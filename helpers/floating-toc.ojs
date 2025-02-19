@@ -1,68 +1,74 @@
 function atlas_toc({
-  selector = "h1", // selectors to include (can comma-separate, like "h1,h2,h3")
-  heading = "<b>In this notebook</b>", // heading for ToC
-  delim = '&nbsp;|&nbsp;', // delimiter between links
-  skip = [], // text content for headers to exclude
-  activeClass = "active", // class to apply to active link
+  selector = "h1", // Selectors to include (e.g., "h1,h2,h3")
+  heading = "<b>In this notebook</b>", // Heading for ToC
+  delim = '&nbsp;|&nbsp;', // Delimiter between links
+  skip = [], // Headers to exclude by text content
+  activeClass = "active", // Class for active link
 } = {}) {
 
   return Generators.observe(notify => {
     let headings = [];
     let links = [];
+    let timeout;
 
-function observed() {
-  let h = Array.from(document.querySelectorAll(selector));
-  h = h.filter(d => !skip.includes(d.textContent));
+    function observed() {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        const h = Array.from(document.querySelectorAll(selector))
+          .filter(d => !skip.includes(d.textContent));
 
-  if (h.length !== headings.length || h.some((h, i) => headings[i] !== h)) {
-    headings = h;
-    notify(html`${heading}<br>${Array.from(headings, (h, i) => {
-      const isLast = i === headings.length - 1; // Check if it's the last heading
-      const link = Object.assign(
-        html`<a class='toc-link' href=#${h.id}>${DOM.text(h.textContent)}</a>`,
-        {
-          onclick: e => {
-            e.preventDefault();
-            h.scrollIntoView({ behavior: 'smooth' });
-            setActiveLink(link);
-          }
-        }
-      );
+        if (h.length === headings.length && h.every((el, i) => el === headings[i
+        ])) return;
 
-      links[i] = link;
+        headings = h;
+        links = headings.map(createLink);
 
-      // Wrap the link in a <span> for all items, including the last one
-      return isLast 
-        ? html`<span>${link}</span>` 
-        : html`<span>${link}${delim}</span>`;
-    })}`);
-  }
-}
+        notify(html`${heading
+        }<br>${
+          headings.length 
+            ? links.map((link, i) => html`<span>${link
+          }${i < links.length - 1 ? delim : ''
+          }</span>`)
+            : html`<span>No headings found.</span>`
+        }`);
+      },
+      5);
+    }
+
+    function createLink(h) {
+      const link = html`<a class='toc-link' href=#${h.id
+      }>${DOM.text(h.textContent)
+      }</a>`;
+      link.onclick = e => {
+        e.preventDefault();
+        h.scrollIntoView({ behavior: 'smooth'
+        });
+        setActiveLink(link);
+      };
+      return link;
+    }
 
     function setActiveLink(activeLink) {
-      links.forEach(link => link.classList.remove(activeClass));
-      if (activeLink) activeLink.classList.add(activeClass);
+      links.forEach(link => link.classList.toggle(activeClass, link === activeLink));
     }
 
     function onScroll() {
-      const top = window.scrollY;
-      let closest = null;
-      let minDist = Infinity;
-      headings.forEach((h, i) => {
-        const dist = Math.abs(h.getBoundingClientRect().top);
-        if (dist < minDist) {
-          minDist = dist;
-          closest = links[i];
-        }
-      });
+      const closest = links[headings
+        .map(h => Math.abs(h.getBoundingClientRect().top))
+        .reduce((minIdx, dist, i, arr) => dist < arr[minIdx
+        ] ? i : minIdx,
+        0)
+      ];
       setActiveLink(closest);
     }
 
     const observer = new MutationObserver(observed);
-    observer.observe(document.body, {childList: true, subtree: true});
+    observer.observe(document.body,
+    { childList: true, subtree: true
+    });
     window.addEventListener('scroll', onScroll);
-    observed();
 
+    observed();
     onScroll();
 
     return () => {
