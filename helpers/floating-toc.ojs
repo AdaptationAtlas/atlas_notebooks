@@ -1,0 +1,73 @@
+function atlas_toc({
+  selector = "h1", // selectors to include (can comma-separate, like "h1,h2,h3")
+  heading = "<b>In this notebook</b>", // heading for ToC
+  delim = '&nbsp;|&nbsp;', // delimiter between links
+  skip = [], // text content for headers to exclude
+  activeClass = "active", // class to apply to active link
+} = {}) {
+
+  return Generators.observe(notify => {
+    let headings = [];
+    let links = [];
+
+function observed() {
+  let h = Array.from(document.querySelectorAll(selector));
+  h = h.filter(d => !skip.includes(d.textContent));
+
+  if (h.length !== headings.length || h.some((h, i) => headings[i] !== h)) {
+    headings = h;
+    notify(html`${heading}<br>${Array.from(headings, (h, i) => {
+      const isLast = i === headings.length - 1; // Check if it's the last heading
+      const link = Object.assign(
+        html`<a class='toc-link' href=#${h.id}>${DOM.text(h.textContent)}</a>`,
+        {
+          onclick: e => {
+            e.preventDefault();
+            h.scrollIntoView({ behavior: 'smooth' });
+            setActiveLink(link);
+          }
+        }
+      );
+
+      links[i] = link;
+
+      // Wrap the link in a <span> for all items, including the last one
+      return isLast 
+        ? html`<span>${link}</span>` 
+        : html`<span>${link}${delim}</span>`;
+    })}`);
+  }
+}
+
+    function setActiveLink(activeLink) {
+      links.forEach(link => link.classList.remove(activeClass));
+      if (activeLink) activeLink.classList.add(activeClass);
+    }
+
+    function onScroll() {
+      const top = window.scrollY;
+      let closest = null;
+      let minDist = Infinity;
+      headings.forEach((h, i) => {
+        const dist = Math.abs(h.getBoundingClientRect().top);
+        if (dist < minDist) {
+          minDist = dist;
+          closest = links[i];
+        }
+      });
+      setActiveLink(closest);
+    }
+
+    const observer = new MutationObserver(observed);
+    observer.observe(document.body, {childList: true, subtree: true});
+    window.addEventListener('scroll', onScroll);
+    observed();
+
+    onScroll();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('scroll', onScroll);
+    };
+  });
+}
