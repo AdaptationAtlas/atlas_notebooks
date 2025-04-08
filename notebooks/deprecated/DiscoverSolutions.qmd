@@ -1,0 +1,2362 @@
+---
+pagetitle: "DiscoverSolutions"
+nb-authors: 
+  - Todd Rosenstock
+  - Zach Bogart
+  - Brayden Youngberg
+execute:
+  echo: false
+---
+
+# `{ojs} nbTitle` {class='title' #notebook-title} 
+
+
+```{ojs}
+viewof prettyLanguageView = {
+  return Inputs.bind(
+    Inputs.radio(languages, {
+      label: _lang({en: "Language", fr: "Langue"}),
+      format: (d) => d.label
+    }),
+    viewof language
+  );
+}
+
+```
+
+# `{ojs} Overview` {#overview}
+
+`{ojs} _lang(nbText.overview.blocks.opener1)`
+
+# `{ojs} Interventions` {#interventions}
+
+```{ojs}
+{
+  // find total observations
+  const raw = d3.sum(
+    data_extendedTable2_total,
+    (d) => d.observations
+  );
+  const formatted = Math.round(raw / 1000) * 1000;
+  const totalObs = formatNumStandard(formatted, {
+    locale: language.locale
+  });
+
+  const langString = _lang(nbText.interventions.blocks.opener1);
+  const formattedString = langString.replace(
+    Lang.getRegexForNamedInsertion("totalObs"),
+    totalObs
+  );
+
+  return md`${formattedString}`;
+}
+```
+
+```{ojs}
+//| echo: true
+//| code-fold: true
+//| code-summary: "View table code"
+{
+  const data = data_extendedTable2_total;
+  const colorFill = "#216729";
+  const langLook = {
+    obs: Lang.toSentenceCase(
+      _lang(nbText.supportNbText.words.observation.plural)
+    )
+  };
+  const y = (d) => _lang(td.Practice.values?.[d]);
+
+  return Plot.plot({
+    width: 900,
+    height: 700,
+    marginLeft: 190,
+    marginRight: 50,
+    marginTop: 60,
+    x: {
+      tickFormat: "s",
+      axis: "top",
+      label: langLook.obs,
+      labelOffset: 40,
+      labelAnchor: "center",
+      labelArrow: "none",
+      grid: true
+    },
+    y: {
+      label: null
+    },
+    marks: [
+      Plot.ruleX([0]),
+      Plot.barX(data, {
+        x: "observations",
+        y: (d) => y(d.practice),
+        sort: { y: "x", reverse: true },
+        fill: colorFill
+      }),
+      Plot.textX(
+        data,
+        Plot.map(
+          { text: (v) => v.map((d) => `${d3.format(".2s")(d)} obs.`) },
+          {
+            x: "observations",
+            y: (d) => y(d.practice),
+            text: "observations",
+            textAnchor: "start",
+            dx: 5,
+            fill: "#333"
+          }
+        )
+      )
+    ]
+  });
+}
+```
+
+# `{ojs} PracticalImpact` {#practicalImpact}
+
+`{ojs} _lang(nbText.practicalImpact.meanCropDiff.blocks.opener1)`
+
+## `{ojs} CropDiff` {#cropDiff}
+
+```{ojs}
+viewof selectCropMeanDiff_new = {
+  const data = [...new Set(data_meanDiff_practiceCrop_new.map((d) => d.Crop))]
+    .map((d) => {
+      return { field: d, translation: td.Crop.values?.[d] };
+    })
+    .sort((a, b) => _lang(a.translation) > _lang(b.translation));
+  return Inputs.select(data, {
+    label: _lang(td.Crop),
+    value: data.find(x => x.field == 'Maize'),
+    format: (x) => _lang(x.translation)
+  });
+}
+
+viewof radioSortDotPlotCrop_new = {
+  const data = [
+    {
+      key: "mean",
+      label: _lang(nbText.inputs.radioSort.fields.mean),
+      channel: "x",
+      reverse: true,
+    },
+    {
+      key: "observations",
+      label: _lang(nbText.inputs.radioSort.fields.observations),
+      channel: "nObs",
+      reverse: true,
+    },
+    {
+      key: "alpha",
+      label: _lang(nbText.inputs.radioSort.fields.alpha),
+      channel: "y",
+      reverse: false,
+    },
+  ]
+  return Inputs.radio(data, { label: _lang(nbText.supportNbText.labels.sort), format: d => d.label, value: data.find(x => x.key === 'mean') });
+}
+
+viewof toggleCIsCrop_new = {
+  const data = [
+    _lang(nbText.practicalImpact.inputs.toggleConfInt.fields.visible)
+  ]
+  return Inputs.checkbox(data, {
+    label: _lang(nbText.supportNbText.labels.confidenceIntervals)
+  });
+}
+```
+
+```{ojs}
+//| echo: true
+//| code-fold: true
+//| code-summary: "View table code"
+{
+  const plotData = data_meanDiff_practiceCrop_new.filter(
+    (d) => d.Crop === selectCropMeanDiff_new.field
+  );
+  const marginBottom = 0;
+  const marginTop = 60;
+  const yHeight = 25;
+  const height =
+    marginTop +
+    marginBottom +
+    d3.group(plotData, (d) => d.Practice).size * yHeight;
+  const _formatNum = formatNum;
+  const _toggleCIs = toggleCIsCrop_new;
+  const _radioSort = radioSortDotPlotCrop_new;
+  const langLookup = {
+    xLabel: _lang(nbText.practicalImpact.labels.xMeanDiff),
+    tooltip: {
+      aez: _lang(nbText.practicalImpact.tooltips.aez),
+      meanDiff: _lang(nbText.practicalImpact.tooltips.meanDiff),
+      meanControl: _lang(nbText.practicalImpact.tooltips.meanControl),
+      crop: Lang.toSentenceCase(_lang(nbText.supportNbText.words.crop.singular)),
+      ciLo: _lang(nbText.practicalImpact.tooltips.ciLower),
+      ciHi: _lang(nbText.practicalImpact.tooltips.ciUpper),
+      obs: Lang.toSentenceCase(_lang(nbText.supportNbText.words.observation.plural)),
+      practice: Lang.toSentenceCase(_lang(nbText.supportNbText.words.practice.singular))
+    }
+  }
+  const y = (d) => _lang(td.Practice.values?.[d]);
+
+  return Plot.plot({
+    height,
+    marginBottom,
+    marginTop,
+    marginLeft: 200,
+    marginRight: 70,
+    width: 900,
+    x: {
+      axis: "top",
+      nice: true,
+      grid: true,
+      label: langLookup.xLabel,
+      labelAnchor: "center",
+      labelOffset: 40,
+      labelArrow: "none"
+    },
+    y: {
+      tickSize: 0,
+      label: null
+    },
+    color: {
+      range: colorYellowGreen
+    },
+    marks: [
+      // main y-axis
+      Plot.axisY({
+        tickSize: 0
+      }),
+      // pointer white-out
+      Plot.axisY(
+        Plot.pointerY({
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0
+        })
+      ),
+      // bold pointer
+      Plot.axisY(
+        Plot.pointerY({
+          fontWeight: "bold",
+          tickSize: 0
+        })
+      ),
+      // zero point
+      Plot.ruleX([0], { stroke: "#333", strokeDasharray: [4] }),
+      // span lines: CI
+      Plot.ruleY(_toggleCIs.length > 0 ? plotData : [], {
+        y: (d) => y(d.Practice),
+        x1: (d) => d.Lower,
+        x2: (d) => d.Upper,
+        stroke: "#333"
+      }),
+      // mean diff dots
+      Plot.dot(plotData, {
+        x: "Mean_Difference",
+        y: (d) => y(d.Practice),
+        sort: { y: _radioSort.channel, reverse: _radioSort.reverse },
+        fill: (d) => d.Mean_Difference,
+        r: 8,
+        stroke: "#fff",
+        strokeWidth: 0.7,
+        channels: {
+          nObs: {
+            value: "N_Obs"
+          },
+          prac: {
+            value: (d) => y(d.Practice),
+          },
+          crop: {
+            value: "Crop"
+          },
+          diff: {
+            label: langLookup.tooltip.meanDiff,
+            value: "Mean_Difference"
+          },
+          control: {
+            label: langLookup.tooltip.meanControl,
+            value: 'Mean_Control',
+          },
+          ciLow: {
+            label: langLookup.tooltip.ciLo,
+            value: "Lower"
+          },
+          ciHigh: {
+            label: langLookup.tooltip.ciHi,
+            value: "Upper"
+          }
+        },
+        tip: {
+          format: {
+            x: false,
+            y: false,
+            fill: false,
+            prac: false,
+            crop: false,
+            nObs: false,
+            diff: (d) => _formatNum(d),
+            control: (d) => _formatNum(d),
+            ciLow: (d) => _formatNum(d),
+            ciHigh: (d) => _formatNum(d)
+          }
+        }
+      }),
+      // dot highlight on hover
+      Plot.dot(plotData, Plot.pointer({
+        x: "Mean_Difference",
+        y: (d) => y(d.Practice),
+        r: 8,
+        stroke: "#333",
+        strokeWidth: 0.7,
+        channels: {
+          nObs: {
+            label: "# Observations",
+            value: "N_Obs"
+          },
+        }
+      })),
+      // observation counts
+      Plot.textY(plotData, {
+        y: (d) => y(d.Practice),
+        text: (d) => d.N_Obs + " obs.",
+        frameAnchor: "right",
+        textAnchor: "start",
+        dx: 16
+      }),
+      // counts white-out
+      Plot.textY(
+        plotData,
+        Plot.pointerY({
+          y: (d) => y(d.Practice),
+          text: (d) => d.N_Obs + " obs.",
+          fill: "white",
+          stroke: "white",
+          strokeWidth: 2,
+          frameAnchor: "right",
+          textAnchor: "start",
+          dx: 16
+        })
+      ),
+      // counts bold hover
+      Plot.textY(
+        plotData,
+        Plot.pointerY({
+          y: (d) => y(d.Practice),
+          text: (d) => d.N_Obs + " obs.",
+          fontWeight: "bold",
+          frameAnchor: "right",
+          textAnchor: "start",
+          dx: 16
+        })
+      )
+    ]
+  });
+}
+```
+
+### `{ojs} quickInsight`
+
+```{ojs}
+// insights
+{
+  const langRoot = nbText;
+  const langBasePath = langRoot.practicalImpact.meanCropDiff.insights; // base path for language
+
+  const data = data_meanDiff_practiceCrop_new;
+  const selection = selectCropMeanDiff_new.field;
+
+  const tl_crop = (crop) => _lang(td.Crop.values?.[crop]);
+  const tl_crop_article = (crop) => _lang(td.Crop_with_articles.values?.[crop]);
+  const tl_prac = (prac) => _lang(td.Practice.values?.[prac]);
+
+  // top 5 crops by unique practices
+  const top5CropsByPractices = T.tidy(
+    data,
+    T.count(["Crop"]),
+    T.arrange(T.desc("n")),
+    T.sliceHead(5)
+  );
+  const top5CropsByPracticesString = top5CropsByPractices
+    .map((d, i) => {
+      if (i == top5CropsByPractices.length - 1) return `and **${tl_crop(d.Crop)}**`;
+      return `**${tl_crop(d.Crop)}**`;
+    })
+    .join(", ");
+  const langTop5 = _lang(langBasePath.top5);
+  const langTop5Format = langTop5.replace(
+    Lang.getRegexForNamedInsertion("top5CropsByPracticesString"),
+    top5CropsByPracticesString
+  );
+  const insightTop5 = md`${langTop5Format}`;
+
+  // crop selection
+  const selectedCrop = selection;
+  const dataCrop = T.tidy(
+    data,
+    T.filter((d) => d.Crop == selectedCrop)
+  );
+
+  // crop overview
+  const cropOverview = T.tidy(
+    dataCrop,
+    T.summarize({
+      totalObs: T.sum("N_Obs"),
+      totalPractices: T.n()
+    })
+  )?.[0];
+  const langCropOverview = _lang(langBasePath.cropOverview);
+  const langCropOverviewItems = [
+    { insertName: "selectedCrop", value: Lang.toSentenceCase(tl_crop_article(selectedCrop)) },
+    { insertName: "totalObs", value: formatComma(cropOverview.totalObs) },
+    { insertName: "totalPractices", value: cropOverview.totalPractices }
+  ];
+  const insightCropOverview = langCropOverviewItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langCropOverview);
+
+  // positive yield
+  const cropPositive = T.tidy(
+    dataCrop,
+    T.filter((d) => d.Mean_Difference > 0)
+  )?.length;
+  const langCropPositive = _lang(langBasePath.cropPositive.main);
+  const langCropSubstring = `**${cropPositive}** ${
+    cropPositive == 1
+      ? _lang(langBasePath.cropPositive.singular)
+      : _lang(langBasePath.cropPositive.plural)
+  }`;
+  const insightCropPositive = langCropPositive.replace(
+    Lang.getRegexForNamedInsertion("cropPositiveText"),
+    langCropSubstring
+  );
+
+  // top for selected crop
+  const n = 2; // # top crops to include
+  const topCrop = T.tidy(
+    dataCrop,
+    T.sliceMax(n, "Mean_Difference"),
+    T.arrange(T.desc("Mean_Difference"))
+  );
+  const diff1 = topCrop?.[0];
+  const diff2 = topCrop?.[1];
+
+  const langDiffFirst = _lang(langBasePath.diffFirst.main);
+  const langDiffFirst_incDec =
+    diff1.Mean_Difference >= 0
+      ? _lang(nbText.supportNbText.words.increase)
+      : _lang(nbText.supportNbText.words.decrease);
+  const langDiffFirst_observations = diff1.N_Obs;
+  const langDiffFirstItems = [
+    { insertName: "practice", value: tl_prac(diff1.Practice) },
+    {
+      insertName: "incDec",
+      value:
+        diff1.Mean_Difference >= 0
+          ? _lang(nbText.supportNbText.words.increase)
+          : _lang(nbText.supportNbText.words.decrease)
+    },
+    { insertName: "meanDiff", value: formatNum(diff1.Mean_Difference) },
+    { insertName: "observationCount", value: formatComma(diff1.N_Obs) },
+    {
+      insertName: "observationString",
+      value:
+        diff1.N_Obs > 1
+          ? _lang(nbText.supportNbText.words.observation.plural)
+          : _lang(nbText.supportNbText.words.observation.singular)
+    }
+  ];
+  const insightDiffFirst = langDiffFirstItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langDiffFirst);
+
+  const langDiffSecond = _lang(langBasePath.diffSecond.main);
+  const langDiffSecond_incDec =
+    diff2?.Mean_Difference >= 0
+      ? _lang(nbText.supportNbText.words.increase)
+      : _lang(nbText.supportNbText.words.decrease);
+  const langDiffSecond_observations = diff2?.N_Obs;
+  const langDiffSecondItems = [
+    { insertName: "practice", value: tl_prac(diff2?.Practice) },
+    {
+      insertName: "incDec",
+      value:
+        diff2?.Mean_Difference >= 0
+          ? _lang(nbText.supportNbText.words.increase)
+          : _lang(nbText.supportNbText.words.decrease)
+    },
+    { insertName: "meanDiff", value: formatNum(diff2?.Mean_Difference) },
+    { insertName: "observationCount", value: formatComma(diff2?.N_Obs) },
+    {
+      insertName: "observationString",
+      value:
+        diff2?.N_Obs > 1
+          ? _lang(nbText.supportNbText.words.observation.plural)
+          : _lang(nbText.supportNbText.words.observation.singular)
+    }
+  ];
+  const insightDiffSecond = diff2
+    ? langDiffSecondItems.reduce((overview, item) => {
+        return overview.replace(
+          Lang.getRegexForNamedInsertion(item.insertName),
+          item.value
+        );
+      }, langDiffSecond)
+    : "";
+
+  return md`${insightTop5}
+
+${insightCropOverview} ${insightCropPositive}
+
+${insightDiffFirst} ${insightDiffSecond}`;
+}
+```
+
+
+## `{ojs} crop_diff_aez` {#cropDiffAEZ}
+
+`{ojs} _lang(nbText.practicalImpact.meanCropDiffAEZ.blocks.opener1)`
+
+```{ojs}
+viewof selectCropMeanDiffAEZ = {
+  const data = [
+    ...new Set(data_meanDiff_aezPracticeCrop_new.map((d) => d.Crop))
+  ]
+    .map((d) => {
+      return { field: d, translation: td.Crop.values?.[d] };
+    })
+    .sort((a, b) => _lang(a.translation) > _lang(b.translation));
+  return Inputs.select(data, {
+    label: _lang(td.Crop),
+    value: data.find((x) => x.field == "Maize"),
+    format: (x) => _lang(x.translation)
+  });
+}
+
+viewof radioSortDotPlotCropAEZ_new = {
+  const data = [
+    {
+      key: "mean",
+      label: _lang(nbText.inputs.radioSort.fields.mean),
+      channel: "x",
+      reverse: true
+    },
+    {
+      key: "observations",
+      label: _lang(nbText.inputs.radioSort.fields.observations),
+      channel: "nObs",
+      reverse: true
+    },
+    {
+      key: "alpha",
+      label: _lang(nbText.inputs.radioSort.fields.alpha),
+      channel: "y",
+      reverse: false
+    }
+  ];
+  return Inputs.radio(data, {
+    label: _lang(nbText.supportNbText.labels.sort),
+    format: (d) => d.label,
+    value: data.find((x) => x.key === "mean")
+  });
+}
+
+viewof aezSelect_new = {
+  const data = data_meanDiff_aezPracticeCrop_new.filter(
+    (d) => d.Crop === selectCropMeanDiffAEZ.field
+  );
+  const aezNames = d3
+    .groups(data, (d) => d.AEZ_Class_FAO)
+    .map((d) => d[0])
+    .sort();
+  const options = aezNames.map((d) => ({
+    field: d,
+    translation: td.AEZ_Class_FAO.values?.[d]
+  }));
+  const nullValue = {
+    field: null,
+    translation: nbText.inputs.defaults.aez
+  };
+  const inputNames = [nullValue, ...options];
+  return Inputs.select(inputNames, {
+    label: _lang(nbText.supportNbText.labels.highlightAez),
+    value: aezNames,
+    format: x => _lang(x.translation)
+  });
+}
+
+viewof toggleCIsCropAEZ_new = {
+  const data = [
+    _lang(nbText.practicalImpact.inputs.toggleConfInt.fields.visible)
+  ];
+  return Inputs.checkbox(data, {
+    label: _lang(nbText.supportNbText.labels.confidenceIntervals)
+  });
+}
+```
+
+```{ojs}
+//| echo: true
+//| code-fold: true
+//| code-summary: "View table code"
+
+plotDotAEZ_new = {
+  const baseData = data_meanDiff_aezPracticeCrop_new;
+  const plotData = baseData.filter(
+    (d) => d.Crop === selectCropMeanDiffAEZ.field
+  );
+  const aezData = T.tidy(
+    plotData,
+    T.filter((d) => {
+      if (aezSelect_new.field == null) return d;
+      return d.AEZ_Class_FAO == aezSelect_new.field;
+    }),
+    T.arrange("Mean_Difference")
+  );
+  const colorDomain = aezColor_new.domain;
+  const colorRange = aezColor_new.range;
+  const marginBottom = 0;
+  const marginTop = 80;
+  const yHeight = 25;
+  const height =
+    marginTop +
+    marginBottom +
+    d3.group(plotData, (d) => d.Practice).size * yHeight;
+  const _formatNum = formatNum;
+  const _toggleCIs = toggleCIsCropAEZ_new;
+  const _radioSort = radioSortDotPlotCropAEZ_new;
+  const langLookup = {
+    xLabel: _lang(nbText.practicalImpact.labels.xMeanDiff),
+    tooltip: {
+      aez: _lang(nbText.practicalImpact.tooltips.aez),
+      meanDiff: _lang(nbText.practicalImpact.tooltips.meanDiff),
+      meanControl: _lang(nbText.practicalImpact.tooltips.meanControl),
+      crop: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.crop.singular)
+      ),
+      ciLo: _lang(nbText.practicalImpact.tooltips.ciLower),
+      ciHi: _lang(nbText.practicalImpact.tooltips.ciUpper),
+      obs: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.observation.plural)
+      ),
+      practice: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.practice.singular)
+      )
+    }
+  };
+  const y = (d) => _lang(td.Practice.values?.[d]);
+  const color = (d) => _lang(td.AEZ_Class_FAO.values?.[d]);
+
+  return Plot.plot({
+    height,
+    marginBottom,
+    marginTop,
+    marginLeft: 200,
+    marginRight: 70,
+    width: 900,
+    x: {
+      axis: "top",
+      nice: true,
+      grid: true,
+      label: langLookup.xLabel,
+      labelAnchor: "center",
+      labelOffset: 40,
+      labelArrow: "none"
+    },
+    y: {
+      tickSize: 0,
+      label: null
+    },
+    color: {
+      domain: colorDomain,
+      range: colorRange
+    },
+    marks: [
+      // main y-axis
+      Plot.axisY({
+        tickSize: 0
+      }),
+      // pointer white-out
+      Plot.axisY(
+        Plot.pointerY({
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0
+        })
+      ),
+      // bold pointer
+      Plot.axisY(
+        Plot.pointerY({
+          fontWeight: "bold",
+          tickSize: 0
+        })
+      ),
+      // zero point
+      Plot.ruleX([0], { stroke: "#333", strokeDasharray: [4] }),
+      // base dots
+      Plot.dot(plotData, {
+        x: "Mean_Difference",
+        y: (d) => y(d.Practice),
+        sort: { y: _radioSort.channel, reverse: _radioSort.reverse },
+        r: 8,
+        stroke: "#fff",
+        strokeWidth: 0.7,
+        fill: "#efefef",
+        channels: {
+          nObs: {
+            label: "# Observations",
+            value: "N_Obs"
+          }
+        }
+      }),
+      // selection: span lines: CI
+      Plot.ruleY(_toggleCIs.length > 0 ? aezData : [], {
+        y: (d) => y(d.Practice),
+        x1: (d) => (d.Lower == "NA" ? null : d.Lower),
+        x2: (d) => (d.Upper == "NA" ? null : d.Upper),
+        stroke: "#333"
+      }),
+      // selection: mean diff dots
+      Plot.dot(aezData, {
+        x: "Mean_Difference",
+        y: (d) => y(d.Practice),
+        fill: (d) => {
+          return color(d.AEZ_Class_FAO);
+        },
+        r: 8,
+        stroke: "#fff",
+        strokeWidth: 0.7,
+        channels: {
+          aez: {
+            label: langLookup.tooltip.aez,
+            value: (d) => color(d.AEZ_Class_FAO)
+          },
+          nObs: {
+            label: langLookup.tooltip.obs,
+            value: "N_Obs"
+          },
+          diff: {
+            label: langLookup.tooltip.meanDiff,
+            value: "Mean_Difference"
+          },
+          control: {
+            label: langLookup.tooltip.meanControl,
+            value: "Mean_Control"
+          },
+          prac: {
+            label: langLookup.tooltip.practice,
+            value: (d) => y(d.Practice)
+          },
+          crop: {
+            label: langLookup.tooltip.crop,
+            value: "Crop"
+          },
+          ciLow: {
+            label: langLookup.tooltip.ciLo,
+            value: "Lower"
+          },
+          ciHigh: {
+            label: langLookup.tooltip.ciHi,
+            value: "Upper"
+          }
+        },
+        tip: {
+          format: {
+            x: false,
+            y: false,
+            fill: false,
+            prac: false,
+            crop: false,
+            aez: true,
+            diff: (d) => _formatNum(d),
+            control: (d) => _formatNum(d),
+            ciLow: (d) => _formatNum(d),
+            ciHigh: (d) => _formatNum(d),
+            nObs: true
+          }
+        }
+      }),
+      // dot highlight on hover
+      Plot.dot(
+        aezData,
+        Plot.pointer({
+          x: "Mean_Difference",
+          y: (d) => y(d.Practice),
+          r: 8,
+          fill: (d) => {
+            return d.AEZ_Class_FAO;
+          },
+          stroke: "#333",
+          strokeWidth: 0.7,
+          channels: {
+            nObs: {
+              label: "# Observations",
+              value: "N_Obs"
+            }
+          }
+        })
+      ),
+      // observation counts
+      Plot.textY(
+        aezData,
+        Plot.map(
+          { text: (values) => values.map((d) => d + " obs.") },
+          Plot.groupY(
+            { text: "sum" },
+            {
+              y: (d) => y(d.Practice),
+              text: "N_Obs",
+              frameAnchor: "right",
+              textAnchor: "start",
+              dx: 16
+            }
+          )
+        )
+      ),
+      // digital white-out
+      Plot.textY(
+        aezData,
+        Plot.pointerY(
+          Plot.map(
+            { text: (values) => values.map((d) => d + " obs.") },
+            Plot.groupY(
+              { text: "sum" },
+              {
+                y: (d) => y(d.Practice),
+                text: "N_Obs",
+                frameAnchor: "right",
+                textAnchor: "start",
+                dx: 16,
+                fill: "white",
+                stroke: "white",
+                strokeWidth: 2
+              }
+            )
+          )
+        )
+      ),
+      // observation counts bold hover
+      Plot.textY(
+        aezData,
+        Plot.pointerY(
+          Plot.map(
+            { text: (values) => values.map((d) => d + " obs.") },
+            Plot.groupY(
+              { text: "sum" },
+              {
+                y: (d) => y(d.Practice),
+                text: "N_Obs",
+                frameAnchor: "right",
+                textAnchor: "start",
+                dx: 16,
+                fontWeight: "bold"
+              }
+            )
+          )
+        )
+      )
+    ]
+  });
+}
+
+plotDotAEZ_new.legend('color', {columns: 3})
+```
+
+### `{ojs} quickInsight`
+
+```{ojs}
+{
+  const langRoot = nbText;
+  const langBasePath = langRoot.practicalImpact.meanCropDiffAEZ.insights; // base path for language
+
+  // top practice by aez
+  const selectedCrop = selectCropMeanDiffAEZ.field;
+
+  // crop selection
+  const dataCropNoAEZ = T.tidy(
+    data_meanDiff_aezPracticeCrop_new,
+    T.filter((d) => d.Crop === selectedCrop)
+  );
+
+  // find aez with the largest mean diff
+  const maxMeanDiff = T.tidy(
+    dataCropNoAEZ,
+    T.sliceMax(1, "Mean_Difference")
+  )?.[0];
+
+  // use aez with max value for no highlight
+  const selectedAEZ =
+    aezSelect_new.field == null ? maxMeanDiff.AEZ_Class_FAO : aezSelect_new.field;
+  const selectedAEZTranslated = _lang(td.AEZ_Class_FAO.values[selectedAEZ]);
+
+  const dataCrop = T.tidy(
+    dataCropNoAEZ,
+    T.filter((d) => d.AEZ_Class_FAO == selectedAEZ)
+  );
+
+  // selected aez square
+  const aezSwatchColor =
+    aezColor_new.range[aezColor_new.domain.indexOf(selectedAEZTranslated)];
+  const squareSize = 13;
+  const aezSquare = `<svg width="${squareSize}" height="${squareSize}">
+    <rect width="${squareSize}" height="${squareSize}" fill=${aezSwatchColor}  />
+  </svg>`;
+
+  // crop overview
+  const cropOverview = T.tidy(
+    dataCrop,
+    T.summarize({
+      totalObs: T.sum("N_Obs"),
+      totalPractices: T.n()
+    })
+  )?.[0];
+  const langCropOverview = _lang(
+    langBasePath.cropOverview.main
+  );
+  const langCropOverviewItems = [
+    { insertName: "selectedCrop", value: _lang(td.Crop_with_articles.values[selectedCrop]) },
+    { insertName: "selectedAEZSquare", value: aezSquare },
+    { insertName: "selectedAEZ", value: selectedAEZTranslated },
+    { insertName: "totalObs", value: formatComma(cropOverview.totalObs) },
+    {
+      insertName: "totalObsString",
+      value:
+        cropOverview.totalObs == 1
+          ? _lang(nbText.supportNbText.words.observation.singular)
+          : _lang(nbText.supportNbText.words.observation.plural)
+    },
+    { insertName: "totalPractices", value: cropOverview.totalPractices },
+    {
+      insertName: "totalPracticesString",
+      value:
+        cropOverview.totalPractices == 1
+          ? _lang(nbText.supportNbText.words.practice.singular)
+          : _lang(nbText.supportNbText.words.practice.plural)
+    }
+  ];
+  const insightCropOverview = langCropOverviewItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langCropOverview);
+
+  // positive yield
+  const cropPositive = T.tidy(
+    dataCrop,
+    T.filter((d) => d.Mean_Difference > 0)
+  )?.length;
+  const langCropPositive = _lang(
+    nbText.practicalImpact.meanCropDiffAEZ.insights.cropPositive.main
+  );
+  const langCropSubstring = `**${cropPositive}** ${
+    cropPositive == 1
+      ? _lang(
+          nbText.practicalImpact.meanCropDiffAEZ.insights.cropPositive.singular
+        )
+      : _lang(
+          nbText.practicalImpact.meanCropDiffAEZ.insights.cropPositive.plural
+        )
+  }`;
+  const insightCropPositive = langCropPositive.replace(
+    Lang.getRegexForNamedInsertion("cropPositiveText"),
+    langCropSubstring
+  );
+
+  // top for selected crop
+  const n = 2; // # top crops to include
+  const topCrop = T.tidy(
+    dataCrop,
+    T.sliceMax(n, "Mean_Difference"),
+    T.arrange(T.desc("Mean_Difference"))
+  );
+  const diff1 = topCrop?.[0];
+  const diff2 = topCrop?.[1];
+
+  const langDiffFirst = _lang(langBasePath.diffFirst.main);
+  const langDiffFirst_incDec =
+    diff1.Mean_Difference >= 0
+      ? _lang(nbText.supportNbText.words.increase)
+      : _lang(nbText.supportNbText.words.decrease);
+  const langDiffFirst_observations = diff1.N_Obs;
+  const langDiffFirstItems = [
+    { insertName: "practice", value: _lang(td.Practice.values[diff1.Practice]) },
+    {
+      insertName: "incDec",
+      value:
+        diff1.Mean_Difference >= 0
+          ? _lang(nbText.supportNbText.words.increase)
+          : _lang(nbText.supportNbText.words.decrease)
+    },
+    { insertName: "meanDiff", value: formatNum(diff1.Mean_Difference) },
+    {
+      insertName: "observationCount",
+      value: formatComma(langDiffFirst_observations)
+    },
+    {
+      insertName: "observationString",
+      value:
+        langDiffFirst_observations > 1
+          ? _lang(nbText.supportNbText.words.observation.plural)
+          : _lang(nbText.supportNbText.words.observation.singular)
+    }
+  ];
+  const insightDiffFirst = langDiffFirstItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langDiffFirst);
+
+  const langDiffSecond = _lang(langBasePath.diffSecond.main);
+  const langDiffSecond_incDec =
+    diff2?.Mean_Difference >= 0
+      ? _lang(nbText.supportNbText.words.increase)
+      : _lang(nbText.supportNbText.words.decrease);
+  const langDiffSecond_observations = diff2?.N_Obs;
+  const langDiffSecondItems = [
+    { insertName: "practice", value: _lang(td.Practice.values[diff2?.Practice]) },
+    {
+      insertName: "incDec",
+      value:
+        diff2?.Mean_Difference >= 0
+          ? _lang(nbText.supportNbText.words.increase)
+          : _lang(nbText.supportNbText.words.decrease)
+    },
+    { insertName: "meanDiff", value: formatNum(diff2?.Mean_Difference) },
+    {
+      insertName: "observationCount",
+      value: formatComma(langDiffSecond_observations)
+    },
+    {
+      insertName: "observationString",
+      value:
+        langDiffSecond_observations > 1
+          ? _lang(nbText.supportNbText.words.observation.plural)
+          : _lang(nbText.supportNbText.words.observation.singular)
+    }
+  ];
+  const insightDiffSecond = diff2
+    ? langDiffSecondItems.reduce((overview, item) => {
+        return overview.replace(
+          Lang.getRegexForNamedInsertion(item.insertName),
+          item.value
+        );
+      }, langDiffSecond)
+    : "";
+
+  return md`${insightCropOverview} ${insightCropPositive}
+
+${insightDiffFirst} ${insightDiffSecond ?? ""}`;
+}
+```
+
+# `{ojs} Risks` {#risks}
+
+`{ojs} _lang(nbText.risks.blocks.opener)`
+
+```{ojs}
+viewof selectPractice = {
+  const data = d3
+    .groups(
+      data_lclRisk.map((d) => d.practice),
+      (d) => d
+    )
+    .map((d) => d[0])
+    .sort();
+  const options = data.map((d) => {
+    return { field: d, translation: td.Practice.values[d] };
+  }).sort((a,b) => _lang(a.translation) > _lang(b.translation));
+  const nullValue = {
+    field: null,
+    translation: nbText.inputs.defaults.practice
+  };
+  const inputData = [nullValue, ...options];
+  return Inputs.select(inputData, {
+    label: _lang(nbText.supportNbText.labels.highlightPractice),
+    format: x => _lang(x.translation)
+  });
+}
+```
+
+
+```{ojs}
+//| echo: true
+//| code-fold: true
+//| code-summary: "View table code"
+
+plotRiskBeeswarm = {
+  const data = data_lclRisk;
+  const langLook = {
+    caption: _lang(nbText.risks.plot.caption),
+    xLabel: _lang(nbText.risks.plot.xLabel),
+    tooltip: {
+      practice: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.practice.singular)
+      ),
+      combo: Lang.toSentenceCase(
+        _lang(nbText.risks.plot.tooltip.inCombination)
+      ),
+      crop: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.crop.singular)
+      ),
+      obs: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.observation.plural)
+      )
+    }
+  };
+  const _practice = selectPractice.field;
+
+  const plot = Plot.plot({
+    caption: langLook.caption,
+    height: 400,
+    width: 800,
+    marginTop: 60,
+    x: {
+      axis: "top",
+      grid: true,
+      domain: [0, 1],
+      label: langLook.xLabel,
+      labelOffset: 40,
+      labelAnchor: "center",
+      labelArrow: "none"
+    },
+    color: {
+      domain: [0, 1],
+      range: colorYellowGreen,
+      legend: false,
+      unknown: "#efefef"
+    },
+    r: {
+      range: [2, 30]
+    },
+    marks: [
+      Plot.dot(
+        data,
+        Plot.dodgeY(
+          { anchor: "middle" },
+          {
+            x: "value",
+            r: "observations",
+            fill: (d) => {
+              if (_practice === null) return d.value; // show all practices
+              // show highlighted practice only
+              return d.practice === _practice ? d.value : null;
+            },
+            stroke: "#fff",
+            strokeWidth: 1,
+            channels: {
+              practice: {
+                label: langLook.tooltip.practice,
+                value: (d) => _lang(td.Practice.values[d.practice])
+              },
+              product: {
+                label: langLook.tooltip.crop,
+                value: (d) => d.product
+              },
+              nObs: {
+                label: langLook.tooltip.obs,
+                value: (d) => d.observations
+              },
+              combo: {
+                label: langLook.tooltip.combo,
+                value: (d) =>
+                  d.is_combo
+                    ? Lang.toTitleCase(_lang(nbText.supportNbText.bools.yes))
+                    : Lang.toTitleCase(_lang(nbText.supportNbText.bools.no))
+              }
+            },
+            tip: {
+              px: (d) => {
+                if (_practice === null) return d.value; // show all practices
+                // show highlighted practice only
+                return d.practice === _practice ? d.value : null;
+              },
+              maxRadius: 6,
+              format: {
+                x: false,
+                y: false,
+                fill: false,
+                r: false,
+                practice: true,
+                combo: true,
+                product: true,
+                px: (d) => formatNum(d),
+                nObs: true
+              }
+            }
+          }
+        )
+      )
+    ]
+  });
+
+  return plot;
+}
+```
+
+### `{ojs} quickInsight`
+
+```{ojs}
+quickInsightsRiskBeeswarm = {
+  const langRoot = nbText;
+  const langBasePath = langRoot.risks.insights.beeswarm; // base path for language
+
+  const selectedPractice = selectPractice.field;
+  const data = T.tidy(
+    data_lclRisk,
+    T.filter((d) => {
+      if (selectedPractice == null) return d;
+      return d.practice == selectedPractice;
+    })
+  );
+
+  const dataOverview = T.tidy(
+    data,
+    T.summarize({
+      totalObs: T.sum("observations"),
+      totalPractices: T.count("practice")
+    })
+  )?.[0];
+  const numPractices = dataOverview.totalPractices.length;
+  const langDataOverview_selection =
+    selectedPractice == null ? {phrase: "inTotal", template: "total"} : 
+    {phrase: "specificHas", template: "specific"};
+  const langDataOverview = _lang(
+    langBasePath.dataOverview[langDataOverview_selection.template],
+
+  );
+  const langDataOverviewItems = [
+    {
+      insertName: "startString",
+      value: _lang(nbText.supportNbText.phrases[langDataOverview_selection.phrase])
+    },
+    { insertName: "totalObs", value: formatComma(dataOverview.totalObs) },
+    {
+      insertName: "observationString",
+      value:
+        dataOverview.totalObs == 1
+          ? _lang(nbText.supportNbText.words.observation.singular)
+          : _lang(nbText.supportNbText.words.observation.plural)
+    },
+    { insertName: "item", value: selectedPractice },
+    { insertName: "totalPractices", value: numPractices },
+    {
+      insertName: "practicesString",
+      value:
+        numPractices == 1
+          ? _lang(nbText.supportNbText.words.practice.singular)
+          : _lang(nbText.supportNbText.words.practice.plural)
+    }
+  ];
+  const insightDataOverview = langDataOverviewItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langDataOverview);
+
+  // top for selected crop
+  const n = 2; // # top crops to include
+  const topCrop = T.tidy(
+    data,
+    T.sliceMax(n, "value"),
+    T.arrange(T.desc("value"))
+  );
+  const diff1 = topCrop?.[0];
+  const diff2 = topCrop?.[1];
+
+  const langDiffFirst = _lang(langBasePath.diffFirst.main);
+  const langDiffFirst_observations = diff1.observations;
+  const langDiffFirstItems = [
+    { insertName: "practice", value: _lang(td.Practice.values[diff1.practice]) },
+    { insertName: "crop", value: _lang(td.Crop_with_articles.values[diff1.product]) },
+    {
+      insertName: "comboString",
+      value: diff1.is_combo
+        ? _lang(langBasePath.diffGeneral.combo.plural)
+        : _lang(langBasePath.diffGeneral.combo.singular)
+    },
+    { insertName: "probYield", value: formatNum(diff1.value) },
+    { insertName: "totalObs", value: formatComma(langDiffFirst_observations) },
+    {
+      insertName: "observationString",
+      value:
+        langDiffFirst_observations > 1
+          ? _lang(nbText.supportNbText.words.observation.plural)
+          : _lang(nbText.supportNbText.words.observation.singular)
+    }
+  ];
+  const insightDiffFirst = langDiffFirstItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langDiffFirst);
+
+  const langDiffSecond = _lang(langBasePath.diffSecond.main);
+  const langDiffSecond_observations = diff2?.observations;
+  const langDiffSecondItems = [
+    { insertName: "practice", value: _lang(td.Practice.values[diff2.practice]) },
+    { insertName: "crop", value: _lang(td.Crop_with_articles.values[diff2.product]) },
+    {
+      insertName: "comboString",
+      value: diff2.is_combo
+        ? _lang(langBasePath.diffGeneral.combo.plural)
+        : _lang(langBasePath.diffGeneral.combo.singular)
+    },
+    { insertName: "probYield", value: formatNum(diff2.value) },
+    { insertName: "totalObs", value: formatComma(langDiffSecond_observations) },
+    {
+      insertName: "observationString",
+      value:
+        langDiffSecond_observations > 1
+          ? _lang(nbText.supportNbText.words.observation.plural)
+          : _lang(nbText.supportNbText.words.observation.singular)
+    }
+  ];
+  const insightDiffSecond = diff2
+    ? langDiffSecondItems.reduce((overview, item) => {
+        return overview.replace(
+          Lang.getRegexForNamedInsertion(item.insertName),
+          item.value
+        );
+      }, langDiffSecond)
+    : "";
+
+  return md`${insightDataOverview}
+
+${insightDiffFirst} ${insightDiffSecond}`;
+}
+```
+
+# `{ojs} Factors` {#adoptionFactors}
+
+`{ojs} _lang(nbText.adoptionFactors.blocks.opener1)`
+
+```{ojs}
+viewof dataAdoptionFactors_select = {
+  const options = [...dataAdoptionFactorsMap.keys()]
+    .map((d) => {
+      return { field: d, translation: td.practices.values?.[d] };
+    })
+    .map((d) => {
+      if (d.field == "All practices")
+        return { ...d, translation: nbText.inputs.defaults.practice };
+      return { ...d };
+    });
+  const sorted = [
+    ...options
+      .filter((d) => d.field == "All practices"),
+    ...options
+      .filter((d) => d.field !== "All practices")
+      .sort((a, b) => _lang(a.translation) > _lang(b.translation))
+  ];
+  return Inputs.select(sorted, {
+    label: _lang(nbText.supportNbText.words.practice.singular),
+    format: (x) => _lang(x.translation)
+  });
+}
+
+viewof radioSortAdoptionFactors = {
+  const data = [
+    {
+      key: "observations",
+      label: _lang(nbText.inputs.radioSort.fields.observations),
+      channel: "total",
+      reverse: true,
+    },
+    {
+      key: "alpha",
+      label: _lang(nbText.inputs.radioSort.fields.alpha),
+      channel: "y",
+      reverse: false,
+    },
+  ]
+  return Inputs.radio(data, { label: _lang(nbText.supportNbText.labels.sortBars), format: d => d.label, value: data.find(x => x.key === 'observations') });
+}
+```
+
+```{ojs}
+//| echo: true
+//| code-fold: true
+//| code-summary: "View table code"
+
+{
+  const plotData = dataAdoptionFactorsMap.get(dataAdoptionFactors_select.field);
+  const _fillLookup = adoptionFactorsLookup;
+  const _sorter = radioSortAdoptionFactors;
+  const colorOrder = [
+    _fillLookup["Negative"],
+    _fillLookup["Not significant"],
+    _fillLookup["Positive"]
+  ];
+  const colorRange = ["#EC5A47", "#F4BB21", "#216729"];
+  const y = (d) => _lang(td.adoption_factors.values?.[d]);
+
+  return Plot.plot({
+    width: 1000,
+    height: 400,
+    marginLeft: 180,
+    marginRight: 50,
+    x: {
+      axis: null
+      // label: "% Total"
+      // labelOffset: 40,
+      // labelAnchor: "center"
+    },
+    y: {
+      label: null,
+      tickSize: 0,
+      padding: 0
+    },
+    color: {
+      domain: colorOrder,
+      range: colorRange,
+      legend: true
+    },
+    marks: [
+      // main y-axis
+      Plot.axisY({
+        tickSize: 0
+      }),
+      // pointer white-out
+      Plot.axisY(
+        Plot.pointerY({
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0
+        })
+      ),
+      // bold pointer
+      Plot.axisY(
+        Plot.pointerY({
+          fontWeight: "bold",
+          tickSize: 0
+        })
+      ),
+      // bars
+      Plot.barX(
+        plotData,
+        Plot.stackX({
+          x: "perc",
+          y: (d) => y(d.factor),
+          sort: { y: _sorter.channel, reverse: _sorter.reverse },
+          fill: (d) => _fillLookup[d.direction],
+          order: colorOrder,
+          stroke: "#fff",
+          channels: {
+            percentage: {
+              label: Lang.toSentenceCase(
+                _lang(nbText.supportNbText.words.percentage.singular)
+              ),
+              value: "perc"
+            },
+            total: "total",
+            n: {
+              label: Lang.toSentenceCase(
+                _lang(nbText.supportNbText.words.observation.plural)
+              ),
+              value: "n"
+            }
+          },
+          tip: {
+            format: {
+              x: false,
+              y: false,
+              fill: false,
+              total: false,
+              percentage: (d) => `${d3.format("d")(d)}%`,
+              n: true
+            }
+          }
+        })
+      ),
+      markBoldSidebarText(plotData, {
+        y: (d) => y(d.factor),
+        text: "n",
+        dx: 7
+      })
+    ]
+  });
+}
+```
+
+### `{ojs} quickInsight`
+
+```{ojs}
+data = {
+  const langRoot = nbText;
+  const langBasePath = langRoot.adoptionFactors.insights.percBar; // base path for language
+
+  const selectedPractice = dataAdoptionFactors_select.field;
+  const data = dataAdoptionFactorsMap.get(selectedPractice);
+
+  const tl_prac = (prac) => _lang(td.practices.values?.[prac]);
+  const tl_fact = (fact) => _lang(td.adoption_factors_with_articles.values?.[fact]);
+
+  // total observations overview
+  const total = T.tidy(
+    data,
+    T.groupBy(
+      ["practice"],
+      [
+        T.summarize({
+          totalObservations: T.sum("n"),
+          factorCount: T.count("factor")
+        })
+      ]
+    )
+  )[0];
+  // const mdTotal =
+  //   total.practice == adoptionFactorAllLabel
+  //     ? `In total, there are`
+  //     : `**${total}** has`;
+  const langTotal_selection =
+    total.practice == adoptionFactorAllLabel ? "inTotal" : "specificHas";
+  const langTotal = _lang(langBasePath.overview);
+  const langTotalItems = [
+    {
+      insertName: "startString",
+      value: _lang(nbText.supportNbText.phrases[langTotal_selection])
+    },
+    { insertName: "totalObs", value: formatComma(total.totalObservations) },
+    { insertName: "item", value: tl_prac(total.practice) },
+    { insertName: "totalFactors", value: total.factorCount.length }
+  ];
+  const mdOverview = langTotalItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langTotal);
+
+  // total significant sum (needle move)
+  const topNeedleMove = T.tidy(
+    data,
+    T.filter((d) => d.direction !== "Not significant"),
+    T.groupBy(["factor"], [T.summarize({ perc_sig: T.sum("perc") })]),
+    T.arrange(T.desc("perc_sig")),
+    T.sliceMax(1, "perc_sig")
+  )[0];
+  const langTopNeedle = _lang(langBasePath.mostImpactfulFactor);
+  const langTopNeedleItems = [
+    { insertName: "factor", value: tl_fact(topNeedleMove.factor) },
+    { insertName: "practice", value: tl_prac(selectedPractice) },
+    { insertName: "influence", value: d3.format("d")(topNeedleMove.perc_sig) }
+  ];
+  const mdTopNeedle = langTopNeedleItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langTopNeedle);
+
+  // high neg influence
+  const largeNegInfluence = T.tidy(
+    data,
+    T.filter((d) => d.direction == "Negative"),
+    T.sliceMax(1, "perc")
+  )[0];
+  const largePosInfluence = T.tidy(
+    data,
+    T.filter((d) => d.direction == "Positive"),
+    T.sliceMax(1, "perc")
+  )[0];
+
+  const langBigInfluence = _lang(langBasePath.biggestInfluences)
+  const langBigInfluenceItems = [
+    { insertName: "factorNeg", value: tl_fact(largeNegInfluence.factor) },
+    { insertName: "influenceNeg", value: d3.format("d")(largeNegInfluence.perc) },
+    { insertName: "factorPos", value: tl_fact(largePosInfluence.factor) },
+    { insertName: "influencePos", value: d3.format("d")(largePosInfluence.perc) },
+  ];
+  const mdBigInfluence = langBigInfluenceItems.reduce((overview, item) => {
+    return overview.replace(
+      Lang.getRegexForNamedInsertion(item.insertName),
+      item.value
+    );
+  }, langBigInfluence);
+
+  return md`${mdOverview}
+
+${mdTopNeedle}
+
+${mdBigInfluence}`;
+}
+```
+
+# `{ojs} Summary` {#summary}
+
+`{ojs} _lang(nbText.summary.blocks.opener1)`
+
+`{ojs} _lang(nbText.summary.blocks.opener2)`
+
+```{ojs}
+viewof selectResourcePractice = {
+  const data = _.uniq(csaManuals.map((d) => d.practice))
+    .map((d) => {
+      return { field: d, translation: td.summaryPractices.values?.[d] };
+    })
+    .sort((a, b) => _lang(a.translation) > _lang(b.translation));
+
+  return Inputs.select(data, {
+    label: _lang(nbText.supportNbText.words.practice.singular),
+    format: x => _lang(x.translation),
+    value: data.find(x => x.field == "Inorganic Fertilizer")
+  });
+}
+
+html`${csaResourceHtml}`
+```
+
+
+# `{ojs} Methods` {#methods}
+
+`{ojs} _lang(nbText.methodsSources.intro)`
+
+## `{ojs} data_sources`
+
+```{ojs}  
+md`${_lang(nbText.methodsSources.h2DataSourcesSubsection)}`
+```
+
+## `{ojs} methods`
+
+```{ojs}
+md`
+### ${_lang(nbText.methodsSources.h3Era)}
+${_lang(nbText.methodsSources.h3EraSubsection)}
+`
+```
+
+
+```{ojs}
+// This section needs to be above the .hidden for it to work
+import { atlas_toc } from '../../helpers/styleBuilders.ojs' 
+toc_bottom = {
+  await nbText // force wait/reload with nbText to load so headings have correct labels/languages
+  return atlas_toc({
+      heading: `<b>${_lang({en:"In this notebook", fr:"Dans ce notebook"})}</b>`,
+      skip: [nbTitle, "notebook-title", "Appendix", "source-code"]
+      })
+}
+  
+htl.html`
+  <div class='floating-toc'>
+    ${toc_bottom}
+  </div>`
+
+```
+
+# Source code {#source-code .hidden} 
+
+## Text translations and language support
+
+```{ojs}
+nbTitle = _lang({en: "Discover Solutions", fr: "Découvrir des solutions"})
+// h1
+Overview = _lang(nbText.overview.h1)
+
+Interventions = _lang(nbText.interventions.h1)
+
+PracticalImpact = _lang(nbText.practicalImpact.meanCropDiff.h1)
+
+Risks = _lang(nbText.risks.h1)
+
+Factors = _lang(nbText.adoptionFactors.h1)
+
+Summary = _lang(nbText.summary.h1)
+
+Methods = _lang(nbText.methodsSources.h1)
+
+// h2
+crop_diff = _lang(nbText.practicalImpact.meanCropDiff.h2.meanDiff)
+
+crop_diff_aez = _lang(nbText.practicalImpact.meanCropDiffAEZ.h2)
+
+aez_dif = _lang(nbText.practicalImpact.meanCropDiffAEZ.h2)
+
+data_sources = _lang(nbText.methodsSources.h2DataSources)
+
+methods = _lang(nbText.methodsSources.h2Methods)
+
+quickInsight =_lang(nbText.supportNbText.labels.quickInsights)
+
+```
+
+
+```{ojs}
+import {nbText} from "../../data/DiscoverSolutions/nbText.ojs"
+
+Lang = await import("../../helpers/lang.js").then(l => l.default);
+
+_lang = await Lang.lg(language.key)
+
+defaultLangKey = {
+  const list = languages.map((d) => d.key);
+  const defaultKey = "en";
+  const queryParam = await Lang.getParamFromList({ name: "lang", list });
+  return queryParam ?? defaultKey;
+}
+
+languages = [
+  { key: "en", label: "English", locale: 'en-US' },
+  { key: "fr", label: "Français", locale: 'fr-FR' }
+]
+
+viewof language = Inputs.radio(languages, {
+  label: "Main language toggle",
+  format: (d) => d.key,
+  value: languages.find((x) => x.key === defaultLangKey),
+})
+
+// data translation values
+td = {
+  let data = await FileAttachment("../../data/DiscoverSolutions/translation_v2@1.json").json();
+
+  /* Additions */
+  data.practices.values["All practices"] = {
+    en: "All practices",
+    fr: "Toutes les pratiques"
+  };
+
+  data.summarySystems = {
+    en: "system",
+    fr: "système",
+    values: {
+      Agroforesty: {
+        en: "Agroforestry",
+        fr: "Agroforestière"
+      },
+      "Cereal-based": {
+        en: "Cereal-based",
+        fr: "À base de céréales"
+      },
+      "Cereal-based, Rice-based": {
+        en: "Cereal-based, Rice-based",
+        fr: "À base de céréales, À base de riz"
+      },
+      "Maize, Napier grass, Desmodium legume": {
+        en: "Maize, Napier grass, Desmodium legume",
+        fr: "Maïs, herbe Napier, légumineuse Desmodium"
+      },
+      "Maize, Other": {
+        en: "Maize, Other",
+        fr: "Maïs, autre"
+      },
+      "Rice-based": {
+        en: "Rice-based",
+        fr: "À base de riz"
+      },
+      Unspecified: {
+        en: "Unspecified",
+        fr: "Non spécifié"
+      },
+      "Vegetables, Fruits, Rice": {
+        en: "Vegetables, Fruits, Rice",
+        fr: "Légumes, Fruits, Riz"
+      }
+    }
+  };
+
+  data.summaryPractices = {
+    en: "Practice",
+    fr: "Pratique",
+    values: {
+      "Agroforestry Fallow": {
+        en: "Agroforestry Fallow",
+        fr: "Jachère agroforestière"
+      },
+      "Agroforestry Pruning": {
+        en: "Agroforestry Pruning",
+        fr: "Taille agroforestière"
+      },
+      Alleycropping: {
+        en: "Alleycropping",
+        fr: "Culture en allées"
+      },
+      Biochar: {
+        en: "Biochar",
+        fr: "Biochar"
+      },
+      "Boundary Planting": {
+        en: "Boundary Planting",
+        fr: "Plantation en bordure"
+      },
+      Composting: {
+        en: "Composting",
+        fr: "Compostage"
+      },
+      "Crop Residue Incorporation": {
+        en: "Crop Residue Incorporation",
+        fr: "Incorporation des résidus de récolte"
+      },
+      "Crop Residue Management": {
+        en: "Crop Residue Management",
+        fr: "Gestion des résidus de récolte"
+      },
+      "Crop Rotation": {
+        en: "Crop Rotation",
+        fr: "Rotation des cultures"
+      },
+      "Deficit Irrigation": {
+        en: "Deficit Irrigation",
+        fr: "Irrigation déficitaire"
+      },
+      "Green Manure": {
+        en: "Green Manure",
+        fr: "Engrais vert"
+      },
+      "Improved Fallows": {
+        en: "Improved Fallows",
+        fr: "Jachères améliorées"
+      },
+      "Improved Varieties": {
+        en: "Improved Varieties",
+        fr: "Variétés améliorées"
+      },
+      "Inorganic Fertilizer": {
+        en: "Inorganic Fertilizer",
+        fr: "Engrais inorganique"
+      },
+      Intercropping: {
+        en: "Intercropping",
+        fr: "Culture intercalaire"
+      },
+      Mulching: {
+        en: "Mulching",
+        fr: "Paillage"
+      },
+      "Organic Fertilizer": {
+        en: "Organic Fertilizer",
+        fr: "Engrais organique"
+      },
+      "Other Agroforestry": {
+        en: "Other Agroforestry",
+        fr: "Autre agroforestière"
+      },
+      Parklands: {
+        en: "Parklands",
+        fr: "Parcs agroforestiers"
+      },
+      "pH Control": {
+        en: "pH Control",
+        fr: "Contrôle du pH"
+      },
+      Silvopasture: {
+        en: "Silvopasture",
+        fr: "Sylvopastoralisme"
+      },
+      "Supplemental Irrigation": {
+        en: "Supplemental Irrigation",
+        fr: "Irrigation supplémentaire"
+      },
+      "Tillage Management": {
+        en: "Tillage Management",
+        fr: "Gestion du travail du sol"
+      },
+      "Water Harvesting": {
+        en: "Water Harvesting",
+        fr: "Collecte des eaux"
+      }
+    }
+  };
+
+  // adoption factors, with articles
+  data.adoption_factors_with_articles = {
+    en: "adoption_factors",
+    fr: "facteurs_dadoption",
+    values: {
+      "Access to credit": { en: "Access to credit", fr: "L'Accès au crédit" },
+      "Access to information": {
+        en: "Access to information",
+        fr: "L'Accès à l'information"
+      },
+      "Availability of labor": {
+        en: "Availability of labor",
+        fr: "La Disponibilité de la main-d'œuvre"
+      },
+      "Biophyiscal factors": {
+        en: "Biophyiscal factors",
+        fr: "Les Facteurs biophysiques"
+      },
+      "Changes in weather": {
+        en: "Changes in weather",
+        fr: "Les Changements climatiques"
+      },
+      "Distance to market": {
+        en: "Distance to market",
+        fr: "La Distance au marché"
+      },
+      "Exposure to risks and shocks": {
+        en: "Exposure to risks and shocks",
+        fr: "L'Exposition aux risques et chocs"
+      },
+      Other: { en: "Other", fr: "Autre" },
+      "Resource endowments": {
+        en: "Resource endowments",
+        fr: "La Dotation en ressources"
+      },
+      "Secure tenure": { en: "Secure tenure", fr: "La Tenure sécurisée" },
+      "Social capital": { en: "Social capital", fr: "La Capital social" },
+      "Socio-demographics": {
+        en: "Socio-demographics",
+        fr: "La Socio-démographie"
+      }
+    }
+  };
+
+  // crop articles
+  data.Crop_with_articles = {
+    en: "crop_with_articles",
+    fr: "crop_with_articles",
+    values: {
+      Maize: { en: "maize", fr: "le maïs" },
+      Rice: { en: "rice", fr: "le riz" },
+      "Pearl Millet": { en: "pearl millet", fr: "le millet perlé" },
+      Sorghum: { en: "sorghum", fr: "le sorgho" },
+      Cowpea: { en: "cowpea", fr: "le niébé" },
+      "Common Bean": { en: "common bean", fr: "le haricot commun" },
+      Soybean: { en: "soybean", fr: "le soja" },
+      Cassava: { en: "cassava", fr: "le manioc" },
+      Groundnut: { en: "groundnut", fr: "l'arachide" },
+      Wheat: { en: "wheat", fr: "le blé" },
+      Yam: { en: "yam", fr: "l'igname" },
+      Cotton: { en: "cotton", fr: "coton" },
+      Teff: { en: "teff", fr: "le teff" },
+      Tomato: { en: "tomato", fr: "la tomate" },
+      Potato: { en: "potato", fr: "la pomme de terre" },
+      "Sugar Cane": { en: "sugar cane", fr: "la canne à sucre" },
+      "Pigeon Pea": { en: "pigeon pea", fr: "le pois cajan" },
+      Chickpea: { en: "chickpea", fr: "le pois chiche" },
+      Okra: { en: "okra", fr: "le gombo" },
+      "Sweet Potato": { en: "sweet potato", fr: "la patate douce" },
+      "Fodder Legume": {
+        en: "fodder legume",
+        fr: "la légumineuse fourragère"
+      },
+      Barley: { en: "barley", fr: "l'orge" },
+      Olive: { en: "olive", fr: "l'olive" },
+      Cabbage: { en: "cabbage", fr: "le chou" },
+      "Banana Sweet": { en: "banana sweet", fr: "la banane douce" },
+      Rape: { en: "rape", fr: "le colza" },
+      Sunflower: { en: "sunflower", fr: "le tournesol" },
+      "Cooking Banana": {
+        en: "cooking banana",
+        fr: "la banane de cuisine"
+      },
+      Sesame: { en: "sesame", fr: "le sésame" }
+    }
+  };
+
+  return data;
+}
+```
+
+## Formatting functions
+
+```{ojs}
+// format number, long notation
+formatNumCompactLong = function (number, { locale = "en-US" } = {}) {
+  return new Intl.NumberFormat(locale, {
+    notation: "compact",
+    compactDisplay: "long",
+    unitDisplay: "long"
+  }).format(number);
+}
+
+formatNumStandard = function (number, { locale = "en-US" } = {}) {
+  return new Intl.NumberFormat(locale, {}).format(number);
+}
+
+// format number, 2 decimal places
+formatNum = d3.format(".2f")
+
+formatComma = d3.format(',')
+```
+
+## import data helpers
+
+```{ojs}
+// TRUE or FALSE strings (from R), otherwise null
+parseBool = (d) => {
+  if (d === "TRUE") return true;
+  if (d === "FALSE") return false;
+  else return null;
+}
+
+// Parsing numbers, blank strings as NaN's
+parseNum = (d) => {
+  if (typeof d === "number" && !isNaN(d)) return d;
+  return d.trim() === "" ? NaN : +d;
+}
+```
+
+## Style things
+
+```{ojs}
+colorYellowGreen = ["#F7D732", "#216729"]
+
+// aez color scale
+aezColor_new = {
+  const lookupAEZ = (aez) => _lang(td.AEZ_Class_FAO.values[aez])
+  return {
+    domain: [
+      lookupAEZ('Desert/Arid climate'),
+      lookupAEZ("Tropics, highland; semi-arid"),
+      lookupAEZ("Tropics, lowland; semi-arid"),
+      lookupAEZ("Subtropics, moderately cool; sub-humid"),
+      lookupAEZ("Tropics, highland; sub-humid"),
+      lookupAEZ("Tropics, lowland; sub-humid"),
+      lookupAEZ("Tropics, highland; humid"),
+      lookupAEZ("Tropics, lowland; humid"),
+      lookupAEZ("Land with ample irrigated soils"),
+      lookupAEZ("Severe soil/terrain limitations"),
+      lookupAEZ("Dominantly urban/built-up land"),
+    ],
+    range: [
+      "#F3D6B0",
+      "#FCA034",
+      "#F7D732",
+      "#523D4E",
+      "#EF6D94",
+      "#F9B1C1",
+      "#2A79A8",
+      "#79A1B7",
+      "#74B95A",
+      "#2E7637",
+      "#B1B1B1"
+    ]
+  };
+}
+```
+
+## Sections
+
+### shared data
+  
+```{ojs}
+// read excel sheet
+workbook_meanDifference = FileAttachment("../../data/DiscoverSolutions/Mean_yield_difference.xlsx").xlsx()
+
+data_extendedTable2 = {
+  // data from file
+  const file = FileAttachment("../../data/DiscoverSolutions/spotlight2_Extended Table 2.csv").csv();
+
+  // return data
+  return file.then((x) => {
+    return x.map((row) => ({
+      practice: String(row.Practice),
+      outcome: String(row.Outcome),
+      product: String(row.Product),
+      is_combo: parseBool(row["Is.Combo"]),
+      observations: parseNum(row.Observations),
+      studies: parseNum(row.Studies),
+      value: parseNum(row.Value),
+      sig: parseNum(row.Sig),
+      value_se: parseNum(row["Value.se"]),
+      ci_low: parseNum(row.CIlow),
+      ci_high: parseNum(row.CIhigh),
+      source: String(row.Source)
+    }));
+  });
+}
+```
+
+```{ojs}
+data_extendedTable2_total = {
+  // data from file
+  const file = FileAttachment("../../data/DiscoverSolutions/spotlight2_Extended Table 2@1.csv").csv();
+
+  // return data
+  return file.then((x) => {
+    return x.map((row) => ({
+      practice: String(row.Practice),
+      outcome: String(row.Outcome),
+      product: String(row.Product),
+      // is_combo: parseBool(row["Is.Combo"]),
+      observations: parseNum(row.Observations),
+      studies: parseNum(row.Studies),
+      value: parseNum(row.Value),
+      sig: parseNum(row.Sig),
+      value_se: parseNum(row["Value.se"]),
+      ci_low: parseNum(row.CIlow),
+      ci_high: parseNum(row.CIhigh),
+      // source: String(row.Source)
+    }));
+  });
+}
+```
+
+```{ojs}
+csaManuals = {
+  const file = FileAttachment("../../data/DiscoverSolutions/CSA-Manuals_Sheet1.csv").csv()
+
+  // parse columns
+  return file.then((x) => {
+    return x.map(d => ({
+      practice: String(d['Practice']).trim(),
+      country_region: String(d['Country or Region']).trim(),
+      system: String(d['System']).trim(),
+      author: String(d['Author']).trim(),
+      title: String(d['Title']).trim(),
+      link: String(d['Link']).trim()
+    }))
+  })
+}
+
+// selections
+csaResourceHtml = {
+  const data = T.tidy(
+    csaManuals,
+    T.filter((d) => d.practice == selectResourcePractice.field),
+    T.arrange(["system", "title"])
+  );
+  const translateSystem = (d) => _lang(td.summarySystems.values?.[d]);
+  const systemWord = Lang.toTitleCase(_lang(td.summarySystems))
+
+  const htmlList = data.map((d) => {
+    const system = translateSystem(d.system);
+    return `<li style='padding: 10px 0'>${system}: <a href=${d.link} target='_blank'>${d.title}</a></li>`;
+  });
+
+  return `<b>${systemWord}</b>
+<ul style='list-style-type:none; padding: 0'>${htmlList.join(
+    ""
+  )}</ul>`;
+}
+
+```
+
+### Practice/Crop dot plot
+
+```{ojs}
+data_meanDiff_practiceCrop = {
+  const raw = workbook_meanDifference.sheet("Practice_Crop", { headers: true });
+  return raw.filter((d) => {
+    return Object.keys(d).length > 0
+      && meanDiffCropList.includes(d.Crop)
+  });
+}
+
+data_meanDiff_practiceCrop_new = {
+  const raw = await FileAttachment("../../data/DiscoverSolutions/figure_2_data@1.csv").csv({typed: true})
+
+  return raw.map(d => {
+    return {
+      Practice: d['Practice'],
+      Crop: d['Crop'],
+      N_Obs: d['N_Obs'],
+      N_Pub: d["N_Pub"],
+      Mean_Treatment: d["Mean_T"],
+      Mean_Control: d["Mean_C"],
+      Mean_Difference: d["Mean_Difference"],
+      Se: d['Se'],
+      Lower: d["Lower"],
+      Upper: d["Upper"],
+    }
+  })
+}
+
+// shared column for mean difference dot plots
+viewof selectCropMeanDiff = Inputs.select(meanDiffCropList, {label: "Crop", unique: true, sort: true, value: 'Maize'})
+
+// list of crops to show for mean difference (study cutoff)
+meanDiffCropList = [
+  'Maize',
+  'Cowpea',
+  'Sorghum',
+  'Rice',
+  'Pearl Millet',
+  'Cassava or Yuca',
+  'Common Bean',
+  'Groundnut',
+  'Soybean',
+  'Wheat',
+  'Tomato',
+  'Potato',
+  'Yam',
+  'Cotton',
+  'Sugar Cane',
+  'Okra',
+  'Sweet Potato',
+  'Teff',
+  'Pigeon Pea',
+  'Sesame Seed',
+]
+
+```
+
+### AEZ Dot Plot
+```{ojs}
+data_meanDiff_aezPracticeCrop_new = {
+  const raw = await FileAttachment("../../data/DiscoverSolutions/Mean_yield_difference@1.csv").csv({typed: true})
+  
+  const formatted = T.tidy(
+    raw,
+    T.filter((d) => Object.keys(d).length > 0),
+    T.rename({
+      Mean_T: 'Mean_Treatment',
+      Mean_C: 'Mean_Control',
+    })
+  )
+  return formatted
+}
+```
+
+### Risk
+```{ojs}
+data_lclRisk = data_extendedTable2.filter((d) => d.outcome == "LCL Risk")
+```
+
+### Adoption Factors
+```{ojs}
+adoptionFactorAllLabel = "All practices"
+
+rawAdoptionFactors = {
+  const raw = await FileAttachment("../../data/DiscoverSolutions/adoption_factors_20mar24.csv").csv()
+
+  return raw.map(d => {
+    return {
+      index: d[''],
+      practice: String(d['practices']),
+      factor: String(d['adoption_factors']),
+      direction: String(d['direction']),
+      n: parseNum(d.n)
+    }
+  })
+}
+
+dataAdoptionFactors = {
+  const allPractices = T.tidy(
+    rawAdoptionFactors,
+    T.groupBy(
+      ["factor", "direction"],
+      [
+        T.summarize({
+          n: T.sum("n")
+        })
+      ]
+    ),
+    T.groupBy(
+      ["factor"],
+      [
+        T.mutateWithSummary({
+          total: T.sum("n")
+        })
+      ]
+    ),
+    T.mutate({ perc: (d) => (d.n / d.total) * 100 }),
+    T.mutate({ practice: (d) => adoptionFactorAllLabel }),
+    T.select(["practice", T.everything()])
+  );
+
+  const wrangled = T.tidy(
+    rawAdoptionFactors,
+    T.select(T.negate("index")),
+    T.groupBy(
+      ["practice", "factor"],
+      [T.mutateWithSummary({ total: T.sum("n") })]
+    ),
+    T.mutate({
+      perc: (d) => (d.n / d.total) * 100
+    })
+  );
+
+  return [
+    ...wrangled,
+    ...allPractices
+  ]
+}
+
+// mapped adoption data
+dataAdoptionFactorsMap = d3.group(dataAdoptionFactors, d => d.practice)
+
+adoptionFactorsLookup = ({
+  "Not significant": _lang(nbText.adoptionFactors.plot.labels.notSig),
+  "Negative": _lang(nbText.adoptionFactors.plot.labels.neg),
+  "Positive": _lang(nbText.adoptionFactors.plot.labels.pos),
+})
+
+function markBoldSidebarText(data, {textFormat=(d) => d + ' obs.', ...options } = {}) {
+  return Plot.marks(
+    // observation counts
+    Plot.textY(
+      data,
+      Plot.map(
+        { text: (values) => values.map((d) => textFormat(d)) },
+        Plot.groupY(
+          { text: "sum" },
+          {
+            frameAnchor: "right",
+            textAnchor: "start",
+            dx: 16,
+            ...options
+          }
+        )
+      )
+    ),
+    // digital white-out
+    Plot.textY(
+      data,
+      Plot.pointerY(
+        Plot.map(
+          { text: (values) => values.map((d) => textFormat(d)) },
+          Plot.groupY(
+            { text: "sum" },
+            {
+              // y: "factor",
+              // text: "n",
+              frameAnchor: "right",
+              textAnchor: "start",
+              dx: 16,
+              fill: "white",
+              stroke: "white",
+              strokeWidth: 2,
+              ...options
+            }
+          )
+        )
+      )
+    ),
+    // observation counts bold hover
+    Plot.textY(
+      data,
+      Plot.pointerY(
+        Plot.map(
+          { text: (values) => values.map((d) => textFormat(d)) },
+          Plot.groupY(
+            { text: "sum" },
+            {
+              // y: "factor",
+              // text: "n",
+              frameAnchor: "right",
+              textAnchor: "start",
+              dx: 16,
+              fontWeight: "bold",
+              ...options
+            }
+          )
+        )
+      )
+    )
+  );
+}
+
+```
+
+## Imports
+
+```{ojs}
+import {T} from "@pbeshai/tidyjs"
+```
+
