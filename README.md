@@ -15,4 +15,53 @@ We welcome contributions from the community. To contribute:
 3. Make your changes
 4. Submit a pull request
 
+## Development Setup
 
+## Activate a Python virtual environment
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install jupyter matplotlib plotly
+```
+
+### Install Quarto
+
+To install Quarto, follow the instructions on the [Quarto website](https://quarto.org/docs/get-started/).
+
+### Install Node.js and related packages
+
+1. Install node version manager:
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+```
+2. Create an environment that uses node v20.17.0:
+```bash
+nvm use 20.17.0
+```
+3. Give this environment an alias: 
+```bash
+nvm alias atlas_notebooks 20.17.0
+```
+4. Switch to this environment: 
+```bash
+nvm use atlas_notebooks
+```
+5. Confirm that you have successfully created the `atlas_notebooks` environment: 
+```bash
+nvm ls
+```
+6. Confirm that the node version in the atlas_notebooks environment is v20.17.0: 
+```bash
+node -v
+```
+7. Install required packages from `package.json`:
+```bash
+npm install
+```
+8. Render the Quarto notebook:
+```bash
+cd /path/to/your/notebook
+quarto preview gender.qmd
+quarto render gender.qmd --to html
+```
