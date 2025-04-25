@@ -1,4 +1,5 @@
-const VERSION = "2.0.0";
+// Authors: Zach Bogart, Brayden Youngberg
+const VERSION = "2.0.1";
 
 // FUNCTIONS
 
@@ -119,7 +120,6 @@ function toSentenceCase(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-// Export all functions as a module
 export default {
   version: VERSION,
   lg,
@@ -129,5 +129,5 @@ export default {
   listLeavesMissingObjectKeys,
   getParamFromList,
   toTitleCase,
-  toSentenceCase,
+  toSentenceCase
 };

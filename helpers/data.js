@@ -1,3 +1,12 @@
+  /**
+   * Add a cache-busting query string to URLs when running on Windows,
+   * to prevent TopoJSON from being loaded from cache.
+   *
+   * https://github.com/duckdb/duckdb-wasm/issues/1658
+   *
+   * @param {string} url - URL to patch
+   * @returns {string} patched URL if on Windows, original URL otherwise
+   */
 export function patchWindowsCache(url) {
   let isWindows = false;
   if (navigator.userAgentData) { // not supported by Fx, although issue seems isolated to Chromium browsers
@@ -12,8 +21,8 @@ export function patchWindowsCache(url) {
 }
 
 
-export const boundary_paths = { // NOTE: These are the current boundaries, but they will be updated soon to use new and signifigantly smaller file size boundaries
-  admin0_path: "/data/shared/atlas-region_admin0_simplified.json",
-  admin1_path: "https://digital-atlas.s3.us-east-1.amazonaws.com/domain=boundaries/type=admin/source=geoboundaries/region=ssa/processing=simplified/level=adm1/atlas-region_admin1_simplified.parquet",
-  admin2_path: "https://digital-atlas.s3.us-east-1.amazonaws.com/domain=boundaries/type=admin/source=geoboundaries/region=ssa/processing=simplified/level=adm1/atlas-region_admin2_simplified.parquet",
+export const boundary_paths = {
+  admin0_path: "/data/shared/atlas_gaul_a0_africa_simple-vlowres.topojson", // lyr: atlas_gaul_a0_africa
+  admin1_path: "/data/shared/atlas_gaul_a1_africa_simple-vlowres.topojson", // lyr: atlas_gaul_a1_africa
+  admin2_path: "/data/shared/atlas_gaul_a2_africa_simple-lowres.topojson"   // lyr: atlas_gaul_a2_africa
 };
