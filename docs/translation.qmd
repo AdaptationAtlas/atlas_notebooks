@@ -1,0 +1,203 @@
+---
+execute: 
+  echo: true
+---
+
+
+
+# Lang Module Guide
+
+_Author: Zach Bogart, Brayden Youngberg_  
+_Version: 2.0.1_
+
+## Overview
+
+The `Lang` module provides a set of helper functions to manage translations, template insertions, and string formatting in JavaScript notebooks and apps. It is especially useful for multi-language support and dynamic text replacement.
+
+---
+
+## Installation & Defining Languages
+
+Define available languages with keys, labels, and locales:
+```{ojs}
+Lang = await import("./../../helpers/lang.js").then(l => l.default);
+
+languages = [
+  { key: "en", label: "English", locale: "en-US" },
+  { key: "fr", label: "Français", locale: "fr-FR" }
+];
+```
+
+## Setting Up Translation JSON
+
+Structure your translations as a nested object or external JSON, with language keys for each field:
+
+```{ojs}
+nbText = new Object({
+  "hello": {
+    "en": "hello",
+    "fr": "Bonjour"
+  },
+  "error": {
+    "en": "Whoops"
+  },
+  "insert": {
+    "small": {
+      "en": "This is an insertion example: :::field:::",
+      "fr": "Ceci est un exemple d'insertion: :::field:::"
+    },
+    "big": {
+      "en": "This is an insertion example: :::field::: :::name:::",
+      "fr": "Ceci est un exemple d'insertion: :::field::: :::name:::"
+    }
+  }
+})
+```
+
+## Language Toggle UI (Observable Example)
+
+Create a master toggle to pick the language key (Observable Inputs):
+
+```{ojs}
+viewof language = Inputs.radio(languages, {
+  label: "Main language toggle",
+  format: (d) => d.key,
+  value: languages.find((x) => x.key === defaultLangKey),
+})
+```
+
+A "pretty" toggle with label that changes based on the language:
+
+ - NOTE: it is required to do this in a new Input, as there would be a circular definition otherwise
+
+```{ojs}
+viewof prettyLanguageView = {
+  return Inputs.bind(
+    Inputs.radio(languages, {
+      label: Lang.getText({en: "Language", fr: "Langue"}, { key: language.key }),
+      format: (d) => d.label
+    }),
+    viewof language
+  );
+}
+```
+
+
+## Retrieving Translations
+
+Get a translation for the current language:
+
+```{ojs}
+Lang.getText(nbText.hello, { key: language.key });
+```
+
+### Shorthand Helper
+
+To avoid repeating the language key, use `lg`:
+
+```{ojs}
+_lang = Lang.lg(language.key);
+_lang(nbText.hello); // "hello" or "Bonjour"
+```
+
+
+## Template Insertion
+
+Replace placeholders in template strings with dynamic values.
+
+### Example: Single Insertion
+
+```{ojs}
+{
+    const template = Lang.getText(nbText.insert.small, { key: language.key });
+    const items = [{ name: "field", value: "hello world!" }];
+    return Lang.reduceReplaceTemplateItems(template, items);
+}
+```
+
+
+### Example: Multiple Insertions
+
+```{ojs}
+{
+    const template = Lang.getText(nbText.insert.big, { key: language.key });
+    const greeting = Lang.getText(nbText.hello, { key: language.key });
+    const items = [
+    { name: "field", value: greeting },
+    { name: "name", value: "Alice" }
+    ];
+    return Lang.reduceReplaceTemplateItems(template, items);
+}
+```
+
+
+### Custom Placeholder Delimiters
+
+```{ojs}
+{
+    const customTemplate = "This is a test: >field<";
+    const result = Lang.reduceReplaceTemplateItems(
+        customTemplate,
+        [{ name: "field", value: "hello world!" }],
+        { start: ">", end: "<" }
+    );
+    return result
+}
+```
+
+## Checking for Missing Translations
+
+Find missing language keys in your text object:
+
+```{ojs}
+
+Lang.listLeavesMissingObjectKeys(nbText, ["en", "fr"]);
+// Returns an array of paths to missing translations
+```
+
+## String Formatting Helpers
+
+```{ojs}
+Lang.toTitleCase("welcome to my home");    // "Welcome To My Home"
+Lang.toSentenceCase("welcome to my home"); // "Welcome to my home"
+```
+
+
+---
+
+## Advanced: Default Language from URL
+
+Set the default language using a URL parameter (`?lang=fr`):
+
+```{ojs}
+
+queryLanguage = await Lang.getParamFromList({
+  name: "lang",
+  list: languages.map((d) => d.key)
+});
+
+defaultLangKey = queryLanguage ?? "en";
+```
+
+
+---
+
+## API Reference
+
+| Function | Description |
+| :-- | :-- |
+| `lg(defaultKey)` | Returns a function to fetch text for a default language key. |
+| `getText(textObj, { key })` | Gets text for the specified language key. |
+| `getRegexForNamedInsertion(item, opts)` | Returns regex to match placeholders (default: `:::item:::`). |
+| `reduceReplaceTemplateItems(...)` | Replaces all placeholders in a template with provided values. |
+| `listLeavesMissingObjectKeys(obj, keys)` | Lists object leaves missing specified keys. |
+| `getParamFromList({ name, list, ... })` | Returns query parameter value if it exists in a provided list. |
+| `toTitleCase(str)` | Converts a string to title case. |
+| `toSentenceCase(str)` | Converts a string to sentence case. |
+
+---
+
+**Links:**
+[Observable Notebook Example](https://observablehq.com/d/7d46679f7d0d917e?lang=fr)
+
+*Happy translating!*
