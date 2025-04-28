@@ -6,7 +6,7 @@ const VERSION = "2.0.1";
 /**
  * Shorthand for getText, that defines default key
  */
-function lg(defaultKey) {
+export function lg(defaultKey) {
   return (textObj) => getText(textObj, { key: defaultKey });
 }
 
@@ -14,7 +14,7 @@ function lg(defaultKey) {
  * get the text in specified language key, or undefined
  * - default to 'en'
  */
-function getText(textObj, { key = null } = {}) {
+export function getText(textObj, { key = null } = {}) {
   if (key === null) {
     throw new Error("No 'key' field; please provide a language key.");
   }
@@ -27,7 +27,7 @@ function getText(textObj, { key = null } = {}) {
  * - default to wrapping in triple angle brackets (<<< item >>>)
  * - ignores whitespace before and after inner string
  */
-function getRegexForNamedInsertion(itemName, { start = ":::", end = ":::" } = {}) {
+export function getRegexForNamedInsertion(itemName, { start = ":::", end = ":::" } = {}) {
   return new RegExp(`${start}\\s*${itemName}\\s*${end}`, "g");
 }
 
@@ -35,7 +35,7 @@ function getRegexForNamedInsertion(itemName, { start = ":::", end = ":::" } = {}
  * replace items in template, return replaced string
  * - default fields for 'items' array of objects [{name: "...", value: "..."}]
  */
-function reduceReplaceTemplateItems(template, items, { templateNameField = "name", templateValueField = "value", ...options } = {}) {
+export function reduceReplaceTemplateItems(template, items, { templateNameField = "name", templateValueField = "value", ...options } = {}) {
   return items.reduce((text, item) => {
     return text.replace(
       getRegexForNamedInsertion(item[templateNameField], { ...options }),
@@ -47,7 +47,7 @@ function reduceReplaceTemplateItems(template, items, { templateNameField = "name
 /**
  * Lists the leaves (i.e., terminal nodes) of an object tree that are missing specified keys.
  */
-function listLeavesMissingObjectKeys(obj, keys) {
+export function listLeavesMissingObjectKeys(obj, keys) {
   const missingLeaves = [];
 
   function traverse(obj, path) {
@@ -89,7 +89,7 @@ function listLeavesMissingObjectKeys(obj, keys) {
 /**
  * Get a query string parameter and return if it is in the provided list.
  */
-async function getParamFromList({ name, list, search = location.search } = {}) {
+export async function getParamFromList({ name, list, search = location.search } = {}) {
   if (!name || !list) {
     throw new Error("'name' and 'list' parameters are required.");
   }
@@ -103,7 +103,7 @@ async function getParamFromList({ name, list, search = location.search } = {}) {
 /**
  * Return string in title case
  */
-function toTitleCase(str) {
+export function toTitleCase(str) {
   if (typeof str !== "string") {
     throw new Error("Input must be a string");
   }
@@ -113,14 +113,14 @@ function toTitleCase(str) {
 /**
  * Return string in sentence case
  */
-function toSentenceCase(str) {
+export function toSentenceCase(str) {
   if (typeof str !== "string") {
     throw new Error("Input must be a string");
   }
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-export default {
+export const lang = {
   version: VERSION,
   lg,
   getText,
@@ -131,3 +131,5 @@ export default {
   toTitleCase,
   toSentenceCase
 };
+
+export default lang; // This is included for some back comapatibility due to some initial issues I was hitting with the import system
