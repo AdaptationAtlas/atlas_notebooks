@@ -77,7 +77,7 @@ npm install
 ```
 8. Render the Quarto notebook:
 ```bash
-cd /path/to/your/notebook
+cd /path/to/gender.qmd
 quarto preview gender.qmd --port 8080
 quarto render gender.qmd --to html
 ```
