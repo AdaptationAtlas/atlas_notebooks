@@ -36,7 +36,8 @@ We welcome contributions from the community. To contribute or to create a new no
 
 ```bash
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/Activate  # MacOS/Linux
+venv\Scripts\activate     # Windows
 pip install jupyter matplotlib plotly
 ```
 
