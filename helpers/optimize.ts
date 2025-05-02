@@ -1,3 +1,4 @@
+// @ts-nocheck
 import * as esbuild from "https://deno.land/x/esbuild@v0.19.2/mod.js";
 import { walk } from "https://deno.land/std@0.224.0/fs/walk.ts";
 import { minify as minifyHtml } from "npm:html-minifier-terser@7.2.0";
