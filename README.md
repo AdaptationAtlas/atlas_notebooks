@@ -32,52 +32,25 @@ We welcome contributions from the community. To contribute or to create a new no
 
 ## Development Setup
 
-## Activate a Python virtual environment
-
-```bash
-python3 -m venv venv
-source venv/bin/Activate  # MacOS/Linux
-venv\Scripts\activate     # Windows
-pip install jupyter matplotlib plotly
-```
-
 ### Install Quarto
-
 To install Quarto, follow the instructions on the [Quarto website](https://quarto.org/docs/get-started/).
 
-### Install Node.js and related packages
+Quarto comes with built-in support for Observable JavaScript and this should be 
+enough get you up and running to render the Quarto notebooks.
 
-1. Install node version manager:
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-```
-2. Create an environment that uses node v20.17.0:
-```bash
-nvm use 20.17.0
-```
-3. Give this environment an alias: 
-```bash
-nvm alias atlas_notebooks 20.17.0
-```
-4. Switch to this environment: 
-```bash
-nvm use atlas_notebooks
-```
-5. Confirm that you have successfully created the `atlas_notebooks` environment: 
-```bash
-nvm ls
-```
-6. Confirm that the node version in the atlas_notebooks environment is v20.17.0: 
-```bash
-node -v
-```
-7. Install required packages from `package.json`:
-```bash
-npm install
-```
-8. Render the Quarto notebook:
+### Render a Quarto notebook
+The command below will preview the notebook at http://localhost:8080
 ```bash
 cd /path/to/gender.qmd
 quarto preview gender.qmd --port 8080
 quarto render gender.qmd --to html
 ```
+
+> [!NOTE]
+> Some TypeScript files may show `Cannot find name 'Deno'` error messages. 
+> The "errors" occur because Quarto manages these dependencies within its own 
+> internal Deno environment—which uses an older version of Deno (not the 
+> recent V2 release). VS Code can’t access that environment, so it (the TS 
+> linter) assumes there are errors, even though they are not. They are not 
+> actual errors and can be safely ignored. A `ts-nocheck` flag at the top of 
+> the .ts scripts has been added to suppress them.
