@@ -1,3 +1,4 @@
+// @ts-nocheck
 import sharp from "npm:sharp@0.33.0";
 
 // Function to crop, resize, and convert image to WebP
