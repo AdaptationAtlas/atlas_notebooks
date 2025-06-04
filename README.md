@@ -10,12 +10,12 @@ The Africa Agriculture Adaptation Atlas is a aimed at strengthening adaptation p
 
 ## Repository Structure
 
-| Branch     | Description                                                                 |
-| ---------- | --------------------------------------------------------------------------- |
-| `main`     | Production branch used to build the live version of the Atlas               |
-| `develop`  | Development and staging branch for active work and previews                 |
-| `template` | Minimal starting point for contributors—no notebook content or dependencies |
-| `example`  | Archived notebooks from an earlier version of the project                   |
+| Branch     | Description                                                                 | Link                                                        |
+| ---------- | --------------------------------------------------------------------------- | ----------------------------------------------------------- | 
+| `main`     | Production branch used to build the live version of the Atlas               | [Main](https://main.adaptation-atlas-nb.pages.dev/)         |
+| `develop`  | Development and staging branch for active work and previews                 | [Develop](https://develop.adaptation-atlas-nb.pages.dev/)   |
+| `template` | Minimal starting point for contributors—no notebook content or dependencies | [Template](https://template.adaptation-atlas-nb.pages.dev/) |
+| `example`  | Archived notebooks from an earlier version of the project                   | [Example](https://example.adaptation-atlas-nb.pages.dev/)   |
 
 ---
 
