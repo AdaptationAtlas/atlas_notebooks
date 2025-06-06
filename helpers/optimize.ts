@@ -23,7 +23,7 @@ async function processFile(path: string, originalSize: number): Promise<number> 
         minifyCSS: true,
         minifyJS: true,
         removeComments: true,
-        removeRedundantAttributes: true
+        removeRedundantAttributes: true,
         removeEmptyAttributes: true,
         useShortDoctype: true
       });
