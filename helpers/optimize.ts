@@ -1,102 +1,77 @@
 // @ts-nocheck
-import * as esbuild from "https://deno.land/x/esbuild@v0.19.2/mod.js";
+import * as esbuild from "https://deno.land/x/esbuild@v0.25.5/mod.js";
 import { walk } from "https://deno.land/std@0.224.0/fs/walk.ts";
+import { extname } from "https://deno.land/std@0.224.0/path/extname.ts";
 import { minify as minifyHtml } from "npm:html-minifier-terser@7.2.0";
 
 const SITE_DIR = "_site";
+const CONCURRENCY = 5;
+const loaders = { ".js": "js", ".css": "css" } as const;
 
-// Get file size in bytes
-async function getFileSize(filePath: string): Promise<number> {
-  try {
-    const stat = await Deno.stat(filePath);
-    return stat.size;
-  } catch {
-    return 0;
-  }
-}
+const getSize = async (path: string) => (await Deno.stat(path).catch(() => ({ size: 0 }))).size;
+const formatSize = (bytes: number) => bytes > 1e6 ? `${(bytes / 1e6).toFixed(2)}MB` : `${bytes}B`;
 
-// Process a single file
-async function processFile(filePath: string): Promise<void> {
-  const ext = filePath.slice(filePath.lastIndexOf("."));
-  
+async function processFile(path: string, originalSize: number): Promise<number> {
+  const ext = extname(path);
   try {
-    const originalSize = await getFileSize(filePath);
-    const content = await Deno.readTextFile(filePath);
+    const content = await Deno.readTextFile(path);
     let minified: string;
-    
+
     if (ext === ".html") {
       minified = await minifyHtml(content, {
         collapseWhitespace: true,
         minifyCSS: true,
         minifyJS: true,
         removeComments: true,
+        removeRedundantAttributes: true
+        removeEmptyAttributes: true,
+        useShortDoctype: true
       });
-    } else {
-      const result = await esbuild.transform(content, {
+    } else if (loaders[ext]) {
+      minified = (await esbuild.transform(content, {
         minify: true,
-        loader: ext.slice(1) as "js" | "css",
-      });
-      minified = result.code;
-    }
-    
-    await Deno.writeTextFile(filePath, minified);
-    const newSize = await getFileSize(filePath);
+        loader: loaders[ext]
+      })).code;
+    } else return originalSize;
+
+    await Deno.writeTextFile(path, minified);
+    const newSize = await getSize(path);
     const reduction = ((originalSize - newSize) / originalSize) * 100;
-    
-    console.log(
-      `✅ Minified ${ext.slice(1).toUpperCase()}: ${filePath}
-      | ${originalSize}B → ${newSize}B (${reduction.toFixed(2)}% reduction) |`
-    );
+    console.log(`${path}: ${formatSize(originalSize)} → ${formatSize(newSize)} (${reduction.toFixed(1)}%)`);
+    return newSize;
   } catch (err) {
-    console.error(`❌ Failed to minify ${filePath}:`, err);
+    console.error(`Failed: ${path}`, err.message);
+    return originalSize;
   }
 }
 
 async function main() {
   try {
-    // Calculate overall folder size
-    let originalTotalSize = 0;
-    const filesToProcess: string[] = [];
-    
-    // Find all files to process and calculate initial total size in one pass
+    const files: { path: string; size: number }[] = [];
+
+    // Collect files
     for await (const entry of walk(SITE_DIR, { includeDirs: false })) {
-      const ext = entry.path.slice(entry.path.lastIndexOf("."));
+      const ext = extname(entry.path);
       if ([".css", ".js", ".html"].includes(ext)) {
-        filesToProcess.push(entry.path);
-      }
-      
-      try {
-        const stat = await Deno.stat(entry.path);
-        originalTotalSize += stat.size;
-      } catch {
-        // Skip files we can't stat
+        const size = await getSize(entry.path);
+        if (size > 0) files.push({ path: entry.path, size });
       }
     }
-    
-    // Process files in parallel
-    const CONCURRENCY_LIMIT = 5;
-    for (let i = 0; i < filesToProcess.length; i += CONCURRENCY_LIMIT) {
-      const batch = filesToProcess.slice(i, i + CONCURRENCY_LIMIT);
-      await Promise.all(batch.map(file => processFile(file)));
+
+    let originalTotal = 0, newTotal = 0;
+
+    // Process in batches
+    for (let i = 0; i < files.length; i += CONCURRENCY) {
+      const batch = files.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(batch.map(f => {
+        originalTotal += f.size;
+        return processFile(f.path, f.size);
+      }));
+      newTotal += results.reduce((sum, size) => sum + size, 0);
     }
-    
-    // Calculate final size
-    let newTotalSize = 0;
-    for await (const entry of walk(SITE_DIR, { includeDirs: false })) {
-      try {
-        const stat = await Deno.stat(entry.path);
-        newTotalSize += stat.size;
-      } catch {
-        // Skip files we can't stat
-      }
-    }
-    
-    const totalReduction = ((originalTotalSize - newTotalSize) / originalTotalSize) * 100;
-    
-    console.log("🎉 Optimization complete!");
-    console.log(
-      `📂 Directory size: ${originalTotalSize}B → ${newTotalSize}B (${totalReduction.toFixed(2)}% reduction)`
-    );
+
+    const reduction = ((originalTotal - newTotal) / originalTotal) * 100;
+    console.log(`\nOptimized: ${formatSize(originalTotal)} → ${formatSize(newTotal)} (${reduction.toFixed(1)}%)`);
   } finally {
     esbuild.stop();
   }
