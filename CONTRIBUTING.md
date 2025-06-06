@@ -172,16 +172,15 @@ defined outside of a block `{}` will not have a `const` or `let` declaration, an
 **OJS Nuances:** Take care to avoid some of the gotchas where OJS differs from JavaScript. In many ways it is simpler as all
 variables will automatically update when a user selection causes another variable to change. Read more 
 [here](https://observablehq.com/@observablehq/learning-observable-javascript-and-observable)
-
 ### Quarto Guidelines
 **Headings**: Dynamic Headings should use inline code alongside quarto/markdown headings
  > **Good**
  > ```md
- >  # `{ojs} dynamicHeading`
+ >  # ` {{ojs}} dynamicHeading`
  > ```
  > **Bad**
  > ```md
- > `{ojs} md`# dynamicHeading``
+ > `{{ojs}} md`# dynamicHeading``
  > ```
 
 
@@ -192,7 +191,7 @@ variables will automatically update when a user selection causes another variabl
  quarto code blocks should be the smallest logical group to keep things clean and manageable. 
  > **For example:**
  > **Good**
- > ```{ojs}
+ > ```{{ojs}}
  > // All external libraries
  > d3 = require("d3@7")
  > topojson = require("topojson")
@@ -200,7 +199,7 @@ variables will automatically update when a user selection causes another variabl
  > ```
  > 
  > **Bad**
- > ```{ojs}
+ > ```{{ojs}}
  > d3 = require("d3@7")
  > topojson = require("topojson")
  > import { aq, op } from '@uwdata/arquero'
@@ -216,13 +215,13 @@ variables will automatically update when a user selection causes another variabl
  > ```
  > This second example block could easily be split into two logical ones - imports and map processing.
  > **Bad**
- > ```{ojs}
+ > ```{{ojs}}
  > d3 = require("d3@7");
  > ```
- > ```{ojs}
+ > ```{{ojs}}
  > topojson = require("topojson");
  > ```
- > ```{ojs}
+ > ```{{ojs}}
  > import { aq, op } from "@uwdata/arquero";
  > ```
  > This third example could be consolidated into a single OJS block rather than 3
