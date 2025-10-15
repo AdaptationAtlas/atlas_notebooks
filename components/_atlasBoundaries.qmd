@@ -1,0 +1,108 @@
+---
+
+---
+
+```{ojs}
+_ADMIN_CONFIG = new Object({
+  0: {
+    file: FileAttachment(
+      "/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson",
+    ),
+    object: "atlas_gaul24_a0_africa",
+  },
+  1: {
+    file: FileAttachment(
+      "/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson",
+    ),
+    object: "atlas_gaul24_a1_africa",
+  },
+  2: {
+    file: FileAttachment(
+      "/data/shared/atlas_gaul_a2_africa_simple-lowres.topojson",
+    ),
+    object: "atlas_gaul_a2_africa_simple-lowres",
+  },
+});
+```
+
+```{ojs}
+admin_json = {
+  const country_list = await FileAttachment(
+    "/data/shared/atlas_countries.json",
+  ).json();
+
+  return country_list
+    .filter((d) => d.include) // && c.iso3c !== "SDN"
+    .map(({ include, ...rest }) => rest);
+};
+
+iso3Set = new Set(admin_json.map(d => d.iso3c));
+```
+
+```{ojs}
+_loadAdminBoundaries = async (level = 0, iso3Set = null) => {
+  const { file, object } = _ADMIN_CONFIG[level];
+  const bounds = await file.json();
+
+  const geometries = iso3Set
+    ? bounds.objects[object].geometries.filter((g) =>
+        iso3Set.has(g.properties.iso3),
+      )
+    : bounds.objects[object].geometries;
+
+  return topojson.feature(bounds, {
+    type: "GeometryCollection",
+    geometries,
+  });
+};
+```
+
+```{ojs}
+/**
+ * Loads administrative boundary data for specified levels
+ *
+ * @async
+ * @param {number|number[]} levels - Administrative level(s) to load.
+ * @returns {Promise<Object>} Object containing GeoJSON FeatureCollections
+ *
+ * @throws {Error} If any level is not in the set of administrative levels
+ *
+ * @example
+ * // Load a single admin level
+ * const countries = await getAdminBoundaries(0);
+ * // Returns: { admin0: GeoJSON }
+ *
+ * @example
+ * // Load multiple admin levels
+ * const boundaries = await getAdminBoundaries([0, 1, 2]);
+ * // Returns: { admin0: GeoJSON, admin1: GeoJSON, admin2: GeoJSON }
+ *
+ * @example
+ * // Load specific levels
+ * const statesAndDistricts = await getAdminBoundaries([1, 2]);
+ * // Returns: { admin1: GeoJSON, admin2: GeoJSON }
+ *
+ * @description
+ * Administrative levels typically represent:
+ * - Level 0: Countries
+ * - Level 1: States/Provinces
+ * - Level 2: Districts/Counties
+ *
+ */
+getAdminBoundaries = async (levels) => {
+  const validLevels = new Set(Object.keys(_ADMIN_CONFIG).map(Number));
+  const levelsArray = Array.isArray(levels) ? levels : [levels];
+
+  if (!levelsArray.every((level) => validLevels.has(level))) {
+    throw new Error(
+      `Invalid level(s). Valid levels are: ${[...validLevels].join(", ")}`,
+    );
+  }
+
+  const results = await Promise.all(
+    levels.map((l) => _loadAdminBoundaries(l, iso3Set)),
+  );
+
+  return Object.fromEntries(levels.map((l, i) => ["admin" + l, results[i]]));
+};
+```
