@@ -11,6 +11,7 @@ format:
   html:
     code-fold: true
     code-summary: "Show the code" ## Add this to global template to make debugging easier.
+    css: styles.css
 ---
 
 ```{ojs}
@@ -25,13 +26,112 @@ hero_url = "./../../images/default_crop.webp";
 atlasHero(nbTitle, hero_url);
 ```
 
-## `{ojs} keyInsights` {class='key-insights' #key-insight-text}
-
 # `{ojs} nbOverview` {#overview}
+
+```{ojs}
+//| echo: false
+// Text for overview section
+md`${_lang(nbText.overview.blocks.block1)}`;
+
+md`${_lang(nbText.overview.blocks.block2)}`;
+
+md`${_lang(nbText.indicators.irr.overview)}`;
+
+md`${_lang(nbText.indicators.mirr.overview)}`;
+
+md`${_lang(nbText.indicators.npv.overview)}`;
+
+md`${_lang(nbText.indicators.bcr.overview)}`;
+
+md`${_lang(nbText.overview.blocks.block3)}`;
+
+md`${_lang(nbText.overview.blocks.block4)}`;
+```
 
 # `{ojs} heading1` {#project-setup}
 
-{{< lipsum 2 >}}
+`{ojs} _lang(nbText.projectSetup.blocks.opener1)`
+
+`{ojs} _lang(nbText.projectSetup.blocks.opener2)`
+
+## `{ojs} _lang(nbText.projectSetup.blocks.costs.h2)`
+
+`{ojs} _lang(nbText.projectSetup.blocks.costs.text)`
+
+```{ojs}
+Inputs.text({
+  label: makeTooltipLabel({
+    labelText: inputOptions_projectCost.label,
+    tooltipText: inputOptions_projectCost.tooltip,
+  }),
+  pattern: inputOptions_projectCost.pattern,
+  placeholder: inputOptions_projectCost.placeholder,
+  // value: inputOptions_projectCost.valueString
+});
+```
+
+```{ojs}
+viewof inputProjectOptions = {
+  const inputProjectCost = Inputs.text({
+    label: makeTooltipLabel({
+      labelText: inputOptions_projectCost.label,
+      tooltipText: inputOptions_projectCost.tooltip
+    }),
+    pattern: inputOptions_projectCost.pattern,
+    placeholder: inputOptions_projectCost.placeholder,
+    value: inputOptions_projectCost.valueString
+  });
+  const inputProjectYears = Inputs.select(inputOptions_projectYears.data, {
+    format: (x) => x.label,
+    label: makeTooltipLabel({
+      labelText: inputOptions_projectYears.label,
+      tooltipText: inputOptions_projectYears.tooltip
+    })
+  });
+
+  return Inputs.form(
+    {
+      cost: inputProjectCost,
+      years:inputProjectYears
+    },
+    {
+      template: (inputs) =>
+        htl.html`<div style="display: flex; gap: 3em">${Object.values(
+          inputs
+        )}</div>`
+    }
+  );
+}
+
+rangeProjectCost = {
+  const unpack = Number(inputProjectOptions.cost.replace(/[,|$]/g, ""))
+  const number = Number(unpack)
+  return number
+}
+```
+
+```{ojs}
+{
+  const template = _lang(nbText.projectSetup.blocks.costs.calloutTemplate)
+  const templateItems = [
+    {name: "money", value: formatUSD({locale: language.locale})(rangeProjectCost)},
+    {name: "time", value: inputProjectOptions.years.label},
+  ]
+  const formatted = Lang.reduceReplaceTemplateItems(template, templateItems)
+  return md`${formatted}`
+}
+```
+
+## `{ojs} _lang(nbText.projectSetup.blocks.impacts.h2)`
+
+`{ojs} _lang(nbText.projectSetup.blocks.impacts.text)`
+
+## Select Parameters
+
+<!-- This is not correct in the notebook as this section
+is on production impact, adapotion rate, etc. -->
+
+Choose your model parameters for the analysis.
 
 `{ojs} dropdown_section("Advanced Controls", false, "Stuff for experts")`
 
@@ -62,14 +162,125 @@ htl.html`
       `;
 ```
 
-# Source code {#source-code .hidden}
+# Source code {#source-code}
 
-<!--
-NOTE:Everything below this point will not appear in the notebook.
-This is useful to hide all of the code, master selectors (language, admin level, etc.),
-and other things that are needed for the notebook to run but would be messy if
-actually appearing in the notebook.
--->
+<!--TODO: Add .hidden in bracket to hide for production -->
+
+## Data import and cleaning
+
+```{ojs}
+// Data loader cell
+//TODO: Move this to s3 paths
+db = DuckDBClient.of({
+  exposure: FileAttachment("/data/economicReturns/exposure_adm_sum_spam20-21_glw420-21.parquet"),
+  cv: FileAttachment("/data/economicReturns/faostat_prod_cv.parquet")
+})
+
+countries = {
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const filteredCountries = country_list
+    .filter((c) => c.include && c.iso3c !== "SDN")
+    .map(({ include, ...rest }) => rest);
+  return filteredCountries;
+};
+
+countries
+```
+
+## Inputs
+
+```{ojs}
+// Defaults and gaurd rails for the inputs
+inputOptions_projectCost = {
+  return {
+    range: [1e6, 5e8],
+    label: _lang(nbText.projectSetup.blocks.costs.inputs.costInput.label),
+    tooltip: _lang(nbText.projectSetup.blocks.costs.inputs.costInput.tooltip),
+    step: 1e5,
+    value: 50_000_000,
+    format: d3.format('$.3s'),
+    outputWidth: 90,
+    placeholder: "Ex. $5,000,000",
+    pattern: "^[$]?[1-9]+[0-9,$]*$",
+    valueString: "$50,000,000"
+  }
+}
+
+inputOptions_projectYears = {
+  const years = _lang(
+      nbText.projectSetup.blocks.costs.inputs.projectYearDropdown.terms.year.plural,
+  );
+  return {
+    range: [2, 16],
+    data: d3
+      .range(2, 16 + 1, 1)
+      .map((d) => ({ label: `${d} ${years}`, value: d })),
+    label: _lang(nbText.projectSetup.blocks.costs.inputs.projectYearDropdown.label),
+    tooltip: _lang(nbText.projectSetup.blocks.costs.inputs.projectYearDropdown.tooltip),
+    step: 1,
+    value: 8,
+    outputWidth: 90
+  };
+}
+```
+
+## Elements
+
+```{ojs}
+function makeTooltipLabel({
+  labelText = "Dropdown label",
+  tooltipText = "Tooltip text",
+} = {}) {
+  return htl.html`
+    <span
+      data-title="${tooltipText}"
+      style="
+        position:relative;
+        cursor:pointer;
+      "
+    >${labelText}</span>
+    <style>
+      [data-title]:hover::after {
+        content: attr(data-title);
+        position: absolute;
+        left: 0;
+        top: 100%;
+        background: #efefef;
+        color: #333;
+        font-size: 14px;
+        padding: 6px 10px;
+        border-radius: 4px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        white-space: nowrap;
+        z-index: 9999;
+      }
+    </style>
+  `;
+}
+```
+
+## Helper Functions
+
+```{ojs}
+// Formatting
+function formatUSD({ locale = "en-US" } = {}) {
+  const formatter = formatNumCompactShort({ locale });
+
+  return (number) => {
+    const formattedNum = formatter(number);
+    return "$" + formattedNum;
+  };
+}
+
+// format number, short notation
+formatNumCompactShort = ({ locale = "en-US" } = {}) =>
+  new Intl.NumberFormat(locale, {
+    notation: "compact",
+    compactDisplay: "short",
+  }).format;
+```
+
+## Language
 
 <!-- Text and Language Translations -->
 
@@ -89,27 +300,11 @@ appendix = _lang(general_translations.appendix);
 ```
 
 ```{ojs}
-mutable hoverCountry = "SSA" // This mutable is defined here and updated in _template_plot.qmd. It should only be defined once.
-
-keyInsights = {
-  let template = _lang({
-        en: `This is where some key insights should go, they will be dynamic based on the selections such as country (**:::country:::**) and crop type (**:::cropType:::**)`,
-        fr: `Ceci est là où les résumés clés devraient être, ils seront dynamiques en fonction des sélections comme pays (**:::country:::**) et type de culture (**:::cropType:::**)`
-  })
-  
-  let fill_items = [
-      { name: "country", value: hoverCountry },
-      { name: "cropType", value: _lang({en: 'potatoes', fr: 'pomme de terre'}) }
-    ]
-  let keyText =  md`${Lang.reduceReplaceTemplateItems(template, fill_items)}`
-  return keyText
-}
-```
-
-```{ojs}
 import { lang as Lang } from "/helpers/lang.js"
 
 general_translations = await FileAttachment("/data/shared/generalTranslations.json").json()
+
+nbText = await FileAttachment("/data/economicReturns/translations.json").json()
 
 languages = [
   { key: "en", label: "English", locale: 'en-US' },
@@ -255,4 +450,3 @@ htl.html`
     }
   });
 </script> -->
-
