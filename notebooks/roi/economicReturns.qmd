@@ -11,7 +11,7 @@ format:
   html:
     code-fold: true
     code-summary: "Show the code" ## Add this to global template to make debugging easier.
-    css: styles.css
+    css: roi_styles.css # Custom CSS for this notebook so the multi select works.
 ---
 
 ```{ojs}
@@ -54,21 +54,19 @@ md`${_lang(nbText.overview.blocks.block4)}`;
 
 `{ojs} _lang(nbText.projectSetup.blocks.opener2)`
 
+```{ojs}
+htl.html`
+  <div style="display: flex; gap: 3em; flex-wrap: wrap;">
+    <div>${viewof select_country}</div>
+    <div>${viewof select_region}</div>
+    <div>${viewof select_crop}</div>
+  </div>
+`
+```
+
 ## `{ojs} _lang(nbText.projectSetup.blocks.costs.h2)`
 
 `{ojs} _lang(nbText.projectSetup.blocks.costs.text)`
-
-```{ojs}
-Inputs.text({
-  label: makeTooltipLabel({
-    labelText: inputOptions_projectCost.label,
-    tooltipText: inputOptions_projectCost.tooltip,
-  }),
-  pattern: inputOptions_projectCost.pattern,
-  placeholder: inputOptions_projectCost.placeholder,
-  // value: inputOptions_projectCost.valueString
-});
-```
 
 ```{ojs}
 viewof inputProjectOptions = {
@@ -102,12 +100,6 @@ viewof inputProjectOptions = {
     }
   );
 }
-
-rangeProjectCost = {
-  const unpack = Number(inputProjectOptions.cost.replace(/[,|$]/g, ""))
-  const number = Number(unpack)
-  return number
-}
 ```
 
 ```{ojs}
@@ -132,6 +124,109 @@ rangeProjectCost = {
 is on production impact, adapotion rate, etc. -->
 
 Choose your model parameters for the analysis.
+
+```{ojs}
+viewof options_econPerfWalkthrough = {
+  const terms = {
+    none: _lang(nbText.projectSetup.blocks.impacts.terms.none, {
+      key: language.key
+    }),
+    low: _lang(nbText.projectSetup.blocks.impacts.terms.low, {
+      key: language.key
+    }),
+    moderate: _lang(nbText.projectSetup.blocks.impacts.terms.moderate, {
+      key: language.key
+    }),
+    high: _lang(nbText.projectSetup.blocks.impacts.terms.high, {
+      key: language.key
+    }),
+    incremental: _lang(
+      nbText.projectSetup.blocks.impacts.terms.incremental,
+      
+    ),
+    transformative: _lang(
+      nbText.projectSetup.blocks.impacts.terms.transformative,
+      
+    )
+  };
+  const dataProdImpact = [
+    { label: `10% (${terms.incremental})`, value: 0.1 },
+    { label: `20%`, value: 0.2 },
+    { label: `30% (${terms.moderate})`, value: 0.3 },
+    { label: `40%`, value: 0.4 },
+    { label: `50% (${terms.transformative})`, value: 0.5 }
+  ];
+  const inputProdImpact = Inputs.select(dataProdImpact, {
+    label: makeTooltipLabel({
+      labelText: _lang(
+      nbText.projectSetup.blocks.impacts.inputs.prodImpactDropdown.label,
+      
+    ),
+      tooltipText:
+        _lang(
+      nbText.projectSetup.blocks.impacts.inputs.prodImpactDropdown.tooltip,
+      
+    )
+    }),
+    format: (x) => x.label,
+    value: dataProdImpact.find((d) => d.value == 0.3)
+  });
+  const dataAdoption = [
+    { label: `0.5% (${terms.low})`, value: 0.005 },
+    { label: `1% (${terms.moderate})`, value: 0.01 },
+    { label: `2% (${terms.high})`, value: 0.02 }
+  ];
+  const inputAdoption = Inputs.select(dataAdoption, {
+    label: makeTooltipLabel({
+      labelText: _lang(
+      nbText.projectSetup.blocks.impacts.inputs.adoptionRateDropdown.label,
+      
+    ),
+      tooltipText:
+        _lang(
+      nbText.projectSetup.blocks.impacts.inputs.adoptionRateDropdown.tooltip,
+      
+    )
+    }),
+    format: (x) => x.label,
+    value: dataAdoption.find((d) => d.value == 0.01)
+  });
+  const dataCisImpact = [
+    { label: `0% (${terms.none})`, value: 0 },
+    { label: `10% (${terms.low})`, value: 0.1 },
+    { label: `25% (${terms.moderate})`, value: 0.25 },
+    { label: `50% (${terms.high})`, value: 0.5 }
+  ];
+  const inputCisImpact = Inputs.select(dataCisImpact, {
+    label: makeTooltipLabel({
+      labelText: _lang(
+      nbText.projectSetup.blocks.impacts.inputs.cisImpactDropdown.label,
+      
+    ),
+      tooltipText:
+        _lang(
+      nbText.projectSetup.blocks.impacts.inputs.cisImpactDropdown.tooltip,
+      
+    )
+    }),
+    format: (x) => x.label,
+    value: dataCisImpact.find((d) => d.value == 0.25)
+  });
+  return Inputs.form(
+    {
+      inputProdImpact,
+      inputAdoption,
+      inputCisImpact
+    },
+    {
+      template: (inputs) =>
+        htl.html`<div style="display: flex; gap: 3em">${Object.values(
+          inputs
+        )}</div>`
+    }
+  );
+}
+```
 
 `{ojs} dropdown_section("Advanced Controls", false, "Stuff for experts")`
 
@@ -171,10 +266,36 @@ htl.html`
 ```{ojs}
 // Data loader cell
 //TODO: Move this to s3 paths
-db = DuckDBClient.of({
-  exposure: FileAttachment("/data/economicReturns/exposure_adm_sum_spam20-21_glw420-21.parquet"),
-  cv: FileAttachment("/data/economicReturns/faostat_prod_cv.parquet")
-})
+db = {
+  let db = await DuckDBClient.of({
+    exposure_raw: FileAttachment("/data/economicReturns/exposure_adm_sum_spam20-21_glw420-21.parquet"),
+    cv: FileAttachment("/data/economicReturns/faostat_prod_cv.parquet")
+  })
+  await db.query(`
+    CREATE VIEW exposure AS
+      SELECT
+        iso3,
+        admin0_name,
+        admin1_name,
+        REGEXP_REPLACE(crop, '-tropical|-highland', '') AS crop,
+        CONCAT(exposure, '_', unit) AS exposure,
+        SUM(value) AS value
+      FROM exposure_raw
+      WHERE
+        admin2_name IS NULL
+        AND (tech = 'all' OR tech IS NULL)
+        AND isfinite(value)
+        AND CONCAT(exposure, '_', unit) = 'vop_usd'
+        AND crop !~ '(^other-|rest-of|temperate-fruit|tropical-fruit|vegetables)'
+      GROUP BY
+        iso3,
+        admin0_name,
+        admin1_name,
+        crop,
+        CONCAT(exposure, '_', unit)
+  `)
+  return db;
+};
 
 countries = {
   const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
@@ -183,8 +304,31 @@ countries = {
     .map(({ include, ...rest }) => rest);
   return filteredCountries;
 };
+```
 
-countries
+<!-- Crops and admin regions based on dataset -->
+
+```{ojs}
+dataAdminRegions = {
+  const regions = await db.query(`
+    SELECT DISTINCT admin0_name, admin1_name, iso3
+    FROM exposure
+    WHERE admin1_name IS NOT null
+    AND iso3 in ('${select_country.join("', '")}')
+  `)
+
+  return regions.map(row => ({
+    ...row,
+    id: `${row.iso3}_${row.admin1_name}`
+  }));
+}
+
+//TODO: Need to add translations and label cleaning to items
+dataCrops = await db.query(`
+  SELECT DISTINCT crop AS item
+  FROM exposure
+  ORDER BY item
+`)
 ```
 
 ## Inputs
@@ -224,6 +368,122 @@ inputOptions_projectYears = {
 }
 ```
 
+### Scope Selectors - country, region, crop
+
+```{ojs}
+viewof select_country = {
+  //TODO: Possibly add a debounce to this.
+  const data = countries
+    .map((d) => ({
+      value: d.iso3c, //Migrating to iso codes for future flexability
+      label: _lang(d.translation)
+    }))
+  return dropdownInput({
+    inputLabel: makeTooltipLabel({
+      labelText: _lang(nbText.supportNbText.words.country.plural),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.locations.inputs.countryDropdown.tooltip
+      )    
+    }),
+    inputId: "positionsTest",
+    placeholderText: "Select Countries...",
+    options: data,
+    selected: ["KEN", "TZA"],
+  });
+}
+
+select_country
+```
+
+```{ojs}
+// admin multi-select: regions
+viewof select_region = {
+  // filter regions based on country id's
+  const filteredRegions = dataAdminRegions
+  // const translateCountry = (d) => _lang(td.admin0_name.values?.[d]);
+  const translateCountry = (iso) => _lang(countries.find((c) => c.iso3c === iso).translation);
+  const data = filteredRegions.map((d) => ({
+    value: d.id,
+    label: `${translateCountry(d.iso3)}: ${d.admin1_name}`
+  }));
+  const selectedIds = filteredRegions.map((d) => d.id);
+  const text = {
+    label: _lang(nbText.supportNbText.words.region.plural),
+    tooltip: _lang(nbText.projectSetup.blocks.locations.inputs.regionDropdown.tooltip),
+  }
+  const input = dropdownInput({
+    inputLabel: makeTooltipLabel({labelText: text.label, tooltipText: text.tooltip}),
+    inputId: "positionsTest",
+    placeholderText: "Select regions...",
+    options: data,
+    selected: selectedIds
+  });
+
+  // return debounce(debounceDelay, input);
+  return input
+}
+```
+
+```{ojs}
+// admin multi-select: countries
+viewof select_crop = {
+  const data = dataCrops
+    .map((d) => ({
+      value: d.item,
+      label: Lang.toSentenceCase(d.item) //TODO: Add translations
+    }))
+    .sort((a,b) => a.label > b.label);
+  const selectedId = dataCrops
+    .filter((d) => ["bean", "goats", "maize"].includes(d.item))
+    .map((d) => d.item);
+  const text = {
+    label: _lang(nbText.supportNbText.words.commodity.plural),
+    tooltip: _lang(
+      nbText.projectSetup.blocks.locations.inputs.commodityDropdown.tooltip
+    )
+  };
+  const input = dropdownInput({
+    inputLabel: makeTooltipLabel({
+      labelText: text.label,
+      tooltipText: text.tooltip
+    }),
+    inputId: "positionsTest",
+    placeholderText: "Select crops...",
+    options: data,
+    selected: selectedId
+  });
+
+  // return debounce(debounceDelay, input);
+  return input
+}
+```
+
+## Economic Input Variables
+
+### Main Control Variables
+
+```{ojs}
+rangeProjectCost = {
+  const unpack = Number(inputProjectOptions.cost.replace(/[,|$]/g, ""))
+  const number = Number(unpack)
+  return number
+}
+
+projectYears = inputProjectOptions.years.value
+```
+
+### Derived Variables
+
+```{ojs}
+recipe_paymentSchedule = Array.from({ length: projectYears }).map((_, i) => {
+  return {
+    year: i,
+    cost: (1 / projectYears) * rangeProjectCost,
+    cost_cum: ((i + 1) / projectYears) * rangeProjectCost,
+  };
+});
+```
+
 ## Elements
 
 ```{ojs}
@@ -257,6 +517,15 @@ function makeTooltipLabel({
     </style>
   `;
 }
+```
+
+```{ojs}
+import {
+  dropdownInput,
+  dropdownCSS,
+} from "@adaptationatlas/data-spotlight-multi-select";
+
+dropdownCSS;
 ```
 
 ## Helper Functions
