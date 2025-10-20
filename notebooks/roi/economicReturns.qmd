@@ -232,8 +232,6 @@ viewof options_econPerfWalkthrough = {
 
 # `{ojs} heading2` {#investment-returns}
 
-{{< lipsum 2 >}}
-
 # `{ojs} nbSummary` {#summary}
 
 {{< lipsum 1 >}}
@@ -269,7 +267,7 @@ htl.html`
 db = {
   let db = await DuckDBClient.of({
     exposure_raw: FileAttachment("/data/economicReturns/exposure_adm_sum_spam20-21_glw420-21.parquet"),
-    cv: FileAttachment("/data/economicReturns/faostat_prod_cv.parquet")
+    cv_raw: FileAttachment("/data/economicReturns/faostat_prod_cv.parquet")
   })
   await db.query(`
     CREATE VIEW exposure AS
@@ -294,6 +292,33 @@ db = {
         crop,
         CONCAT(exposure, '_', unit)
   `)
+  await db.query(`
+    CREATE VIEW cv AS
+      SELECT
+        admin0_name,
+        -- clean and standardize crop names
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(
+            REPLACE(REPLACE(crop, '_meat', ''), ' ', '-'),
+            'goat$', 'goats'
+          ),
+          'pig$', 'pigs'
+        ) AS crop,
+        value_filled AS cv
+      FROM cv_raw
+      WHERE NOT (crop ILIKE '%milk%' OR crop ILIKE '%eggs%' OR LOWER(crop) = 'total')
+
+      UNION ALL
+      -- add robusta-coffee and small-millet substitutes
+      SELECT admin0_name, 'robusta-coffee', value_filled AS cv
+      FROM cv_raw
+      WHERE crop = 'arabica-coffee'
+
+      UNION ALL
+      SELECT admin0_name, 'small-millet', value_filled AS cv
+      FROM cv_raw
+      WHERE crop = 'pearl-millet';
+`)
   return db;
 };
 
@@ -472,6 +497,17 @@ rangeProjectCost = {
 projectYears = inputProjectOptions.years.value
 ```
 
+### Advanced Control Variables
+
+```{ojs}
+//TODO:
+// -[ ] years, cost, Prod Impact,Adoption, Reduction of impacts, CIS Impact
+// -[ ] BCR
+// -[ ] CIS impact
+
+bcr = 1.62;
+```
+
 ### Derived Variables
 
 ```{ojs}
@@ -547,6 +583,20 @@ formatNumCompactShort = ({ locale = "en-US" } = {}) =>
     notation: "compact",
     compactDisplay: "short",
   }).format;
+
+function formatCurrencyAuto(value, precision = 1) {
+  const absVal = Math.abs(value);
+
+  if (absVal >= 1e9) {
+    return `$${(value / 1e9).toFixed(precision)}B`;
+  } else if (absVal >= 1e6) {
+    return `$${(value / 1e6).toFixed(precision)}M`;
+  } else if (absVal >= 1e3) {
+    return `$${(value / 1e3).toFixed(precision)}K`;
+  } else {
+    return `$${value.toFixed(1)}`;
+  }
+}
 ```
 
 ## Language
@@ -598,7 +648,6 @@ viewof masterLanguage = Inputs.radio(languages, {
 ```
 
 ```{ojs}
-// import { NavbarLangSelector } from "/helpers/uiComponents.ojs"
 function NavbarLangSelector(language_obj, masterLanguage) {
   let navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
   if (navEnd) {
@@ -642,80 +691,108 @@ prettyLanguageView = {
 }
 ```
 
-<!--
-
-# Prototypes for future use to hack a sidebar into notebooks:
-
-{.column-margin}
-
 ```{ojs}
-htl.html`
-<style>
-.sticky-margin-div {
-  position: fixed;
-  }
-@media (max-width: 768px) {
-  .sticky-margin-div {
-    position: static;
+dataPickMetric = {
+  return [
+    {
+      key: "irr",
+      columnName: "irr",
+      label: _lang(nbText.indicators.irr.label),
+      tooltip: _lang(nbText.indicators.irr.tooltip),
+      labelLong: _lang(nbText.indicators.irr.labelLong),
+      labelFull: _lang(nbText.indicators.irr.labelFull),
+      info: {
+        what: _lang(nbText.indicators.irr.info.what),
+        interpret: _lang(nbText.indicators.irr.info.interpret),
+        tell: _lang(nbText.indicators.irr.info.tell)
+      },
+      yFormat: (d) => `${d.toFixed(1)}%`
+    },
+    {
+      key: "mirr",
+      columnName: "mirr",
+      label: _lang(nbText.indicators.mirr.label),
+      tooltip: _lang(nbText.indicators.mirr.tooltip),
+      labelLong: _lang(nbText.indicators.mirr.labelLong),
+      labelFull: _lang(nbText.indicators.mirr.labelFull),
+      info: {
+        what: _lang(nbText.indicators.mirr.info.what),
+        interpret: _lang(nbText.indicators.mirr.info.interpret),
+        tell: _lang(nbText.indicators.mirr.info.tell)
+      },
+      yFormat: (d) => `${d.toFixed(1)}%`
+    },
+    {
+      key: "npv",
+      columnName: "npv",
+      label: _lang(nbText.indicators.npv.label),
+      tooltip: _lang(nbText.indicators.npv.tooltip),
+      labelLong: _lang(nbText.indicators.npv.labelLong),
+      labelFull: _lang(nbText.indicators.npv.labelFull),
+      info: {
+        what: _lang(nbText.indicators.npv.info.what),
+        interpret: _lang(nbText.indicators.npv.info.interpret),
+        tell: _lang(nbText.indicators.npv.info.tell)
+      },
+       yFormat: (d) => formatCurrencyAuto(d, 1)
+    },
+    {
+      key: "bcr",
+      columnName: "discounted_bcr",
+      label: _lang(nbText.indicators.bcr.label),
+      tooltip: _lang(nbText.indicators.bcr.tooltip),
+      labelLong: _lang(nbText.indicators.bcr.labelLong),
+      labelFull: _lang(nbText.indicators.bcr.labelFull),
+      info: {
+        what: _lang(nbText.indicators.bcr.info.what),
+        interpret: _lang(nbText.indicators.bcr.info.interpret),
+        tell: _lang(nbText.indicators.bcr.info.tell)
+      },
+      yFormat: d3.format(".2f")
     }
+  ];
 }
-</style>
-
-<div class = "sticky-margin-div">
-    <div>
-      ${Inputs.radio(languages, {
-        label: "Main language toggle",
-        format: (d) => d.key,
-        value: languages.find((x) => x.key === defaultLangKey),
-      })}
-    </div>
-  </div>`
 ```
 
-:-::
+## Data Filtering and Processing
 
--->
+```{ojs}
+admin0_names = {
+  const isoSet = new Set(select_country);
+  return countries
+  .filter((d) => isoSet.has(d.iso3c))
+  .map((d) => d.admin0_name);
+}
+admin0_names;
+```
 
-<!-- Floating Sidebar: Self-contained HTML, CSS, and JS -->
-<!--
-<div id="floating-sidebar">
+### CV Data
 
-</div>
+```{ojs}
+import { avlossCalc } from "/notebooks/roi/roi_tools.js";
+```
 
-<style>
-  #floating-sidebar {
-    position: fixed;
-    top: 150px;           /* Distance from top of the page */
-    left: 20px;          /* Distance from left of the page */
-    width: 260px;        /* Sidebar width */
-    min-height: 400px;   /* Minimum height */
-    max-height: 80vh;    /* Max height relative to viewport */
-    background: #ffffff;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-    border-radius: 8px;
-    padding: 20px;
-    overflow-y: auto;
-    z-index: 9999;
-    transition: box-shadow 0.2s;
-  }
-  #floating-sidebar:hover {
-    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-  }
-  /* Responsive: hide on small screens */
-  @media (max-width: 800px) {
-    #floating-sidebar {
-      display: none;
-    }
-  }
-</style>
+```{ojs}
+mutable cv_results = []; // To allow rest of the cells to render and say, "run code"
 
-<script>
-  // Optional: Add any JS for interactivity here
-  // Example: Toggle sidebar visibility with a keyboard shortcut (Ctrl+B)
-  document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.key === 'b') {
-      const sidebar = document.getElementById('floating-sidebar');
-      sidebar.style.display = (sidebar.style.display === 'none') ? 'block' : 'none';
-    }
-  });
-</script> -->
+//TODO: this gets wrapped in a function
+cv_data = db.query(`
+  SELECT * 
+  FROM cv 
+  WHERE crop in ('${select_crop.join("', '")}')
+  AND admin0_name in ('${admin0_names.join("', '")}') -- This needs to find admin0_name from iso3
+`);
+
+cis_impact = options_econPerfWalkthrough.inputCisImpact.value;
+
+results = await Promise.all(
+  // Reduced to only run for each country/crop selection 1. I think it yields same result.
+  cv_data.map(async ({ crop, admin0_name, cv }) => {
+    const av = await avlossCalc(cv, cis_impact);
+    const avloss = Math.abs(Number(av.toFixed?.(4) ?? av));
+    return { admin0_name, crop, cv, cis_impact, avloss };
+  }),
+);
+
+results;
+```

@@ -1,10 +1,11 @@
+import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
 /**
  *
  * Calculates the average loss reduction by simulating normal distributions
  * with and without a specified change in standard deviation.
  * The reduction is expressed as a proportion of the total without the change.
  *
- * @function avloss
+ * @function avlossCalc
  * @param {number} cv - Coefficient of variation (standard deviation / mean) representing the baseline variability.
  * @param {number} change - The proposed change in standard deviation.
  * @param {boolean} [fixed=false] - If true, treats `change` as an absolute reduction in CV; if false, treats it as proportional.
@@ -13,7 +14,13 @@
  * @returns {number} - The estimated average loss (bounded between 0 and 1). Returns `NaN` if invalid input leads to negative SD.
  *
  */
-function avloss(cv, change, fixed = false, reps = 1e6, approx = true) {
+export function avlossCalc(
+  cv,
+  change,
+  fixed = false,
+  reps = 1e6,
+  approx = true,
+) {
   // Calculate new standard deviation
   const sd_with = fixed
     ? Math.max(0, cv - Math.min(change, cv))
