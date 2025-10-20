@@ -84,8 +84,9 @@ viewof inputProjectOptions = {
     label: makeTooltipLabel({
       labelText: inputOptions_projectYears.label,
       tooltipText: inputOptions_projectYears.tooltip
-    })
-  });
+    }),
+    value: inputOptions_projectYears.data.find((d) => d.value == 8)
+    });
 
   return Inputs.form(
     {
@@ -240,6 +241,18 @@ options_econPerfWalkthrough;
 `{ojs} renderReview2()`
 
 ```{ojs}
+bigNumbersResults();
+```
+
+```{ojs}
+resultTable();
+```
+
+```{ojs}
+resultPlot();
+```
+
+```{ojs}
 indicatorSelector = {
   // bind input so tooltip can be dynamic
   return Inputs.bind(
@@ -270,9 +283,28 @@ indicatorSelector = {
 }
 ```
 
+`{ojs} _lang(nbText.investmentReturns.blocks.closer1)`
+
 # `{ojs} nbSummary` {#summary}
 
-{{< lipsum 1 >}}
+`{ojs} _lang(nbText.summary.blocks.block1)`
+
+```{ojs}
+{
+  const npv_rate = (discountRate * 100) + "%";
+  const farm_bcr = bcr;
+  const methods_title = nbMethods;
+  
+  const template = _lang(nbText.summary.blocks.block2)
+  const templateItems = [
+    {name: "npvDisountRate", value: npv_rate},
+    {name: "farmBcr", value: farm_bcr},
+    {name: "methodsSourcesTitle", value: methods_title},
+  ]
+  const formatted = Lang.reduceReplaceTemplateItems(template, templateItems)
+  return md`${formatted}`
+}
+```
 
 # `{ojs} nbMethods` {#methods}
 
@@ -541,19 +573,8 @@ projectYears = inputProjectOptions.years.value
 // -[ ] BCR
 // -[ ] CIS impact
 
+discountRate = 0.12;
 bcr = 1.62;
-```
-
-### Derived Variables
-
-```{ojs}
-recipe_paymentSchedule = Array.from({ length: projectYears }).map((_, i) => {
-  return {
-    year: i,
-    cost: (1 / projectYears) * rangeProjectCost,
-    cost_cum: ((i + 1) / projectYears) * rangeProjectCost,
-  };
-});
 ```
 
 ### Other Selections
@@ -914,11 +935,297 @@ renderReview2 = () => {
     { name: "year_string", value: projectYears + " years" },
   ];
 
-  return md`${Lang.reduceReplaceTemplateItems(investmentTemplate, investmentTemplateItems)}`;
+  return md`${Lang.reduceReplaceTemplateItems(investmentTemplate, investmentTemplateItems)}:`;
 };
 ```
 
-## Data Filtering and Processing
+### Result Elements
+
+```{ojs}
+bigNumbersResults = () => {
+  const y = projectYears;
+  const e = walkthroughEconomicIndicators?.enriched?.find((d) => d.year === y);
+
+  const data = dataPickMetric.map((d) => {
+    let value;
+
+    if (d.key === "irr" && e?.irr != null) {
+      value = e.irr; // IRR as percentage
+    } else if (d.key === "mirr" && e?.mirr != null) {
+      value = e.mirr; // MIRR as percentage
+    } else if (
+      d.key === "npv" &&
+      e?.discounted_benefit_cum != null &&
+      e?.discounted_cost_cum != null
+    ) {
+      value = +(e.discounted_benefit_cum - e.discounted_cost_cum).toFixed(1); // NPV, 1 dp
+    } else if (d.key === "bcr") {
+      value = e?.discounted_bcr;
+    }
+
+    return { ...d, value };
+  });
+
+  return htl.html`<style>
+    .outer-div {
+      display: flex;
+      gap: 2em;
+    }
+    .inner-div {
+      width: 30%;
+      padding: 80px 30px;
+      border: 1px solid #efefef;
+    }
+    .label {
+      display: block;
+      font-weight: 400;
+      font-size: 14px;
+      text-transform: uppercase;
+      color: #666;
+    }
+    .value {
+      font-weight: bold;
+      font-size: 42px; 
+    }
+    .negative {
+      color: #EC5A47;
+    }
+    .tooltip-card {
+        position: relative;
+        display: inline-block;
+        cursor: pointer;
+        width: 100%;
+    }
+    .tooltip-card .tooltiptext-card {
+        position: absolute;
+        z-index: 1;
+        visibility: hidden; 
+        left: 0;
+        bottom: 90%;
+        background-color: #efefef;
+        color: #333;
+        padding: 14px 20px;
+        font-size: 14px;
+        line-height: 1.6;
+        text-align: left;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    .tooltip-card:hover .tooltiptext-card {
+        visibility: visible;
+        opacity: 1;
+        cursor: default;
+    }
+  </style>
+
+  <body>
+    <div class="outer-div">
+      ${data.map(
+        (d) => htl.html`<div class="inner-div">
+          <span class="tooltip-card">
+            <span class="tooltiptext-card">${d.tooltip}</span>
+            <span class="value ${d.value != null && d.value < 0 ? "negative" : ""}">${
+              d.value != null ? d.yFormat(d.value) : "---"
+            }</span>
+            <span class="label">${d.labelFull}</span>
+          </span>
+        </div>`,
+      )}
+    </div>
+  </body>`;
+};
+```
+
+```{ojs}
+resultTable = () => {
+  function formatAbbreviatedNumber(num) {
+    if (num == null || isNaN(num)) return "—";
+
+    const absNum = Math.abs(num);
+    if (absNum >= 1e9) return (num / 1e9).toFixed(1) + "B";
+    if (absNum >= 1e6) return (num / 1e6).toFixed(1) + "M";
+    if (absNum >= 1e3) return (num / 1e3).toFixed(1) + "K";
+    return num.toString();
+  }
+  const selectedYear = projectYears;
+  const enriched = (walkthroughEconomicIndicators?.enriched ?? []).filter(
+    (d) => d.year <= selectedYear,
+  );
+
+  const headerNames = [
+    "Year",
+    "Benefit",
+    "Cost",
+    "Cashflow",
+    "Discounted Benefit (cum)",
+    "Discounted Cost (cum)",
+    "Discounted NPV (cum)",
+    "Discounted BCR",
+    "IRR",
+    "MIRR",
+  ];
+
+  return html`
+    <style>
+      .econ-table {
+        font-family: sans-serif;
+        border-collapse: collapse;
+        font-size: 13.75px;
+        margin-top: 1em;
+        min-width: 100%;
+      }
+      .econ-table th, .econ-table td {
+        border: 1px solid #ddd;
+        padding: 6px 10px;
+        text-align: right;
+      }
+      .econ-table th {
+        background-color: #f4f4f4;
+        white-space: nowrap;
+        text-align: center;
+      }
+      .econ-table td.year-col {
+        text-align: center;
+        font-weight: bold;
+      }
+      .econ-table tr.final-row td {
+        font-weight: bold;
+        background-color: #f1f1f1;
+      }
+      .table-container {
+        overflow-x: auto;
+        display: block;
+        padding-bottom: 4px;
+      }
+    </style>
+
+    <div class="table-container">
+      <table class="econ-table">
+        <thead>
+          <tr>
+            ${headerNames.map((h) => html`<th title="${h}">${h}</th>`)}
+          </tr>
+        </thead>
+        <tbody>
+          ${enriched.map((d, i) => {
+            const isFinal = i === enriched.length - 1;
+            const npv_i =
+              d.discounted_benefit_cum != null && d.discounted_cost_cum != null
+                ? d.discounted_benefit_cum - d.discounted_cost_cum
+                : null;
+
+            return html`<tr class=${isFinal ? "final-row" : ""}>
+              <td class="year-col">${d.year}</td>
+              <td>${d.project_benefit != null ? `$${Math.round(d.project_benefit).toLocaleString()}` : "—"}</td>
+              <td>${d.cost != null ? `$${Math.round(d.cost).toLocaleString()}` : "—"}</td>
+              <td>${d.cashflow != null ? `$${Math.round(d.cashflow).toLocaleString()}` : "—"}</td>
+              <td>${d.discounted_benefit_cum != null ? `$${Math.round(d.discounted_benefit_cum).toLocaleString()}` : "—"}</td>
+              <td>${d.discounted_cost_cum != null ? `$${Math.round(d.discounted_cost_cum).toLocaleString()}` : "—"}</td>
+              <td>${npv_i != null ? `$${Math.round(npv_i).toLocaleString()}` : "—"}</td>
+              <td>${d.discounted_bcr != null ? d.discounted_bcr.toFixed(2) : "—"}</td>
+              <td>${d.irr != null ? `${(d.irr).toFixed(2)}%` : "—"}</td>
+              <td>${d.mirr != null ? `${(d.mirr).toFixed(2)}%` : "—"}</td>
+            </tr>`;
+          })}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+```
+
+```{ojs}
+resultPlot = () => {
+  const projectYearCutoff = walkthroughSelections.project_years;
+  const selector = pickMetricWalkthrough;
+  const plotData = walkthroughEconomicIndicators?.enriched ?? [];
+
+  // Always include all years for consistent x-axis
+  const fullYears = d3.range(0, 9); // 0 to 8 inclusive
+  const completePlotData = fullYears.map((y) => {
+    const row = plotData.find((d) => d.year === y);
+    return row ?? { year: y };
+  });
+
+  const ruleYValue = selector.key === "bcr" ? 1 : 0;
+
+  return Plot.plot({
+    width,
+    marginRight: 80,
+    inset: 5,
+    x: {
+      label: _lang(
+        nbText.investmentReturns.blocks.exploreIndicators.projectYear,
+      ),
+      ticks: fullYears,
+      tickFormat: "d",
+      labelAnchor: "center",
+      labelArrow: "none",
+    },
+    y: {
+      label: selector.label,
+      tickFormat: selector.yFormat,
+    },
+    marks: [
+      Plot.axisY({
+        anchor: "right",
+        label: selector.label,
+        tickFormat: selector.yFormat,
+        tickSize: 0,
+        color: (d) => {
+          return d >= 0 ? "black" : "#EC5A47";
+        },
+      }),
+      // horizontal reference line
+      Plot.ruleY([ruleYValue], {
+        stroke: "#333",
+        strokeDasharray: [3],
+      }),
+
+      // line
+      Plot.line(completePlotData, {
+        x: "year",
+        y: selector.columnName,
+        stroke: "#444",
+        strokeOpacity: 0.7,
+        strokeWidth: 2,
+        tip: true,
+      }),
+
+      // dots
+      Plot.dot(completePlotData, {
+        x: "year",
+        y: selector.columnName,
+        r: 3,
+        fill: "#444",
+        stroke: "#fff",
+        strokeWidth: 0.5,
+        tip: {
+          format: {
+            x: true,
+            y: selector.yFormat,
+          },
+        },
+      }),
+
+      // highlight selected year
+      Plot.dot(
+        completePlotData.filter((d) => d.year === projectYearCutoff),
+        {
+          x: "year",
+          y: selector.columnName,
+          r: 7,
+          fill: "#fff",
+          stroke: (d) => (d[selector.columnName] >= 0 ? "#333" : "#EC5A47"),
+          strokeWidth: 2,
+        },
+      ),
+    ],
+  });
+};
+```
+
+## Data Analysis and Processing
 
 ```{ojs}
 admin0_names = {
@@ -932,7 +1239,15 @@ admin0_names = {
 ### CV Data
 
 ```{ojs}
-import { avlossCalc } from "/notebooks/roi/roi_tools.js";
+// Module Imports for the calculation of ROI data
+import {
+  avlossCalc,
+  calcMIRR,
+  calcIRR,
+  npvDiscreteCumulative,
+} from "/notebooks/roi/roi_tools.js";
+
+irrnpv = import("https://cdn.skypack.dev/irr-npv@1.0.1?min");
 ```
 
 ```{ojs}
@@ -979,9 +1294,9 @@ calcCV = async () => {
   mutable cv_cis_impact = cis_impact
   return cv_index
 }
-
-cv_index = calcCV();
 ```
+
+### Other ROI X Exposure Variables
 
 ```{ojs}
 getExposureData = async (crops, countries) => {
@@ -1047,7 +1362,7 @@ crop_adoption = async () => {
 
 ```{ojs}
 roiResults = async () => {
-  let index = cv_index;
+  let index = await calcCV();
   let data = await crop_adoption();
 
   const withImpact = data.map((row) => {
@@ -1074,9 +1389,226 @@ roiResults = async () => {
     const project_benefit =
       Math.round((d.marginal_impact_cis - d.marginal_impact_cis / bcr) * 10) /
       10;
-    return { ...d, bcr, project_benefit };
+    const cis_impact = options_econPerfWalkthrough.inputCisImpact.value; //TODO: This can probably be removed and just called once later
+    return { ...d, bcr, cis_impact, project_benefit };
   });
 };
+```
 
-roiResults();
+### ROI X inputs Calculations
+
+#### Sum across admins and crops
+
+We select all the data for admin regions and crops, and sum up to get the
+benefit across all parameter combos.
+
+```{ojs}
+recipe_dataSummed = { 
+//NOTE: Currently recipe_dataSummed in notebook
+  const roi_data = await roiResults()
+  
+  const aggregated = d3.flatGroup(
+    roi_data,
+    d => d.adoption,
+    d => d.prod_impact,
+    d => d.cis_impact,
+    d => d.bcr,
+    d => d.year
+  ).map(([adoption, prod_impact, cis_impact, bcr, year, group]) => ({
+    adoption,
+    prod_impact,
+    cis_impact,
+    bcr,
+    year,
+    project_benefit: d3.sum(group, d => d.project_benefit)
+  }));
+  return aggregated
+}
+```
+
+#### Define project payment schedule
+
+Below we define the project cost schedule
+
+- Cost is evenly distributed across years (
+  - Ex. 1M over 5 years is 200K, 400K, 600K, 800K, 1M; the first year has no
+    project benefit ($200K, 0 benefit)
+
+```{ojs}
+recipe_paymentSchedule = Array.from({ length: projectYears }).map((_, i) => {
+  return {
+    year: i,
+    cost: (1 / projectYears) * rangeProjectCost,
+    cost_cum: ((i + 1) / projectYears) * rangeProjectCost,
+  };
+});
+
+recipe_paymentSchedule;
+```
+
+#### Add project scope to data
+
+- Add a zero year at the start (the return rate is hardcoded to one year)
+- Also if the project cost is zero, return an empty array
+
+```{ojs}
+recipe_dataCashflow = {
+  if (!rangeProjectCost || rangeProjectCost === 0) return [];
+
+  const payByYear = new Map(recipe_paymentSchedule.map(d => [d.year, d]));
+
+  return d3.flatGroup(
+    recipe_dataSummed,
+    d => d.adoption,
+    d => d.prod_impact,
+    d => d.cis_impact,
+    d => d.bcr
+  ).flatMap(([adoption, prod_impact, cis_impact, bcr, rows]) => {
+    const allRows = [
+      ...rows,
+      { adoption, prod_impact, cis_impact, bcr, year: 0, project_benefit: 0 }
+    ].sort((a, b) => a.year - b.year);
+
+    return allRows.map(r => {
+      const pay = payByYear.get(r.year) || {};
+      const cost = pay.cost ?? 0;
+      const cost_cum = pay.cost_cum ?? rangeProjectCost;
+      return {
+        ...r,
+        cost,
+        cost_cum,
+        cashflow: (r.project_benefit ?? 0) - cost,
+        discount_rate: discountRate
+      };
+    });
+  });
+}
+
+recipe_dataCashflow;
+```
+
+#### Format that into final indicators
+
+```{ojs}
+walkthroughEconomicIndicators = {
+  const selection = walkthroughSelections;
+
+  const data = recipe_dataCashflow
+
+  const years = data.map(d => d.year);
+  const benefit = data.map(d => d.project_benefit);
+  const cost = data.map(d => d.cost);
+  const cashflow = benefit.map((b, i) => b - cost[i]);
+  const discountRate = selection.discount_rate;
+
+  const npv = npvDiscreteCumulative(cashflow, discountRate);
+  const npv_benefit = npvDiscreteCumulative(benefit, discountRate);
+  const npv_cost = npvDiscreteCumulative(cost, discountRate);
+  const discounted_bcr = npv_benefit.map((b, i) => npv_cost[i] === 0 ? null : b / npv_cost[i]);
+
+  const proj_irr = calcIRR(cashflow);
+  const proj_mirr = calcMIRR(cashflow, discountRate, discountRate);
+  const proj_npv = npv.at(-1);
+  const proj_bcr = discounted_bcr.at(-1);
+
+  // === Enriched table
+  const enrichedData = years.map((year, i) => {
+    const cashflowToDate = cashflow.slice(0, i + 1);
+    return {
+      year,
+      project_benefit: benefit[i],
+      cost: cost[i],
+      cashflow: cashflow[i],
+      discounted_benefit_cum: npv_benefit[i],
+      discounted_cost_cum: npv_cost[i],
+      discounted_bcr: discounted_bcr[i],
+      irr: calcIRR(cashflowToDate)*100,
+      mirr: calcMIRR(cashflowToDate, discountRate, discountRate)*100,
+      npv: npv[i]
+    };
+  });
+
+  return {
+    summary: {
+      proj_npv,
+      proj_irr,
+      proj_mirr,
+      proj_bcr
+    },
+    enriched: enrichedData
+  };
+}
+
+walkthroughEconomicIndicators;
+```
+
+#### Calculate final values
+
+```{ojs}
+recipe_dataFinancialValues = recipe_dataCashflow.map((d, i, arr) => {
+  const cashflowArray = arr
+    .filter(
+      (x) =>
+        x.adoption === d.adoption &&
+        x.prod_impact === d.prod_impact &&
+        x.cis_impact === d.cis_impact &&
+        x.bcr === d.bcr &&
+        x.discount_rate === d.discount_rate &&
+        x.year <= d.year,
+    )
+    .map((x) => x.cashflow);
+
+  const proj_npv = irrnpv.npv(cashflowArray, d.discount_rate);
+
+  return {
+    ...d,
+    cashflowArray,
+    proj_irr: irrnpv.irr(cashflowArray),
+    proj_npv,
+    proj_bcr: proj_npv / d.cost_cum,
+  };
+});
+
+recipe_dataFinancialValues;
+```
+
+At this point, following the recipe, we have the timeseries for the selected
+parameters, with financial values calculated. Specifically:
+
+- adoption
+- prod_impact
+- cis_impact
+- bcr
+- discount_rate
+
+Across:
+
+- year
+
+Data:
+
+- project_benifit
+- cost and cashflow
+- Project IRR
+- Project NPV
+- Project BCR
+
+## Selections
+
+```{ojs}
+walkthroughSelections = {
+  return {
+    countries: select_country,
+    regions: select_region,
+    crops: select_crop,
+    project_years: projectYears,
+    project_cost: rangeProjectCost,
+    prod_impact: options_econPerfWalkthrough.inputProdImpact.value,
+    adoption: options_econPerfWalkthrough.inputAdoption.value,
+    cis_impact: options_econPerfWalkthrough.inputCisImpact.value,
+    discount_rate: discountRate,
+    bcr: bcr,
+    // time_horizon: options_econPerfWalkthrough.inputTime.value,
+  };
+}
 ```

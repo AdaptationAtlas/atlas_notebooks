@@ -77,3 +77,51 @@ export function avlossCalc(
   // Calculate average loss reduction and express as proportion of total without innovation
   return Math.max(0, (with_lh - without_lh) / totalWithout);
 }
+
+// === Custom IRR (secant method)
+export function calcIRR(cf, guess = 0.1, maxIterations = 100, tol = 1e-6) {
+  const npv = (rate) =>
+    cf.reduce((acc, val, i) => acc + val / Math.pow(1 + rate, i), 0);
+
+  let r0 = guess;
+  let r1 = guess + 0.05;
+
+  for (let i = 0; i < maxIterations; i++) {
+    const npv0 = npv(r0);
+    const npv1 = npv(r1);
+    const denom = npv1 - npv0;
+    if (Math.abs(denom) < 1e-10) return null;
+    const r2 = r1 - (npv1 * (r1 - r0)) / denom;
+    if (Math.abs(r2 - r1) < tol) return r2;
+    r0 = r1;
+    r1 = r2;
+  }
+  return null;
+}
+
+export function calcMIRR(cf, financeRate, reinvestRate) {
+  const n = cf.length - 1;
+  const inflows = cf.map((x) => (x > 0 ? x : 0));
+  const outflows = cf.map((x) => (x < 0 ? x : 0));
+
+  const FV_inflows = inflows.reduce(
+    (acc, x, i) => acc + x * Math.pow(1 + reinvestRate, n - i),
+    0,
+  );
+  const PV_outflows = outflows.reduce(
+    (acc, x, i) => acc + x / Math.pow(1 + financeRate, i),
+    0,
+  );
+
+  if (PV_outflows === 0 || FV_inflows <= 0) return null;
+
+  return Math.pow(FV_inflows / Math.abs(PV_outflows), 1 / n) - 1;
+}
+
+export function npvDiscreteCumulative(values, discountRate) {
+  return values.map((_, i) =>
+    values
+      .slice(0, i + 1)
+      .reduce((acc, val, j) => acc + val / Math.pow(1 + discountRate, j), 0),
+  );
+}
