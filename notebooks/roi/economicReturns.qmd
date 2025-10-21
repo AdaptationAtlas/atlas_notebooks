@@ -206,7 +206,7 @@ indicatorSelector = {
 
 # `{ojs} nbMethods` {#methods}
 
-{{< lipsum 1 >}}
+`{ojs} _lang(nbText.methods.intro)`
 
 # `{ojs} appendix` {#appendix}
 
@@ -365,13 +365,12 @@ inputOptions_projectYears = {
 
 ```{ojs}
 viewof select_country = {
-  //TODO: Possibly add a debounce to this.
   const data = countries
     .map((d) => ({
       value: d.iso3c, //Migrating to iso codes for future flexability
       label: _lang(d.translation)
     }))
-  return dropdownInput({
+  let input = dropdownInput({
     inputLabel: makeTooltipLabel({
       labelText: _lang(nbText.supportNbText.words.country.plural),
       tooltipText: _lang(
@@ -383,6 +382,8 @@ viewof select_country = {
     options: data,
     selected: ["KEN", "TZA"],
   });
+  
+  return debounce(input, 2000);
 }
 ```
 
@@ -410,8 +411,7 @@ viewof select_region = {
     selected: selectedIds
   });
 
-  // return debounce(debounceDelay, input);
-  return input
+  return debounce(input, 2000);
 }
 ```
 
@@ -444,8 +444,7 @@ viewof select_crop = {
     selected: selectedId
   });
 
-  // return debounce(debounceDelay, input);
-  return input
+  return debounce(input, 2000);
 }
 ```
 
@@ -656,6 +655,23 @@ function formatCurrencyAuto(value, precision = 1) {
     return `$${value.toFixed(1)}`;
   }
 }
+```
+
+```{ojs}
+debounce = (input, delay = 500) => {
+  class DelayedEvent extends Event {}
+  let id;
+  input.addEventListener("input", (e) => {
+    if (e instanceof DelayedEvent) return;
+    e.stopImmediatePropagation();
+    clearTimeout(id);
+    id = setTimeout(
+      () => input.dispatchEvent(new DelayedEvent("input", { bubbles: true })),
+      delay,
+    );
+  });
+  return input;
+};
 ```
 
 ## Language
@@ -1240,21 +1256,19 @@ irrnpv = import("https://cdn.skypack.dev/irr-npv@1.0.1?min");
 
 ```{ojs}
 mutable cv_result = [];
-mutable cv_admin0_names = [];
-mutable cv_crops = [];
-mutable cv_cis_impact = null;
+mutable cv_cache_key = '';
 
 calcCV = async () => {
   const cis_impact = options_econPerfWalkthrough.inputCisImpact.value;
 
-  if ( // Can be computation heavy so if inputs repeat, don't recompute
-      cv_admin0_names === admin0_names
-      && cv_crops === select_crop 
-      && cv_cis_impact === cis_impact
-     ) {
+  const cache_key = `${[...admin0_names].sort().join(',')}|${[...select_crop].sort().join(',')}|${cis_impact}`;
+
+  if (cv_cache_key === cache_key) {
+    console.log('Skipped cv run as inputs the same');
     return cv_result;
   }
-
+  
+  console.log('Running the cv analysis as inputs changed')
   const cv_data = await db.query(`
     SELECT *
     FROM cv
@@ -1276,9 +1290,7 @@ calcCV = async () => {
   }
 
   mutable cv_result = cv_index
-  mutable cv_admin0_names = admin0_names
-  mutable cv_crops = select_crop
-  mutable cv_cis_impact = cis_impact
+  mutable cv_cache_key = cache_key
   return cv_index
 }
 ```
@@ -1390,27 +1402,33 @@ We select all the data for admin regions and crops, and sum up to get the
 benefit across all parameter combos.
 
 ```{ojs}
-recipe_dataSummed = { 
-//NOTE: Currently recipe_dataSummed in notebook
-  const roi_data = await roiResults()
-  
-  const aggregated = d3.flatGroup(
-    roi_data,
-    d => d.adoption,
-    d => d.prod_impact,
-    d => d.cis_impact,
-    d => d.bcr,
-    d => d.year
-  ).map(([adoption, prod_impact, cis_impact, bcr, year, group]) => ({
-    adoption,
-    prod_impact,
-    cis_impact,
-    bcr,
-    year,
-    project_benefit: d3.sum(group, d => d.project_benefit)
-  }));
-  return aggregated
-}
+recipe_dataSummed = async () => {
+  //TODO: It may make more sense to move the loading cursor later and
+  // make this a fn... but this is the most compute heavy piece.
+  document.body.style.cursor = "wait";
+  const roi_data = await roiResults();
+
+  const aggregated = d3
+    .flatGroup(
+      roi_data,
+      (d) => d.adoption,
+      (d) => d.prod_impact,
+      (d) => d.cis_impact,
+      (d) => d.bcr,
+      (d) => d.year,
+    )
+    .map(([adoption, prod_impact, cis_impact, bcr, year, group]) => ({
+      adoption,
+      prod_impact,
+      cis_impact,
+      bcr,
+      year,
+      project_benefit: d3.sum(group, (d) => d.project_benefit),
+    }));
+
+  document.body.style.cursor = "default";
+  return aggregated;
+};
 ```
 
 #### Define project payment schedule
@@ -1442,34 +1460,38 @@ recipe_paymentSchedule;
 recipe_dataCashflow = {
   if (!rangeProjectCost || rangeProjectCost === 0) return [];
 
-  const payByYear = new Map(recipe_paymentSchedule.map(d => [d.year, d]));
+  const payByYear = new Map(recipe_paymentSchedule.map((d) => [d.year, d]));
 
-  return d3.flatGroup(
-    recipe_dataSummed,
-    d => d.adoption,
-    d => d.prod_impact,
-    d => d.cis_impact,
-    d => d.bcr
-  ).flatMap(([adoption, prod_impact, cis_impact, bcr, rows]) => {
-    const allRows = [
-      ...rows,
-      { adoption, prod_impact, cis_impact, bcr, year: 0, project_benefit: 0 }
-    ].sort((a, b) => a.year - b.year);
+  const data = await recipe_dataSummed();
 
-    return allRows.map(r => {
-      const pay = payByYear.get(r.year) || {};
-      const cost = pay.cost ?? 0;
-      const cost_cum = pay.cost_cum ?? rangeProjectCost;
-      return {
-        ...r,
-        cost,
-        cost_cum,
-        cashflow: (r.project_benefit ?? 0) - cost,
-        discount_rate: discountRate
-      };
+  return d3
+    .flatGroup(
+      data,
+      (d) => d.adoption,
+      (d) => d.prod_impact,
+      (d) => d.cis_impact,
+      (d) => d.bcr,
+    )
+    .flatMap(([adoption, prod_impact, cis_impact, bcr, rows]) => {
+      const allRows = [
+        ...rows,
+        { adoption, prod_impact, cis_impact, bcr, year: 0, project_benefit: 0 },
+      ].sort((a, b) => a.year - b.year);
+
+      return allRows.map((r) => {
+        const pay = payByYear.get(r.year) || {};
+        const cost = pay.cost ?? 0;
+        const cost_cum = pay.cost_cum ?? rangeProjectCost;
+        return {
+          ...r,
+          cost,
+          cost_cum,
+          cashflow: (r.project_benefit ?? 0) - cost,
+          discount_rate: discountRate,
+        };
+      });
     });
-  });
-}
+};
 
 recipe_dataCashflow;
 ```
