@@ -383,7 +383,7 @@ viewof select_country = {
     selected: ["KEN", "TZA"],
   });
   
-  return debounce(input, 2000);
+  return debounce(input, 1000); // Noisy input, so delay it a bit.
 }
 ```
 
@@ -411,8 +411,10 @@ viewof select_region = {
     selected: selectedIds
   });
 
-  return debounce(input, 2000);
+  return debounce(input, 1000);
 }
+
+select_region
 ```
 
 ```{ojs}
@@ -444,7 +446,7 @@ viewof select_crop = {
     selected: selectedId
   });
 
-  return debounce(input, 2000);
+  return debounce(input, 1000);
 }
 ```
 
@@ -1298,12 +1300,19 @@ calcCV = async () => {
 ### Other ROI X Exposure Variables
 
 ```{ojs}
-getExposureData = async (crops, countries) => {
+// getExposureData = async (crops, countries) => {
+// NOTE: Making this a dataset rather than a function so it only re-runs when crop or country change.
+// Defaulting to all admin 1 data as all admin regions are selected by defualt and this
+// will prevent having to have users re-query the datasets when changing regions in a county.
+exposure_data = {
+  let crops = select_crop;
+  let countries = select_country;
   let data = await db.query(`
     SELECT *
     FROM exposure
     WHERE crop in ('${crops.join("', '")}')
-    AND iso3 in ('${countries.join("', '")}') 
+    AND iso3 in ('${countries.join("', '")}')
+    -- POSSIBLY add admin1 name filter, but defaults to full country, so maybe bigger query is better. 
   `);
   return data;
 };
@@ -1312,10 +1321,11 @@ getExposureData = async (crops, countries) => {
 ```{ojs}
 crop_adoption = async () => {
   // Globals from the notebook
-  let adoption = options_econPerfWalkthrough.inputAdoption.value;
-  let years = projectYears;
-  let prod_impact = options_econPerfWalkthrough.inputProdImpact.value;
-  let data = await getExposureData(select_crop, select_country);
+  const adoption = options_econPerfWalkthrough.inputAdoption.value;
+  const years = projectYears;
+  const prod_impact = options_econPerfWalkthrough.inputProdImpact.value;
+  // let data = await getExposureData(select_crop, select_country);
+  const data = exposure_data;
   const result = [];
 
   for (const row of data) {
@@ -1337,6 +1347,7 @@ crop_adoption = async () => {
       result.push({
         admin0_name: row.admin0_name,
         admin1_name: row.admin1_name,
+        iso3c: row.iso3,
         crop: row.crop,
         exposure: row.exposure,
         value: row.value,
@@ -1357,12 +1368,15 @@ crop_adoption = async () => {
     return { ...row, result_w_impact, marginal_impact };
   });
 };
+
+//NOTE: QAQC RESULTS:
+// 1 region & crop: PERFECT - This output matches the R script output exactly
 ```
 
 ```{ojs}
 roiResults = async () => {
-  let index = await calcCV();
-  let data = await crop_adoption();
+  const index = await calcCV();
+  const data = await crop_adoption();
 
   const withImpact = data.map((row) => {
     const key = `${row.admin0_name}|${row.crop}`;
@@ -1388,10 +1402,13 @@ roiResults = async () => {
     const project_benefit =
       Math.round((d.marginal_impact_cis - d.marginal_impact_cis / bcr) * 10) /
       10;
-    const cis_impact = options_econPerfWalkthrough.inputCisImpact.value; //TODO: This can probably be removed and just called once later
+    const cis_impact = options_econPerfWalkthrough.inputCisImpact.value;
     return { ...d, bcr, cis_impact, project_benefit };
   });
 };
+
+//NOTE: QAQC RESULTS:
+// 1 region & crop: Good - Output is close, the MC simulation gives different results, but the difference is few $100 each time
 ```
 
 ### ROI X inputs Calculations
@@ -1403,14 +1420,18 @@ benefit across all parameter combos.
 
 ```{ojs}
 recipe_dataSummed = async () => {
-  //TODO: It may make more sense to move the loading cursor later and
-  // make this a fn... but this is the most compute heavy piece.
   document.body.style.cursor = "wait";
   const roi_data = await roiResults();
 
+  // Filter down on this step to the selected regions
+  const regionSet = new Set(select_region);
+  const roi_data_filtered = roi_data.filter((d) =>
+    regionSet.has(`${d.iso3c}_${d.admin1_name}`),
+  );
+
   const aggregated = d3
     .flatGroup(
-      roi_data,
+      roi_data_filtered,
       (d) => d.adoption,
       (d) => d.prod_impact,
       (d) => d.cis_impact,
@@ -1447,8 +1468,6 @@ recipe_paymentSchedule = Array.from({ length: projectYears }).map((_, i) => {
     cost_cum: ((i + 1) / projectYears) * rangeProjectCost,
   };
 });
-
-recipe_paymentSchedule;
 ```
 
 #### Add project scope to data
@@ -1492,8 +1511,6 @@ recipe_dataCashflow = {
       });
     });
 };
-
-recipe_dataCashflow;
 ```
 
 #### Format that into final indicators
