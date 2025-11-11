@@ -12,107 +12,253 @@ filters:
 
 # Glossary
 
-Here is a list of terms used in the Atlas and their definitions.
-
 ```{=html}
-<div id="languageToggle" style="margin-bottom: 20px;">
-  <label style="margin-right: 10px;">
-    <input type="radio" name="language" value="EN" checked>
-    English
-  </label>
-  <label>
-    <input type="radio" name="language" value="FR">
-    Français
-  </label>
-</div>
+<div id="toc" style="margin-bottom: 30px;"></div>
+
+<input
+  type="text"
+  id="searchBox"
+  placeholder="Search glossary..."
+  style="margin-bottom: 20px; padding: 8px; width: 100%; max-width: 400px;"
+/>
 
 <div id="output"></div>
+```
+
+```{=html}
+<script>
+const navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
+
+if (navEnd) {
+  // Only add it if it doesn't already exist
+  if (!document.getElementById("nav-lang-selector")) {
+    // Create wrapper
+    const langSel = document.createElement("div");
+    langSel.id = "nav-lang-selector";
+    langSel.style.display = "flex";
+    langSel.style.alignItems = "center";
+    langSel.style.marginLeft = "10px";
+
+    // Create inner container
+    const langDiv = document.createElement("div");
+    langDiv.style.display = "flex";
+    langDiv.style.flexDirection = "column";
+
+    // Build radios dynamically
+    const langs = [
+      { code: "EN", label: "English" },
+      { code: "FR", label: "Français" },
+    ];
+
+    langs.forEach(lang => {
+      const label = document.createElement("label");
+      label.style.fontWeight = "500";
+      label.style.cursor = "pointer";
+
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "language";
+      input.value = lang.code;
+      input.style.accentColor = "var(--atlasGreen)";
+      input.style.marginRight = "5px";
+      input.style.cursor = "pointer";
+
+      if (lang.code === "EN") input.checked = true;
+
+      // When changed → handle switching logic
+      input.addEventListener("change", e => {
+        if (e.target.checked) {
+          currentLang = lang.code;
+          renderGlossary();
+          renderTOC();
+          updateSearchPlaceholder();
+        }
+      });
+
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(lang.label));
+      langDiv.appendChild(label);
+    });
+
+    // Assemble and attach
+    langSel.appendChild(langDiv);
+    navEnd.parentNode.appendChild(langSel);
+  }
+}
+</script>
+```
 
 <script>
-  let currentLang = 'EN';
-  let glossaryData = null;
+let currentLang = 'EN';
+let glossaryData = null;
+let searchQuery = '';
 
-  fetch("./../../data/shared/glossary.json")
-    .then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      return response.json();
-    })
-    .then(data => {
-      glossaryData = data;
-      renderGlossary();
+fetch("./../../data/shared/glossary.json")
+  .then(response => {
+    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+    return response.json();
+  })
+  .then(data => {
+    glossaryData = data;
+    renderGlossary();
+    renderTOC();
 
-      // Set up radio button event listeners
-      document.querySelectorAll('input[name="language"]').forEach(radio => {
-        radio.addEventListener('change', (event) => {
-          currentLang = event.target.value;
-          renderGlossary();
-        });
+    // Language toggle
+    document.querySelectorAll('input[name="language"]').forEach(radio => {
+      // currentLang = localStorage.getItem('glossaryLang') || 'EN';
+      radio.addEventListener('change', event => {
+        currentLang = event.target.value;
+        // localStorage.setItem('glossaryLang', currentLang);
+        updateSearchPlaceholder();
+        renderGlossary();
+        renderTOC();
+        attachTOCListeners();
       });
-    })
-    .catch(error => {
-      console.error("Error loading JSON:", error);
-      document.getElementById("output").innerHTML =
-        `<p style="color: red;">Error loading glossary: ${error.message}</p>`;
     });
 
-  function renderGlossary() {
-    if (!glossaryData) return;
+    // Search filter
+    let searchTimeout;
+    document.getElementById('searchBox').addEventListener('input', event => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        searchQuery = event.target.value.toLowerCase();
+        renderGlossary();
+      }, 200);
+    });
+    updateSearchPlaceholder();
+  })
+  .catch(error => {
+    console.error("Error loading JSON:", error);
+    document.getElementById("output").innerHTML =
+      `<p style="color: red;">Error loading glossary: ${error.message}</p>`;
+  });
 
-    // Group entries by section
-    const sections = {};
+function updateSearchPlaceholder() {
+  const searchBox = document.getElementById('searchBox');
+  searchBox.placeholder =
+    currentLang === 'FR' ? 'Rechercher dans le glossaire...' : 'Search glossary...';
+}
 
-    Object.entries(glossaryData).forEach(([key, entry]) => {
-      const section = entry.Section || 'Other';
-      if (!sections[section]) {
-        sections[section] = [];
+// Sanitize section name for use as HTML ID
+function sanitizeId(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+// Build TOC dynamically
+function renderTOC() {
+  if (!glossaryData) return;
+
+  const sections = {};
+  Object.entries(glossaryData).forEach(([key, entry]) => {
+    const section = entry.Section || 'Other';
+    sections[section] = true;
+  });
+
+  // Start HTML
+  let tocHtml = '<h2 style="margin-bottom: 10px;">Contents</h2>';
+  tocHtml += '<div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">';
+
+  // Add links inline with separators
+  const sectionNames = Object.keys(sections).sort();
+  sectionNames.forEach((section, i) => {
+    const sectionId = sanitizeId(section);
+    tocHtml += `
+      <a href="#section-${sectionId}"
+         style="text-decoration: none;">
+         ${section}
+      </a>
+      ${i < sectionNames.length - 1 ? '<span style="color: #999;">|</span>' : ''}
+    `;
+  });
+
+  tocHtml += '</div>';
+  document.getElementById('toc').innerHTML = tocHtml;
+}
+
+function attachTOCListeners() {
+  document.querySelectorAll('#toc a').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const targetId = link.getAttribute('href').substring(1);
+      const target = document.getElementById(targetId);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-      sections[section].push({ key, ...entry });
+    });
+  });
+}
+
+// Render glossary
+function renderGlossary() {
+  if (!glossaryData) return;
+
+  const sections = {};
+  Object.entries(glossaryData).forEach(([key, entry]) => {
+    const section = entry.Section || 'Other';
+    if (!sections[section]) sections[section] = [];
+    sections[section].push({ key, ...entry });
+  });
+
+  let html = '<div>';
+
+  Object.keys(sections).sort().forEach(section => {
+    const filteredEntries = sections[section].filter(entry => {
+      const term = entry.Term?.toLowerCase() || '';
+      const acronym = entry.Acronym?.toLowerCase() || '';
+      const defEN = entry['Definition EN']?.toLowerCase() || entry['Definiton EN']?.toLowerCase() || '';
+      const defFR = entry['Definition FR']?.toLowerCase() || '';
+      const tooltipEN = entry['Tooltip EN']?.toLowerCase() || '';
+      const tooltipFR = entry['Tooltip FR']?.toLowerCase() || '';
+
+      return (
+        !searchQuery ||
+        term.includes(searchQuery) ||
+        acronym.includes(searchQuery) ||
+        defEN.includes(searchQuery) ||
+        defFR.includes(searchQuery) ||
+        tooltipEN.includes(searchQuery) ||
+        tooltipFR.includes(searchQuery)
+      );
     });
 
-    // Build HTML
-    let html = '<div>';
+    if (filteredEntries.length === 0) return;
 
-    // Sort sections alphabetically
-    Object.keys(sections).sort().forEach(section => {
-      html += `<h1>${section}</h1>`;
+    const sectionId = sanitizeId(section);
+    html += `<h1 id="section-${sectionId}">${section}</h1>`;
 
-      // Sort entries within section by Term
-      sections[section].sort((a, b) => a.Term.localeCompare(b.Term)).forEach(entry => {
-        const acronym = entry.Acronym && entry.Acronym.trim() !== '' ? entry.Acronym : null;
-        const definition = currentLang === 'EN' ?
-          (entry['Definiton EN'] || entry['Definition EN'] || '') :
-          (entry['Definition FR'] || '');
-        const tooltip = currentLang === 'EN' ?
-          (entry['Tooltip EN'] || '') :
-          (entry['Tooltip FR'] || '');
+    filteredEntries
+      .sort((a, b) => a.Term.localeCompare(b.Term))
+      .forEach(entry => {
+        const acronym = entry.Acronym?.trim() || null;
+        const definition =
+          currentLang === 'EN'
+            ? entry['Definiton EN'] || entry['Definition EN'] || ''
+            : entry['Definition FR'] || '';
+        const tooltip =
+          currentLang === 'EN' ? entry['Tooltip EN'] || '' : entry['Tooltip FR'] || '';
 
         html += '<div style="margin-bottom: 30px;">';
-
-        // Term heading with optional acronym
-        if (acronym) {
-          html += `<h2 style="color: #555; margin-bottom: 5px; font-size: 1.3em;">${entry.Term} (${acronym})</h2>`;
-        } else {
-          html += `<h2 style="color: #555; margin-bottom: 5px; font-size: 1.3em;">${entry.Term}</h2>`;
-        }
-
-        // Tooltip if available
-        if (tooltip) {
+        html += `<h2 style="color: #555; margin-bottom: 5px; font-size: 1.3em;">
+                  ${entry.Term}${acronym ? ` (${acronym})` : ''}
+                 </h2>`;
+        if (tooltip)
           html += `<p style="color: #666; font-style: italic; margin: 5px 0; font-size: 0.9em;">${tooltip}</p>`;
-        }
-
-        // Definition
-        if (definition) {
+        if (definition)
           html += `<p style="color: #444; line-height: 1.6; margin-top: 10px;">${definition}</p>`;
-        }
-
         html += '</div>';
       });
-    });
+  });
 
-    html += '</div>';
-    document.getElementById('output').innerHTML = html;
-  }
+  html += '</div>';
+  document.getElementById('output').innerHTML = html;
+}
 </script>
+
+```
+```
+
+```
 ```
