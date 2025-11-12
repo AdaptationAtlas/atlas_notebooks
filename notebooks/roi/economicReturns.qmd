@@ -6,11 +6,11 @@ nb-authors:
 date-created: "2025-10-15"
 date-edited: today
 execute:
-  echo: true
+  echo: false
 format:
   html:
-    code-fold: true
-    code-summary: "Show the code" ## Add this to global template to make debugging easier.
+    # code-fold: true
+    # code-summary: "Show the code" ## Add this to global template to make debugging easier.
     css: roi_styles.css # Custom CSS for this notebook so the multi select works.
 ---
 
@@ -68,6 +68,53 @@ htl.html`
     ${viewof select_crop}
   </div>
 `
+```
+
+```{ojs}
+{
+  const data = exposure_data
+    .filter((d) =>
+    regionSet.has(`${d.iso3}_${d.admin1_name}`),
+  );
+
+  const totals = d3.rollup(
+    data,
+    v => d3.sum(v, d => d.value),
+    d => d.admin0_name,
+    d => d.crop
+  );
+
+  const flatTotals = Array.from(totals, ([admin0_name, crops]) =>
+    Array.from(crops, ([crop, value]) => ({ admin0_name, crop, value }))
+  ).flat();
+
+  const _title = _lang({
+    en: "Total VoP for selected regions and crops in each country", 
+    fr: "Total VoP pour les régions et les cultures sélectionnées dans chaque pays"
+  })
+
+  return Plot.plot({
+    subtitle: _title,
+    marginLeft: 50,
+    width: 928,
+    height: 500,
+    x: { label: null, tickFormat: (d) => `${d} Regions` },
+    y: { tickFormat:(d) => formatUSD()(d) },
+    color: {
+      scheme: "Spectral",
+      legend: true,
+      label: "Crops",
+    },
+    marks: [
+      Plot.barY(flatTotals, {
+        x: "admin0_name",
+        y: "value",
+        fill: "crop",
+        tip: true
+      }),
+    ],
+  });
+}
 ```
 
 ## `{ojs} _lang(nbText.projectSetup.blocks.costs.h2)`
@@ -133,7 +180,87 @@ is on production impact, adapotion rate, etc. -->
 Choose your model parameters for the analysis.
 
 ```{ojs}
-viewof options_econPerfWalkthrough = render_econPerfWalkthrough();
+viewof selections_econPerfWalkthrough = {
+  const _label_prodImpact = makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.prodImpactDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.prodImpactDropdown.tooltip,
+      ),
+    })
+
+  const _label_Adoption = makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.adoptionRateDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.adoptionRateDropdown.tooltip,
+      ),
+    })
+
+  const _label_CisImpact = makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.cisImpactDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.cisImpactDropdown.tooltip,
+      ),
+    })
+
+  const inputProdImpact = Inputs.range(
+    [0, 55],
+    {
+      step: 5,
+      label : _label_prodImpact,
+      value: 30
+    },
+  )
+
+  const inputAdoption = Inputs.range(
+    [0.25, 2],
+    {
+      step: 0.25,
+      label : _label_Adoption,
+      value: 1
+    },
+  )
+
+  const inputCisImpact = Inputs.range(
+    [0, 55],
+    {
+      step: 5,
+      label : _label_CisImpact,
+      value: 25
+    },
+    
+  )
+
+  return Inputs.form(
+    {
+      inputProdImpact,
+      inputAdoption,
+      inputCisImpact
+},
+    {
+      template: (inputs) =>
+        htl.html`<div style="display: flex; gap: 3em">${Object.values(
+          inputs
+        )}</div>`,
+    }
+  )
+}
+
+options_econPerfWalkthrough = {
+  const formatted = {};
+  for (const [key, value] of Object.entries(selections_econPerfWalkthrough)) {
+    formatted[key] = {
+      label: `${value}%`,
+      value: value / 100
+    };
+  }
+  return formatted;
+}
 ```
 
 ```{ojs}
@@ -1302,6 +1429,7 @@ calcCV = async () => {
 // NOTE: Making this a dataset rather than a function so it only re-runs when crop or country change.
 // Defaulting to all admin 1 data as all admin regions are selected by defualt and this
 // will prevent having to have users re-query the datasets when changing regions in a county.
+
 exposure_data = {
   let crops = select_crop;
   let countries = select_country;
@@ -1417,12 +1545,15 @@ We select all the data for admin regions and crops, and sum up to get the
 benefit across all parameter combos.
 
 ```{ojs}
+regionSet = new Set(select_region);
+```
+
+```{ojs}
 recipe_dataSummed = async () => {
   document.body.style.cursor = "wait";
   const roi_data = await roiResults();
 
   // Filter down on this step to the selected regions
-  const regionSet = new Set(select_region);
   const roi_data_filtered = roi_data.filter((d) =>
     regionSet.has(`${d.iso3c}_${d.admin1_name}`),
   );
