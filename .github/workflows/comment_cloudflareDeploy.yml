@@ -1,0 +1,39 @@
+name: Deploy Quarto to Cloudflare Pages with a comment
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  deployments: write
+  pull-requests: read
+
+jobs:
+  comment_build-and-deploy:
+    if: >
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/quarto-render') &&
+      contains('MEMBER,OWNER,COLLABORATOR', github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 0
+
+      - name: Set up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Render site
+        uses: quarto-dev/quarto-actions/render@v2
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: |
+            pages deploy _site --project-name=adaptation-atlas-nb --branch=pr-${{ github.event.issue.number }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
