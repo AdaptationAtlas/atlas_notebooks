@@ -1,0 +1,363 @@
+/**
+  * Creates a customizable dropdown input component with multi-select functionality.
+  * Modified from https://observablehq.com/@tashapiro/dropdown-input
+  * WARNING: For this to display correctly, the css must be imported and included in the notebook
+  *
+  * @param {Object} config - Configuration object for the dropdown
+  * @param {string} config.inputId - Unique identifier for the dropdown form
+  * @param {string} config.inputLabel - Label text displayed above the dropdown
+  * @param {string} config.placeholderText - Placeholder text shown when no items are selected
+  * @param {Array<{value: string, label: string|HTMLElement}>} config.options - Array of option objects
+  * @param {string} config.options[].value - The value identifier for the option
+  * @param {string|HTMLElement} config.options[].label - Display label (can be HTML element or string)
+  * @param {Array<string>} config.selected - Array of initially selected option values
+  * 
+  * @returns {HTMLFormElement} Form element containing the dropdown component with a .value property
+  *
+  * @example
+  * viewof selectPositionTest = dropdownInput({
+  *   inputLabel: "Crops",
+  *   inputId: "cropsTest",
+  *   placeholderText: 'Select Crops...',
+  *   options: [{value:'RIC', label:'Rice'},
+  *             {value:'MAI', label: 'Maize'}, 
+  *             {value:'PEA', label: 'Pea'}],
+  *   selected: ['RIC','MAI','PEA']
+  * });
+  */
+function dropdownInput(config = {}) {
+  //set up configuration
+  let { inputId, inputLabel, placeholderText, options, selected } = config;
+
+  const width = "250px";
+
+  const maxHeight = "250px";
+
+  //dropdown  button
+  const dropdownButton = Inputs.button(
+    html`<div class='button-inner' style='display:flex;justify-content:space-between;height:100%; id='dropdown-${inputId}'><div class='filter-selected' style='text-align:left;'>${placeholderText}</div><span style='font-size:10px;padding-left:5px;display:flex;align-items:center;'><i class="fas fa-chevron-down"></i></span></div>`
+  );
+  dropdownButton.classList.add("dropdown-button");
+
+  const optionValues = options.map((option) => option.value);
+
+  //selectInput
+  const selectInput = Inputs.select(optionValues, {
+    multiple: true,
+    value: selected
+  });
+  selectInput.classList.add("dropdown-select");
+  selectInput.style.display = "none";
+
+  //select and deselect buttons
+  const selectDeselectButtons = Inputs.button([
+    ["Select All", (value) => "Select All"],
+    ["Deselect All", (value) => "Deselect All"]
+  ]);
+  selectDeselectButtons.classList.add("dropdown-action-buttons");
+
+  let selectInputValue = selected.slice(); // Create a copy of selected for selectInputValue
+
+  let optionListItems = options.map((option) => {
+    const isSelected = selectInputValue.includes(option.value);
+    const listItem = html`<li id='${option.value}'><a style='cursor:pointer;'><span class='text'>${option.label}</span><span class='checkmark'><i class="fas fa-check"></i></span></a></li>`;
+
+    // Event listener for the list item
+    listItem.addEventListener("click", (event) => {
+      event.preventDefault();
+
+      const clickedListItem = event.currentTarget;
+      const clickedItemId = clickedListItem.id;
+      const index = selectInputValue.indexOf(clickedItemId);
+
+      if (clickedListItem.classList.contains("selected")) {
+        clickedListItem.classList.remove("selected");
+
+        if (index !== -1) {
+          selectInputValue.splice(index, 1);
+        }
+      } else {
+        clickedListItem.classList.add("selected");
+        selectInputValue.push(option.value);
+      }
+
+      // Update selectInput value
+      selectInput.value = selectInputValue;
+
+      // Update form value with selectInputValue
+      form.value = selectInputValue;
+      form.dispatchEvent(new CustomEvent("input", { bubbles: true }));
+    });
+
+    return listItem;
+  });
+
+  const optionList = html`<ul class='dropdown-list'>${optionListItems}</ul>`;
+
+  const innerDropdown = html`<div class='dropdown-action-buttons-container'>${selectDeselectButtons}</div>${selectInput} <div class='dropdown-list-container' style='max-height:${maxHeight};overflow-y:scroll;'>${optionList}</div>`;
+
+  innerDropdown.classList.add("dropdown-inner");
+  innerDropdown.style.display = "none";
+  innerDropdown.style.width = width;
+
+  // Function to toggle dropdown visibility
+  const toggleDropdown = () => {
+    innerDropdown.style.display =
+      innerDropdown.style.display === "none" ? "block" : "none";
+  };
+
+  // Toggle the visibility of the select input on button click
+  dropdownButton.onclick = (event) => {
+    toggleDropdown();
+  };
+
+  // Function to close the dropdown if clicked outside
+  const closeDropdownIfClickedOutside = (event) => {
+    if (
+      !dropdownButton.contains(event.target) &&
+      !innerDropdown.contains(event.target)
+    ) {
+      innerDropdown.style.display = "none"; // Close the dropdown
+    }
+  };
+
+  // Add event listener to the document for click events
+  document.addEventListener("click", closeDropdownIfClickedOutside);
+
+  optionListItems.forEach((t, index) => {
+    const option = options[index].value;
+    if (selectInputValue.includes(option)) {
+      t.classList.add("selected");
+    }
+  });
+
+  selectDeselectButtons.onclick = () => {
+    const buttonText = selectDeselectButtons.value;
+    if (buttonText === "Select All") {
+      selectInput.value = options.map((option) => option.value);
+      selectInputValue = options.map((option) => option.value);
+      form.value = selectInputValue;
+
+      optionListItems.forEach((t) => {
+        t.classList.add("selected");
+      });
+    } else if (buttonText === "Deselect All") {
+      selectInput.value = [];
+      selectInputValue = [];
+      form.value = [];
+
+      optionListItems.forEach((t) => {
+        t.classList.remove("selected");
+      });
+    }
+
+    form.dispatchEvent(new CustomEvent("input", { bubbles: true }));
+  };
+
+  //modified from inputs formula by https://observablehq.com/@jashkenas/inputs
+  selectInput.onchange = (e) => {
+    e && e.preventDefault();
+    const value = selectInput.value;
+    if (form.output) {
+      const out = value;
+      if (out instanceof window.Element) {
+        while (form.output.hasChildNodes()) {
+          form.output.removeChild(form.output.lastChild);
+        }
+        form.output.append(out);
+      } else {
+        form.output.value = out;
+      }
+    }
+    // Update form.value with the selectInput value
+    form.value = value;
+    form.dispatchEvent(new CustomEvent("input", { bubbles: true }));
+  };
+
+  const form = html`
+    <label style='font-weight:bold;font-size:14px;'>
+      ${inputLabel}
+    </label>
+    <form style='max-width:350px' id=${inputId}>${dropdownButton} ${innerDropdown}</form>`;
+
+  form.classList.add("dropdown-form");
+
+  form.value = selected;
+
+  const updatePlaceholderText = () => {
+    const selectedValues = form.value;
+    if (selectedValues.length > 0) {
+      const filteredLabels = options
+        .filter((option) => selectedValues.includes(option.value))
+        .map((filteredOption) => {
+          // Check if the label is an HTML element
+          if (
+            typeof filteredOption.label === "object" &&
+            filteredOption.label instanceof HTMLElement
+          ) {
+            return filteredOption.label.outerHTML;
+          } else {
+            return filteredOption.label; // Assuming label is a string if not HTML
+          }
+        });
+
+      const concatenatedText = filteredLabels.join(", ");
+      dropdownButton.querySelector(
+        ".filter-selected"
+      ).innerHTML = `${concatenatedText}`;
+    } else {
+      dropdownButton.querySelector(".filter-selected").innerHTML =
+        placeholderText;
+    }
+  };
+
+  // Listen for changes in form.value
+  form.addEventListener("input", updatePlaceholderText);
+
+  // Initial update of placeholder text
+  updatePlaceholderText();
+
+  return form;
+}
+
+dropdownCSS = html`
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <style>
+    .filter-selected {
+      text-wrap:nowrap;
+      overflow:hidden;
+      display:flex;
+      align-items:center;
+    }
+
+    .dropdown-action-buttons-container {
+      padding:10px;
+    }
+
+    .dropdown-action-buttons {
+      width:100%;
+    }
+
+    .dropdown-action-buttons button {
+      width:50%;
+      font-size:14px;
+      height:30px;
+      background-color:#E9E9E9;
+    }
+
+    .dropdown-list a {
+      width:100%;
+      display:flex;
+      align-items:center;
+      min-height:14px!important;
+    }
+    
+    .dropdown-list .text {
+      width:90%;
+    }
+
+    .dropdown-inner {
+      border:1px #ccc solid;
+      border-radius:4px;
+      background-color:white;
+      margin-top:5px;
+      position:absolute;
+      z-index:2000;
+    }
+
+
+    .dropdown-list .checkmark {
+      width:10%:
+    }
+
+    .dropdown-list {
+      padding:0px;
+      margin:0px;
+      line-height:0px;
+      list-style: none;
+    }
+
+    .dropdown-list li {
+      display:flex;
+      align-content:center;
+      min-height:35px;
+      font-size:15px;
+    }
+
+    li .checkmark {
+      display:none;
+      float:right;
+      padding-right:5px;
+    }
+
+    li.selected .checkmark {
+      display:flex!important;
+    }
+
+    .dropdown-list li:hover {
+      background-color:whitesmoke!important;
+      cursor:pointer;
+    }
+
+    .dropdown-list>li>a {
+      padding: 10px 20px!important;
+      white-space: nowrap;
+    }
+
+    .dropdown-form button {
+      background-color:white!important;
+      color: #333!important;
+      border:1px #ccc solid!important;
+      border-radius:4px!important;
+      cursor:pointer;
+    }
+
+    .dropdown-button button {
+      width:100%!important;
+      height:35px!important;
+    }
+
+    span.dropdown-form button {
+      padding: 0;
+      border: 0 !important;
+      border-radius: 0 !important;
+    }
+
+    form.inputs-3a86ea.dropdown-action-buttons button:hover {
+      background: #EFEFEF !important;
+    }
+
+    form.inputs-3a86ea dropdown-button {
+      max-width: none !important;
+    }
+
+    span.dropdown-form .button-inner {
+      padding: 8px 0;
+    }
+
+    span.dropdown-form form {
+      // width: calc(var(--input-width) + var(--label-width) - 10px) !important;
+      width: 24vw !important;
+    }
+
+    .dropdown-action-buttons button {
+      width: 49% !important;
+    }
+
+    span.dropdown-form label {
+      padding: 8px 0;
+      display: flex;
+      border-bottom: 1px solid black;
+      font-size: 12px !important;
+      font-weight: 400 !important;
+      text-transform: uppercase;
+      width: 100%;
+    }
+
+    .dropdown-inner {
+      border: 1px #333 solid !important;
+      border-radius: 0 !important;
+      margin-top: 12px !important;
+    }
+  </style>
+`;
