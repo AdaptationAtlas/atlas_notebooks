@@ -27,9 +27,45 @@ md`${_lang(nbText.sections.intro.text)}`; // wrapped in md for lists to work
 
 `{ojs} _lang(nbText.sections.recentChanges.introText)`
 
+```{ojs}
+adminForm();
+climateForm();
+viewof viewRecentChanges = Inputs.radio(["divergingBar", "warmingStripes", "table"], {
+  label: "View Type",
+  value: "divergingBar",
+});
+```
+
+```{ojs}
+loaderDiv("plotRecentChanges");
+```
+
+```{ojs}
+//| output: false
+{
+  const _displayType = viewRecentChanges;
+  const div = document.getElementById("plotRecentChanges");
+  div.innerHTML = "";
+  let viz;
+  if (_displayType === "divergingBar") {
+    viz = barplot_recentChanges();
+  } else if (_displayType === "warmingStripes") {
+    viz = warmingStripes_recentChanges();
+  } else if (_displayType === "table") {
+    viz = Inputs.table(recentChanges_plotData);
+  }
+  div.appendChild(viz);
+}
+```
+
 # `{ojs} heading4` {#futureProjections}
 
 `{ojs} _lang(nbText.sections.futureProjections.introText)`
+
+```{ojs}
+adminForm();
+climateForm();
+```
 
 # `{ojs} heading5` {#hazardExposure}
 
@@ -54,7 +90,9 @@ htl.html`
 `;
 ```
 
-# Source code {#source-code .hidden}
+# Source code {#source-code}
+
+<!-- Add .hidden back in to hide -->
 
 ## Text and Language Translations
 
@@ -110,6 +148,7 @@ viewof masterLanguage = Inputs.radio(languages, {
 ### formatters
 
 ```{ojs}
+//TODO: Move to shared helpers
 // format number, short notation
 formatNumCompactShort = ({ locale = "en-US" } = {}) =>
   new Intl.NumberFormat(locale, {
@@ -138,14 +177,6 @@ function formatUSD({ locale = "en-US" } = {}) {
   return (number) => {
     const formattedNum = formatter(number);
     return "$" + formattedNum;
-  };
-}
-
-function formatIntDollar({ locale = "en-US" } = {}) {
-  return (number, unit = intDollarUnit.replace("$", "")) => {
-    let formattedNumber = formatUSD({ locale })(number);
-    let intDollar = unit + formattedNumber;
-    return intDollar;
   };
 }
 ```
@@ -228,8 +259,470 @@ prettyLanguageView = {
 
 ## Data
 
+```{ojs}
+import { cleanAdminInput_SQL } from "/helpers/data.js";
+```
+
 ### Database
+
+```{ojs}
+data_obj = FileAttachment("/data/climateRationale/nbData.json").json();
+first = new Array(data_obj[0]);
+first;
+db = {
+  let data = first
+  const db = await DuckDBClient.of();
+
+  // loop through datasets
+  for (const d of data) {
+    let path = d.s3_path || d.local_path;
+    let view = d.sql.table ? "TABLE" : "VIEW";
+    let query = d.sql.query;
+    if (!query) {
+      // use default query
+      query = `CREATE ${view} ${d.key} AS SELECT * FROM read_parquet("${path}");`
+    } else {
+      query = `CREATE ${view} ${d.key} AS ${query};`
+    }
+    await db.query(query);
+  }
+
+  return await db;
+};
+```
+
+### Sections
+
+#### recentChanges
+
+```{ojs}
+recentChanges_plotData = {
+  document.body.style.cursor = "wait";
+  const _iso3 = admin0Select.iso3c;
+  const _admin1 = admin1Select.admin1_name;
+  const _season = seasonSelect.season;
+  const _variable = climateVarSelect.id;
+
+  const resp = await db.query(`
+  SELECT
+    iso3,
+    admin0_name,
+    admin1_name,
+    season,
+    year,
+    hazard,
+    mean,
+    mean_anomaly
+  FROM historic_climate_timeseries
+    where 1=1
+    ${sqlWhereNull({ field: "iso3", value: cleanAdminInput_SQL(_iso3)})}
+    ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
+    ${sqlWhereNull({ field: "season", value: _season })}
+    ${sqlWhereNull({ field: "hazard", value: _variable })}
+  `);
+
+  const data = resp.map(row => ({
+  ...row,
+  adminName: row.admin1_name
+    ? `${row.admin1_name} (${row.iso3})`
+    : row.iso3
+  }));
+
+  document.body.style.cursor = "";
+  return data;
+}
+
+recentChanges_plotData
+```
+
+#### futureProjections
 
 ### Global Selectors
 
+#### Admin Regions
+
+```{ojs}
+// ADMIN 0
+countries = {
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const filteredCountries = country_list
+    .filter((c) => c.include && c.iso3c !== "SDN")
+    .map(({ include, ...rest }) => rest);
+  return filteredCountries;
+};
+
+viewof admin0Select = Inputs.select(
+  countries,
+  {
+    format: (d) => d.iso3c,
+  },
+)
+```
+
+```{ojs}
+// Admin1
+dataAdmin1 = {
+  const regions = await db.query(`
+    SELECT DISTINCT admin0_name, admin1_name, iso3
+    FROM historic_climate_timeseries
+    WHERE admin1_name IS NOT null
+    and iso3 = '${admin0Select.iso3c}'
+  `);
+  
+  return [
+    {
+      admin0_name: admin0Select.admin0_name,
+      admin1_name: null,
+      iso3: admin0Select.iso3c
+    },
+    ...regions
+  ]
+  // return regions
+  // AND iso3 in ('${countryMain.join("', '")}')
+}
+
+dataAdmin1
+
+viewof admin1Select = Inputs.select(
+  dataAdmin1,
+    {
+      format: (d) => d.admin1_name
+    }
+)
+```
+
+```{ojs}
+// Admin form generator
+adminForm = () => {
+  const admin0 = Inputs.bind(
+    Inputs.select(
+        countries,
+        {
+          label: _lang(general_translations.country),
+          format: (d) => _lang(d.translation),
+        }
+      ),
+    viewof admin0Select
+  )
+
+  const admin1 = Inputs.bind(
+    Inputs.select(
+        dataAdmin1,
+        {
+          label: _lang(general_translations.region),
+          format: (d) => d.admin1_name,
+        }
+      ),
+    viewof admin1Select
+  )
+
+  return Inputs.form(
+    [
+      admin0,
+      admin1
+    ],
+    {
+      template: inputTemplate()
+    }
+  )
+}
+
+adminForm()
+```
+
+#### Climate data
+
+```{ojs}
+seasons = new Array(
+  { season: "annual", season_rank: null, season_string: "Annual Average" },
+  { season: "JFM", season_rank: 0, season_string: "Jan-Feb-Mar" },
+  { season: "FMA", season_rank: 1, season_string: "Feb-Mar-Apr" },
+  { season: "MAM", season_rank: 2, season_string: "Mar-Apr-May" },
+  { season: "AMJ", season_rank: 3, season_string: "Apr-May-Jun" },
+  { season: "MJJ", season_rank: 4, season_string: "May-Jun-Jul" },
+  { season: "JJA", season_rank: 5, season_string: "Jun-Jul-Aug" },
+  { season: "JAS", season_rank: 6, season_string: "Jul-Aug-Sep" },
+  { season: "ASO", season_rank: 7, season_string: "Aug-Sep-Oct" },
+  { season: "SON", season_rank: 8, season_string: "Sep-Oct-Nov" },
+  { season: "OND", season_rank: 9, season_string: "Oct-Nov-Dec" },
+  { season: "NDJ", season_rank: 10, season_string: "Nov-Dec-Jan" },
+  { season: "DJF", season_rank: 11, season_string: "Dec-Jan-Feb" },
+);
+
+viewof seasonSelect = Inputs.select(seasons, {
+  format: (d) => d.season,
+});
+```
+
+```{ojs}
+hazards_obj = {
+  const input = general_translations.hazardVariables;
+
+  const hazard_lookup = new Object({
+    "ndwl0": "NDWL0",
+    "ndws": "NDWS",
+    "ntx35": "NTx35",
+    "ntx40": "NTx40",
+    "ptot": "PTOT",
+    "tavg": "TAVG",
+    "thi": "THI-max",
+    "tmax": "TMAX",
+    "hsh": "HSH-max"
+  })
+  return Object.entries(input).map(([id, data]) => ({
+    id: hazard_lookup[id],
+    ...data
+  }));
+}
+
+viewof climateVarSelect = Inputs.select(hazards_obj, {format: (d) => d.id});
+```
+
+```{ojs}
+climateForm()
+
+climateForm = () => {
+  let season = Inputs.bind(
+    Inputs.select(seasons, {
+      format: (d) => d.season_string,
+      label: _lang(general_translations.season),
+    }),
+    viewof seasonSelect
+  );
+
+  const climateVar = Inputs.bind(
+    Inputs.select(hazards_obj, {
+      format: (d) => _lang(d.name),
+      label: _lang(general_translations.climateVar),
+    }),
+    viewof climateVarSelect
+  )
+
+  return Inputs.form(
+    [
+      season,
+      climateVar
+    ],
+    {
+      template: inputTemplate()
+    }
+  )
+};
+```
+
 ## Content
+
+### Recent changes
+
+```{ojs}
+barplot_recentChanges = () => {
+  const _data = recentChanges_plotData;
+  const _season = seasonSelect.season_string;
+  const _variableName = _lang(climateVarSelect.name);
+  const _variableAxis = _lang(climateVarSelect.labelAxis);
+  const _admin1 = admin1Select.admin1_name;
+  const _admin0 = _lang(admin0Select.translation);
+
+  const _mainTitle = `${_variableName} (${_lang(general_translations.anomaly)})`;
+
+  // 1. Determine the min and max for consistent axis scaling
+  const maxAnomaly = Math.max(..._data.map((d) => d.mean_anomaly));
+  const minAnomaly = Math.min(..._data.map((d) => d.mean_anomaly));
+  const absMax = Math.max(Math.abs(minAnomaly), Math.abs(maxAnomaly));
+
+  const chart = Plot.plot({
+    // --- General Configuration ---
+    width,
+    height: 400,
+    marginTop: 30,
+    title: _mainTitle,
+    subtitle: `Season: ${_season}`,
+
+    // --- Axis Scales ---
+    x: {
+      label: "Year",
+      tickFormat: "d",
+    },
+    y: {
+      // Ensure the Y-axis is also symmetric around 0 for visual balance
+      domain: [-absMax, absMax],
+      grid: true,
+      label: _variableAxis,
+    },
+    facet: { data: _data, y: "adminName", label: null },
+
+    // --- Color Scale ---
+    color: {
+      scheme: "BuRd",
+      type: "diverging",
+      legend: true,
+      label: `${_variableAxis} (${_lang(general_translations.anomaly)})`,
+    },
+    // --- Marks ---
+    marks: [
+      // A single bar mark is used, with 'fill' set to the anomaly value
+      Plot.barY(_data, {
+        x: "year",
+        y: "mean_anomaly",
+        // The color scale defined above will automatically color and grade the bars
+        fill: "mean_anomaly",
+        tip: true,
+        channels: {
+          Admin: "adminName",
+        },
+        tip: {
+          format: {
+            y: false,
+            fy: false,
+            Admin: true,
+            x: (d) => d,
+            color: true,
+          },
+        },
+      }),
+
+      // Add a black line at y=0 for a clear baseline
+      Plot.ruleY([0], { stroke: "black", strokeWidth: 1.5 }),
+    ],
+  });
+  return chart;
+};
+```
+
+```{ojs}
+warmingStripes_recentChanges = () => {
+  const _data = recentChanges_plotData;
+  const _season = seasonSelect.season_string;
+  const _variableName = _lang(climateVarSelect.name);
+  const _variableAxis = _lang(climateVarSelect.labelAxis);
+  const _admin1 = admin1Select.admin1_name;
+  const _admin0 = _lang(admin0Select.translation);
+  const _showAnomaly = true;
+  const _anomalyText = _showAnomaly
+    ? `(${_lang(general_translations.anomaly)})`
+    : "";
+
+  const _mainTitle = `${_variableName}${_anomalyText}`;
+  const plotValue = _showAnomaly ? "mean_anomaly" : "mean";
+  const lineColor = "#000";
+
+  const yMax = d3.max(_data, (d) => d[plotValue]);
+  const yMin = d3.min(_data, (d) => d[plotValue]);
+  const yExtent = Math.abs(yMax - yMin);
+  const yBufferPerc = 0.05;
+  const yBuffer = yExtent * yBufferPerc;
+  const yDomain = [yMin - yBuffer, yMax + yBuffer];
+
+  const warmingStripes = Plot.plot({
+    width,
+    height: 350,
+    title: _mainTitle,
+    subtitle: `Season: ${_season}`,
+    // caption: caption,
+    x: {
+      label: "Year",
+      tickFormat: "d",
+      padding: 0,
+    },
+    y: {
+      // axis: ws_iToggleLine ? "left" : null,
+      label: `${_variableAxis} ${_anomalyText}`,
+      domain: yDomain,
+    },
+    facet: { data: _data, y: "adminName", label: null },
+    color: {
+      scheme: _showAnomaly ? "BuRd" : "Reds",
+      legend: true,
+      label: _variableAxis,
+      reverse: ["PTOT"].includes(climateVarSelect.id),
+    },
+    marks: [
+      // stripes
+      Plot.barY(_data, {
+        x: "year",
+        y1: yDomain[0],
+        y2: yDomain[1],
+        fill: (d) => d[plotValue],
+      }),
+      // zero line
+      Plot.ruleY(_showAnomaly ? [0] : [], {
+        strokeDasharray: [5],
+        stroke: lineColor,
+      }),
+      // line
+      Plot.line(_data, {
+        x: "year",
+        y: (d) => d[plotValue],
+        stroke: lineColor,
+      }),
+      // dots
+      Plot.dot(_data, {
+        x: "year",
+        y: (d) => d[plotValue],
+        fill: lineColor,
+      }),
+      // tooltip
+      Plot.tip(
+        _data,
+        Plot.pointerX({
+          x: "year",
+          y: (d) => yMin,
+          tip: true,
+          channels: {
+            Admin: "adminName",
+            varMean: {
+              label: _variableAxis,
+              value: (d) => d.mean,
+            },
+            varMeanAnomaly: {
+              label: _lang(general_translations.anomaly),
+              value: (d) => d.mean_anomaly,
+            },
+          },
+          format: {
+            y: false,
+            fy: false,
+            Admin: true,
+            x: (d) => d,
+            varMean: true,
+            varMeanAnomaly: true,
+          },
+          lineWidth: Infinity,
+        }),
+      ),
+    ],
+  });
+
+  return warmingStripes;
+};
+```
+
+```{ojs}
+function loaderDiv(id) {
+  return html`
+  <div id="${id}">
+    <div style="
+        min-height: 500px;
+        display: flex;
+        justify-content: center;
+        align-items: center;"
+    >
+      <div style="
+        width: 40px;
+        height: 40px;
+        border: 4px solid #ccc;
+        border-top-color: var(--atlasGreen);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      "></div>
+
+      <style>
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      </style>
+    </div>
+  </div>
+  `;
+}
+```
