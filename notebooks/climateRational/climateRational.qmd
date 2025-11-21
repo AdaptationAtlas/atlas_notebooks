@@ -327,11 +327,16 @@ generateDB = async (data_obj) => {
 ```
 
 ```{ojs}
-data_obj = FileAttachment("/data/climateRationale/nbData.json").json();
+data_obj = {
+  const obj = await FileAttachment("/data/climateRationale/nbData.json").json();
+  return obj.data
+}
 data_obj;
 first = new Array(data_obj[0]);
-first;
-db = await generateDB(first);
+db = await generateDB(
+  // Future projection data is big, so split into different database
+  data_obj.filter((d) => !d.sections.includes("FutureProjections")),
+);
 ```
 
 ```{ojs}
@@ -439,8 +444,108 @@ futureProjections_plotData = {
   document.body.style.cursor = "";
   return data;
 }
+```
 
-futureProjections_plotData
+#### hazardExposure
+
+```{ojs}
+hazardExposure_plotData = {
+  const _iso3 = admin0Select.iso3c;
+  const _admin1 = admin1Select.admin1_name;
+  const _season = seasonSelect.season;
+
+  const resp = await db.query(`
+  SELECT *
+  FROM hazard_exposure
+    where 1=1
+    AND admin2_name IS NULL
+    ${sqlWhereNull({ field: "iso3", value: cleanAdminInput_SQL(_iso3)})}
+    ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
+  `);
+  
+  return resp
+}
+
+hazardExposure_plotData
+```
+
+```{ojs}
+exposure_plotData = {
+  const _iso3 = admin0Select.iso3c;
+  const _admin1 = admin1Select.admin1_name;
+  const _season = seasonSelect.season;
+
+  const resp = await db.query(`
+  SELECT *
+  FROM exposure
+    WHERE 1=1
+    AND admin2_name IS NULL
+    AND tech = 'all'
+    AND exposure = 'vop'
+    AND unit_full = 'nominal-usd-2021'
+    ${sqlWhereNull({ field: "iso3", value: cleanAdminInput_SQL(_iso3)})}
+    ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
+  `);
+
+  const data = resp.map(row => ({
+    ...row,
+    adminName: row.admin1_name
+      ? `${row.admin1_name} (${row.iso3})`
+      : row.iso3
+  }));
+
+
+  
+  return data
+}
+
+exposure_plotData
+```
+
+```{ojs}
+{
+  const _data = exposure_plotData;
+
+  return Plot.plot({
+    width,
+    marginLeft: 120,
+    marginBottom: 50,
+    marginTop: 30,
+
+    x: {
+      axis: "bottom",
+      grid: true,
+      percent: true,
+      label: "Value of Production",
+      tickFormat: formatUSD(),
+    },
+
+    y: {
+      label: "Crop",
+    },
+
+    facet: {
+      data: _data,
+      x: "adminName",
+    },
+
+    color: {
+      type: "linear",
+      range: ["#F7D732","#216729"],
+      domain: d3.extent(_data, d => d.value)
+    },
+
+    marks: [
+      Plot.barX(_data, {
+        x: "value",
+        y: "crop",
+        fill: "value",
+        sort: {y: "x", reverse: true},
+        tip: true
+      })
+    ]
+  });
+}
 ```
 
 ### Global Selectors
