@@ -8,7 +8,12 @@ date-edited: today
 ---
 
 ```{ojs}
-import { atlasTOC, atlasHero } from "/helpers/uiComponents.ojs";
+import {
+  atlasTOC,
+  atlasHero,
+  dataTable,
+  downloadButton,
+} from "/helpers/uiComponents.ojs";
 
 atlasHero(nbTitle, hero_url);
 ```
@@ -52,11 +57,13 @@ loaderDiv("plotRecentChanges");
   } else if (_displayType === "warmingStripes") {
     viz = warmingStripes_recentChanges();
   } else if (_displayType === "table") {
-    viz = Inputs.table(recentChanges_plotData);
+    viz = dataTable(recentChanges_plotData, 500);
   }
   div.appendChild(viz);
 }
 ```
+
+`{ojs} downloadButton(recentChanges_plotData, "recentChanges")`
 
 # `{ojs} heading4` {#futureProjections}
 
@@ -65,11 +72,41 @@ loaderDiv("plotRecentChanges");
 ```{ojs}
 adminForm();
 climateForm();
+viewof viewFutureChanges = Inputs.radio(["plot", "table"], {
+  label: "View Type",
+  value: "plot",
+});
 ```
+
+```{ojs}
+loaderDiv("plotFutureProjections");
+```
+
+```{ojs}
+//| output: false
+{
+  const _displayType = viewFutureChanges;
+  const div = document.getElementById("plotFutureProjections");
+  div.innerHTML = "";
+  let viz;
+  if (_displayType === "plot") {
+    viz = timeseries_futureProjections();
+  } else if (_displayType === "table") {
+    viz = dataTable(futureProjections_plotData, 500);
+  }
+  div.appendChild(viz);
+}
+```
+
+`{ojs} downloadButton(futureProjections_plotData, "futureProjections")`
 
 # `{ojs} heading5` {#hazardExposure}
 
 `{ojs} _lang(nbText.sections.hazardExposure.introText)`
+
+```{ojs}
+loaderDiv("plotHazardExposure");
+```
 
 # `{ojs} summary` {#summary}
 
@@ -266,29 +303,50 @@ import { cleanAdminInput_SQL } from "/helpers/data.js";
 ### Database
 
 ```{ojs}
-data_obj = FileAttachment("/data/climateRationale/nbData.json").json();
-first = new Array(data_obj[0]);
-first;
-db = {
-  let data = first
-  const db = await DuckDBClient.of();
+generateDB = async (data_obj) => {
+  let data = data_obj;
+  const _db = await DuckDBClient.of();
 
   // loop through datasets
   for (const d of data) {
+    if (!d.key || d.key.trim() === "") continue;
     let path = d.s3_path || d.local_path;
     let view = d.sql.table ? "TABLE" : "VIEW";
     let query = d.sql.query;
     if (!query) {
       // use default query
-      query = `CREATE ${view} ${d.key} AS SELECT * FROM read_parquet("${path}");`
+      query = `CREATE ${view} "${d.key}" AS SELECT * FROM read_parquet("${path}");`;
     } else {
-      query = `CREATE ${view} ${d.key} AS ${query};`
+      query = `CREATE ${view} "${d.key}" AS ${query};`;
     }
-    await db.query(query);
+    await _db.query(query);
   }
 
-  return await db;
+  return await _db;
 };
+```
+
+```{ojs}
+data_obj = FileAttachment("/data/climateRationale/nbData.json").json();
+data_obj;
+first = new Array(data_obj[0]);
+first;
+db = await generateDB(first);
+```
+
+```{ojs}
+dbFutureHive = {
+    const fut = data_obj.filter((d) => d.sections.includes("FutureProjections"));
+    const _db = await DuckDBClient.of();
+    _db.query(`
+      CREATE VIEW futureProjections as
+        SELECT *, period as timeperiod
+        FROM parquet_scan([
+          ${fut.map((d) => `'${d.s3_path}'`).join(", ")}
+        ],filename=true, hive_partitioning = 1)
+    `)
+  return _db
+}
 ```
 
 ### Sections
@@ -336,6 +394,54 @@ recentChanges_plotData
 ```
 
 #### futureProjections
+
+```{ojs}
+futureProjections_plotData = {
+  document.body.style.cursor = "wait";
+  const _iso3 = admin0Select.iso3c;
+  const _admin1 = admin1Select.admin1_name;
+  const _season = seasonSelect.season;
+  const _variable = climateVarSelect.id;
+
+  const resp = await dbFutureHive.query(`
+  SELECT
+    iso3,
+    admin0_name,
+    admin1_name,
+    season,
+    scenario,
+    year,
+    timeperiod,
+    hazard,
+    mean,
+    mean_anomaly,
+    max,
+    max_anomaly,
+    min,
+    min_anomaly
+  FROM futureProjections
+    where 1=1
+    ${sqlWhereNull({ field: "iso3", value: cleanAdminInput_SQL(_iso3)})}
+    ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
+    ${sqlWhereNull({ field: "season", value: _season })}
+    ${sqlWhereNull({ field: "hazard", value: _variable })}
+    AND timeperiod in (${["2021-2040", "2041-2060"].map((t) => `'${t}'`).join(", ")})
+    AND scenario in (${["ssp245", "ssp585"].map((t) => `'${t}'`).join(", ")})
+  `);
+
+  const data = resp.map(row => ({
+    ...row,
+    adminName: row.admin1_name
+      ? `${row.admin1_name} (${row.iso3})`
+      : row.iso3
+  }));
+
+  document.body.style.cursor = "";
+  return data;
+}
+
+futureProjections_plotData
+```
 
 ### Global Selectors
 
@@ -525,6 +631,8 @@ barplot_recentChanges = () => {
 
   const _mainTitle = `${_variableName} (${_lang(general_translations.anomaly)})`;
 
+  const _reverse = ["PTOT"].includes(climateVarSelect.id);
+
   // 1. Determine the min and max for consistent axis scaling
   const maxAnomaly = Math.max(..._data.map((d) => d.mean_anomaly));
   const minAnomaly = Math.min(..._data.map((d) => d.mean_anomaly));
@@ -555,6 +663,7 @@ barplot_recentChanges = () => {
     color: {
       scheme: "BuRd",
       type: "diverging",
+      reverse: _reverse,
       legend: true,
       label: `${_variableAxis} (${_lang(general_translations.anomaly)})`,
     },
@@ -612,6 +721,7 @@ warmingStripes_recentChanges = () => {
   const yBufferPerc = 0.05;
   const yBuffer = yExtent * yBufferPerc;
   const yDomain = [yMin - yBuffer, yMax + yBuffer];
+  const _reverse = ["PTOT"].includes(climateVarSelect.id);
 
   const warmingStripes = Plot.plot({
     width,
@@ -634,7 +744,7 @@ warmingStripes_recentChanges = () => {
       scheme: _showAnomaly ? "BuRd" : "Reds",
       legend: true,
       label: _variableAxis,
-      reverse: ["PTOT"].includes(climateVarSelect.id),
+      reverse: _reverse,
     },
     marks: [
       // stripes
@@ -694,6 +804,123 @@ warmingStripes_recentChanges = () => {
   });
 
   return warmingStripes;
+};
+```
+
+```{ojs}
+scenarioColors = new Object({
+  SSP126: "#4FB5B7",
+  SSP245: "#F4BB21",
+  SSP370: "#EE624F",
+  SSP585: "#B34E65",
+});
+
+timeseries_futureProjections = () => {
+  const _data = futureProjections_plotData;
+  const _season = seasonSelect.season_string;
+  const _variableName = _lang(climateVarSelect.name);
+  const _variableAxis = _lang(climateVarSelect.labelAxis);
+  const _admin1 = admin1Select.admin1_name;
+  const _admin0 = _lang(admin0Select.translation);
+  const _showAnomaly = true;
+  const _anomalyText = _showAnomaly
+    ? ` (${_lang(general_translations.anomaly)})`
+    : "";
+
+  const _mainTitle = `${_variableName}${_anomalyText}`;
+  const plotValue_mean = _showAnomaly ? "mean_anomaly" : "mean";
+  const plotValue_max = _showAnomaly ? "max_anomaly" : "max";
+  const plotValue_min = _showAnomaly ? "min_anomaly" : "min";
+
+  const formatScenario = (d) => d?.toUpperCase();
+  const scenariosInData = [
+    ...new Set(_data.map((d) => formatScenario(d.scenario))),
+  ];
+
+  return Plot.plot({
+    width,
+    title: _mainTitle,
+    // caption: caption,
+    x: {
+      tickFormat: "d",
+      label: null,
+    },
+    y: {
+      axis: "right",
+      grid: true,
+      label: _variableAxis,
+      tickSize: 0,
+    },
+    facet: { data: _data, y: "adminName", label: null },
+    color: {
+      domain: scenariosInData,
+      range: scenariosInData.map((s) => scenarioColors[s]),
+      legend: true,
+    },
+    marks: [
+      Plot.ruleY(_showAnomaly ? [0] : [], {
+        strokeDasharray: [5],
+      }),
+      Plot.line(_data, {
+        x: "year",
+        y: plotValue_mean,
+        stroke: (d) => formatScenario(d.scenario),
+      }),
+      Plot.areaY(_data, {
+        x: "year",
+        y1: plotValue_max,
+        y2: plotValue_min,
+        fill: (d) => formatScenario(d.scenario),
+        fillOpacity: 0.2,
+      }),
+      Plot.dot(_data, {
+        x: "year",
+        y: plotValue_mean,
+        fill: (d) => formatScenario(d.scenario),
+        // tip: true
+        tip: {
+          channels: {
+            scenario: {
+              label: _lang(general_translations.scenario),
+              value: (d) => formatScenario(d.scenario),
+            },
+            year: {
+              label: _lang(general_translations.year),
+              value: (d) => d3.format("d")(d.year),
+            },
+            Admin: "adminName",
+            varMean: {
+              label: _variableAxis,
+              value: (d) => d.mean,
+            },
+            varMeanAnomaly: {
+              label: _lang(general_translations.anomaly),
+              value: (d) => d.mean_anomaly,
+            },
+          },
+          format: {
+            Admin: true,
+            scenario: true,
+            year: true,
+            varMean: true,
+            varMeanAnomaly: true,
+            // value: d => `${d} ${plotField.unit}`,
+            x: false,
+            y: false,
+            fy: false,
+            fill: false,
+          },
+        },
+      }),
+      Plot.linearRegressionY(false ? _data : [], {
+        x: "year",
+        y: plotValue_mean,
+        stroke: (d) => formatScenario(d.scenario),
+        strokeDasharray: [5],
+        fill: null,
+      }),
+    ],
+  });
 };
 ```
 
