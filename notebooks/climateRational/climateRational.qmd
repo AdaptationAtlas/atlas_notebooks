@@ -407,7 +407,9 @@ futureProjections_plotData = {
   const _admin1 = admin1Select.admin1_name;
   const _season = seasonSelect.season;
   const _variable = climateVarSelect.id;
-
+  //WARN: Temp return no to avoid constant loading/re-query
+  // Make sure this is removed for prod.
+  // return null
   const resp = await dbFutureHive.query(`
   SELECT
     iso3,
@@ -430,7 +432,7 @@ futureProjections_plotData = {
     ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
     ${sqlWhereNull({ field: "season", value: _season })}
     ${sqlWhereNull({ field: "hazard", value: _variable })}
-    AND timeperiod in (${["2021-2040", "2041-2060"].map((t) => `'${t}'`).join(", ")})
+    AND timeperiod in (${["2021-2040"].map((t) => `'${t}'`).join(", ")})
     AND scenario in (${["ssp245", "ssp585"].map((t) => `'${t}'`).join(", ")})
   `);
 
@@ -443,6 +445,131 @@ futureProjections_plotData = {
 
   document.body.style.cursor = "";
   return data;
+}
+```
+
+#### Extreme Events
+
+```{ojs}
+function addZScores(data, groupKeys, field = "mean") {
+  const groups = d3.group(data, (d) => groupKeys.map((k) => d[k]).join("|"));
+
+  const result = [];
+
+  for (const [_, records] of groups) {
+    const mean = d3.mean(records, (d) => d[field]);
+    const std = d3.deviation(records, (d) => d[field]);
+
+    for (const d of records) {
+      result.push({
+        ...d,
+        z: std === 0 ? 0 : (d[field] - mean) / std,
+      });
+    }
+  }
+
+  return result;
+}
+
+zThresholds = new Object({
+  extreme_low: (z) => z <= -2,
+  unusual_low: (z) => z > -2 && z <= -1,
+  unusual_high: (z) => z >= 1 && z < 2,
+  extreme_high: (z) => z >= 2,
+});
+
+function classifyZ(z) {
+  return Object.keys(zThresholds).find((k) => zThresholds[k](z)) || null;
+}
+
+function aggregateEvents(data, scenario_name) {
+  const groups = new Map();
+
+  for (const d of data) {
+    const key = `${d.iso3}|${d.admin0_name}|${d.admin1_name}|${d.hazard}|${d.season}|${d.scenario}`;
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        iso3: d.iso3,
+        admin0: d.admin0_name,
+        admin1: d.admin1_name,
+        adminName: d.adminName,
+        hazard: d.hazard,
+        scenario: d.scenario || scenario_name,
+        // count number in each class from thresholds
+        ...Object.fromEntries(Object.keys(zThresholds).map((k) => [k, 0])),
+      });
+    }
+
+    const group = groups.get(key);
+    const category = classifyZ(d.z);
+
+    if (category) group[category] += 1;
+  }
+
+  return Array.from(groups.values());
+}
+
+{
+  const historicZ = addZScores(recentChanges_plotData, [
+    "iso3",
+    "admin1_name",
+    "season",
+    "hazard",
+  ])
+  const historicData = aggregateEvents(historicZ, "historical")
+  
+  const futureZ = addZScores(futureProjections_plotData, [
+    "iso3",
+    "admin1_name",
+    "season",
+    "hazard",
+    "scenario",
+  ])
+  const futureData = aggregateEvents(futureZ)
+  
+  const data = [...historicData, ...futureData]
+
+  const longData = data.flatMap(d =>
+  Object.entries({
+    extreme_low: d.extreme_low,
+    unusual_low: d.unusual_low,
+    unusual_high: d.unusual_high,
+    extreme_high: d.extreme_high
+  }).map(([category, value]) => ({
+    scenario: d.scenario,
+    adminName: d.adminName,
+    hazard: d.hazard,
+    category,
+    value
+  }))
+);
+
+return Plot.plot({
+  width: 750,
+  height: 420,
+  marginLeft: 60,
+  marginBottom: 50,
+  facet: {
+    data: longData,
+    x: "adminName",
+  },
+  x: {
+    domain: ["extreme_low", "unusual_low", "unusual_high", "extreme_high"]
+  },
+  color: {
+    legend: true,
+    domain: ["historical", "ssp245", "ssp585"]
+  },
+  marks: [
+    Plot.barY(longData, {
+      x: "category",
+      y: "value",
+      fill: "scenario",
+      tip: true
+    }),
+  ]
+})
 }
 ```
 
@@ -459,6 +586,7 @@ hazardExposure_plotData = {
   FROM hazard_exposure
     where 1=1
     AND admin2_name IS NULL
+    AND hazard_vars in ('NDWS+NTx35+NDWL0', 'NDWS+THI-max+NDWL0')
     ${sqlWhereNull({ field: "iso3", value: cleanAdminInput_SQL(_iso3)})}
     ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
   `);
