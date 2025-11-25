@@ -1,0 +1,118 @@
+---
+pagetitle: Admin Selectors
+created: "2025-11-25"
+updated: "2025-11-25"
+---
+
+<!--
+This should be loaded into a notebook with quarto shortcodes:
+`{{< include /components/_adminSelectors.qmd >}}`
+
+This esentially copies this code into that notebook during render,
+so any variables defined here can be used in the notebook/will also
+conflict with other global variables in the notebook.
+
+This relies on _lang being defined, so the _lang component must also
+be loaded into the notebook with:
+`{{< include /components/_lang.qmd >}}`
+-->
+
+```{ojs}
+adminDB = await DuckDBClient.of({
+  admin_lookup: await FileAttachment(
+    "/data/shared/gaul24_africa_lookup.parquet",
+  ),
+});
+```
+
+```{ojs}
+// ADMIN 0
+countries = {
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const filteredCountries = country_list
+    .filter((c) => c.include && c.iso3c !== "SDN")
+    .map(({ include, ...rest }) => rest);
+  return filteredCountries;
+};
+
+viewof admin0Select = Inputs.select(
+  countries,
+  {
+    format: (d) => d.iso3c,
+  },
+)
+```
+
+```{ojs}
+// Admin1
+dataAdmin1 = {
+  const regions = await adminDB.query(`
+    SELECT DISTINCT admin0_name, admin1_name, iso3
+    FROM admin_lookup
+    WHERE iso3 = '${admin0Select.iso3c}'
+  `);
+  
+  return [
+    {
+      admin0_name: admin0Select.admin0_name,
+      admin1_name: null,
+      iso3: admin0Select.iso3c
+    },
+    ...regions
+  ]
+  // return regions
+  // AND iso3 in ('${countryMain.join("', '")}')
+}
+
+dataAdmin1
+
+viewof admin1Select = Inputs.select(
+dataAdmin1,
+    {
+      format: (d) => d.admin1_name
+    }
+)
+```
+
+```{ojs}
+// Admin form generator
+admin01Form = () => {
+  const admin0 = Inputs.bind(
+    Inputs.select(
+        countries,
+        {
+        //NOTE: _lang & general_translations are defined in 
+        // components/_lang.qmd
+        //Both must be loaded into a notebook for this to work.
+          label: _lang(general_translations.country),
+          format: (d) => _lang(d.translation),
+        }
+      ),
+    viewof admin0Select
+  )
+
+  const admin1 = Inputs.bind(
+    Inputs.select(
+        dataAdmin1,
+        {
+          label: _lang(general_translations.region),
+          format: (d) => d.admin1_name,
+        }
+      ),
+    viewof admin1Select
+  )
+
+  return Inputs.form(
+    [
+      admin0,
+      admin1
+    ],
+    {
+      template: (inputs) =>
+        html`<div style="display: flex; gap: 2em;">${inputs}</div>`,
+    }
+  )
+}
+
+admin01Form()
+```
