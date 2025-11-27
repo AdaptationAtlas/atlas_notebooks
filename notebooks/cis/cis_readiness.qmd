@@ -31,10 +31,673 @@ overviewTitle = _lang(cis.overviewTitle);
 overviewContent = _lang(cis.overviewContent);
 ```
 
-
 # `{ojs} overviewTitle` {#overviewTitle}
 
 `{ojs} overviewContent` 
+
+```{ojs}
+section1Title = _lang(cis.section1Title)
+```
+
+# `{ojs} section1Title` {#section1Title}
+
+
+```{ojs}
+section11Title = _lang(cis.section11Title)
+```
+
+## `{ojs} section11Title` {#section11Title}
+
+
+```{ojs}
+section11Content = _lang(cis.section11Content)
+```
+
+`{ojs} section11Content `
+
+```{ojs}
+//| echo: false
+
+// Import geometry utilities
+import { geojsonFromWKB_wk, read_topojson } from "/helpers/boundaries.js"
+
+// File input
+viewof csvFile = Inputs.file({
+  label: "Upload CIS Data CSV",
+  accept: ".csv",
+  required: false
+})
+
+// Parse CSV data
+adminData = {
+  if (!csvFile) return [];
+  const text = await csvFile.text();
+  return d3.csvParse(text, d3.autoType);
+}
+
+// Extract unique values for filters
+admin0_values = Array.from(new Set(adminData.map(d => d.admin0_name))).filter(Boolean).sort()
+admin1_values = Array.from(new Set(adminData.map(d => d.admin1_name))).filter(Boolean).sort()
+admin2_values = Array.from(new Set(adminData.map(d => d.admin2_name))).filter(Boolean).sort()
+```
+
+### Controls
+
+```{ojs}
+
+//| echo: false
+
+viewof admin0_selected = Inputs.select(
+  ["All", ...admin0_values],
+  {label: "Admin 0 (Country)", value: "All"}
+)
+
+
+admin1_filtered = admin1_values.filter(a1 => {
+  if (admin0_selected === "All") return true;
+  return data.some(d => d.admin0_name === admin0_selected && d.admin1_name === a1);
+})
+
+viewof admin1_selected = Inputs.select(
+  ["All", ...admin1_filtered],
+  {label: "Admin 1 (Region)", value: "All"}
+)
+
+admin2_filtered = admin2_values.filter(a2 => {
+  if (admin1_selected === "All" && admin0_selected === "All") return true;
+  if (admin1_selected === "All") {
+    return data.some(d => d.admin0_name === admin0_selected && d.admin2_name === a2);
+  }
+  return data.some(d => d.admin1_name === admin1_selected && d.admin2_name === a2);
+})
+
+viewof admin2_selected = Inputs.select(
+  ["All", ...admin2_filtered],
+  {label: "Admin 2 (District)", value: "All"}
+)
+
+viewof viewType = Inputs.radio(
+  ["map", "table"],
+  {label: "View Type", value: "map"}
+)
+
+viewof mapMode = Inputs.radio(
+  ["raw", "classified"],
+  {label: "Map Mode", value: "raw"}
+)
+
+
+```
+
+### Filtered Data
+
+```{ojs}
+//| echo: false
+
+filteredData = {
+  let filtered = data;
+  
+  if (admin0_selected !== "All") {
+    filtered = filtered.filter(d => d.admin0_name === admin0_selected);
+  }
+  
+  if (admin1_selected !== "All") {
+    filtered = filtered.filter(d => d.admin1_name === admin1_selected);
+  }
+  
+  if (admin2_selected !== "All") {
+    filtered = filtered.filter(d => d.admin2_name === admin2_selected);
+  }
+  
+  return filtered;
+}
+
+// Determine which admin level to use for mapping
+currentAdminLevel = {
+  if (admin2_selected !== "All") return 2;
+  if (admin1_selected !== "All") return 1;
+  return 0;
+}
+
+// Get WKB data for current admin level
+currentWKBData = {
+  const levelData = filteredData.map(d => {
+    let wkb;
+    if (currentAdminLevel === 2 && d.lv3) wkb = d.lv3;
+    else if (currentAdminLevel === 1 && d.lv2) wkb = d.lv2;
+    else if (d.lv1) wkb = d.lv1;
+    
+    return {
+      wkb: wkb,
+      properties: d
+    };
+  }).filter(d => d.wkb);
+  
+  return levelData;
+}
+
+// Convert WKB to GeoJSON
+geoData = {
+  if (currentWKBData.length === 0) return null;
+  
+  const wkbArray = currentWKBData.map(d => d.wkb);
+  const propertiesArray = currentWKBData.map(d => d.properties);
+  
+  try {
+    return await geojsonFromWKB_wk(wkbArray, propertiesArray);
+  } catch (error) {
+    console.error("Error converting WKB to GeoJSON:", error);
+    return null;
+  }
+}
+
+// Calculate percentile cutoffs for classification
+percentileCutoffs = {
+  const weatherStations = data.map(d => d["weather-station_density"]).filter(v => v != null && !isNaN(v));
+  const cloudCover = data.map(d => d["cloud-coverage_meannannual"]).filter(v => v != null && !isNaN(v));
+  
+  return {
+    weatherStation: {
+      low: d3.quantile(weatherStations.sort(d3.ascending), 0.333),
+      moderate: d3.quantile(weatherStations.sort(d3.ascending), 0.667)
+    },
+    cloudCover: {
+      low: d3.quantile(cloudCover.sort(d3.ascending), 0.333),
+      moderate: d3.quantile(cloudCover.sort(d3.ascending), 0.667)
+    }
+  };
+}
+
+// Classification function
+classify = (value, cutoffs, inverse = false) => {
+  if (value == null || isNaN(value)) return "No data";
+  
+  if (inverse) {
+    // For cloud cover: higher value = weaker (more clouds = harder to observe)
+    if (value <= cutoffs.low) return "Stronger";
+    if (value <= cutoffs.moderate) return "Moderate";
+    return "Weaker";
+  } else {
+    // For weather stations: higher value = stronger
+    if (value <= cutoffs.low) return "Weaker";
+    if (value <= cutoffs.moderate) return "Moderate";
+    return "Stronger";
+  }
+}
+
+// Add classifications to data
+enrichedData = filteredData.map(d => ({
+  ...d,
+  weatherStationClass: classify(
+    d["weather-station_density"], 
+    percentileCutoffs.weatherStation, 
+    false
+  ),
+  cloudCoverClass: classify(
+    d["cloud-coverage_meannannual"], 
+    percentileCutoffs.cloudCover, 
+    true
+  )
+}))
+
+```
+
+### Dynamic Insight
+
+```{ojs}
+//| echo: false
+
+insight = {
+  const wsValues = filteredData
+    .map(d => d["weather-station_density"])
+    .filter(v => v != null && !isNaN(v));
+  
+  const ccValues = filteredData
+    .map(d => d["cloud-coverage_meannannual"])
+    .filter(v => v != null && !isNaN(v));
+  
+  if (wsValues.length === 0 || ccValues.length === 0) {
+    return html`<div style="padding: 1rem; background: #fff3cd; border-left: 4px solid #ffc107;">
+      No data available for selected region.
+    </div>`;
+  }
+  
+  const avgWS = d3.mean(wsValues);
+  const avgCC = d3.mean(ccValues);
+  const clearSkyFraction = 1 - avgCC;
+  
+  const wsCapacity = classify(avgWS, percentileCutoffs.weatherStation, false);
+  const ccCapacity = classify(avgCC, percentileCutoffs.cloudCover, true);
+  
+  const region = admin2_selected !== "All" ? admin2_selected :
+                 admin1_selected !== "All" ? admin1_selected :
+                 admin0_selected !== "All" ? admin0_selected :
+                 "the selected region";
+  
+  const overallCapacity = 
+    (wsCapacity === "Stronger" && ccCapacity === "Stronger") ? "high" :
+    (wsCapacity === "Weaker" || ccCapacity === "Weaker") ? "low" : "moderate";
+  
+  return html`<div style="padding: 1rem; background: #f0f8ff; border-left: 4px solid #2196F3; margin: 1rem 0;">
+    <strong>Insight:</strong> In ${region}, ground-station density is <strong>${avgWS.toFixed(3)}</strong> 
+    (${wsCapacity.toLowerCase()}) and clear-sky fraction is <strong>${clearSkyFraction.toFixed(3)}</strong> 
+    (${ccCapacity.toLowerCase()}), indicating <strong>${overallCapacity}</strong> capacity for both in-situ and optical observation.
+    <br><small style="color: #666; margin-top: 0.5rem; display: block;">
+    Note: Classifications are relative to sub-Saharan Africa region.
+    </small>
+  </div>`;
+}
+
+insight
+```
+
+
+### Visualization
+
+```{ojs}
+//| echo: false
+
+visualization = {
+  if (viewType === "map") {
+    if (!geoData || geoData.features.length === 0) {
+      return html`<div style="padding: 2rem; background: #fff3cd; text-align: center; border-radius: 8px; border: 1px solid #ffc107;">
+        <h3>⚠️ No Geographic Data Available</h3>
+        <p>No geometry data found for the selected region(s).</p>
+        <p>Please select a different region or check that your data includes WKB geometry columns (lv1, lv2, lv3).</p>
+      </div>`;
+    }
+    
+    return html`<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0;">
+      ${weatherStationMap}
+      ${cloudCoverMap}
+    </div>`;
+  } else {
+    return Inputs.table(enrichedData, {
+      columns: [
+        "admin0_name",
+        "admin1_name", 
+        "admin2_name",
+        "weather-station_density",
+        "weatherStationClass",
+        "cloud-coverage_meannannual",
+        "cloudCoverClass"
+      ],
+      header: {
+        "admin0_name": "Country",
+        "admin1_name": "Region",
+        "admin2_name": "District",
+        "weather-station_density": "Weather Station Density",
+        "weatherStationClass": "Station Accuracy",
+        "cloud-coverage_meannannual": "Cloud Coverage",
+        "cloudCoverClass": "Cloud Cover Accuracy"
+      },
+      format: {
+        "weather-station_density": x => x?.toFixed(4) ?? "N/A",
+        "cloud-coverage_meannannual": x => x?.toFixed(4) ?? "N/A"
+      },
+      width: {
+        "admin0_name": 100,
+        "admin1_name": 100,
+        "admin2_name": 150,
+        "weather-station_density": 120,
+        "weatherStationClass": 120,
+        "cloud-coverage_meannannual": 120,
+        "cloudCoverClass": 150
+      },
+      layout: "auto"
+    });
+  }
+}
+
+visualization
+```
+
+```{ojs}
+//| echo: false
+
+// Helper function to get color for weather stations
+getWSColor = (value, mode) => {
+  if (value == null || isNaN(value)) return "#e0e0e0";
+  
+  if (mode === "classified") {
+    const category = classify(value, percentileCutoffs.weatherStation, false);
+    return category === "Stronger" ? "#238b45" :
+           category === "Moderate" ? "#74c476" :
+           category === "Weaker" ? "#c7e9c0" : "#e0e0e0";
+  } else {
+    // Continuous scale for raw values
+    const scale = d3.scaleSequential(d3.interpolateGreens)
+      .domain([0, 20]);
+    return scale(value);
+  }
+}
+
+// Helper function to get color for cloud cover
+getCCColor = (value, mode) => {
+  if (value == null || isNaN(value)) return "#e0e0e0";
+  
+  if (mode === "classified") {
+    const category = classify(value, percentileCutoffs.cloudCover, true);
+    return category === "Stronger" ? "#3f007d" :
+           category === "Moderate" ? "#807dba" :
+           category === "Weaker" ? "#bcbddc" : "#e0e0e0";
+  } else {
+    // Continuous scale for raw values (inverted: darker = less clouds = stronger)
+    const scale = d3.scaleSequential(d3.interpolatePurples)
+      .domain([0.9, 0.3]);
+    return scale(value);
+  }
+}
+
+// Weather Station Density Map
+weatherStationMap = {
+  if (!geoData) return html`<div>Loading map...</div>`;
+  
+  return Plot.plot({
+    title: "Weather station density",
+    width: 600,
+    height: 500,
+    projection: {
+      type: "mercator",
+      domain: geoData
+    },
+    color: {
+      type: mapMode === "classified" ? "categorical" : "linear",
+      domain: mapMode === "classified" 
+        ? ["Weaker", "Moderate", "Stronger", "No data"]
+        : [0, 20],
+      range: mapMode === "classified"
+        ? ["#c7e9c0", "#74c476", "#238b45", "#e0e0e0"]
+        : d3.interpolateGreens,
+      legend: true,
+      label: mapMode === "classified" ? "Accuracy" : "Stations per 10k km²"
+    },
+    marks: [
+      Plot.geo(geoData, {
+        fill: d => {
+          const value = d.properties["weather-station_density"];
+          if (mapMode === "classified") {
+            return classify(value, percentileCutoffs.weatherStation, false);
+          }
+          return value;
+        },
+        stroke: "white",
+        strokeWidth: 0.5,
+        strokeOpacity: 0.8,
+        title: d => {
+          const name = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
+          const density = d.properties["weather-station_density"];
+          const category = classify(density, percentileCutoffs.weatherStation, false);
+          return `${name}\nDensity: ${density?.toFixed(4) || 'N/A'}\nAccuracy: ${category}`;
+        }
+      })
+    ]
+  });
+}
+
+// Cloud Cover Map
+cloudCoverMap = {
+  if (!geoData) return html`<div>Loading map...</div>`;
+  
+  return Plot.plot({
+    title: "Cloud cover",
+    width: 600,
+    height: 500,
+    projection: {
+      type: "mercator",
+      domain: geoData
+    },
+    color: {
+      type: mapMode === "classified" ? "categorical" : "linear",
+      domain: mapMode === "classified" 
+        ? ["Weaker", "Moderate", "Stronger", "No data"]
+        : [0.3, 0.9],
+      range: mapMode === "classified"
+        ? ["#bcbddc", "#807dba", "#3f007d", "#e0e0e0"]
+        : d3.interpolatePurples,
+      legend: true,
+      label: mapMode === "classified" ? "Accuracy" : "Cloud cover fraction"
+    },
+    marks: [
+      Plot.geo(geoData, {
+        fill: d => {
+          const value = d.properties["cloud-coverage_meannannual"];
+          if (mapMode === "classified") {
+            return classify(value, percentileCutoffs.cloudCover, true);
+          }
+          return value;
+        },
+        stroke: "white",
+        strokeWidth: 0.5,
+        strokeOpacity: 0.8,
+        title: d => {
+          const name = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
+          const coverage = d.properties["cloud-coverage_meannannual"];
+          const category = classify(coverage, percentileCutoffs.cloudCover, true);
+          return `${name}\nCloud Cover: ${(coverage * 100)?.toFixed(1) || 'N/A'}%\nAccuracy: ${category}`;
+        }
+      })
+    ]
+  });
+}
+```
+
+
+### Distribution Charts
+
+```{ojs}
+//| echo: false
+
+html`<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2rem 0;">`
+
+Plot.plot({
+  title: "Weather Station Density Distribution",
+  marginLeft: 60,
+  width: 550,
+  height: 300,
+  x: {
+    label: "Weather Station Density →",
+    labelAnchor: "center"
+  },
+  y: {
+    label: "↑ Count",
+    labelAnchor: "center"
+  },
+  marks: [
+    Plot.rectY(enrichedData.filter(d => d["weather-station_density"] != null), 
+      Plot.binX(
+        {y: "count"}, 
+        {x: "weather-station_density", fill: "#74c476", thresholds: 30}
+      )
+    ),
+    Plot.ruleX([percentileCutoffs.weatherStation.low], {stroke: "orange", strokeWidth: 2, strokeDasharray: "4,4"}),
+    Plot.ruleX([percentileCutoffs.weatherStation.moderate], {stroke: "red", strokeWidth: 2, strokeDasharray: "4,4"}),
+    Plot.text([{x: percentileCutoffs.weatherStation.low, label: "33rd %ile"}], {
+      x: "x", 
+      y: 0,
+      text: "label",
+      dy: -10,
+      fill: "orange",
+      fontSize: 10
+    }),
+    Plot.text([{x: percentileCutoffs.weatherStation.moderate, label: "67th %ile"}], {
+      x: "x",
+      y: 0,
+      text: "label",
+      dy: -10,
+      fill: "red",
+      fontSize: 10
+    })
+  ]
+})
+
+Plot.plot({
+  title: "Cloud Coverage Distribution",
+  marginLeft: 60,
+  width: 550,
+  height: 300,
+  x: {
+    label: "Cloud Coverage (mean annual) →",
+    labelAnchor: "center"
+  },
+  y: {
+    label: "↑ Count",
+    labelAnchor: "center"
+  },
+  marks: [
+    Plot.rectY(enrichedData.filter(d => d["cloud-coverage_meannannual"] != null), 
+      Plot.binX(
+        {y: "count"}, 
+        {x: "cloud-coverage_meannannual", fill: "#807dba", thresholds: 30}
+      )
+    ),
+    Plot.ruleX([percentileCutoffs.cloudCover.low], {stroke: "orange", strokeWidth: 2, strokeDasharray: "4,4"}),
+    Plot.ruleX([percentileCutoffs.cloudCover.moderate], {stroke: "red", strokeWidth: 2, strokeDasharray: "4,4"}),
+    Plot.text([{x: percentileCutoffs.cloudCover.low, label: "33rd %ile"}], {
+      x: "x",
+      y: 0,
+      text: "label",
+      dy: -10,
+      fill: "orange",
+      fontSize: 10
+    }),
+    Plot.text([{x: percentileCutoffs.cloudCover.moderate, label: "67th %ile"}], {
+      x: "x",
+      y: 0,
+      text: "label",
+      dy: -10,
+      fill: "red",
+      fontSize: 10
+    })
+  ]
+})
+
+html`</div>`
+```
+
+
+### Summary Statistics
+
+```{ojs}
+//| echo: false
+
+summaryStats = {
+  const ws = filteredData.map(d => d["weather-station_density"]).filter(v => v != null && !isNaN(v));
+  const cc = filteredData.map(d => d["cloud-coverage_meannannual"]).filter(v => v != null && !isNaN(v));
+  
+  return {
+    weatherStation: {
+      count: ws.length,
+      mean: d3.mean(ws),
+      median: d3.median(ws),
+      min: d3.min(ws),
+      max: d3.max(ws),
+      stronger: ws.filter(v => v > percentileCutoffs.weatherStation.moderate).length,
+      moderate: ws.filter(v => v > percentileCutoffs.weatherStation.low && v <= percentileCutoffs.weatherStation.moderate).length,
+      weaker: ws.filter(v => v <= percentileCutoffs.weatherStation.low).length
+    },
+    cloudCover: {
+      count: cc.length,
+      mean: d3.mean(cc),
+      median: d3.median(cc),
+      min: d3.min(cc),
+      max: d3.max(cc),
+      stronger: cc.filter(v => v <= percentileCutoffs.cloudCover.low).length,
+      moderate: cc.filter(v => v > percentileCutoffs.cloudCover.low && v <= percentileCutoffs.cloudCover.moderate).length,
+      weaker: cc.filter(v => v > percentileCutoffs.cloudCover.moderate).length
+    }
+  };
+}
+
+html`
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0;">
+  <div style="padding: 1.5rem; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    <h4 style="margin-top: 0; color: #2e7d32; display: flex; align-items: center; gap: 0.5rem;">
+      <span style="font-size: 1.5rem;">📊</span> Weather Station Density
+    </h4>
+    <table style="width: 100%; font-size: 0.95rem;">
+      <tr><td style="padding: 0.3rem 0;">Count:</td><td><strong>${summaryStats.weatherStation.count}</strong></td></tr>
+      <tr><td style="padding: 0.3rem 0;">Mean:</td><td><strong>${summaryStats.weatherStation.mean?.toFixed(4) ?? 'N/A'}</strong></td></tr>
+      <tr><td style="padding: 0.3rem 0;">Median:</td><td><strong>${summaryStats.weatherStation.median?.toFixed(4) ?? 'N/A'}</strong></td></tr>
+      <tr><td style="padding: 0.3rem 0;">Range:</td><td><strong>${summaryStats.weatherStation.min?.toFixed(4)} - ${summaryStats.weatherStation.max?.toFixed(4)}</strong></td></tr>
+      <tr style="border-top: 1px solid rgba(0,0,0,0.1);"><td colspan="2" style="padding-top: 0.5rem; font-weight: 600; color: #2e7d32;">Classification</td></tr>
+      <tr><td style="padding: 0.3rem 0;">Stronger:</td><td><strong>${summaryStats.weatherStation.stronger}</strong> (${((summaryStats.weatherStation.stronger/summaryStats.weatherStation.count)*100).toFixed(1)}%)</td></tr>
+      <tr><td style="padding: 0.3rem 0;">Moderate:</td><td><strong>${summaryStats.weatherStation.moderate}</strong> (${((summaryStats.weatherStation.moderate/summaryStats.weatherStation.count)*100).toFixed(1)}%)</td></tr>
+      <tr><td style="padding: 0.3rem 0;">Weaker:</td><td><strong>${summaryStats.weatherStation.weaker}</strong> (${((summaryStats.weatherStation.weaker/summaryStats.weatherStation.count)*100).toFixed(1)}%)</td></tr>
+    </table>
+  </div>
+  
+  <div style="padding: 1.5rem; background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    <h4 style="margin-top: 0; color: #6a1b9a; display: flex; align-items: center; gap: 0.5rem;">
+      <span style="font-size: 1.5rem;">☁️</span> Cloud Coverage
+    </h4>
+    <table style="width: 100%; font-size: 0.95rem;">
+      <tr><td style="padding: 0.3rem 0;">Count:</td><td><strong>${summaryStats.cloudCover.count}</strong></td></tr>
+      <tr><td style="padding: 0.3rem 0;">Mean:</td><td><strong>${summaryStats.cloudCover.mean?.toFixed(4) ?? 'N/A'}</strong></td></tr>
+      <tr><td style="padding: 0.3rem 0;">Median:</td><td><strong>${summaryStats.cloudCover.median?.toFixed(4) ?? 'N/A'}</strong></td></tr>
+      <tr><td style="padding: 0.3rem 0;">Range:</td><td><strong>${summaryStats.cloudCover.min?.toFixed(4)} - ${summaryStats.cloudCover.max?.toFixed(4)}</strong></td></tr>
+      <tr style="border-top: 1px solid rgba(0,0,0,0.1);"><td colspan="2" style="padding-top: 0.5rem; font-weight: 600; color: #6a1b9a;">Classification</td></tr>
+      <tr><td style="padding: 0.3rem 0;">Stronger:</td><td><strong>${summaryStats.cloudCover.stronger}</strong> (${((summaryStats.cloudCover.stronger/summaryStats.cloudCover.count)*100).toFixed(1)}%)</td></tr>
+      <tr><td style="padding: 0.3rem 0;">Moderate:</td><td><strong>${summaryStats.cloudCover.moderate}</strong> (${((summaryStats.cloudCover.moderate/summaryStats.cloudCover.count)*100).toFixed(1)}%)</td></tr>
+      <tr><td style="padding: 0.3rem 0;">Weaker:</td><td><strong>${summaryStats.cloudCover.weaker}</strong> (${((summaryStats.cloudCover.weaker/summaryStats.cloudCover.count)*100).toFixed(1)}%)</td></tr>
+    </table>
+  </div>
+</div>
+`
+```
+
+### Data Quality Indicators
+
+```{ojs}
+//| echo: false
+
+dataQuality = {
+  const totalRecords = filteredData.length;
+  const wsComplete = filteredData.filter(d => d["weather-station_density"] != null && !isNaN(d["weather-station_density"])).length;
+  const ccComplete = filteredData.filter(d => d["cloud-coverage_meannannual"] != null && !isNaN(d["cloud-coverage_meannannual"])).length;
+  const geomComplete = currentWKBData.length;
+  
+  return {
+    total: totalRecords,
+    weatherStation: {
+      complete: wsComplete,
+      percentage: (wsComplete / totalRecords * 100).toFixed(1)
+    },
+    cloudCover: {
+      complete: ccComplete,
+      percentage: (ccComplete / totalRecords * 100).toFixed(1)
+    },
+    geometry: {
+      complete: geomComplete,
+      percentage: (geomComplete / totalRecords * 100).toFixed(1)
+    }
+  };
+}
+
+html`
+<div style="padding: 1rem; background: #fff9e6; border-radius: 8px; border: 1px solid #ffe57f; margin: 1rem 0;">
+  <h4 style="margin-top: 0; color: #f57c00;">📋 Data Completeness</h4>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+    <div>
+      <strong>Weather Stations:</strong><br>
+      ${dataQuality.weatherStation.complete} / ${dataQuality.total} 
+      (${dataQuality.weatherStation.percentage}%)
+    </div>
+    <div>
+      <strong>Cloud Coverage:</strong><br>
+      ${dataQuality.cloudCover.complete} / ${dataQuality.total} 
+      (${dataQuality.cloudCover.percentage}%)
+    </div>
+    <div>
+      <strong>Geometry Data:</strong><br>
+      ${dataQuality.geometry.complete} / ${dataQuality.total} 
+      (${dataQuality.geometry.percentage}%)
+    </div>
+  </div>
+</div>
+`
+```
+
 
 # Examples
 
@@ -128,34 +791,7 @@ data = new Object([
 }
 ```
 
-## `{ojs} keyInsights` {class='key-insights' #key-insight-text}
 
-# `{ojs} heading1` {#example-heading1}
-
-{{< include _template_plot.qmd >}}
-
-<!-- The above ^  {{< include path.qmd >}} alows for modular import of code.
-This is performed on build, so there are no performance implications,
-but be aware of that the global namespaces are shared, so the same variable
-or module imported in each will result in an error -->
-
-{{< lipsum 2 >}}
-
-# `{ojs} heading2` {#example-heading2}
-
-{{< lipsum 2 >}}
-
-# `{ojs} heading3` {#example-heading3}
-
-{{< lipsum 1 >}}
-
-# `{ojs} heading4` {#example-heading4}
-
-{{< lipsum 1 >}}
-
-# `{ojs} nbSummary` {#summary}
-
-{{< lipsum 1 >}}
 
 # `{ojs} appendix` {#appendix}
 
