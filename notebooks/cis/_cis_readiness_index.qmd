@@ -1,0 +1,884 @@
+```{ojs}
+section1Title = _lang(cis.section1Title)
+```
+
+# `{ojs} section1Title` {#section1}
+
+```{ojs}
+// Load CIS data from CSV (simpler and more reliable)
+cisData = await d3.csv("/data/cis/CIS_DATA.csv", d3.autoType)
+```
+
+```{ojs}
+// Import boundary helper functions
+import { geojsonFromWKB_wk, read_topojson } from "/helpers/boundaries.js"
+import { boundary_paths } from "/helpers/data.js"
+```
+
+```{ojs}
+// Load boundary data
+admin0Boundaries = await read_topojson(boundary_paths.admin0_path, "atlas_gaul24_a0_africa")
+admin1Boundaries = await read_topojson(boundary_paths.admin1_path, "atlas_gaul24_a1_africa")
+admin2Boundaries = await read_topojson(boundary_paths.admin2_path, "atlas_gaul_a2_africa_simple-lowres")
+```
+
+```{ojs}
+// Calculate Africa-wide tercile cutoffs for classification
+africaTerciles = {
+  const weatherStations = cisData.map(d => d["weather-station_density"]).filter(d => d != null);
+  const cloudCover = cisData.map(d => d["cloud-coverage_meanannual"]).filter(d => d != null);
+  const precipAgreement = cisData.map(d => parseFloat(d["cv-precipitation_agreement"])).filter(d => !isNaN(d));
+  const shortTermSkill = cisData.map(d => d["short-term_frcst_skill"]).filter(d => d != null);
+  const seasonalSkill = cisData.map(d => d["seasonal_frcst_skill"]).filter(d => d != null);
+  const cisReadiness = cisData.map(d => d["cis_readiness_index"]).filter(d => d != null);
+  
+  const quantile = (arr, q) => {
+    const sorted = arr.slice().sort((a, b) => a - b);
+    const pos = (sorted.length - 1) * q;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    return sorted[base + 1] !== undefined 
+      ? sorted[base] + rest * (sorted[base + 1] - sorted[base])
+      : sorted[base];
+  };
+  
+  return {
+    weatherStation: {
+      p33: quantile(weatherStations, 0.33),
+      p66: quantile(weatherStations, 0.66)
+    },
+    cloudCover: {
+      p33: quantile(cloudCover, 0.33),
+      p66: quantile(cloudCover, 0.66)
+    },
+    precipAgreement: {
+      p33: quantile(precipAgreement, 0.33),
+      p66: quantile(precipAgreement, 0.66)
+    },
+    shortTermSkill: {
+      p33: quantile(shortTermSkill, 0.33),
+      p66: quantile(shortTermSkill, 0.66)
+    },
+    seasonalSkill: {
+      p33: quantile(seasonalSkill, 0.33),
+      p66: quantile(seasonalSkill, 0.66)
+    },
+    cisReadiness: {
+      p33: quantile(cisReadiness, 0.33),
+      p66: quantile(cisReadiness, 0.66)
+    }
+  };
+}
+```
+
+```{ojs}
+// Classification functions
+classifyTercile = (value, terciles) => {
+  if (value == null || isNaN(value)) return "No data";
+  if (value <= terciles.p33) return "Weaker";
+  if (value <= terciles.p66) return "Moderate";
+  return "Stronger";
+}
+
+classifyPrecipAgreement = (value) => {
+  if (value == null || isNaN(value)) return "No data";
+  const numVal = parseFloat(value);
+  if (numVal === 0) return "No agreement (Very Low)";
+  if (numVal <= 2) return "Partial agreement (Moderate)";
+  if (numVal === 3) return "High agreement (High)";
+  return "Full agreement (Very High)";
+}
+
+classifyForecastSkill = (shortTerm, longTerm) => {
+  if (shortTerm == null || longTerm == null) return { interpretation: "No data", implication: "Insufficient data" };
+  
+  const delta = shortTerm - longTerm;
+  
+  if (shortTerm > 0.6 && longTerm > 0.6) {
+    return {
+      interpretation: "Reliable forecasts at both horizons",
+      implication: "Scale CIS for advisories + finance"
+    };
+  } else if (shortTerm > 0.6 && longTerm < 0.4 && delta > 0.2) {
+    return {
+      interpretation: "Rapid loss of skill",
+      implication: "Limit use to short-term planning"
+    };
+  } else if (shortTerm < 0.4 && longTerm < 0.4) {
+    return {
+      interpretation: "Weak predictability",
+      implication: "Use climatology / caution"
+    };
+  } else {
+    return {
+      interpretation: "Uncertain but usable",
+      implication: "Blend with historical averages"
+    };
+  }
+}
+```
+
+```{ojs}
+// Get unique admin values for selectors
+uniqueAdmin0 = Array.from(new Set(cisData.map(d => d.admin0_name))).sort()
+uniqueAdmin1 = (admin0Selection) => {
+  if (!admin0Selection || admin0Selection.length === 0) return [];
+  return Array.from(new Set(
+    cisData
+      .filter(d => admin0Selection.includes(d.admin0_name))
+      .map(d => d.admin1_name)
+      .filter(d => d != null)
+  )).sort();
+}
+uniqueAdmin2 = (admin0Selection, admin1Selection) => {
+  if (!admin1Selection || admin1Selection.length === 0) return [];
+  return Array.from(new Set(
+    cisData
+      .filter(d => 
+        admin0Selection.includes(d.admin0_name) && 
+        admin1Selection.includes(d.admin1_name)
+      )
+      .map(d => d.admin2_name)
+      .filter(d => d != null)
+  )).sort();
+}
+```
+
+```{ojs}
+// Import multi-select component (only once for the entire section)
+import { dropdownInput as multiSelect, dropdownCSS } from "/helpers/multiSelect.ojs"
+import { downloadButton } from "/helpers/uiComponents.ojs"
+dropdownCSS
+```
+
+```{ojs}
+// Admin level selectors
+viewof selectedAdmin0 = multiSelect({
+  inputLabel: _lang(cis.admin0Label),
+  inputId: "admin0Select",
+  placeholderText: _lang(cis.admin0Placeholder),
+  options: uniqueAdmin0.map(d => ({ value: d, label: d })),
+  selected: ['Kenya']
+})
+```
+
+```{ojs}
+admin1Options = uniqueAdmin1(selectedAdmin0)
+
+viewof selectedAdmin1 = multiSelect({
+  inputLabel: _lang(cis.admin1Label),
+  inputId: "admin1Select",
+  placeholderText: _lang(cis.admin1Placeholder),
+  options: admin1Options.map(d => ({ value: d, label: d })),
+  selected: admin1Options.length > 0 ? admin1Options : []
+})
+```
+
+```{ojs}
+admin2Options = uniqueAdmin2(selectedAdmin0, selectedAdmin1)
+
+viewof selectedAdmin2 = multiSelect({
+  inputLabel: _lang(cis.admin2Label),
+  inputId: "admin2Select",
+  placeholderText: _lang(cis.admin2Placeholder),
+  options: admin2Options.map(d => ({ value: d, label: d })),
+  selected: []
+})
+```
+
+```{ojs}
+// Determine current admin level and filter data
+currentAdminLevel = selectedAdmin2.length > 0 ? 2 : (selectedAdmin1.length > 0 ? 1 : 0)
+
+filteredData = {
+  if (currentAdminLevel === 2) {
+    return cisData.filter(d => 
+      selectedAdmin0.includes(d.admin0_name) &&
+      selectedAdmin1.includes(d.admin1_name) &&
+      selectedAdmin2.includes(d.admin2_name)
+    );
+  } else if (currentAdminLevel === 1) {
+    return cisData.filter(d => 
+      selectedAdmin0.includes(d.admin0_name) &&
+      selectedAdmin1.includes(d.admin1_name)
+    );
+  } else {
+    return cisData.filter(d => selectedAdmin0.includes(d.admin0_name));
+  }
+}
+```
+
+```{ojs}
+// Breadcrumb navigation
+breadcrumb = {
+  const parts = [];
+  if (selectedAdmin0.length === 1) parts.push(selectedAdmin0[0]);
+  else if (selectedAdmin0.length > 1) parts.push(`${selectedAdmin0.length} countries`);
+  
+  if (selectedAdmin1.length === 1) parts.push(selectedAdmin1[0]);
+  else if (selectedAdmin1.length > 1) parts.push(`${selectedAdmin1.length} admin1 regions`);
+  
+  if (selectedAdmin2.length === 1) parts.push(selectedAdmin2[0]);
+  else if (selectedAdmin2.length > 1) parts.push(`${selectedAdmin2.length} admin2 regions`);
+  
+  return parts.join(' → ');
+}
+```
+
+```{ojs}
+// Display breadcrumb
+html`<div style="padding: 10px; background: #f0f0f0; border-radius: 5px; margin: 10px 0;">
+  <strong>${_lang(cis.currentSelection)}:</strong> ${breadcrumb}
+</div>`
+```
+
+---
+
+```{ojs}
+section11Title = _lang(cis.section11Title)
+```
+
+## `{ojs} section11Title` {#section1-1}
+
+```{ojs}
+section11Content = _lang(cis.section11Content)
+```
+
+`{ojs} section11Content`
+
+```{ojs}
+// Section 1.1 Controls
+viewof s11ViewType = Inputs.radio(["Map", "Table"], {
+  label: _lang(cis.viewTypeLabel),
+  value: "Map"
+})
+
+viewof s11MapMode = Inputs.radio(["Raw values", "Classified"], {
+  label: _lang(cis.mapModeLabel),
+  value: "Classified"
+})
+```
+
+```{ojs}
+// Prepare data for Section 1.1 maps
+s11MapData = {
+  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
+                     currentAdminLevel === 1 ? admin1Boundaries :
+                     admin0Boundaries;
+  
+  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul0_code';
+  
+  // Join data with boundaries
+  const features = boundaries.features.map(feature => {
+    const gaulCode = feature.properties[gaulCodeField];
+    const dataRow = filteredData.find(d => d[gaulCodeField] === gaulCode);
+    
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        weatherStation: dataRow?.["weather-station_density"],
+        cloudCover: dataRow?.["cloud-coverage_meanannual"],
+        weatherStationClass: dataRow ? classifyTercile(dataRow["weather-station_density"], africaTerciles.weatherStation) : "No data",
+        cloudCoverClass: dataRow ? classifyTercile(dataRow["cloud-coverage_meanannual"], africaTerciles.cloudCover) : "No data"
+      }
+    };
+  }).filter(f => f.properties.weatherStation != null || f.properties.cloudCover != null);
+  
+  return { type: "FeatureCollection", features };
+}
+```
+
+```{ojs}
+// Section 1.1 Maps
+{
+  if (s11ViewType === "Map") {
+    const width = 900;
+    const height = 400;
+    
+    // Color scale for 0-1 values
+    const colorScale = d3.scaleSequential(d3.interpolateYlGnBu).domain([0, 1]);
+    
+    // Classification color scale
+    const classColorScale = (className) => {
+      if (className === "Weaker") return "#fee5d9";
+      if (className === "Moderate") return "#fcae91";
+      if (className === "Stronger") return "#fb6a4a";
+      return "#ddd";
+    };
+    
+    const useRaw = s11MapMode === "Raw values";
+    
+    return htl.html`<div style="display: flex; gap: 20px;">
+      <div style="flex: 1;">
+        <h4>${_lang(cis.weatherStationLabel)}</h4>
+        ${Plot.plot({
+          width: width / 2,
+          height: height,
+          projection: "mercator",
+          color: {
+            type: useRaw ? "linear" : "categorical",
+            domain: useRaw ? [0, 1] : ["Weaker", "Moderate", "Stronger"],
+            range: useRaw ? d3.interpolateYlGnBu : ["#fee5d9", "#fcae91", "#fb6a4a"],
+            legend: true,
+            label: useRaw ? "Density (0-1)" : "Classification"
+          },
+          marks: [
+            Plot.geo(s11MapData, {
+              fill: useRaw ? d => d.properties.weatherStation : d => d.properties.weatherStationClass,
+              stroke: "#333",
+              strokeWidth: 0.5,
+              title: d => `${d.properties.admin0_name || d.properties.admin1_name || d.properties.admin2_name}\n` +
+                          `Weather Station: ${d.properties.weatherStation?.toFixed(3) || 'N/A'}\n` +
+                          `Class: ${d.properties.weatherStationClass}`
+            })
+          ]
+        })}
+      </div>
+      <div style="flex: 1;">
+        <h4>${_lang(cis.cloudCoverLabel)}</h4>
+        ${Plot.plot({
+          width: width / 2,
+          height: height,
+          projection: "mercator",
+          color: {
+            type: useRaw ? "linear" : "categorical",
+            domain: useRaw ? [0, 1] : ["Weaker", "Moderate", "Stronger"],
+            range: useRaw ? d3.interpolateYlGnBu : ["#fee5d9", "#fcae91", "#fb6a4a"],
+            legend: true,
+            label: useRaw ? "Coverage (0-1)" : "Classification"
+          },
+          marks: [
+            Plot.geo(s11MapData, {
+              fill: useRaw ? d => d.properties.cloudCover : d => d.properties.cloudCoverClass,
+              stroke: "#333",
+              strokeWidth: 0.5,
+              title: d => `${d.properties.admin0_name || d.properties.admin1_name || d.properties.admin2_name}\n` +
+                          `Cloud Cover: ${d.properties.cloudCover?.toFixed(3) || 'N/A'}\n` +
+                          `Class: ${d.properties.cloudCoverClass}`
+            })
+          ]
+        })}
+      </div>
+    </div>`;
+  } else {
+    // Table view
+    const tableData = filteredData.map(d => ({
+      "Admin Name": d[`admin${currentAdminLevel}_name`] || d.admin0_name,
+      "Weather Station (Raw)": d["weather-station_density"]?.toFixed(3) || "N/A",
+      "Weather Station (Class)": classifyTercile(d["weather-station_density"], africaTerciles.weatherStation),
+      "Cloud Cover (Raw)": d["cloud-coverage_meanannual"]?.toFixed(3) || "N/A",
+      "Cloud Cover (Class)": classifyTercile(d["cloud-coverage_meanannual"], africaTerciles.cloudCover)
+    }));
+    
+    return Inputs.table(tableData, {
+      sort: "Admin Name",
+      rows: 20
+    });
+  }
+}
+```
+
+```{ojs}
+// Section 1.1 Dynamic Insight
+s11Insight = {
+  const avgWeatherStation = d3.mean(filteredData, d => d["weather-station_density"]);
+  const avgCloudCover = d3.mean(filteredData, d => d["cloud-coverage_meanannual"]);
+  
+  const wsClass = classifyTercile(avgWeatherStation, africaTerciles.weatherStation).toLowerCase();
+  const ccClass = classifyTercile(avgCloudCover, africaTerciles.cloudCover).toLowerCase();
+  
+  const capacity = (wsClass === "stronger" && ccClass === "stronger") ? "high" :
+                   (wsClass === "weaker" || ccClass === "weaker") ? "low" : "moderate";
+  
+  return _lang({
+    en: `In ${breadcrumb}, ground-station density is ${avgWeatherStation?.toFixed(3)} and clear-sky fraction ${avgCloudCover?.toFixed(3)}, indicating ${capacity} capacity for both in-situ and optical observation. Classification is relative to Sub-Saharan Africa.`,
+    fr: `Dans ${breadcrumb}, la densité des stations au sol est ${avgWeatherStation?.toFixed(3)} et la fraction de ciel clair ${avgCloudCover?.toFixed(3)}, indiquant une capacité ${capacity} pour l'observation in-situ et optique. La classification est relative à l'Afrique subsaharienne.`
+  });
+}
+```
+
+::: {.key-insights}
+`{ojs} s11Insight`
+:::
+
+---
+
+```{ojs}
+section12Title = _lang(cis.section12Title)
+```
+
+## `{ojs} section12Title` {#section1-2}
+
+```{ojs}
+section12Content = _lang(cis.section12Content)
+```
+
+`{ojs} section12Content`
+
+```{ojs}
+// Section 1.2 Controls
+viewof s12ViewType = Inputs.radio(["Map", "Table"], {
+  label: _lang(cis.viewTypeLabel),
+  value: "Map"
+})
+
+viewof s12MapMode = Inputs.radio(["Raw values", "Classified"], {
+  label: _lang(cis.mapModeLabel),
+  value: "Classified"
+})
+```
+
+```{ojs}
+// Prepare data for Section 1.2 map
+s12MapData = {
+  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
+                     currentAdminLevel === 1 ? admin1Boundaries :
+                     admin0Boundaries;
+  
+  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul0_code';
+  
+  const features = boundaries.features.map(feature => {
+    const gaulCode = feature.properties[gaulCodeField];
+    const dataRow = filteredData.find(d => d[gaulCodeField] === gaulCode);
+    
+    const precipValue = dataRow ? parseFloat(dataRow["cv-precipitation_agreement"]) : null;
+    
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        precipAgreement: precipValue,
+        precipAgreementClass: classifyPrecipAgreement(precipValue)
+      }
+    };
+  }).filter(f => f.properties.precipAgreement != null);
+  
+  return { type: "FeatureCollection", features };
+}
+```
+
+```{ojs}
+// Section 1.2 Map/Table
+{
+  if (s12ViewType === "Map") {
+    const useRaw = s12MapMode === "Raw values";
+    
+    return Plot.plot({
+      width: 900,
+      height: 500,
+      projection: "mercator",
+      color: {
+        type: useRaw ? "linear" : "categorical",
+        domain: useRaw ? [0, 4] : ["No agreement (Very Low)", "Partial agreement (Moderate)", "High agreement (High)", "Full agreement (Very High)"],
+        range: useRaw ? d3.interpolateViridis : ["#fee5d9", "#fcae91", "#fb6a4a", "#a50f15"],
+        legend: true,
+        label: useRaw ? "Agreement (0-4)" : "Classification"
+      },
+      marks: [
+        Plot.geo(s12MapData, {
+          fill: useRaw ? d => d.properties.precipAgreement : d => d.properties.precipAgreementClass,
+          stroke: "#333",
+          strokeWidth: 0.5,
+          title: d => `${d.properties.admin0_name || d.properties.admin1_name || d.properties.admin2_name}\n` +
+                      `Satellite Agreement: ${d.properties.precipAgreement?.toFixed(1) || 'N/A'}\n` +
+                      `Class: ${d.properties.precipAgreementClass}`
+        })
+      ]
+    });
+  } else {
+    const tableData = filteredData.map(d => ({
+      "Admin Name": d[`admin${currentAdminLevel}_name`] || d.admin0_name,
+      "Satellite Agreement (Raw)": parseFloat(d["cv-precipitation_agreement"])?.toFixed(1) || "N/A",
+      "Satellite Agreement (Class)": classifyPrecipAgreement(d["cv-precipitation_agreement"])
+    }));
+    
+    return Inputs.table(tableData, {
+      sort: "Admin Name",
+      rows: 20
+    });
+  }
+}
+```
+
+```{ojs}
+// Download button for Section 1.2
+downloadButton(
+  filteredData.map(d => ({
+    "Admin Name": d[`admin${currentAdminLevel}_name`] || d.admin0_name,
+    "Satellite Agreement": parseFloat(d["cv-precipitation_agreement"]),
+    "Classification": classifyPrecipAgreement(d["cv-precipitation_agreement"])
+  })),
+  "cis_precipitation_agreement",
+  _lang(cis.downloadLabel)
+)
+```
+
+```{ojs}
+// Section 1.2 Dynamic Insight
+s12Insight = {
+  const avgAgreement = d3.mean(filteredData, d => parseFloat(d["cv-precipitation_agreement"]));
+  
+  let agreementLevel = "no";
+  if (avgAgreement >= 3) agreementLevel = "high";
+  else if (avgAgreement >= 1) agreementLevel = "partial";
+  
+  return _lang({
+    en: `In ${breadcrumb}, consistency across satellite data sources is ${avgAgreement?.toFixed(2)} indicating ${agreementLevel} agreement.`,
+    fr: `Dans ${breadcrumb}, la cohérence entre les sources de données satellites est ${avgAgreement?.toFixed(2)} indiquant un accord ${agreementLevel}.`
+  });
+}
+```
+
+::: {.key-insights}
+`{ojs} s12Insight`
+:::
+
+---
+
+```{ojs}
+section13Title = _lang(cis.section13Title)
+```
+
+## `{ojs} section13Title` {#section1-3}
+
+```{ojs}
+section13Content = _lang(cis.section13Content)
+```
+
+`{ojs} section13Content`
+
+```{ojs}
+// Section 1.3 Controls
+viewof s13ViewType = Inputs.radio(["Chart", "Table"], {
+  label: _lang(cis.viewTypeLabel),
+  value: "Chart"
+})
+
+viewof s13SortBy = Inputs.radio(["Short-term skill", "Long-term skill", "Difference (Δ)"], {
+  label: _lang(cis.sortByLabel),
+  value: "Short-term skill"
+})
+```
+
+```{ojs}
+// Prepare data for Section 1.3
+s13Data = {
+  const data = filteredData.map(d => {
+    const shortTerm = d["short-term_frcst_skill"];
+    const longTerm = d["seasonal_frcst_skill"];
+    const classification = classifyForecastSkill(shortTerm, longTerm);
+    
+    return {
+      admin: d[`admin${currentAdminLevel}_name`] || d.admin0_name,
+      shortTerm: shortTerm,
+      longTerm: longTerm,
+      delta: shortTerm && longTerm ? shortTerm - longTerm : null,
+      interpretation: classification.interpretation,
+      implication: classification.implication
+    };
+  }).filter(d => d.shortTerm != null || d.longTerm != null);
+  
+  // Sort data
+  if (s13SortBy === "Short-term skill") {
+    data.sort((a, b) => (b.shortTerm || 0) - (a.shortTerm || 0));
+  } else if (s13SortBy === "Long-term skill") {
+    data.sort((a, b) => (b.longTerm || 0) - (a.longTerm || 0));
+  } else {
+    data.sort((a, b) => (b.delta || 0) - (a.delta || 0));
+  }
+  
+  return data;
+}
+```
+
+```{ojs}
+// Section 1.3 Chart/Table
+{
+  if (s13ViewType === "Chart") {
+    // Prepare data for grouped bar chart
+    const chartData = s13Data.flatMap(d => [
+      { admin: d.admin, type: "Short-term", value: d.shortTerm },
+      { admin: d.admin, type: "Long-term", value: d.longTerm }
+    ]);
+    
+    return Plot.plot({
+      width: 900,
+      height: Math.max(400, s13Data.length * 25),
+      marginLeft: 150,
+      x: { label: "Forecast Skill (RPSS)", domain: [0, 1] },
+      y: { label: null },
+      color: { 
+        domain: ["Short-term", "Long-term"],
+        range: ["#4575b4", "#d73027"],
+        legend: true
+      },
+      marks: [
+        Plot.barX(chartData, {
+          x: "value",
+          y: "admin",
+          fill: "type",
+          title: d => `${d.admin}\n${d.type}: ${d.value?.toFixed(3) || 'N/A'}`
+        }),
+        Plot.ruleX([0.4, 0.6], { stroke: "#999", strokeDasharray: "4,4" })
+      ]
+    });
+  } else {
+    const tableData = s13Data.map(d => ({
+      "Admin Name": d.admin,
+      "Short-term": d.shortTerm?.toFixed(3) || "N/A",
+      "Long-term": d.longTerm?.toFixed(3) || "N/A",
+      "Δ": d.delta?.toFixed(3) || "N/A",
+      "Interpretation": d.interpretation,
+      "CIS Implication": d.implication
+    }));
+    
+    return Inputs.table(tableData, {
+      rows: 20
+    });
+  }
+}
+```
+
+```{ojs}
+// Download button for Section 1.3
+downloadButton(
+  s13Data.map(d => ({
+    "Admin Name": d.admin,
+    "Short-term Skill": d.shortTerm,
+    "Long-term Skill": d.longTerm,
+    "Delta": d.delta,
+    "Interpretation": d.interpretation,
+    "CIS Implication": d.implication
+  })),
+  "cis_forecast_skill",
+  _lang(cis.downloadLabel)
+)
+```
+
+```{ojs}
+// Section 1.3 Dynamic Insight
+s13Insight = {
+  const avgShortTerm = d3.mean(filteredData, d => d["short-term_frcst_skill"]);
+  const avgLongTerm = d3.mean(filteredData, d => d["seasonal_frcst_skill"]);
+  
+  const classification = classifyForecastSkill(avgShortTerm, avgLongTerm);
+  
+  return _lang({
+    en: `In ${breadcrumb}, short-term forecast skill averages ${avgShortTerm?.toFixed(3)} while long-term skill drops to ${avgLongTerm?.toFixed(3)}. Predictability is ${classification.interpretation.toLowerCase()}.`,
+    fr: `Dans ${breadcrumb}, la compétence de prévision à court terme est en moyenne ${avgShortTerm?.toFixed(3)} tandis que la compétence à long terme chute à ${avgLongTerm?.toFixed(3)}. La prévisibilité est ${classification.interpretation.toLowerCase()}.`
+  });
+}
+```
+
+::: {.key-insights}
+`{ojs} s13Insight`
+:::
+
+---
+
+```{ojs}
+section14Title = _lang(cis.section14Title)
+```
+
+## `{ojs} section14Title` {#section1-4}
+
+```{ojs}
+section14Content = _lang(cis.section14Content)
+```
+
+`{ojs} section14Content`
+
+```{ojs}
+// Section 1.4 Controls
+viewof s14ViewType = Inputs.radio(["Map", "Table", "Heatmap"], {
+  label: _lang(cis.viewTypeLabel),
+  value: "Map"
+})
+
+viewof s14Threshold = Inputs.range([0, 1], {
+  label: _lang(cis.thresholdLabel),
+  value: 0.5,
+  step: 0.05
+})
+```
+
+```{ojs}
+// Prepare data for Section 1.4
+s14MapData = {
+  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
+                     currentAdminLevel === 1 ? admin1Boundaries :
+                     admin0Boundaries;
+  
+  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul0_code';
+  
+  const features = boundaries.features.map(feature => {
+    const gaulCode = feature.properties[gaulCodeField];
+    const dataRow = filteredData.find(d => d[gaulCodeField] === gaulCode);
+    
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        cisReadiness: dataRow?.["cis_readiness_index"],
+        cisReadinessClass: dataRow ? classifyTercile(dataRow["cis_readiness_index"], africaTerciles.cisReadiness) : "No data",
+        weatherStation: dataRow?.["weather-station_density"],
+        weatherStationClass: dataRow ? classifyTercile(dataRow["weather-station_density"], africaTerciles.weatherStation) : "No data",
+        cloudCover: dataRow?.["cloud-coverage_meanannual"],
+        cloudCoverClass: dataRow ? classifyTercile(dataRow["cloud-coverage_meanannual"], africaTerciles.cloudCover) : "No data",
+        precipAgreement: dataRow ? parseFloat(dataRow["cv-precipitation_agreement"]) : null,
+        precipAgreementClass: dataRow ? classifyPrecipAgreement(dataRow["cv-precipitation_agreement"]) : "No data",
+        shortTerm: dataRow?.["short-term_frcst_skill"],
+        longTerm: dataRow?.["seasonal_frcst_skill"]
+      }
+    };
+  }).filter(f => f.properties.cisReadiness != null);
+  
+  return { type: "FeatureCollection", features };
+}
+```
+
+```{ojs}
+// Section 1.4 Visualization
+{
+  if (s14ViewType === "Map") {
+    return Plot.plot({
+      width: 900,
+      height: 500,
+      projection: "mercator",
+      color: {
+        type: "linear",
+        domain: [0, 1],
+        range: d3.interpolateRdYlGn,
+        legend: true,
+        label: "CIS Readiness Index (0-1)"
+      },
+      marks: [
+        Plot.geo(s14MapData, {
+          fill: d => d.properties.cisReadiness,
+          stroke: "#333",
+          strokeWidth: 0.5,
+          title: d => `${d.properties.admin0_name || d.properties.admin1_name || d.properties.admin2_name}\n` +
+                      `CIS Readiness: ${d.properties.cisReadiness?.toFixed(3) || 'N/A'}\n` +
+                      `Class: ${d.properties.cisReadinessClass}\n` +
+                      `Weather Station: ${d.properties.weatherStationClass}\n` +
+                      `Cloud Cover: ${d.properties.cloudCoverClass}\n` +
+                      `Precip Agreement: ${d.properties.precipAgreementClass}\n` +
+                      `Short-term: ${d.properties.shortTerm?.toFixed(3) || 'N/A'}\n` +
+                      `Long-term: ${d.properties.longTerm?.toFixed(3) || 'N/A'}`
+        }),
+        Plot.ruleX([s14Threshold])
+      ]
+    });
+  } else if (s14ViewType === "Table") {
+    const tableData = filteredData.map(d => ({
+      "Admin Name": d[`admin${currentAdminLevel}_name`] || d.admin0_name,
+      "CIS Readiness (Raw)": d["cis_readiness_index"]?.toFixed(3) || "N/A",
+      "CIS Readiness (Class)": classifyTercile(d["cis_readiness_index"], africaTerciles.cisReadiness),
+      "Weather Station (Class)": classifyTercile(d["weather-station_density"], africaTerciles.weatherStation),
+      "Cloud Cover (Class)": classifyTercile(d["cloud-coverage_meanannual"], africaTerciles.cloudCover),
+      "Precip Agreement (Class)": classifyPrecipAgreement(d["cv-precipitation_agreement"]),
+      "Short-term (Raw)": d["short-term_frcst_skill"]?.toFixed(3) || "N/A",
+      "Long-term (Raw)": d["seasonal_frcst_skill"]?.toFixed(3) || "N/A"
+    }));
+    
+    return Inputs.table(tableData, {
+      sort: "CIS Readiness (Raw)",
+      reverse: true,
+      rows: 20
+    });
+  } else {
+    // Heatmap
+    const heatmapData = filteredData.map(d => ({
+      admin: d[`admin${currentAdminLevel}_name`] || d.admin0_name,
+      "Weather Stations": d["weather-station_density"],
+      "Cloud Cover": d["cloud-coverage_meanannual"],
+      "Precip Agreement": parseFloat(d["cv-precipitation_agreement"]) / 4, // Normalize to 0-1
+      "Short-term Forecast": d["short-term_frcst_skill"],
+      "Long-term Forecast": d["seasonal_frcst_skill"],
+      "CIS Readiness": d["cis_readiness_index"]
+    })).slice(0, 30); // Limit to 30 rows for readability
+    
+    const indicators = ["Weather Stations", "Cloud Cover", "Precip Agreement", "Short-term Forecast", "Long-term Forecast", "CIS Readiness"];
+    
+    const heatData = heatmapData.flatMap(row => 
+      indicators.map(indicator => ({
+        admin: row.admin,
+        indicator: indicator,
+        value: row[indicator]
+      }))
+    );
+    
+    return Plot.plot({
+      width: 900,
+      height: Math.max(400, heatmapData.length * 20),
+      marginLeft: 150,
+      marginBottom: 80,
+      x: { 
+        label: null,
+        tickRotate: -45
+      },
+      y: { label: null },
+      color: {
+        type: "linear",
+        domain: [0, 1],
+        range: d3.interpolateRdYlGn,
+        legend: true,
+        label: "Value (0-1)"
+      },
+      marks: [
+        Plot.cell(heatData, {
+          x: "indicator",
+          y: "admin",
+          fill: "value",
+          title: d => `${d.admin}\n${d.indicator}: ${d.value?.toFixed(3) || 'N/A'}`
+        })
+      ]
+    });
+  }
+}
+```
+
+```{ojs}
+// Download button for Section 1.4
+downloadButton(
+  filteredData.map(d => ({
+    "Admin Name": d[`admin${currentAdminLevel}_name`] || d.admin0_name,
+    "CIS Readiness Index": d["cis_readiness_index"],
+    "Weather Station Density": d["weather-station_density"],
+    "Cloud Coverage": d["cloud-coverage_meanannual"],
+    "Precipitation Agreement": parseFloat(d["cv-precipitation_agreement"]),
+    "Short-term Forecast Skill": d["short-term_frcst_skill"],
+    "Long-term Forecast Skill": d["seasonal_frcst_skill"]
+  })),
+  "cis_readiness_index",
+  _lang(cis.downloadLabel)
+)
+```
+
+```{ojs}
+// Section 1.4 Dynamic Insight
+s14Insight = {
+  const avgReadiness = d3.mean(filteredData, d => d["cis_readiness_index"]);
+  const readinessClass = classifyTercile(avgReadiness, africaTerciles.cisReadiness).toLowerCase();
+  
+  const aboveThreshold = filteredData.filter(d => d["cis_readiness_index"] >= s14Threshold).length;
+  const total = filteredData.length;
+  const pct = ((aboveThreshold / total) * 100).toFixed(1);
+  
+  return _lang({
+    en: `In ${breadcrumb}, the overall CIS Readiness Index averages ${avgReadiness?.toFixed(3)}, classified as ${readinessClass} relative to Sub-Saharan Africa. ${pct}% of regions exceed the ${s14Threshold} readiness threshold.`,
+    fr: `Dans ${breadcrumb}, l'indice global de préparation CIS est en moyenne ${avgReadiness?.toFixed(3)}, classé comme ${readinessClass} par rapport à l'Afrique subsaharienne. ${pct}% des régions dépassent le seuil de préparation ${s14Threshold}.`
+  });
+}
+```
+
+::: {.key-insights}
+`{ojs} s14Insight`
+:::
