@@ -1,0 +1,549 @@
+```{ojs}
+section2Title = _lang(cis.section2Title)
+section2Intro = _lang(cis.section2Intro)
+```
+
+# `{ojs} section2Title` {#section2}
+
+`{ojs} section2Intro`
+
+```{ojs}
+//| echo: false
+
+// ============================================================================
+// SECTION 2: CIS READINESS × CLIMATE HAZARD INTERSECTION
+// ============================================================================
+
+// Load hazard data using CSV (will switch to DuckDB/Parquet in production)
+hazardDataRaw = await d3.csv("/data/cis/haz-means_adm_historic.csv", d3.autoType);
+
+// Filter for only the hazards we need
+hazardData = hazardDataRaw.filter(d => 
+  d.hazard === "NDWS-mean" || d.hazard === "NDWL0-mean"
+);
+
+// Load CIS readiness cutoffs from three_cut_offs.csv
+cisReadinessCutoffs = await d3.csv("/data/cis/three_cut_offs.csv").then(data => {
+  const cisRow = data.find(d => d[''] === 'cis_readiness_index');
+  return {
+    low: parseFloat(cisRow['X33.33333.']),
+    moderate: parseFloat(cisRow['X66.66667.'])
+  };
+});
+
+// Pivot hazard data to have separate columns for drought and waterlogging
+hazardPivoted = {
+  const grouped = d3.group(hazardData, d => `${d.iso3}_${d.admin0_name}_${d.admin1_name}_${d.admin2_name}`);
+  
+  return Array.from(grouped.values()).map(group => {
+    const base = group[0];
+    const drought = group.find(d => d.hazard === "NDWS-mean");
+    const waterlogging = group.find(d => d.hazard === "NDWL0-mean");
+    
+    return {
+      iso3: base.iso3,
+      admin0_name: base.admin0_name,
+      admin1_name: base.admin1_name,
+      admin2_name: base.admin2_name,
+      drought_ndws: drought ? parseFloat(drought.value) : null,
+      waterlogging_ndwl0: waterlogging ? parseFloat(waterlogging.value) : null
+    };
+  });
+}
+
+// Join hazard data with CIS readiness data
+combinedData = cisData.map(cis => {
+  const hazard = hazardPivoted.find(h => 
+    h.iso3 === cis.iso3 &&
+    h.admin0_name === cis.admin0_name &&
+    h.admin1_name === cis.admin1_name &&
+    h.admin2_name === cis.admin2_name
+  );
+  
+  return {
+    ...cis,
+    drought_ndws: hazard?.drought_ndws || null,
+    waterlogging_ndwl0: hazard?.waterlogging_ndwl0 || null
+  };
+}).filter(d => d.drought_ndws !== null || d.waterlogging_ndwl0 !== null);
+
+// Bivariate classification function
+function bivariateClassify(readiness, hazard, readinessCutoffs, hazardType) {
+  // Classify readiness using cutoffs from three_cut_offs.csv
+  let readinessClass;
+  if (readiness < readinessCutoffs.low) readinessClass = "Low";
+  else if (readiness < readinessCutoffs.moderate) readinessClass = "Moderate";
+  else readinessClass = "High";
+  
+  // Classify hazard using thresholds
+  let hazardClass;
+  if (hazardType === "NDWS-mean") {
+    if (hazard < 15) hazardClass = "Low";
+    else if (hazard < 20) hazardClass = "Moderate";
+    else hazardClass = "High";
+  } else if (hazardType === "NDWL0-mean") {
+    if (hazard < 2) hazardClass = "Low";
+    else if (hazard < 5) hazardClass = "Moderate";
+    else hazardClass = "High";
+  }
+  
+  return {
+    readinessClass,
+    hazardClass,
+    bivariateClass: `${readinessClass} × ${hazardClass}`
+  };
+}
+
+// Bivariate color palette (3x3 grid)
+bivariateColors = {
+  return {
+    "Low × Low": "#e8e8e8",      // Light gray - low priority
+    "Low × Moderate": "#b8d6be",  
+    "Low × High": "#6c9a8b",      // Dark teal-green - high need, low capacity
+    "Moderate × Low": "#c8b2d6",
+    "Moderate × Moderate": "#9c9eba",
+    "Moderate × High": "#627a8e",
+    "High × Low": "#b8a0c2",      
+    "High × Moderate": "#8b7fa8",
+    "High × High": "#5a5f8f"      // Dark blue-purple - OPTIMAL (priority zone)
+  };
+}
+```
+
+## Controls
+
+```{ojs}
+//| echo: false
+
+viewof s2HazardType = Inputs.radio(
+  ["drought", "waterlogging"],
+  {
+    label: _lang(cis.s2HazardSelector),
+    value: "drought",
+    format: d => d === "drought" ? _lang(cis.s2HazardDrought) : _lang(cis.s2HazardWaterlogging)
+  }
+);
+
+viewof s2ReadinessThreshold = Inputs.range([0, 1], {
+  label: _lang(cis.s2ReadinessThreshold),
+  step: 0.05,
+  value: 0
+});
+
+viewof s2ViewToggle = Inputs.radio(
+  ["map", "table"],
+  {
+    label: _lang(cis.s2ViewToggle),
+    value: "map",
+    format: d => d === "map" ? _lang(cis.s2ViewMap) : _lang(cis.s2ViewTable)
+  }
+);
+```
+
+```{ojs}
+//| echo: false
+
+// Display current selection from Section 1
+html`<div style="padding: 10px; background: #f0f0f0; border-radius: 5px; margin: 10px 0;">
+  <strong>${_lang(cis.currentSelection)}:</strong> ${breadcrumb}
+</div>`
+```
+
+```{ojs}
+//| echo: false
+
+// Reuse admin level from Section 1
+s2CurrentAdminLevel = currentAdminLevel;
+
+// Process and classify data - filter by Section 1's selections
+s2ProcessedData = {
+  const hazardColumn = s2HazardType === "drought" ? "drought_ndws" : "waterlogging_ndwl0";
+  const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
+  
+  // Filter by Section 1's admin selections
+  let filtered = combinedData;
+  
+  if (s2CurrentAdminLevel === 2) {
+    filtered = filtered.filter(d => 
+      selectedAdmin0.includes(d.admin0_name) &&
+      selectedAdmin1.includes(d.admin1_name) &&
+      selectedAdmin2.includes(d.admin2_name)
+    );
+  } else if (s2CurrentAdminLevel === 1) {
+    filtered = filtered.filter(d => 
+      selectedAdmin0.includes(d.admin0_name) &&
+      selectedAdmin1.includes(d.admin1_name)
+    );
+  } else {
+    filtered = filtered.filter(d => selectedAdmin0.includes(d.admin0_name));
+  }
+  
+  // Filter by readiness threshold and remove nulls
+  filtered = filtered.filter(d => 
+    d.cis_readiness_index >= s2ReadinessThreshold &&
+    d[hazardColumn] !== null
+  );
+  
+  // Add classifications
+  return filtered.map(d => {
+    const classified = bivariateClassify(
+      d.cis_readiness_index,
+      d[hazardColumn],
+      cisReadinessCutoffs,
+      hazardTypeCode
+    );
+    
+    return {
+      ...d,
+      hazardValue: d[hazardColumn],
+      ...classified
+    };
+  });
+}
+
+// Prepare map data at the appropriate admin level
+s2MapData = {
+  const level = s2CurrentAdminLevel;
+  
+  if (level === 0) {
+    // Group by admin0
+    const grouped = d3.group(s2ProcessedData, d => d.gaul0_code);
+    return Array.from(grouped.values()).map(group => {
+      const first = group[0];
+      const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
+      const avgHazard = d3.mean(group, d => d.hazardValue);
+      const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
+      const classified = bivariateClassify(avgReadiness, avgHazard, cisReadinessCutoffs, hazardTypeCode);
+      
+      return {
+        admin0_name: first.admin0_name,
+        iso3: first.iso3,
+        gaul0_code: first.gaul0_code,
+        cis_readiness_index: avgReadiness,
+        hazardValue: avgHazard,
+        ...classified
+      };
+    });
+  } else if (level === 1) {
+    // Group by admin1
+    const grouped = d3.group(s2ProcessedData, d => d.gaul1_code);
+    return Array.from(grouped.values()).map(group => {
+      const first = group[0];
+      const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
+      const avgHazard = d3.mean(group, d => d.hazardValue);
+      const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
+      const classified = bivariateClassify(avgReadiness, avgHazard, cisReadinessCutoffs, hazardTypeCode);
+      
+      return {
+        admin0_name: first.admin0_name,
+        admin1_name: first.admin1_name,
+        iso3: first.iso3,
+        gaul0_code: first.gaul0_code,
+        gaul1_code: first.gaul1_code,
+        cis_readiness_index: avgReadiness,
+        hazardValue: avgHazard,
+        ...classified
+      };
+    });
+  } else {
+    // admin2 - use as is
+    return s2ProcessedData;
+  }
+}
+
+// Load appropriate boundaries based on Section 1's admin level
+s2Boundaries = {
+  if (s2CurrentAdminLevel === 0) {
+    return admin0Boundaries;
+  } else if (s2CurrentAdminLevel === 1) {
+    return admin1Boundaries;
+  } else {
+    return admin2Boundaries;
+  }
+}
+
+// Join boundaries with data
+s2GeoData = {
+  const gaulCodeField = s2CurrentAdminLevel === 0 ? 'gaul0_code' :
+                        s2CurrentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul2_code';
+  
+  const features = s2Boundaries.features.map(feature => {
+    const gaulCode = feature.properties[gaulCodeField];
+    const match = s2MapData.find(d => d[gaulCodeField] === gaulCode);
+    
+    return {
+      type: "Feature",
+      geometry: feature.geometry,
+      properties: {
+        ...feature.properties,
+        ...(match || {})
+      }
+    };
+  }).filter(f => f.properties.bivariateClass);
+  
+  return { type: "FeatureCollection", features };
+}
+```
+
+## `{ojs} s2HazardType === "drought" ? _lang(cis.s2MapTitleDrought) : _lang(cis.s2MapTitleWaterlogging)`
+
+```{ojs}
+//| echo: false
+
+// Bivariate legend
+s2Legend = {
+  const size = 80;
+  const padding = 15;
+  const totalWidth = size * 3 + padding * 2;
+  const totalHeight = size * 3 + padding * 2 + 60;
+  
+  const svg = d3.create("svg")
+    .attr("width", totalWidth)
+    .attr("height", totalHeight)
+    .style("position", "absolute")
+    .style("bottom", "20px")
+    .style("right", "20px")
+    .style("background", "white")
+    .style("border", "2px solid #333")
+    .style("border-radius", "8px")
+    .style("box-shadow", "0 4px 8px rgba(0,0,0,0.2)");
+  
+  const g = svg.append("g")
+    .attr("transform", `translate(${padding}, ${padding})`);
+  
+  // Draw 3x3 grid (inverted Y axis so High hazard is at top)
+  const classes = ["Low", "Moderate", "High"];
+  
+  classes.forEach((readinessClass, i) => {
+    classes.forEach((hazardClass, j) => {
+      const key = `${readinessClass} × ${classes[2 - j]}`; // Invert j for Y axis
+      g.append("rect")
+        .attr("x", i * size)
+        .attr("y", j * size)
+        .attr("width", size)
+        .attr("height", size)
+        .attr("fill", bivariateColors[key])
+        .attr("stroke", "#333")
+        .attr("stroke-width", 1);
+      
+      // Add star to High × High cell
+      if (readinessClass === "High" && classes[2 - j] === "High") {
+        g.append("text")
+          .attr("x", i * size + size / 2)
+          .attr("y", j * size + size / 2)
+          .attr("text-anchor", "middle")
+          .attr("dominant-baseline", "middle")
+          .attr("font-size", "24px")
+          .text("🎯");
+      }
+    });
+  });
+  
+  // X-axis label (CIS Readiness)
+  svg.append("text")
+    .attr("x", totalWidth / 2)
+    .attr("y", totalHeight - 35)
+    .attr("text-anchor", "middle")
+    .attr("font-size", "12px")
+    .attr("font-weight", "bold")
+    .text("CIS Readiness →");
+  
+  svg.append("text")
+    .attr("x", totalWidth / 2)
+    .attr("y", totalHeight - 20)
+    .attr("text-anchor", "middle")
+    .attr("font-size", "10px")
+    .text("Low        Moderate        High");
+  
+  // Y-axis label (Hazard Severity)
+  svg.append("text")
+    .attr("x", -totalHeight / 2 + 30)
+    .attr("y", 12)
+    .attr("text-anchor", "middle")
+    .attr("font-size", "12px")
+    .attr("font-weight", "bold")
+    .attr("transform", `rotate(-90, 12, ${totalHeight / 2 - 30})`)
+    .text("Hazard Severity ↑");
+  
+  return svg.node();
+}
+```
+
+```{ojs}
+//| echo: false
+
+// Render map or table based on toggle
+{
+  if (s2ViewToggle === "map") {
+    const hazardName = s2HazardType === "drought" ? "Drought (Dry Spell Days)" : "Waterlogging (Days)";
+    
+    const map = Plot.plot({
+      width: 2000,
+      height: 1000,
+      projection: {
+        type: "mercator",
+        domain: s2GeoData
+      },
+      color: {
+        legend: false
+      },
+      marks: [
+        Plot.geo(s2GeoData, {
+          fill: d => bivariateColors[d.properties.bivariateClass],
+          stroke: "#333",
+          strokeWidth: 0.5,
+          title: d => {
+            const adminName = s2CurrentAdminLevel === 0 
+              ? d.properties.admin0_name 
+              : s2CurrentAdminLevel === 1
+              ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
+              : `${d.properties.admin2_name}, ${d.properties.admin1_name}`;
+            
+            const isPriority = d.properties.bivariateClass === "High × High";
+            const priorityLabel = isPriority ? "\n🎯 PRIORITY ZONE" : "";
+            
+            return `${adminName}\n` +
+                   `CIS Readiness: ${d.properties.cis_readiness_index?.toFixed(2)} (${d.properties.readinessClass})\n` +
+                   `${hazardName}: ${d.properties.hazardValue?.toFixed(1)} (${d.properties.hazardClass})\n` +
+                   `Category: ${d.properties.bivariateClass}${priorityLabel}`;
+          }
+        })
+      ]
+    });
+    
+    yield html`
+      <div style="position: relative;">
+        ${map}
+        ${s2Legend}
+      </div>
+    `;
+  } else {
+    // Table view
+    const hazardName = s2HazardType === "drought" ? "Drought (Days)" : "Waterlogging (Days)";
+    
+    const tableData = s2MapData.map(d => {
+      const adminName = s2CurrentAdminLevel === 0 
+        ? d.admin0_name 
+        : s2CurrentAdminLevel === 1
+        ? `${d.admin1_name}, ${d.admin0_name}`
+        : `${d.admin2_name}, ${d.admin1_name}`;
+      
+      let priorityLevel;
+      if (d.bivariateClass === "High × High") priorityLevel = "Critical";
+      else if (d.bivariateClass.includes("High") && d.bivariateClass.includes("Moderate")) priorityLevel = "Moderate";
+      else if (d.bivariateClass.includes("High")) priorityLevel = "Moderate";
+      else priorityLevel = "Low";
+      
+      return {
+        adminLevel: s2CurrentAdminLevel === 0 ? "0" : s2CurrentAdminLevel === 1 ? "1" : "2",
+        adminName: adminName,
+        readinessRaw: d.cis_readiness_index,
+        readinessClass: d.readinessClass,
+        hazardRaw: d.hazardValue,
+        hazardClass: d.hazardClass,
+        bivariateClass: d.bivariateClass,
+        priorityLevel: priorityLevel
+      };
+    });
+    
+    yield Inputs.table(tableData, {
+      columns: [
+        "adminLevel",
+        "adminName",
+        "readinessRaw",
+        "readinessClass",
+        "hazardRaw",
+        "hazardClass",
+        "bivariateClass",
+        "priorityLevel"
+      ],
+      header: {
+        adminLevel: "Admin Level",
+        adminName: "Admin Name",
+        readinessRaw: "CIS Readiness",
+        readinessClass: "Readiness Class",
+        hazardRaw: hazardName,
+        hazardClass: "Hazard Class",
+        bivariateClass: "Bivariate Category",
+        priorityLevel: "Priority Level"
+      },
+      format: {
+        readinessRaw: d => d.toFixed(2),
+        hazardRaw: d => d.toFixed(1)
+      },
+      sort: "priorityLevel",
+      reverse: true,
+      rows: 20
+    });
+  }
+}
+```
+
+## Dynamic Insights
+
+```{ojs}
+//| echo: false
+
+s2Insights = {
+  const hazardName = s2HazardType === "drought" ? "Drought" : "Waterlogging";
+  const selectedRegion = breadcrumb; // Use the breadcrumb from Section 1
+  
+  // Insight 1: Opportunity (High × High zones)
+  const highHazardHighReadiness = s2MapData.filter(d => d.bivariateClass === "High × High");
+  const percentHighHigh = s2MapData.length > 0 
+    ? (highHazardHighReadiness.length / s2MapData.length * 100).toFixed(1)
+    : 0;
+  
+  const insight1 = `In ${selectedRegion}, **${percentHighHigh}%** of areas fall in High-Readiness & High-${hazardName} zones, indicating strong potential for CIS as an adaptation measure.`;
+  
+  // Insight 2: Gap (High hazard with Low readiness)
+  const highHazardAreas = s2MapData.filter(d => d.hazardClass === "High");
+  const highHazardLowReadiness = highHazardAreas.filter(d => d.readinessClass === "Low");
+  const percentGap = highHazardAreas.length > 0 
+    ? (highHazardLowReadiness.length / highHazardAreas.length * 100).toFixed(1)
+    : 0;
+  
+  const insight2 = `**${percentGap}%** of High-${hazardName} areas have Low CIS Readiness—priority gaps for station and forecast investment.`;
+  
+  return html`
+    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;">
+      <h4 style="margin-top: 0;">Key Insights</h4>
+      <p style="margin: 10px 0;"><strong>Opportunity:</strong> ${md([insight1])}</p>
+      <p style="margin: 10px 0;"><strong>Investment Gap:</strong> ${md([insight2])}</p>
+    </div>
+  `;
+}
+
+s2Insights
+```
+
+```{ojs}
+//| echo: false
+
+// Download button for Section 2
+downloadButton(
+  s2MapData.map(d => {
+    const adminName = s2CurrentAdminLevel === 0 
+      ? d.admin0_name 
+      : s2CurrentAdminLevel === 1
+      ? `${d.admin1_name}, ${d.admin0_name}`
+      : `${d.admin2_name}, ${d.admin1_name}`;
+    
+    const hazardName = s2HazardType === "drought" ? "Drought_Days" : "Waterlogging_Days";
+    
+    return {
+      "Admin Level": s2CurrentAdminLevel === 0 ? "0" : s2CurrentAdminLevel === 1 ? "1" : "2",
+      "Admin Name": adminName,
+      "CIS Readiness Raw": d.cis_readiness_index?.toFixed(3) || "N/A",
+      "CIS Readiness Class": d.readinessClass,
+      [hazardName + " Raw"]: d.hazardValue?.toFixed(1) || "N/A",
+      [hazardName + " Class"]: d.hazardClass,
+      "Bivariate Category": d.bivariateClass
+    };
+  }),
+  `cis_hazard_intersection_${s2HazardType}_admin${s2CurrentAdminLevel}`,
+  _lang(cis.downloadLabel)
+)
+```
+
