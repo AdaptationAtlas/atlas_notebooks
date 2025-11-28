@@ -31,6 +31,12 @@ md`${_lang(nbText.sections.intro.text)}`; // wrapped in md for lists to work
 ```{ojs}
 admin01Form();
 
+gdpBar_keyFacts();
+
+landuse_plotData
+
+areaBar_keyFacts();
+
 viewof prod_type = Inputs.select([null, ...Object.keys(exposure_groups)], {format: (d) => d || "All Commodities"});
 
 exposureBars_keyFacts();
@@ -375,6 +381,46 @@ dbFutureHive = {
 #### data - keyFacts
 
 ```{ojs}
+gdp_plotData = {
+  const resp = await db.query(`
+    SELECT iso3,
+      sector,
+      year,
+      gdp_usd2015,
+      ROUND(
+          gdp_usd2015
+            / SUM(CASE WHEN sector = 'total' THEN gdp_usd2015 END)
+              OVER (PARTITION BY iso3, year),
+          1
+        ) * 100 AS pct_of_total
+    FROM a0_gdp
+    WHERE iso3 = '${admin0Select.iso3c}'
+    AND year = 2022
+  `)
+  return resp
+}
+
+landuse_plotData = {
+  const resp = await db.query(`
+    SELECT iso3,
+      sub_group,
+      "group",
+      year,
+      ha,
+      ha_pct
+    FROM a0_landuse
+    WHERE iso3 = '${admin0Select.iso3c}'
+    AND year = 2021
+  `)
+  return resp
+}
+
+gdp_plotData
+
+landuse_plotData
+```
+
+```{ojs}
 exposure_plotData = {
   const _iso3 = admin0Select.iso3c;
   const _admin1 = admin1Select.admin1_name;
@@ -394,9 +440,6 @@ exposure_plotData = {
       ? `${row.admin1_name} (${row.iso3})`
       : row.iso3
   }));
-
-
-  
   return data
 }
 
@@ -873,6 +916,150 @@ exposureBars_keyFacts = function () {
         tip: true,
       }),
     ],
+  });
+};
+```
+
+```{ojs}
+function createStackedBarChart({
+  data,
+  // Required field mappings
+  xField = "percentage", // Field for bar width
+  yField = "admin0_name", // Field for faceting/grouping
+  fillField = "sector", // Field for coloring segments
+
+  // Chart dimensions
+  width,
+  heightPerRow = 110,
+
+  // Color configuration
+  fillColors = {},
+  // fillDomain, // Array of category names
+  // fillRange, // Array of colors matching domain
+  fillLabelFormatter = (d) => d,
+
+  // Labels and text
+  title = "",
+  caption = "",
+
+  // Text formatting
+  textFormatter = (d) => `${d[xField].toFixed(1)}%`,
+
+  // Tooltip configuration
+  channels = {}, // Custom channels for tooltips
+  tooltipFormat = {}, // Which fields to show in tooltip
+}) {
+  const _data = data.filter((d) => d[xField] != null && d[fillField] != null);
+
+  // Calculate number of unique groups for height
+  const uniqueGroups = new Set(_data.map((d) => d[yField]));
+  const numGroups = uniqueGroups.size;
+
+  // Setup color scale
+  const dataCategories = new Set(_data.map((d) => d[fillField]));
+  const fillDomain = Object.keys(fillColors).filter((k) =>
+    dataCategories.has(k),
+  );
+  const fillRange = fillDomain.map((d) => fillColors[d]);
+  const colorScale = d3.scaleOrdinal().domain(fillDomain).range(fillRange);
+
+  const marks = [
+    Plot.barX(
+      _data,
+      Plot.stackX({
+        x: xField,
+        y: yField,
+        fill: (d) => d[fillField],
+        channels: channels,
+        tip: {
+          dy: 6,
+          format: {
+            fill: false,
+            x: false,
+            y: false,
+            ...tooltipFormat,
+          },
+        },
+      }),
+    ),
+    Plot.textX(
+      _data.filter((d) => d[xField] > 1), //Assume labels under 1% are too small to show well
+      Plot.stackX({
+        x: xField,
+        y: yField,
+        text: textFormatter,
+        fill: "#fff",
+        fontWeight: "bold",
+      }),
+    ),
+  ];
+
+  return Plot.plot({
+    style: {
+      overflow: "visible",
+    },
+    title,
+    caption,
+    width,
+    height: heightPerRow * numGroups,
+    x: {
+      axis: null,
+    },
+    y: {
+      axis: null,
+    },
+    color: {
+      domain: fillDomain,
+      range: fillRange,
+      legend: true,
+      label: fillLabelFormatter,
+    },
+    facet: {
+      data: _data,
+      y: yField,
+      label: null,
+    },
+    marks,
+  });
+}
+```
+
+```{ojs}
+gdpBar_keyFacts = () => {
+  return createStackedBarChart({
+    data: gdp_plotData.filter((d) => d.sector !== "total"),
+    xField: "pct_of_total",
+    yField: "iso3",
+    fillField: "sector",
+    width: width,
+    fillColors: {
+      agriculture: "#74B95A",
+      industry: "#8C3E5F",
+      manufacturing: "#B34E65",
+      services: "#523D4E",
+    },
+    fillLabelFormatter: (d) => (d) => d.toUpperCase(),
+    title: "Country GDP by Sector",
+  });
+};
+
+areaBar_keyFacts = () => {
+  return createStackedBarChart({
+    data: landuse_plotData.filter((d) => d.sector !== "total"),
+    xField: "ha_pct",
+    yField: "iso3",
+    fillField: "sub_group",
+    width: width,
+    fillColors: {
+      "Permanent meadows and pastures": "#E8C654",
+      Cropland: "#E0A810",
+      "Naturally regenerating forest": "#4C843A",
+      "Planted Forest": "#8DB878",
+      "Other land": "#955D7C",
+      "Land used for aquaculture": "#4FB5B7",
+    },
+    fillLabelFormatter: (d) => (d) => d.toUpperCase(),
+    title: "Country GDP by Sector",
   });
 };
 ```
