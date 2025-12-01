@@ -13,7 +13,10 @@ import {
   atlasHero,
   dataTable,
   downloadButton,
+  multiLineText,
 } from "/helpers/uiComponents.ojs";
+
+import { cleanAdminInput_SQL } from "/helpers/data.js";
 
 atlasHero(nbTitle, hero_url);
 ```
@@ -31,13 +34,17 @@ md`${_lang(nbText.sections.intro.text)}`; // wrapped in md for lists to work
 ```{ojs}
 admin01Form();
 
-gdpBar_keyFacts();
+povBar_keyFacts();
 
-landuse_plotData
+gdpBar_keyFacts();
 
 areaBar_keyFacts();
 
-viewof prod_type = Inputs.select([null, ...Object.keys(exposure_groups)], {format: (d) => d || "All Commodities"});
+viewof prod_type = Inputs.select([null, ...Object.keys(exposure_groups)], {
+  format: (d) => d || "All Commodities",
+  value: null,
+  label: "Production Type",
+});
 
 exposureBars_keyFacts();
 
@@ -53,10 +60,13 @@ exposure_plotData
 ```{ojs}
 admin01Form();
 climateForm();
-viewof viewRecentChanges = Inputs.radio(["divergingBar", "warmingStripes", "table"], {
-  label: "View Type",
-  value: "divergingBar",
-});
+viewof viewRecentChanges = Inputs.radio(
+  ["divergingBar", "warmingStripes", "table"],
+  {
+    label: "View Type",
+    value: "divergingBar",
+  }
+);
 ```
 
 ```{ojs}
@@ -177,7 +187,6 @@ data_obj;
     return response.json();
   })
 
-  console.log("data", datasets.data);
   document.getElementById("datasets").innerHTML =
     buildDatasetDescriptor(datasets.data);
 </script>
@@ -316,10 +325,6 @@ NavbarLangSelector(languages, masterLanguage)
 
 ## Data
 
-```{ojs}
-import { cleanAdminInput_SQL } from "/helpers/data.js";
-```
-
 ### Database
 
 ```{ojs}
@@ -330,7 +335,7 @@ generateDB = async (data_obj) => {
   // loop through datasets
   for (const d of data) {
     if (!d.key || d.key.trim() === "") continue;
-    let path = d.s3_path || d.local_path;
+    let path = d.s3_path || d.local_path; //ToDO swap priotities
     let view = d.sql.table ? "TABLE" : "VIEW";
     let query = d.sql.query;
     if (!query) {
@@ -418,6 +423,46 @@ landuse_plotData = {
 gdp_plotData
 
 landuse_plotData
+```
+
+```{ojs}
+pov_plotData = {
+  const _iso3 = admin0Select.iso3c;
+  const _admin1 = admin1Select.admin1_name;
+
+  const resp = await db.query(`
+    SELECT 
+      p.iso3,
+      p.admin0_name,
+      p.admin1_name,
+      g.group_name AS group,
+      ROUND(
+        CASE 
+          WHEN g.group_name = 'in_poverty' THEN p.poor420_ln * 100
+          ELSE 100 - p.poor420_ln * 100
+        END,
+        2
+      ) AS pov_rate,
+    FROM poverty p
+    CROSS JOIN (
+      VALUES 
+        ('in_poverty'),
+        ('not_poverty')
+    ) AS g(group_name)
+    WHERE 1=1
+      ${sqlWhereNull({ field: "iso3", value: _iso3 })}
+      ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
+  `);
+
+
+  const data = resp.map(row => ({
+    ...row,
+    adminName: row.admin1_name
+      ? `${row.admin1_name} (${row.iso3})`
+      : row.iso3
+  }));
+  return data
+}
 ```
 
 ```{ojs}
@@ -1040,6 +1085,10 @@ gdpBar_keyFacts = () => {
     },
     fillLabelFormatter: (d) => (d) => d.toUpperCase(),
     title: "Country GDP by Sector",
+    caption: multiLineText([
+      "Data is from 2022, measured in 2015 US dollars",
+      "Source: FAOSTAT",
+    ]),
   });
 };
 
@@ -1059,7 +1108,30 @@ areaBar_keyFacts = () => {
       "Land used for aquaculture": "#4FB5B7",
     },
     fillLabelFormatter: (d) => (d) => d.toUpperCase(),
-    title: "Country GDP by Sector",
+    title: "Country Land Use by Sector",
+    caption: multiLineText(["Data is based on 2021 values", "Source: FAOSTAT"]),
+  });
+};
+```
+
+```{ojs}
+povBar_keyFacts = () => {
+  return createStackedBarChart({
+    data: pov_plotData,
+    xField: "pov_rate",
+    yField: "iso3",
+    fillField: "group",
+    width: width,
+    fillColors: {
+      in_poverty: "#EC5A47",
+      not_poverty: "#F4BB21",
+    },
+    fillLabelFormatter: (d) => (d) => d.toUpperCase(),
+    title: "Poverty Rates",
+    caption: multiLineText([
+      "Data uses purchasing power parity (PPP) values for 2023. Poverty threshold is $4.20 USD/day.",
+      "Source: World Bank GSAP 2025.",
+    ]),
   });
 };
 ```
