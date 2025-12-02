@@ -1,0 +1,68 @@
+// Some general helpers to use across the project
+// This includes formatters for numbers, database generation, etc.
+
+// Data tools //
+
+generateDB = async (data_obj) => {
+  let data = data_obj;
+  const _db = await DuckDBClient.of();
+
+  // loop through datasets
+  for (const d of data) {
+    if (!d.key || d.key.trim() === "") continue;
+    let path = d.local_path || d.s3_path; // Prioritize local path for speed/dev ease
+    let view = d.sql.table ? "TABLE" : "VIEW";
+    let query = d.sql.query;
+    if (!query) {
+      // use default query
+      query = `CREATE ${view} "${d.key}" AS SELECT * FROM read_parquet("${path}");`;
+    } else {
+      query = `
+        CREATE ${view} "${d.key}" AS
+          SELECT ${query.select} 
+          FROM read_parquet("${path}")
+          WHERE ${query.where.join(" AND ")};`;
+    }
+    await _db.query(query);
+  }
+  return await _db;
+};
+
+// Number formatters //
+
+formatNumCompactShort = ({ locale = "en-US" } = {}) =>
+  new Intl.NumberFormat(locale, {
+    notation: "compact",
+    compactDisplay: "short",
+  }).format;
+
+// format number, to significant figures
+formatNumCompactSigFigs = ({ locale = "en-US", sigFigs = 3 } = {}) => {
+  // Return a formatting function
+  return (number) => {
+    // Adjust number to specified significant figures
+    const formattedNumber = Number(number).toLocaleString(locale, {
+      maximumSignificantDigits: sigFigs,
+      notation: "compact",
+      compactDisplay: "short",
+    });
+
+    return formattedNumber;
+  };
+};
+
+function formatUSD({ locale = "en-US" } = {}) {
+  const formatter = formatNumCompactShort({ locale });
+  return (number) => {
+    const formattedNum = formatter(number);
+    return "$" + formattedNum;
+  };
+}
+
+// Templates //
+
+inputTemplate = ({ gap = "2em" } = {}) => {
+  // template for input display
+  return (inputs) =>
+    html`<div style="display: flex; gap: ${gap};">${inputs}</div>`;
+};
