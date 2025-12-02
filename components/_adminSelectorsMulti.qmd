@@ -76,19 +76,50 @@ renderA0Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => 
 
 ```{ojs}
 // Admin1
-dataAdmin1 = {
-  const regions = await adminDB.query(`
+
+//NOTE: less hacky than below. Read in all admin 1 and filter
+allAdmin1 = {
+ const resp = await adminDB.query(`
     SELECT DISTINCT admin0_name, admin1_name, iso3
     FROM admin_lookup
-    WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
+    WHERE iso3 in ('${countries.map((d) => d.iso3c).join("', '")}')
   `);
-  
-  return [
-    ...admin0Select.map((d) => ({ admin0_name: d.admin0_name, admin1_name: null, iso3: d.iso3c })),
-    ...regions
-  ]
-  // return regions
+
+  return resp;
 }
+
+dataAdmin1 = allAdmin1.filter(d =>
+  admin0Select.some(a0 => a0.iso3c === d.iso3)
+);
+
+// admin1Cache = new Map();
+// 
+// dataAdmin1 = {
+//   const regions = await adminDB.query(`
+//     SELECT DISTINCT admin0_name, admin1_name, iso3
+//     FROM admin_lookup
+//     WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
+//   `);
+// 
+//   //HACK: We need to cache and reuse the old selected rows, as the inputs compare
+//   //JS objects not the values and the db query returns new objects each time.
+//   // Otherwise, the multiselect will clear values when a new country is selected
+//   function stable(obj) {
+//     const key = `${obj.iso3}|${obj.admin1_name ?? "FULL"}`;
+//     if (!admin1Cache.has(key)) admin1Cache.set(key, obj);
+//     return admin1Cache.get(key);
+//   }
+// 
+//   const fullCountryRows = admin0Select.map((d) =>
+//     stable({
+//       admin0_name: d.admin0_name,
+//       admin1_name: null,
+//       iso3: d.iso3c
+//     })
+//   );
+// 
+//   return [...fullCountryRows, ...regions.map(stable)];
+// };
 
 viewof admin1Select = Inputs.input([])
 
@@ -98,7 +129,7 @@ renderA1Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => 
       {
         label: _lang(general_translations.region),
         format: (d) => `${d.admin1_name || "Full Country"} (${d.iso3})`,
-        multiple: true
+        multiple: true,
       }
     )
     enhancedMultiSelect(_admin1, { maxSelections, requireAtLeastOne })
@@ -128,5 +159,34 @@ renderA2Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => 
     )
     enhancedMultiSelect(_admin2, { maxSelections, requireAtLeastOne })
     return Inputs.bind(_admin2, viewof admin2Select)
+}
+```
+
+```{ojs}
+//HACK: inputs hang if admin0 is diselected with chosen admin1
+// and so on... this resets it
+function setSelectorValue(input, value) {
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+{
+  // If nothing selected in admin1, nothing to validate
+  if (!admin1Select.length) return;
+
+  // Set of iso3 codes from selected admin1 (a1)
+  const selectedA1Iso3 = new Set(admin1Select.map(d => d.iso3));
+
+  // If all iso3 codes in a0 are not in selectedA1Iso3
+  const a1NoMatch = admin0Select.every(obj => !selectedA1Iso3.has(obj.iso3c));
+
+  if (a1NoMatch) {
+    // Clear admin1 selection since it conflicts with the selected admin0
+    setSelectorValue(viewof admin1Select, []);
+    console.log("Cleared admin1 selection");
+    return;
+  }
+
+  //TODO: This probably needs expanded to admin2 as well
 }
 ```
