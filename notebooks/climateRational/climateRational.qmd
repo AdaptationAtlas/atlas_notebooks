@@ -14,6 +14,7 @@ import {
   dataTable,
   downloadButton,
   multiLineText,
+  loaderDiv,
 } from "/helpers/uiComponents.ojs";
 
 import { cleanAdminInput_SQL } from "/helpers/data.js";
@@ -65,7 +66,12 @@ exposureBars_keyFacts();
 `{ojs} _lang(nbText.sections.recentChanges.introText)`
 
 ```{ojs}
-admin01Form();
+section2A0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
+section2A1 = renderA1Multi({ maxSelections: 3 });
+inputTemplate()([section2A0, section2A1]);
+```
+
+```{ojs}
 climateForm();
 viewof viewRecentChanges = Inputs.radio(
   ["divergingBar", "warmingStripes", "table"],
@@ -105,7 +111,12 @@ loaderDiv("plotRecentChanges");
 `{ojs} _lang(nbText.sections.futureProjections.introText)`
 
 ```{ojs}
-admin01Form();
+section3A0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
+section3A1 = renderA1Multi({ maxSelections: 3 });
+inputTemplate()([section3A0, section3A1]);
+```
+
+```{ojs}
 climateForm();
 viewof viewFutureChanges = Inputs.radio(["plot", "table"], {
   label: "View Type",
@@ -138,7 +149,12 @@ loaderDiv("plotFutureProjections");
 # `{ojs} heading5` {#extremeEvents}
 
 ```{ojs}
-admin01Form();
+section4A0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
+section4A1 = renderA1Multi({ maxSelections: 3 });
+inputTemplate()([section4A0, section4A1]);
+```
+
+```{ojs}
 climateForm();
 
 bars_extremeEvents();
@@ -151,6 +167,12 @@ extremeEvents_plotData;
 # `{ojs} heading6` {#hazardExposure}
 
 `{ojs} _lang(nbText.sections.hazardExposure.introText)`
+
+```{ojs}
+section5A0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
+section5A1 = renderA1Multi({ maxSelections: 3 });
+inputTemplate()([section5A0, section5A1]);
+```
 
 ```{ojs}
 loaderDiv("plotHazardExposure");
@@ -239,7 +261,6 @@ import {
   formatNumCompactShort,
   formatUSD,
   generateDB,
-  loaderDiv,
 } from "/helpers/std.ojs";
 ```
 
@@ -318,7 +339,10 @@ db = await generateDB(
 dbFutureHive = {
     const fut = data_obj.filter((d) => d.sections.includes("futureProjections"));
     const _db = await DuckDBClient.of();
-    _db.query(`
+    await _db.query(`SET enable_object_cache = true;`)
+    await _db.query(`SET enable_http_metadata_cache = true;`)
+     
+    await _db.query(`
       CREATE VIEW futureProjections as
         SELECT *, period as timeperiod
         FROM parquet_scan([
@@ -507,8 +531,8 @@ exposure_groups = new Object({
 ```{ojs}
 recentChanges_plotData = {
   document.body.style.cursor = "wait";
-  const _iso3 = admin0Select.iso3c;
-  const _admin1 = admin1Select.admin1_name;
+  const _iso3 = admin0Select.map((d) => d.iso3c);
+  const _admin1 = admin1Select.map((d) => d.admin1_name);
   const _season = seasonSelect.season;
   const _variable = climateVarSelect.id;
 
@@ -523,9 +547,12 @@ recentChanges_plotData = {
     mean,
     mean_anomaly
   FROM historic_climate_timeseries
-    where 1=1
-    ${sqlWhereNull({ field: "iso3", value: cleanAdminInput_SQL(_iso3)})}
-    ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
+    WHERE 1=1
+    AND iso3 in ('${_iso3.join("', '")}')
+    AND (
+     admin1_name in ('${_admin1.join("', '")}')
+     OR admin1_name IS NULL
+    )
     ${sqlWhereNull({ field: "season", value: _season })}
     ${sqlWhereNull({ field: "hazard", value: _variable })}
   `);
@@ -549,13 +576,11 @@ recentChanges_plotData
 ```{ojs}
 futureProjections_plotData = {
   document.body.style.cursor = "wait";
-  const _iso3 = admin0Select.iso3c;
-  const _admin1 = admin1Select.admin1_name;
+  const _iso3 = admin0Select.map((d) => d.iso3c);
+  const _admin1 = admin1Select.map((d) => d.admin1_name);
   const _season = seasonSelect.season;
   const _variable = climateVarSelect.id;
-  //WARN: Temp return no to avoid constant loading/re-query
-  // Make sure this is removed for prod.
-  // return null
+
   const resp = await dbFutureHive.query(`
   SELECT
     iso3,
@@ -574,8 +599,11 @@ futureProjections_plotData = {
     min_anomaly
   FROM futureProjections
     where 1=1
-    ${sqlWhereNull({ field: "iso3", value: cleanAdminInput_SQL(_iso3)})}
-    ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
+    AND iso3 in ('${_iso3.join("', '")}')
+    AND (
+     admin1_name in ('${_admin1.join("', '")}')
+     OR admin1_name IS NULL
+    )
     ${sqlWhereNull({ field: "season", value: _season })}
     ${sqlWhereNull({ field: "hazard", value: _variable })}
     AND timeperiod in (${["2021-2040"].map((t) => `'${t}'`).join(", ")})
@@ -698,8 +726,8 @@ extremeEvents_plotData = {
 
 ```{ojs}
 hazardExposure_plotData = {
-  const _iso3 = admin0Select.iso3c;
-  const _admin1 = admin1Select.admin1_name;
+  const _iso3 = admin0Select.map((d) => d.iso3c);
+  const _admin1 = admin1Select.map((d) => d.admin1_name);
   const _season = seasonSelect.season;
 
   const resp = await db.query(`
@@ -717,34 +745,34 @@ hazardExposure_plotData = {
     AND admin2_name IS NULL
     AND hazard_vars in ('NDWS+NTx35+NDWL0', 'NDWS+THI-max+NDWL0')
     AND exposure_unit = 'nominal-usd-2021'
-    ${sqlWhereNull({ field: "iso3", value: cleanAdminInput_SQL(_iso3)})}
-    ${sqlWhereNull({ field: "admin1_name", value: cleanAdminInput_SQL(_admin1) })}
+    AND iso3 in ('${_iso3.join("', '")}')
+    AND (
+     admin1_name in ('${_admin1.join("', '")}')
+     OR admin1_name IS NULL
+    )
   `);
-  
-    const data = resp.map(row => ({
+
+  const data = resp.map(row => ({
     ...row,
     adminName: row.admin1_name
       ? `${row.admin1_name} (${row.iso3})`
       : row.iso3
   }));
-  
   // Add in total production not exposed
-  const merged = data.map(d => ({
-    ...d,
-    total_value: exposureMap.get(`${d.iso3}|${d.admin1_name}|${d.crop}`) ?? null
-  }));
-
-  return merged
+  // const merged = data.map(d => ({
+  //   ...d,
+  //   total_value: exposureMap.get(`${d.iso3}|${d.admin1_name}|${d.crop}`) ?? null
+  // }));
+  // return merged
+  return data
 }
 
-hazardExposure_plotData
+hazardExposure_plotData;
 ```
 
 ### Global Selectors
 
 #### Admin Regions
-
-<!-- {{< include /components/_adminSelectors.qmd >}} -->
 
 {{< include /components/_adminSelectorsMulti.qmd >}}
 
@@ -891,7 +919,7 @@ exposureBars_keyFacts = function () {
     width,
     height: 400,
     marginLeft: 30,
-    marginBottom: 30,
+    marginBottom: 50,
     marginTop: 30,
     subtitle: "Agricultural Production",
     caption: multiLineText([
