@@ -1,0 +1,150 @@
+---
+pagetitle: Admin Selectors (MultiSelect)
+created: "2025-11-25"
+updated: "2025-11-25"
+---
+
+<!--
+This should be loaded into a notebook with quarto shortcodes:
+`{{< include /components/_adminSelectorsMulti.qmd >}}`
+
+This esentially copies this code into that notebook during render,
+so any variables defined here can be used in the notebook/will also
+conflict with other global variables in the notebook. -->
+
+<!--IMPORTANT:
+This requires the enhancedMultiSelect component to be imported
+from helpers/enhancedMultiSelect.ojs
+
+This also relies on _lang being defined, so the _lang component must also
+be loaded into the notebook with:
+`{{< include /components/_lang.qmd >}}`
+-->
+
+<!-- NOTE:
+Due to how OJS updates cells, when inputs are duplicated across sections they need
+to be defined again with different names and placed in a div. This is because the inputs
+trigger a re-render of the cell every time they are selected, so the focus on the input is
+lost. To see what happens use the following wrong example:
+html`<div style="display: flex; gap: 2em;">${renderA0Multi()} ${renderA1Multi()} ${renderA2Multi()}</div>`;
+
+Correct Example usage:
+/// THese don't need viewof as they are already bound to a global input
+section1A0 = renderA0Multi();
+section1A1 = renderA1Multi();
+section1A2 = renderA2Multi();
+html`<div style="display: flex; gap: 2em;">${section1A0} ${section1A1} ${section1A2}</div>`;
+-->
+
+```{ojs}
+adminDB = await DuckDBClient.of({
+  admin_lookup: await FileAttachment(
+    "/data/shared/gaul24_africa_lookup.parquet",
+  ),
+});
+```
+
+```{ojs}
+// ADMIN 0
+countries = {
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const filteredCountries = country_list
+    .filter((c) => c.include && c.iso3c !== "SDN")
+    .map(({ include, ...rest }) => rest);
+  return filteredCountries;
+};
+
+viewof admin0Select = Inputs.select(
+  countries,
+  {
+    format: (d) => d.iso3c,
+    multiple: true
+  },
+)
+
+renderA0Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => {
+    const _admin0 = Inputs.select(countries, {
+        //NOTE: _lang & general_translations are defined in 
+        // components/_lang.qmd
+        //Both must be loaded into a notebook for this to work.
+        label: _lang(general_translations.country),
+        format: (d) => _lang(d.translation),
+        // format: (d) => d.iso3c,
+        multiple: true
+      }
+    );
+    // Adds the additional features to the multi-select
+    enahncedMultiSelect(_admin0, { maxSelections, requireAtLeastOne })
+    // Bind to the main global multi-select for updates across NB
+    return Inputs.bind(_admin0, viewof admin0Select)
+}
+```
+
+```{ojs}
+// Admin1
+dataAdmin1 = {
+  const regions = await adminDB.query(`
+    SELECT DISTINCT admin0_name, admin1_name, iso3
+    FROM admin_lookup
+    WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
+  `);
+  
+  return [
+    ...admin0Select.map((d) => ({ admin0_name: d.admin0_name, admin1_name: null, iso3: d.iso3c })),
+    ...regions
+  ]
+  // return regions
+}
+
+viewof admin1Select = Inputs.select(
+dataAdmin1,
+    {
+      format: (d) => d.admin1_name,
+      multiple: true
+    }
+)
+
+renderA1Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => {
+    const _admin1 = Inputs.select(
+      dataAdmin1,
+      {
+        label: _lang(general_translations.region),
+        format: (d) => `${d.admin1_name || "Full Country"} (${d.iso3})`,
+        multiple: true
+      }
+    )
+    enahncedMultiSelect(_admin1, { maxSelections, requireAtLeastOne })
+    return Inputs.bind(_admin1, viewof admin1Select)
+}
+```
+
+```{ojs}
+// Admin2
+dataAdmin2 = await adminDB.query(`
+  SELECT DISTINCT admin0_name, admin1_name, admin2_name, iso3
+  FROM admin_lookup
+  WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
+  AND admin1_name in ('${admin1Select.map((d) => d.admin1_name).join("', '")}')
+`)
+
+viewof admin2Select = Inputs.select(
+  dataAdmin2,
+  {
+    format: (d) => d.admin2_name,
+    multiple: true
+  }
+)
+
+renderA2Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => {
+    const _admin2 = Inputs.select(
+      dataAdmin2,
+      {
+        label: _lang(general_translations.district),
+        format: (d) => `${d.admin2_name} (${d.iso3})`,
+        multiple: true
+      }
+    )
+    enahncedMultiSelect(_admin2, { maxSelections, requireAtLeastOne })
+    return Inputs.bind(_admin2, viewof admin2Select)
+}
+```
