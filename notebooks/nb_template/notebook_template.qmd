@@ -9,6 +9,7 @@ date-edited: today
 
 ```{ojs}
 import { atlasTOC, atlasHero } from "/helpers/uiComponents.ojs";
+import { enahncedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
 
 hero_url = "./../../images/default_crop.webp";
 // This ^^ must be relative path due to an issue
@@ -21,6 +22,60 @@ atlasHero(nbTitle, hero_url);
 ## `{ojs} keyInsights` {class='key-insights' #key-insight-text}
 
 # `{ojs} heading1` {#example-heading1}
+
+```{ojs}
+dropdown_section(
+  "Advanced Controls",
+  true,
+  inputTemplate()(
+    [
+      Inputs.bind(
+        Inputs.select(
+          periods,
+          {
+            label: "Calculation Window"
+          }
+        ),
+        viewof mainHazPeriod
+      ),
+      Inputs.bind(
+        Inputs.select(
+          expVariable,
+          {
+            label: "Exposure Variable"
+          }
+        ),
+        viewof mainHazVar
+      ),
+      Inputs.bind(
+        Inputs.select(
+          severity,
+          {
+            label: "Severity"
+          }
+        ),
+        viewof mainHazSev
+      ),
+    ]
+  )
+)
+```
+
+```{ojs}
+//Admin multi-select usage
+
+section1A0 = renderA0Multi();
+section1A1 = renderA1Multi();
+section1A2 = renderA2Multi();
+
+inputTemplate()([section1A0, section1A1, section1A2]);
+```
+
+```{ojs}
+// Test queries
+getHistoricData();
+getProjectedData();
+```
 
 {{< include _template_plot.qmd >}}
 
@@ -68,8 +123,74 @@ htl.html`
 NOTE:Everything below this point will not appear in the notebook.
 This is useful to hide all of the code, master selectors (language, admin level, etc.),
 and other things that are needed for the notebook to run but would be messy if
-actually appearing in the notebook.
+actually appearing in the notebook. Remove the .hidden class to show the code for
+development and testing
 -->
+
+```{ojs}
+import { generateDB, inputTemplate } from "/helpers/std.ojs";
+
+import { dropdown_section } from "/helpers/uiComponents.ojs";
+```
+
+<!-- Database Setup -->
+
+```{ojs}
+dataObj = {
+  const obj = await FileAttachment("/data/hazardExposure/nbData.json").json();
+  return obj.data
+}
+
+// The combinations of hazard X exposure data results in ~20 datasets
+// better to just make the db with the exposure data and query the other
+// datasets directly as needed rather than a hive-partiton or similar
+db = await generateDB(dataObj.filter((d) => d.key === "exposure"));
+```
+
+```{ojs}
+S3HazExposurePath = (variable, period, model, severity) => {
+  const s3Root = `s3://digital-atlas/domain=hazard_exposure/source=atlas_cmip6/region=ssa/processing=hazard-risk-exposure`;
+
+  return `${s3Root}/variable=${variable}/period=${period}/model=${model}/severity=${severity}/interaction.parquet`;
+};
+
+//NOTE: Both of these are examples and need modified for notebook logic
+getHistoricData = async () => {
+  const resp = await db.query(`
+    SELECT *
+    FROM read_parquet("${S3HazExposurePath(mainHazVar, mainHazPeriod, "historic", mainHazSev)}")
+    WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
+    LIMIT 5
+  `);
+  return resp;
+};
+
+getProjectedData = async () => {
+  const resp = await db.query(`
+    SELECT *
+    FROM read_parquet("${S3HazExposurePath(mainHazVar, mainHazPeriod, "ENSEMBLE", mainHazSev)}")
+    WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
+    LIMIT 5
+  `);
+  return resp;
+};
+```
+
+<!-- Inputs for hazards -->
+
+```{ojs}
+// Main Global selectors for hazards
+// These are the "advanced controls"
+
+// model = ["historic", "ENSEMBLE"];
+expVariable = ["vop_intld15", "vop_usd15"];
+periods = ["annual", "jagermeyr"];
+severity = ["moderate", "severe", "extreme"];
+
+viewof mainHazVar = Inputs.input("vop_intld15")
+viewof mainHazPeriod = Inputs.input("annual")
+viewof mainHazSev = Inputs.input("severe")
+```
 
 <!-- Text and Language Translations -->
 
@@ -105,6 +226,10 @@ keyInsights = {
   return keyText
 }
 ```
+
+{{< include /components/_adminSelectorsMulti.qmd >}}
+
+<!-- This ^ defines _adminSelectorsMulti, the admin level selectors. -->
 
 {{< include /components/_lang.qmd >}}
 
@@ -232,4 +357,3 @@ htl.html`
     }
   });
 </script> -->
-
