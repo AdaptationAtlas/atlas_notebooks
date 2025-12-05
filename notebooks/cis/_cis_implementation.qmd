@@ -17,21 +17,26 @@ section31Intro = _lang(cis.section31Intro)
 // SECTION 3.1: CIS READINESS × ACCESS INTERSECTION
 // ============================================================================
 
-// Load access data from CSV
-s3AccessData = await d3.csv("/data/cis/CIS_access.csv", row => {
-  return {
-    admin0_name: row.admin0_name,
-    admin1_name: row.admin1_name === "\\N" || row.admin1_name === "" ? null : row.admin1_name,
-    admin2_name: row.admin2_name === "\\N" || row.admin2_name === "" ? null : row.admin2_name,
-    iso3: row.iso3,
-    gaul0_code: row.gaul0_code !== "\\N" && row.gaul0_code !== "" ? parseInt(row.gaul0_code) : null,
-    gaul1_code: row.gaul1_code !== "\\N" && row.gaul1_code !== "" ? parseInt(row.gaul1_code) : null,
-    gaul2_code: row.gaul2_code !== "\\N" && row.gaul2_code !== "" ? parseInt(row.gaul2_code) : null,
-    tv: row.tv !== "\\N" && row.tv !== null && row.tv !== "" ? parseFloat(row.tv) : null,
-    internet: row.internet !== "\\N" && row.internet !== null && row.internet !== "" ? parseFloat(row.internet) : null,
-    cellphone: row.cellphone !== "\\N" && row.cellphone !== null && row.cellphone !== "" ? parseFloat(row.cellphone) : null
-  };
+// Load access data using DuckDB with Parquet for better performance
+s3AccessDB = await DuckDBClient.of({
+  access_data: FileAttachment("/data/cis/CIS_access.parquet")
 });
+
+// Query and clean the access data
+s3AccessData = await s3AccessDB.query(`
+  SELECT 
+    admin0_name,
+    CASE WHEN admin1_name = '\\N' OR admin1_name = '' THEN NULL ELSE admin1_name END as admin1_name,
+    CASE WHEN admin2_name = '\\N' OR admin2_name = '' THEN NULL ELSE admin2_name END as admin2_name,
+    iso3,
+    CASE WHEN gaul0_code = '\\N' OR gaul0_code = '' THEN NULL ELSE CAST(gaul0_code AS INTEGER) END as gaul0_code,
+    CASE WHEN gaul1_code = '\\N' OR gaul1_code = '' THEN NULL ELSE CAST(gaul1_code AS INTEGER) END as gaul1_code,
+    CASE WHEN gaul2_code = '\\N' OR gaul2_code = '' THEN NULL ELSE CAST(gaul2_code AS INTEGER) END as gaul2_code,
+    CASE WHEN tv = '\\N' OR tv = '' OR tv IS NULL THEN NULL ELSE CAST(tv AS DOUBLE) END as tv,
+    CASE WHEN internet = '\\N' OR internet = '' OR internet IS NULL THEN NULL ELSE CAST(internet AS DOUBLE) END as internet,
+    CASE WHEN cellphone = '\\N' OR cellphone = '' OR cellphone IS NULL THEN NULL ELSE CAST(cellphone AS DOUBLE) END as cellphone
+  FROM access_data
+`);
 
 // Aggregate CIS readiness to Admin 0 level (average)
 s3CisReadinessAdmin0 = {
