@@ -174,7 +174,8 @@ viewof selectedAdmin0 = multiSelect({
   inputId: "admin0Select",
   placeholderText: _lang(cis.admin0Placeholder),
   options: uniqueAdmin0.map(d => ({ value: d, label: d })),
-  selected: ['Kenya']
+  selected: ['Kenya'],
+  maxSelections: 3
 })
 ```
 
@@ -186,7 +187,8 @@ viewof selectedAdmin1 = multiSelect({
   inputId: "admin1Select",
   placeholderText: _lang(cis.admin1Placeholder),
   options: admin1Options.map(d => ({ value: d, label: d })),
-  selected: admin1Options.length > 0 ? admin1Options : []
+  selected: admin1Options.length > 0 ? admin1Options.slice(0, 3) : [],
+  maxSelections: 3
 })
 ```
 
@@ -198,7 +200,8 @@ viewof selectedAdmin2 = multiSelect({
   inputId: "admin2Select",
   placeholderText: _lang(cis.admin2Placeholder),
   options: admin2Options.map(d => ({ value: d, label: d })),
-  selected: []
+  selected: [],
+  maxSelections: 3
 })
 ```
 
@@ -291,10 +294,18 @@ s11MapData = {
     const gaulCode = feature.properties[gaulCodeField];
     const dataRow = filteredData.find(d => d[gaulCodeField] === gaulCode);
     
+    // Pre-compute region name for faster tooltip rendering
+    const regionName = currentAdminLevel === 0 
+      ? feature.properties.admin0_name 
+      : currentAdminLevel === 1
+      ? `${feature.properties.admin1_name}, ${feature.properties.admin0_name}`
+      : `${feature.properties.admin2_name}, ${feature.properties.admin1_name}, ${feature.properties.admin0_name}`;
+    
     return {
       ...feature,
       properties: {
         ...feature.properties,
+        regionName: regionName,
         weatherStation: dataRow?.["weather-station_density"],
         cloudCover: dataRow?.["cloud-coverage_meanannual"],
         weatherStationClass: dataRow ? classifyTercile(dataRow["weather-station_density"], africaTerciles.weatherStation) : "No data",
@@ -327,7 +338,52 @@ s11MapData = {
     
     const useRaw = s11MapMode === "Raw values";
     
-    return htl.html`<div style="display: flex; gap: 20px;">
+    return htl.html`<style>
+      .plot-tip,
+      [class*="plot-tip"],
+      .observablehq .plot-tip,
+      .observablehq [class*="plot-tip"] {
+        font-size: 24px !important;
+        padding: 30px 40px !important;
+        line-height: 2.2 !important;
+        min-width: 500px !important;
+        max-width: 700px !important;
+        min-height: 200px !important;
+        box-sizing: border-box !important;
+      }
+      .plot-tip table,
+      [class*="plot-tip"] table,
+      .observablehq .plot-tip table,
+      .observablehq [class*="plot-tip"] table {
+        font-size: 24px !important;
+        width: 100% !important;
+      }
+      .plot-tip th,
+      .plot-tip td,
+      [class*="plot-tip"] th,
+      [class*="plot-tip"] td,
+      .observablehq .plot-tip th,
+      .observablehq .plot-tip td,
+      .observablehq [class*="plot-tip"] th,
+      .observablehq [class*="plot-tip"] td {
+        padding: 16px 20px !important;
+        font-size: 24px !important;
+      }
+      .plot-tip th,
+      [class*="plot-tip"] th,
+      .observablehq .plot-tip th,
+      .observablehq [class*="plot-tip"] th {
+        font-weight: 700 !important;
+        font-size: 24px !important;
+      }
+      .plot-tip *,
+      [class*="plot-tip"] *,
+      .observablehq .plot-tip *,
+      .observablehq [class*="plot-tip"] * {
+        font-size: 24px !important;
+      }
+    </style>
+    <div style="display: flex; gap: 20px;">
       <div style="flex: 1;">
         <h4>${_lang(cis.weatherStationLabel)}</h4>
         ${Plot.plot({
@@ -351,18 +407,24 @@ s11MapData = {
             Plot.geo(s11MapData, {
               fill: useRaw ? d => d.properties.weatherStation : d => d.properties.weatherStationClass,
               stroke: "#333",
-              strokeWidth: 0.5,
-              title: d => {
-                const regionName = currentAdminLevel === 0 
-                  ? d.properties.admin0_name 
-                  : currentAdminLevel === 1
-                  ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
-                  : `${d.properties.admin2_name}, ${d.properties.admin1_name}, ${d.properties.admin0_name}`;
-                return `Region: ${regionName}\n` +
-                       `Weather Station: ${d.properties.weatherStation?.toFixed(3) || 'N/A'}\n` +
-                       `Class: ${d.properties.weatherStationClass}`;
-              }
-            })
+              strokeWidth: 0.5
+            }),
+            Plot.tip(s11MapData.features, Plot.pointer(Plot.centroid({
+              channels: {
+                Region: {
+                  value: d => d.properties.regionName
+                },
+                "Weather Station": {
+                  value: d => d.properties.weatherStation != null ? d.properties.weatherStation.toFixed(3) : 'N/A'
+                },
+                Class: {
+                  value: d => d.properties.weatherStationClass
+                },
+               
+              },
+             
+           
+            })))
           ]
         })}
       </div>
@@ -389,18 +451,21 @@ s11MapData = {
             Plot.geo(s11MapData, {
               fill: useRaw ? d => d.properties.cloudCover : d => d.properties.cloudCoverClass,
               stroke: "#333",
-              strokeWidth: 0.5,
-              title: d => {
-                const regionName = currentAdminLevel === 0 
-                  ? d.properties.admin0_name 
-                  : currentAdminLevel === 1
-                  ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
-                  : `${d.properties.admin2_name}, ${d.properties.admin1_name}, ${d.properties.admin0_name}`;
-                return `Region: ${regionName}\n` +
-                       `Cloud Cover: ${d.properties.cloudCover?.toFixed(3) || 'N/A'}\n` +
-                       `Class: ${d.properties.cloudCoverClass}`;
+              strokeWidth: 0.5
+            }),
+            Plot.tip(s11MapData.features, Plot.pointer(Plot.centroid({
+              channels: {
+                Region: {
+                  value: d => d.properties.regionName
+                },
+                "Cloud Cover": {
+                  value: d => d.properties.cloudCover != null ? d.properties.cloudCover.toFixed(3) : 'N/A'
+                },
+                Class: {
+                  value: d => d.properties.cloudCoverClass
+                }
               }
-            })
+            })))
           ]
         })}
       </div>
