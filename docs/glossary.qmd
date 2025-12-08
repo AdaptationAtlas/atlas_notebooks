@@ -13,6 +13,8 @@ filters:
 
 # Atlas Definitions
 
+<div id="h1-list"></div>
+
 ```{=html}
 <div id="toc" class="atlas-toc"></div>
 
@@ -336,4 +338,110 @@ btn.addEventListener('click', () => {
     behavior: 'smooth'
   });
 });
+</script>
+
+<script>
+function observeH1ChangesForTOC(idsToIgnore = []) {
+    const outputElement = document.getElementById('h1-list');
+
+    // Create a Set for fast lookup of IDs to ignore
+    const ignoredIdSet = new Set(idsToIgnore);
+
+    // Helper function to convert text into a URL-friendly slug
+    const slugify = (text) => {
+        return text.toString().toLowerCase()
+            .trim()
+            .replace(/\s+/g, '-')
+            .replace(/[^\w\-]+/g, '')
+            .replace(/\-\-+/g, '-');
+    };
+
+    // 1. Function to refresh the TOC from the live DOM
+    const updateH1List = () => {
+        const h1Elements = document.querySelectorAll('h1');
+        const ul = document.createElement('ul');
+        const tocItems = [];
+
+        h1Elements.forEach((h1) => {
+            const h1Text = h1.textContent.trim();
+            let id = h1.id;
+
+            // Generate/Ensure ID
+            if (!id) {
+                id = slugify(h1Text);
+                let suffix = 1;
+                let finalId = id;
+                while (document.getElementById(finalId)) {
+                    finalId = id + '-' + suffix++;
+                }
+                h1.id = finalId;
+                id = finalId;
+            }
+
+            // --- 🔑 New Exclusion Check: Skip if the ID is in the ignored set ---
+            if (ignoredIdSet.has(id)) {
+                return; // Skip this H1 and move to the next one
+            }
+
+            // Create the link element
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+
+            a.href = `#${id}`;
+            a.textContent = h1Text || '[Empty H1]';
+
+            li.appendChild(a);
+            ul.appendChild(li);
+        });
+
+        // Update the output element
+        outputElement.innerHTML = '';
+        if (ul.children.length > 0) {
+            outputElement.appendChild(ul);
+        } else {
+            outputElement.textContent = 'No eligible <h1> elements found.';
+        }
+
+        console.log('TOC updated. Ignored IDs:', idsToIgnore);
+    };
+
+    // 2. Set up the MutationObserver (configuration remains the same for efficiency)
+    const observer = new MutationObserver((mutationsList, observer) => {
+        // ... (mutation checking logic is unchanged) ...
+        let needsUpdate = false;
+        for (const mutation of mutationsList) {
+            if (mutation.type === 'childList') {
+                const relevantNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+                if (relevantNodes.some(node => node.nodeType === 1 && (node.matches('h1') || node.querySelector('h1')))) {
+                    needsUpdate = true;
+                    break;
+                }
+            } else if (mutation.type === 'characterData') {
+                if (mutation.target.parentElement && mutation.target.parentElement.matches('h1')) {
+                    needsUpdate = true;
+                    break;
+                }
+            }
+        }
+
+        if (needsUpdate) {
+            requestAnimationFrame(updateH1List);
+        }
+    });
+
+    const config = { childList: true, subtree: true, characterData: true };
+    observer.observe(document.body, config);
+    updateH1List();
+
+    return {
+        update: updateH1List,
+        disconnect: () => observer.disconnect()
+    };
+}
+
+// Ensure the HTML elements exist before running the function
+document.addEventListener('DOMContentLoaded', () => {
+    observeH1ChangesForTOC(['atlas-definitions-1']);
+});
+
 </script>
