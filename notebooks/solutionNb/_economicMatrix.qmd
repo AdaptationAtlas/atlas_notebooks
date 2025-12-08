@@ -1,0 +1,429 @@
+---
+page-title: Solution Economic Matrix
+---
+
+```{ojs}
+{
+  const plot = generateQuadrantPlot();
+  const circleLegend = legendRadius(plot.scale("r"), {
+    ticks: 3,
+    strokeWidthY: 1,
+    label: "# Studies",
+  });
+  return html`<div style="
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  ">
+    <div>${plot}</div>
+    <div>
+      <div>${circleLegend} </div>
+      <div style="margin-top: 25px;">${plot.legend("color", { columns: 1 })} </div>
+    </div>
+  </div>`;
+}
+
+generateQuadSummaryTable();
+```
+
+<!-- Data Backend -->
+
+```{ojs}
+//Datasets from Todd
+data_yield = await FileAttachment("/data/solutionsNb/data_yield.json").json();
+data_econ = await FileAttachment("/data/solutionsNb/data_econ.json").json();
+```
+
+```{ojs}
+function aggregatePractice(rows) {
+  const withWeights = rows.map((row) => ({
+    ...row,
+    weight: 1 / row.se ** 2
+  }));
+
+  const totalWeight = d3.sum(withWeights, (d) => d.weight);
+  const weightedEst = d3.sum(withWeights, (d) => d.weight * d.estimate);
+
+  const est = weightedEst / totalWeight;
+  const variance = 1 / totalWeight;
+  const se = Math.sqrt(variance);
+  const lci = est - 1.96 * se;
+  const uci = est + 1.96 * se;
+
+  return {
+    practice: rows[0].practice,
+    est,
+    se,
+    var: variance,
+    lci,
+    uci,
+    studies: d3.sum(rows, (d) => d.studies),
+    n_sources: rows.length,
+    sources: rows.map((d) => d.econ_source).join(", "),
+    significant: lci > 0 || uci < 0
+  };
+}
+
+quadrantData = {
+  const econ_agg = Array.from(
+    d3.rollup(data_econ, aggregatePractice, (d) => d.practice).values()
+  );
+
+  // Create lookup map for LCL data
+  const lclMap = d3.index(data_yield, (d) => d.practice);
+
+  // Merge with LCL data and add derived columns
+  const plot_data = econ_agg.map((row) => {
+    const est = row.est;
+    const lcl = lclMap.get(row.practice)?.lcl ?? null;
+
+    return {
+      ...row,
+      lcl,
+      se_upper: est + row.se,
+      se_lower: est - row.se,
+      zone:
+        est > 0 && lcl >= 0.75
+          ? "Recommended"
+          : est > 0 && lcl >= 0.5
+          ? "Caution"
+          : est > 0 && lcl < 0.5
+          ? "Risky"
+          : est <= 0 && lcl >= 0.75
+          ? "Limited"
+          : est <= 0 && lcl >= 0.5
+          ? "Uncertain"
+          : "Avoid"
+    };
+  });
+
+  // Sort by estimate descending
+  return plot_data.sort((a, b) => b.est - a.est);
+}
+```
+
+```{ojs}
+zoneColors = new Object({
+  Recommended: "rgba(0, 128, 0, 0.15)",
+  Limited: "rgba(255, 215, 0, 0.15)",
+  Caution: "rgba(255, 165, 0, 0.15)",
+  Avoid: "rgba(255, 0, 0, 0.15)",
+});
+```
+
+```{ojs}
+generateQuadrantPlot = () => {
+  const data = quadrantData;
+  const colorScale = {
+    domain: ["signifigant", "notSignifigant"],
+    range: ["#3498db", "#e74c3c"],
+  };
+  const xThreshold = 0.7;
+  const yThreshold = 0.0;
+  const xMin = 0.4;
+  const xMax = 1.0;
+  const yMin = -1;
+  const yMax = 1.5;
+
+  const quadrants = [
+    {
+      x1: xMin,
+      x2: xThreshold,
+      y1: yThreshold,
+      y2: yMax,
+      fill: "#FCEDEC",
+      label: "Caution",
+      labelX: xMin + 0.02,
+      labelY: yMax - 0.05,
+      anchor: "start",
+    },
+    {
+      x1: xThreshold,
+      x2: xMax,
+      y1: yThreshold,
+      y2: yMax,
+      fill: "#d6f5e6",
+      label: "Recommended",
+      labelX: xMax - 0.04,
+      labelY: yMax - 0.05,
+      anchor: "end",
+    },
+    {
+      x1: xMin,
+      x2: xThreshold,
+      y1: yMin,
+      y2: yThreshold,
+      fill: "#ffd7d7",
+      label: "Avoid",
+      labelX: xMin + 0.02,
+      labelY: yMin + 0.05,
+      anchor: "start",
+    },
+    {
+      x1: xThreshold,
+      x2: xMax,
+      y1: yMin,
+      y2: yThreshold,
+      fill: "#ffe7c2",
+      label: "Limited",
+      labelX: xMax - 0.02,
+      labelY: yMin + 0.05,
+      anchor: "end",
+    },
+  ];
+
+  return Plot.plot({
+    width: 900,
+    height: 600,
+    marginLeft: 80,
+    marginBottom: 80,
+    marginTop: 40,
+    x: {
+      label: "Yield Reliability (Probability of yield more than control, %)",
+      grid: true,
+      domain: [xMin, xMax],
+    },
+    y: {
+      label: "Economic Return (Standardised Mean Difference)",
+      grid: true,
+      domain: [yMin, yMax],
+    },
+    color: {
+      domain: colorScale.domain,
+      range: colorScale.range,
+    },
+    r: {
+      domain: [1, 30],
+      range: [1, 20],
+      type: "sqrt",
+    },
+    marks: [
+      Plot.rect(quadrants, {
+        x1: "x1",
+        x2: "x2",
+        y1: "y1",
+        y2: "y2",
+        fill: (d) => d.fill,
+        opacity: 0.6,
+      }),
+      Plot.ruleX([xThreshold], { stroke: "#555", strokeDasharray: "4" }),
+      Plot.ruleY([yThreshold], { stroke: "#d62728", strokeDasharray: "4" }),
+      Plot.dot(data, {
+        x: (d) => d.lcl,
+        y: (d) => d.est,
+        r: (d) => d.studies,
+        stroke: (d) => (d.significant ? "#111" : "#bbb"),
+        strokeWidth: (d) => (d.significant ? 2 : 0.5),
+        // fill: "white",
+        fill: (d) => (d.significant ? "signifigant" : "notSignifigant"),
+        fillOpacity: 0.5,
+      }),
+      Plot.ruleX(data, {
+        x: (d) => d.lcl,
+        y: (d) => d.est,
+        y1: (d) => d.se_lower,
+        y2: (d) => d.se_upper,
+        stroke: "#555",
+        opacity: 0.8,
+      }),
+      // Use dodge to avoid overlaps
+      Plot.text(data, {
+        x: (d) => d.lcl,
+        y: (d) => d.est,
+        text: (d) => d.practice,
+        fontSize: 10,
+        dy: -20,
+        dx: 10,
+        fill: "#000",
+        stroke: "white",
+        strokeWidth: 3,
+        paintOrder: "stroke",
+      }),
+      Plot.text(quadrants, {
+        x: (d) => d.labelX,
+        y: (d) => d.labelY,
+        text: (d) => d.label,
+        textAnchor: (d) => d.anchor,
+        fontWeight: "bold",
+        fontSize: 13,
+        fill: "#444",
+        opacity: 0.8,
+      }),
+    ],
+  });
+};
+```
+
+```{ojs}
+// from https://observablehq.com/@recifs/a-radius-legend-for-plot-665
+function legendRadius(
+  scale,
+  {
+    label = scale.label,
+    ticks = 5,
+    tickFormat = (d) => d,
+    strokeWidth = 0.5,
+    strokeDasharray = [5, 4],
+    lineHeight = 8,
+    gap = 20,
+    style,
+  } = {},
+) {
+  // const s = scale.scale;
+  const s =
+    scale.type === "pow"
+      ? d3.scalePow(scale.domain, scale.range).exponent(scale.exponent)
+      : d3.scaleLinear(scale.domain, scale.range); // TODO add more types as needed
+
+  const r0 = scale.range[1];
+  const shiftY = label ? 10 : 0;
+
+  let h = Infinity;
+  const values = s
+    .ticks(ticks)
+    .reverse()
+    .filter((t) => h - s(t) > lineHeight / 2 && (h = s(t)));
+
+  return Plot.plot({
+    width: 2 * r0 + 90,
+    x: { type: "identity", axis: null },
+    r: { type: "identity" },
+    y: { type: "identity", axis: null },
+    marks: [
+      Plot.link(values, {
+        x1: r0 + 2,
+        y1: (d) => 8 + 2 * r0 - 2 * s(d) + shiftY,
+        x2: 2 * r0 + 2 + gap,
+        y2: (d) => 8 + 2 * r0 - 2 * s(d) + shiftY,
+        strokeWidth: strokeWidth / 2,
+        strokeDasharray,
+      }),
+      Plot.dot(values, {
+        r: s,
+        x: r0 + 2,
+        y: (d) => 8 + 2 * r0 - s(d) + shiftY,
+        strokeWidth,
+      }),
+      Plot.text(values, {
+        x: 2 * r0 + 2 + gap,
+        y: (d) => 8 + 2 * r0 - 2 * s(d) + shiftY,
+        textAnchor: "start",
+        dx: 4,
+        text: tickFormat,
+      }),
+      Plot.text(label ? [label] : [], {
+        x: 0,
+        y: 6,
+        textAnchor: "start",
+        fontWeight: "bold",
+        text: tickFormat,
+      }),
+    ],
+    height: 2 * r0 + 10 + shiftY,
+    style,
+  });
+}
+```
+
+```{ojs}
+generateQuadSummaryTable = () => {
+  function sparkbar({
+    max,
+    background = "#ddd",
+    color = "white",
+    formatter = (x) => x.toLocaleString(),
+    align = "right", // "right" | "left"
+  } = {}) {
+    return (x) => {
+      const width = Math.max(0, Math.min(100, (x / max) * 100));
+
+      return htl.html`
+      <div style="
+        background: ${background};
+        width: ${width}%;
+        padding-right: 3px;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        color: ${color};
+        border-radius: 2px;
+        ${align === "right" ? "margin-left: auto;" : ""}
+      ">
+        ${formatter(x)}
+      </div>
+    `;
+    };
+  }
+
+  function colorZone() {
+    return (x) => {
+      const bg = zoneColors[x] ?? "#eee";
+      return htl.html`
+      <div style="
+        background: ${bg};
+        width: 100%,
+        padding-right: 3px;
+        box-sizing: border-box;
+        display: flex;
+        justify-content: center;
+        border-radius: 2px;
+      ">
+        ${x}
+      </div>
+    `;
+    };
+  }
+
+  const table = Inputs.table(quadrantData, {
+    height: 420,
+    layout: "auto",
+    columns: [
+      "zone",
+      "practice",
+      "lcl",
+      "est",
+      "lci",
+      "uci",
+      "studies",
+      "significant",
+    ],
+    header: {
+      zone: "Zone",
+      practice: "Practice",
+      lcl: "Yield Reliability",
+      est: "Gross Margin",
+      lci: "95% CI (lower)",
+      uci: "95% CI (upper)",
+      studies: "Studies",
+      significant: "Significant",
+    },
+    format: {
+      zone: colorZone((x) => x),
+      lcl: sparkbar({
+        max: 1,
+        background: "lightblue",
+        color: "black",
+        formatter: (x) => (x * 100).toFixed(1) + "%",
+        align: "left",
+      }),
+      est: (x) => x.toFixed(2),
+      studies: sparkbar({
+        max: 26,
+        background: "#D9ECD9",
+        color: "black",
+        align: "right",
+      }),
+      significant: (x) => (x ? "✓" : ""),
+    },
+    align: {
+      significant: "center",
+    },
+    sort: "lcl",
+    reverse: true,
+    select: false,
+  });
+
+  return table;
+};
+```

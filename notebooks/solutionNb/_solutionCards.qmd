@@ -1,0 +1,289 @@
+---
+page-title: "Solution Cards"
+nb-authors:
+  - Todd Rosenstock
+  - Pete Steward
+  - Brayden Youngberg
+---
+
+```{ojs}
+import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
+```
+
+<!-- Requirements:
+- `{{< include /components/_adminSelectors.qmd >}}`
+- `{{< include /components/_lang.qmd >}}`
+-->
+
+```{ojs}
+viewof cards_selectBase = {
+
+  const commodity = [{value: "Total Livestock", label: "Livestock"}, {value: "Total Crop", label: "Crops"}];
+
+  const commoditySel = Inputs.select(commodity, {
+    format: (d) => d.label,
+    label: "Commodity",
+  });
+
+  const admin0Sel = Inputs.bind(
+    Inputs.select(
+        countries,
+        {
+          label: _lang(general_translations.country),
+          format: (d) => _lang(d.translation),
+        }
+      ),
+    viewof admin0Select
+  )
+
+  return Inputs.form([admin0Sel, commoditySel], {
+    template: (inputs) => html`<div style="display: flex; gap: 2em;">${inputs}</div>`
+  });
+}
+
+viewof cards_selHazards = {
+  const hazSel = Inputs.select(["heat", "wet", "dry"], {
+    // format: (d) => d.label,
+    label: "Hazards",
+    value: ["heat", "wet", "dry"],
+    multiple: true
+  });
+  enhancedMultiSelect(hazSel);
+
+  const severitySel = Inputs.select([1, 2, 3, 4], {
+    format: (d) => d,
+    value: 3,
+    label: "Severity",
+  })
+  return Inputs.form([hazSel, severitySel], {
+    template: (inputs) => html`<div style="display: flex; gap: 2em;">${inputs}</div>`
+  });
+}
+
+viewof cards_selectScenario = Inputs.form(
+  [
+    Inputs.select(["rcp45", "rcp85"], {label: "Scenario"}),
+    Inputs.select(["2030", "2050"], {label: "Timeframe"})
+  ],
+  {
+    template: (inputs) => html`<div style="display: flex; gap: 2em;">${inputs}</div>`
+  }
+)
+```
+
+```{ojs}
+resp = {
+  const commodity = cards_selectBase[1].value;
+  const [hazards, severity] = cards_selHazards;
+  const [scenario, timeframe] = cards_selectScenario;
+  return await getSolutions(admin0Select.iso3c, hazards, severity, scenario, timeframe, commodity);
+}
+
+viewof cards_selectView = Inputs.radio(["cards", "plot"],
+  {label: "Select View", value: "cards"}
+)
+
+{
+  if (cards_selectView === "cards") {
+    return makeCards(resp);
+  } else {
+    return makeCardPlot(resp.results.solutions)
+  }
+}
+```
+
+<!-- Data Backend -->
+
+```{ojs}
+async function getSolutions(
+  iso3c,
+  hazardList,
+  hazSeverity,
+  scenario,
+  timeframe,
+  commodity,
+) {
+  const hazards = {
+    heat: hazardList.includes("heat"),
+    wet: hazardList.includes("wet"),
+    dry: hazardList.includes("dry"),
+  };
+
+  const _solutionScenario = scenario;
+  const _solutionYear = timeframe;
+  const _solutionCountry = iso3c;
+
+  const _severity = hazSeverity;
+  const _exposure = commodity;
+
+  const _heatHaz =
+    _exposure === "Total Crop"
+      ? "Heat Stress Generic Crop"
+      : "Heat Stress Livestock";
+
+  const baseURL =
+    "https://f68jm68tpf.execute-api.us-west-2.amazonaws.com/dev/api/solutionsranking";
+
+  const params = new URLSearchParams();
+
+  // conditional hazards
+  if (hazards.heat) {
+    params.append("heat", _heatHaz);
+    params.append("heatMin", _severity);
+    params.append("heatMax", _severity);
+  }
+
+  if (hazards.dry) {
+    params.append("drought", "Soil Water Stress");
+    params.append("droughtMin", _severity);
+    params.append("droughtMax", _severity);
+  }
+
+  if (hazards.wet) {
+    params.append("flood", "Waterlogging");
+    params.append("floodMin", _severity);
+    params.append("floodMax", _severity);
+  }
+
+  // exposure block
+  if (_exposure === "Total Crop") {
+    params.append("crop", "Total Crop");
+    params.append("cropMin", 16.31707191467285);
+    params.append("cropMax", 962);
+  } else {
+    params.append("livestock", "Total Livestock");
+    params.append("livestockMin", 0);
+    params.append("livestockMax", 5852);
+  }
+
+  // shared controls
+  params.append("timePeriod", _solutionYear);
+  params.append("scenario", _solutionScenario);
+  params.append("maxFarmSize", 2);
+  params.append("boundaryIds", _solutionCountry);
+  params.append("reportingUnit", "gadml0");
+
+  const url = `${baseURL}?${params.toString()}`;
+
+  // ---- CACHE ----
+  const cacheKey = `solutionsCache:${url}`;
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  // ---- FETCH ----
+  const data = await fetch(url).then((r) => r.json());
+  localStorage.setItem(cacheKey, JSON.stringify(data));
+
+  return data;
+}
+```
+
+```{ojs}
+makeCards = (resp, num = 6) => {
+  const solutions = resp.results.solutions;
+  const cards = solutions.slice(0, num).map(
+    (s, i) => html`
+<div style="
+  border:1px solid #eee;
+  padding:14px;
+  border-radius:6px;
+  font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  display: flex;
+  flex-direction: column;
+">
+        <div style="display:flex; justify-content:space-between;">
+          <div>
+            <div style="font-size:16px; font-weight:600;">${i + 1}. ${
+              s.name
+            }</div>
+            <div style="color:#666; font-size:12px; margin-top:3px;">
+              ${s.subPractices}
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:10px; font-size:12px;">
+          <strong>Commodities:</strong> ${s.exposure.join(", ")}<br>
+          <strong>Enablers:</strong> ${s.enablers.join(", ")}<br>
+          <strong>Goes well with:</strong> ${s.goesWellWith.join(", ")}<br>
+          <strong>Climate stress addressed:</strong> ${s.climateStressAddressed.join(
+            ", ",
+          )}
+        </div>
+
+        <div style="margin-top:10px; display:flex; flex-wrap: wrap; gap:8px; font-size:12px;">
+          <div style="padding:4px 6px; border-radius:4px; background:${
+            s.yield.color
+          }; color: #333;">
+            Yield: ${s.yield.label}
+          </div>
+          <div style="padding:4px 6px; border-radius:4px; background:${
+            s.profit.color
+          }; color: #333;">
+            Profit: ${s.profit.label}
+          </div>
+          <div style="padding:4px 6px; border-radius:4px; background:${
+            s.womensTime.color
+          }; color: #333;">
+            Women’s Time: ${s.womensTime.label}
+          </div>
+          <div style="padding:4px 6px; border-radius:4px; background:${
+            s.ghg.color
+          }; color: #333;">
+            GHG: ${s.ghg.label}
+          </div>
+        </div>
+      </div>
+    `,
+  );
+
+  return htl.html`
+    <div style="
+      display: grid;
+      max-width: 1000px;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); 
+      gap: 16px;
+      padding: 16px 0;
+      font-family:-apple-system,Segoe UI,Roboto,sans-serif;
+    ">
+      ${cards}
+    </div>
+  `;
+};
+```
+
+```{ojs}
+makeCardPlot = (solutions, num = 10) => {
+  const _solutions = solutions.slice(0, num);
+  const values = _solutions.map((d) => d.impact_total_vop);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  const normalized = _solutions.map((d) => ({
+    ...d,
+    normalizedImpact: (d.impact_total_vop - min) / (max - min),
+  }));
+
+  return Plot.plot({
+    marginLeft: 140,
+    width: 1000,
+    height: 500,
+    x: { label: "Impact Index (0–1)" },
+    y: { label: "Solution" },
+    color: {
+      scheme: "greens",
+      type: "linear",
+      domain: [0, 1],
+    },
+    marks: [
+      Plot.barX(normalized, {
+        x: "normalizedImpact",
+        y: "name",
+        fill: "normalizedImpact",
+        sort: { y: "x", reverse: true },
+      }),
+    ],
+  });
+};
+```

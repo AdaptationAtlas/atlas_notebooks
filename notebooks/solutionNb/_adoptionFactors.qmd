@@ -1,0 +1,404 @@
+---
+page-title: "Adoption Factors"
+---
+
+```{ojs}
+viewof selectAdoptionPractice = generateInputAdoptionFactor();
+viewof radioSortAdoptionFactors = generateInputAdoptionSort();
+viewof toggleSignificantFactors = Inputs.checkbox([{label: "Visible", value: true}], {
+  label: "Non-significant results",
+  format: (d) => d.label
+  }
+);
+```
+
+```{ojs}
+{
+  if (toggleSignificantFactors.length > 0){
+    return generateAdoptionFactorPlot();
+  } else {
+    return generateAdoptionDivergingPlot();
+  }
+}
+```
+
+<!-- Data Backend -->
+
+```{ojs}
+adoptionFactors = {
+  const raw = await FileAttachment("/data/solutionsNb/adoptionFactors.csv").csv({typed: true})
+
+  return raw.map(d => {
+    return {
+      practice: String(d['practices']),
+      factor: String(d['adoption_factors']),
+      direction: String(d['direction']),
+      n: d.n
+    }
+  })
+}
+```
+
+```{ojs}
+adoptionFactorGroups = {
+  const adoptionFactorAllLabel = "All Practices";
+  // Calculate totals for all practices combined
+  const allPracticesMap = d3.rollup(
+    adoptionFactors,
+    v => d3.sum(v, d => d.n),
+    d => d.factor,
+    d => d.direction
+  );
+  
+  const allPractices = [];
+  allPracticesMap.forEach((directions, factor) => {
+    const total = d3.sum([...directions.values()]);
+    directions.forEach((n, direction) => {
+      allPractices.push({
+        practice: adoptionFactorAllLabel,
+        factor,
+        direction,
+        n,
+        total,
+        perc: (n / total) * 100
+      });
+    });
+  });
+  
+  // Calculate totals per practice and factor
+  const practiceMap = d3.rollup(
+    adoptionFactors,
+    v => ({
+      items: v,
+      total: d3.sum(v, d => d.n)
+    }),
+    d => d.practice,
+    d => d.factor
+  );
+  
+  const wrangled = [];
+  practiceMap.forEach((factors, practice) => {
+    factors.forEach(({ items, total }, factor) => {
+      items.forEach(item => {
+        const { index, ...rest } = item; // Remove index field
+        wrangled.push({
+          practice,
+          factor,
+          ...rest,
+          total,
+          perc: (item.n / total) * 100
+        });
+      });
+    });
+  });
+  return d3.group([...wrangled, ...allPractices], d => d.practice)
+}
+```
+
+<!-- Inputs -->
+
+```{ojs}
+generateInputAdoptionFactor = () => {
+  const options = [...adoptionFactorGroups.keys()];
+
+  const reordered = [
+    "All Practices",
+    ...options.filter((p) => p !== "All Practices"),
+  ];
+
+  return Inputs.select(reordered, { label: "Practice" });
+};
+
+generateInputAdoptionSort = () => {
+  const data = [
+    {
+      key: "observations",
+      //label: _lang(nbText.inputs.radioSort.fields.observations),
+      label: "Observations",
+      channel: "total",
+      reverse: true,
+    },
+    {
+      key: "alpha",
+      //label: _lang(nbText.inputs.radioSort.fields.alpha),
+      label: "Alphabetical",
+      channel: "y",
+      reverse: false,
+    },
+  ];
+  return Inputs.radio(data, {
+    // label: _lang(nbText.supportNbText.labels.sortBars),
+    label: "Sort By",
+    format: (d) => d.label,
+    value: data.find((x) => x.key === "observations"),
+  });
+};
+```
+
+```{ojs}
+generateAdoptionFactorPlot = () => {
+  const plotData = adoptionFactorGroups.get(selectAdoptionPractice);
+  const _sorter = radioSortAdoptionFactors;
+  const colorOrder = ["Negative", "Not significant", "Positive"];
+  const colorRange = ["#EC5A47", "#F4BB21", "#216729"];
+  const y = (d) => d;
+  // const y = (d) => _lang(td.adoption_factors.values?.[d]);
+
+  return Plot.plot({
+    width: 1000,
+    height: 400,
+    marginLeft: 180,
+    marginRight: 50,
+    x: {
+      axis: null,
+      // label: "% Total"
+      // labelOffset: 40,
+      // labelAnchor: "center"
+    },
+    y: {
+      label: null,
+      tickSize: 0,
+      padding: 0,
+    },
+    color: {
+      domain: colorOrder,
+      range: colorRange,
+      legend: true,
+    },
+    marks: [
+      // main y-axis
+      Plot.axisY({
+        tickSize: 0,
+      }),
+      // pointer white-out
+      Plot.axisY(
+        Plot.pointerY({
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0,
+        }),
+      ),
+      // bold pointer
+      Plot.axisY(
+        Plot.pointerY({
+          fontWeight: "bold",
+          tickSize: 0,
+        }),
+      ),
+      // bars
+      Plot.barX(
+        plotData,
+        Plot.stackX({
+          x: "perc",
+          y: (d) => y(d.factor),
+          sort: { y: _sorter.channel, reverse: _sorter.reverse },
+          fill: (d) => d.direction,
+          order: colorOrder,
+          stroke: "#fff",
+          channels: {
+            percentage: {
+              // label: Lang.toSentenceCase(
+              //   _lang(nbText.supportNbText.words.percentage.singular)
+              // ),
+              label: "Percentage",
+              value: "perc",
+            },
+            total: "total",
+            n: {
+              // label: Lang.toSentenceCase(
+              //   _lang(nbText.supportNbText.words.observation.plural)
+              // ),
+              label: "Observations",
+              value: "n",
+            },
+          },
+          tip: {
+            format: {
+              x: false,
+              y: false,
+              fill: false,
+              total: false,
+              percentage: (d) => `${d3.format("d")(d)}%`,
+              n: true,
+            },
+          },
+        }),
+      ),
+      markBoldSidebarText(plotData, {
+        y: (d) => y(d.factor),
+        text: "n",
+        dx: 7,
+      }),
+    ],
+  });
+};
+```
+
+```{ojs}
+function markBoldSidebarText(
+  data,
+  { textFormat = (d) => d + " obs.", ...options } = {},
+) {
+  return Plot.marks(
+    // observation counts
+    Plot.textY(
+      data,
+      Plot.map(
+        { text: (values) => values.map((d) => textFormat(d)) },
+        Plot.groupY(
+          { text: "sum" },
+          {
+            frameAnchor: "right",
+            textAnchor: "start",
+            dx: 16,
+            ...options,
+          },
+        ),
+      ),
+    ),
+    // digital white-out
+    Plot.textY(
+      data,
+      Plot.pointerY(
+        Plot.map(
+          { text: (values) => values.map((d) => textFormat(d)) },
+          Plot.groupY(
+            { text: "sum" },
+            {
+              // y: "factor",
+              // text: "n",
+              frameAnchor: "right",
+              textAnchor: "start",
+              dx: 16,
+              fill: "white",
+              stroke: "white",
+              strokeWidth: 2,
+              ...options,
+            },
+          ),
+        ),
+      ),
+    ),
+    // observation counts bold hover
+    Plot.textY(
+      data,
+      Plot.pointerY(
+        Plot.map(
+          { text: (values) => values.map((d) => textFormat(d)) },
+          Plot.groupY(
+            { text: "sum" },
+            {
+              // y: "factor",
+              // text: "n",
+              frameAnchor: "right",
+              textAnchor: "start",
+              dx: 16,
+              fontWeight: "bold",
+              ...options,
+            },
+          ),
+        ),
+      ),
+    ),
+  );
+}
+```
+
+```{ojs}
+generateAdoptionDivergingPlot = () => {
+  const allData = adoptionFactorGroups.get(selectAdoptionPractice);
+  const plotData = allData.filter((d) => d.direction !== "Not significant");
+
+  const _sorter = radioSortAdoptionFactors;
+  const colorRange = ["#EC5A47", "#216729"];
+  const y = (d) => d;
+
+  return Plot.plot({
+    width: 1000,
+    height: 400,
+    marginLeft: 180,
+    marginRight: 50,
+    x: {
+      label: "Percentage (%)",
+      labelAnchor: "center",
+      tickFormat: (d) => Math.abs(d) + "%",
+      domain: [-100, 100],
+    },
+    y: {
+      label: null,
+      tickSize: 0,
+      padding: 0,
+    },
+    color: {
+      domain: ["Negative", "Positive"],
+      range: colorRange,
+      legend: true,
+    },
+    marks: [
+      // Zero line
+      Plot.ruleX([0], { stroke: "#ccc", strokeWidth: 1 }),
+
+      // Main y-axis
+      Plot.axisY({
+        tickSize: 0,
+      }),
+
+      // Pointer white-out
+      Plot.axisY(
+        Plot.pointerY({
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0,
+        }),
+      ),
+
+      // Bold pointer
+      Plot.axisY(
+        Plot.pointerY({
+          fontWeight: "bold",
+          tickSize: 0,
+        }),
+      ),
+
+      // Bars
+      Plot.barX(plotData, {
+        x: (d) => (d.direction === "Negative" ? -d.perc : d.perc),
+        y: (d) => y(d.factor),
+        sort: { y: _sorter.channel, reverse: _sorter.reverse },
+        fill: (d) => d.direction,
+        stroke: "#fff",
+        channels: {
+          percentage: {
+            label: "Percentage",
+            value: "perc",
+          },
+          total: "total",
+          direction: "direction",
+          n: {
+            label: "Observations",
+            value: "n",
+          },
+        },
+        tip: {
+          format: {
+            x: false,
+            y: false,
+            fill: false,
+            percentage: (d) => `${d3.format("d")(d)}%`,
+            direction: true,
+            n: true,
+          },
+        },
+      }),
+
+      markBoldSidebarText(allData, {
+        y: (d) => y(d.factor),
+        text: "n",
+        dx: 7,
+      }),
+    ],
+  });
+};
+```

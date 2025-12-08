@@ -1,0 +1,556 @@
+---
+page-title: Project Map
+nb-authors:
+  - Todd Rosenstock
+  - Brayden Youngberg
+---
+
+```{ojs}
+maplibregl = require("maplibre-gl");
+mapLibreStylesheet = html`<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" />`;
+```
+
+```{ojs}
+viewof projectForm = Inputs.form(
+  {
+    country: Inputs.select(
+      projectCountries,
+      { label: "Country" }
+    ),
+    intervention: Inputs.select(
+      projectInterventions,
+      { label: "Intervention" }
+    ),
+    actor: Inputs.select(
+      projectActors,
+      { label: "Organization Type" }
+    ),
+  },
+  {
+    template: (inputs) => html`<div style="display: flex; gap: 2em;">${Object.values(inputs)}</div>`,
+  }
+)
+```
+
+```{ojs}
+filteredProjects = new Object({
+  ...projectGeo,
+  features: projectGeo.features.filter((feature) => {
+    const { country, intervention, actor } = projectForm;
+    const p = feature.properties;
+    return (
+      (!country || p.country === country) &&
+      (!intervention || p.interventions.includes(intervention)) &&
+      (!actor || p.actorClass === actor)
+    );
+  }),
+});
+
+filteredProjectData = projectData.filter((p) => {
+  const { country, intervention, actor } = projectForm;
+  return (
+    (!country || p.countries?.includes(country)) &&
+    (!intervention || p.interventions?.includes(intervention)) &&
+    (!actor || p.actorClass === actor)
+  );
+})
+
+projectStats = {
+  const projects = new Set();
+  const countries = new Set();
+  const locations = new Set();
+  let beneficiaries = 0;
+
+  for (const { properties: p = {} } of filteredProjects.features ?? []) {
+    if (p.locationId) locations.add(p.locationId);
+    // Some projects go across all countries, so filter here instead
+    if (p.country) countries.add(p.country);
+  }
+
+  for (const p of filteredProjectData) {
+    if (p.projectCode) projects.add(p.projectCode);
+    beneficiaries += p.beneficiaryNum ?? 0;
+  }
+  
+  console.log(countries)
+
+  return {
+    projects: projects.size,
+    locations: locations.size,
+    countries: countries.size,
+    beneficiaries
+  };
+}
+```
+
+```{=html}
+<style>
+.stat-row {
+  display: flex;
+  gap: 32px;
+  margin: 16px 0;
+  flex-wrap: wrap;
+}
+.stat-box {
+  text-align: left;
+}
+.stat-number {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #d4a017;
+  line-height: 1.2;
+}
+.stat-label {
+  font-size: 1rem;
+  text-transform: uppercase;
+  color: #666;
+}
+</style>
+```
+
+```{ojs}
+ html`
+  <div class="stat-row">
+    <div class="stat-box">
+      <div class="stat-number">${projectStats.projects}</div>
+      <div class="stat-label">Projects</div>
+    </div>
+
+    <div class="stat-box">
+      <div class="stat-number">${projectStats.locations}</div>
+      <div class="stat-label">Locations</div>
+    </div>
+
+    <div class="stat-box">
+      <div class="stat-number">${projectStats.countries}</div>
+      <div class="stat-label">Countries</div>
+    </div>
+
+    <div class="stat-box">
+      <div class="stat-number">
+        ${new Intl.NumberFormat(navigator.language, {
+          notation: "compact",
+          maximumFractionDigits: 1,
+        }).format(projectStats.beneficiaries)}
+      </div>
+      <div class="stat-label">Beneficiaries</div>
+    </div>
+  </div>`;
+```
+
+```{ojs}
+map = {
+  const _dataGeojson = addJitterToGeoJSON(filteredProjects);
+  const mapContainer = html`
+    <div class="map-and-sidebar" style="
+      display: flex;
+      height: 800px;
+      position: relative;
+      z-index: 1;
+      margin-top: 10px;
+    ">
+      <div id="map-area" style="
+        flex-grow: 1;
+        min-width: 0;
+      "></div>
+      
+      <div id="sidebar-panel" style="
+        width: 350px;
+        background: #f8f9fa;
+        padding: 15px;
+        overflow-y: auto;
+        border-left: 1px solid #ddd;
+        position: relative;
+        z-index: 2;
+      ">
+        <p>Click a project on the map to see details here.</p>
+      </div>
+    </div>`;
+  yield mapContainer;
+
+  const map = new maplibregl.Map({
+    container: mapContainer.querySelector("#map-area"),
+    style: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    center: [20, 5],
+    zoom: 2.5,
+    interactive: true
+  });
+
+  map.dragRotate.disable();
+  map.keyboard.disable();
+
+  map.addControl(
+    new maplibregl.NavigationControl({
+      visualizePitch: false
+    }),
+    "top-right"
+  );
+
+  map.on("load", () => {
+    const sidebar = document.getElementById("sidebar-panel");
+
+    map.addSource("points-data", {
+      type: "geojson",
+      data: _dataGeojson,
+    });
+
+    map.addLayer({
+      id: "points-layer",
+      type: "circle",
+      source: "points-data",
+      paint: {
+        // Use the marker_color property from the GeoJSON
+        "circle-color": [
+          "match",
+          ["get", "actorClass"],
+            "Government/Regional", "#9B59B6",
+            "International Development", "#E67E22",
+            "NGO/Civil Society", "#3498DB",
+            "Unspecified", "#cccccc",
+            "#cccccc"
+        ],
+        'circle-radius': [
+            'case',
+            ['boolean', ['feature-state', 'clicked'], false],
+            15,
+            4
+        ],
+        "circle-stroke-width": [
+            'case',
+            ['boolean', ['feature-state', 'clicked'], false],
+            5,
+            1
+        ],
+        "circle-stroke-color": "#fff"
+      }
+    });
+
+    let selectedID = null;
+
+    map.on("click", "points-layer", (e) => {
+      // Check if any feature was clicked
+      if (e.features.length) {
+        // The first feature is the topmost one clicked
+        const feature = e.features[0];
+
+        // Remove previous selection
+        if (selectedID !== null) {
+          map.setFeatureState(
+            { source: "points-data", id: selectedID },
+            { clicked: false }
+          );
+        }
+        
+        // Set new selection
+        selectedID = feature.id;
+        map.setFeatureState(
+          { source: "points-data", id: selectedID },
+          { clicked: true }
+        );
+
+        // Get the build HTML from the feature's properties
+        const _projId = feature.properties.projectCode;
+        const _data = projectMap.get(_projId);
+
+        
+        const htmlContent = generateSidebarHtml(_data, feature.properties);
+        sidebar.innerHTML = htmlContent;
+
+        // Zoom to region
+        map.flyTo({
+          center: feature.geometry.coordinates,
+          zoom: 6, // Zoom in slightly
+          essential: true
+        });
+      }
+    });
+
+    // Change cursor on hover
+    map.on("mouseenter", "points-layer", () => {
+      map.getCanvas().style.cursor = "pointer";
+    });
+
+    map.on("mouseleave", "points-layer", () => {
+      map.getCanvas().style.cursor = "";
+    });
+
+    // Legend
+    const legend = document.createElement("div");
+    legend.id = "map-legend";
+    legend.style.cssText = `
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.75);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.4;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+      backdrop-filter: blur(10px);
+      transition: opacity 0.3s ease;
+      opacity: 0.9;
+      z-index: 3;
+    `;
+    legend.onmouseenter = () => legend.style.opacity = "1";
+    legend.onmouseleave = () => legend.style.opacity = "0.9";
+    map.getContainer().appendChild(legend);
+
+    const expr = map.getPaintProperty("points-layer", "circle-color");
+
+    function buildLegendFromMatch(matchExpr) {
+      const container = document.getElementById("map-legend");
+      container.innerHTML = "<strong>Actor Class</strong><br>";
+
+      const pairs = matchExpr.slice(2, matchExpr.length - 1);
+
+      for (let i = 0; i < pairs.length; i += 2) {
+        const label = pairs[i];
+        const color = pairs[i + 1];
+
+        const item = document.createElement("div");
+        item.style.cssText = "display: flex; align-items: center; margin-top: 4px;";
+
+        const swatch = document.createElement("span");
+        swatch.style.cssText = `
+          width: 14px;
+          height: 14px;
+          background: ${color};
+          border-radius: 3px;
+          display: inline-block;
+          margin-right: 6px;
+          border: 1px solid #555;
+        `;
+
+        item.appendChild(swatch);
+        item.appendChild(document.createTextNode(label));
+        container.appendChild(item);
+      }
+    }
+
+    buildLegendFromMatch(expr);
+
+  });
+}
+```
+
+```{ojs}
+html`
+<div style="font-size: 0.78rem; color: #888; margin-top: 25px;">
+  <strong>Data Source:</strong>
+  <a href="https://africanagricultureadaptation.org" target="_blank" style="color: #d4a017;">African Agriculture Adaptation Tracking</a>
+  &nbsp;|&nbsp;
+  <strong>Updated:</strong> 2025-05-12
+</div>
+`;
+```
+
+<!-- Data setup -->
+
+```{ojs}
+projectGeo = await FileAttachment(
+  "/data/solutionsNb/projectLocations.geojson",
+).json();
+
+function jitterPoint([lng, lat]) {
+  const JITTER = 0.0075;
+  const dx = (Math.random() - 0.5) * JITTER;
+  const dy = (Math.random() - 0.5) * JITTER;
+  return [lng + dx, lat + dy];
+}
+
+function addJitterToGeoJSON(geojson) {
+  const used = new Map(); // track duplicates
+
+  geojson.features.forEach((feature) => {
+    if (feature.geometry?.type === "Point") {
+      const key = feature.geometry.coordinates.join(",");
+
+      // If we've seen this point before → jitter it
+      if (used.has(key)) {
+        feature.geometry.coordinates = jitterPoint(
+          feature.geometry.coordinates,
+        );
+      }
+
+      used.set(key, true);
+    }
+  });
+
+  return geojson;
+}
+```
+
+```{ojs}
+projectData = await FileAttachment(
+  "/data/solutionsNb/project_data.json",
+).json();
+
+projectMap = new Map(projectData.map((p) => [p.projectCode, p]));
+```
+
+```{ojs}
+projectCountries = [
+  null,
+  ...Array.from(new Set(projectData.flatMap((d) => d.countries || []))).sort(),
+];
+
+projectActors = [
+  null,
+  ...Array.from(
+    new Set(projectGeo.features.map((f) => f.properties.actorClass)),
+  ).sort(),
+];
+
+projectInterventions = [
+  null,
+  ...Array.from(
+    new Set(projectGeo.features.map((f) => f.properties.interventions)),
+  ).sort(),
+];
+```
+
+```{ojs}
+generateSidebarHtml = (project, location) => {
+  if (!project) return location.projectName;
+  // Helpers
+  const joinList = (arr) => (arr?.length ? arr.join(", ") : "");
+  const showIf = (condition, html) => (condition ? html : "");
+  const formatPartners = (partners) =>
+    partners?.length
+      ? partners.map((p) => `${p.name} <em>(${p.class})</em>`).join(", ")
+      : "";
+
+  // Date formatting
+  const dateDisplay =
+    project.minStartDate || project.maxEndDate
+      ? `${project.minStartDate || ""} - ${project.maxEndDate || "ongoing"}`
+      : "";
+
+  // Group partners
+  const partnerGroups = {
+    funding: [],
+    implementation: [],
+    primary: [],
+  };
+
+  project.partners?.forEach((p) => {
+    const type = p.type || "primary";
+    if (!partnerGroups[type]) partnerGroups[type] = [];
+    partnerGroups[type].push({
+      name: p.actor_name,
+      class: p.actor_class,
+    });
+  });
+
+  return `
+  <div style="
+    font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif;
+    font-size: 13px;
+    padding: 12px;
+    max-width: 320px;
+    line-height: 1.45;
+    color: #222;
+  ">
+
+    <!-- Label -->
+    <div style="font-size: 10px; font-weight: 600; color: #d4a017; text-transform: uppercase;">
+      Project Detail
+    </div>
+
+    <!-- Title -->
+    <div style="font-size: 15px; font-weight: 600; margin: 4px 0 10px; color: #111;">
+      ${project.projectName}
+    </div>
+
+    <!-- Basic Info -->
+    <div style="border-top: 1px solid #eee; padding-top: 8px;">
+      <div><strong>Location:</strong> ${location.locationName}, ${location.country}</div>
+
+      ${showIf(
+        project.projectScale,
+        `<div><strong>Scale:</strong> ${project.projectScale}</div>`,
+      )}
+
+      ${showIf(dateDisplay, `<div><strong>Date:</strong> ${dateDisplay}</div>`)}
+    </div>
+
+    <!-- Impact -->
+    ${showIf(
+      project.beneficiaryNum || project.targetedBeneficiaries?.length,
+      `
+      <div style="border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
+        <div style="font-weight: 600; margin-bottom: 6px;">👥 Project Impact</div>
+
+        ${showIf(
+          project.beneficiaryNum,
+          `<div><strong>Project Beneficiaries:</strong> ${project.beneficiaryNum?.toLocaleString() || ""}</div>`,
+        )}
+
+        ${showIf(
+          project.targetedBeneficiaries?.length,
+          `<div style="margin-top: 2px; color: #555;">${joinList(project.targetedBeneficiaries)}</div>`,
+        )}
+      </div>
+      `,
+    )}
+
+    <!-- Interventions -->
+    ${showIf(
+      project.targetedValueChains?.length ||
+        project.onFarmAdaptations?.length ||
+        project.beyondFarmAdaptations?.length,
+      `
+      <div style="border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
+        <div style="font-weight: 600; margin-bottom: 6px;">🌱 Approaches & Interventions</div>
+
+        ${showIf(
+          project.targetedValueChains?.length,
+          `<div><strong>Targeted Value Chains:</strong> ${joinList(project.targetedValueChains)}</div>`,
+        )}
+
+        ${showIf(
+          project.onFarmAdaptations?.length,
+          `<div><strong>On-farm:</strong> ${joinList(project.onFarmAdaptations)}</div>`,
+        )}
+
+        ${showIf(
+          project.beyondFarmAdaptations?.length,
+          `<div><strong>Beyond-farm:</strong> ${joinList(project.beyondFarmAdaptations)}</div>`,
+        )}
+      </div>
+      `,
+    )}
+
+    <!-- Partners -->
+    ${showIf(
+      partnerGroups.funding.length ||
+        partnerGroups.implementation.length ||
+        partnerGroups.primary.length,
+      `
+      <div style="border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px;">
+        <div style="font-weight: 600; margin-bottom: 6px;">🤝 Project Partners</div>
+
+        ${showIf(
+          partnerGroups.primary.length,
+          `<div><strong>Primary:</strong> ${formatPartners(partnerGroups.primary)}</div>`,
+        )}
+
+        ${showIf(
+          partnerGroups.funding.length,
+          `<div style="margin-top: 3px;"><strong>Funding:</strong> ${formatPartners(partnerGroups.funding)}</div>`,
+        )}
+
+        ${showIf(
+          partnerGroups.implementation.length,
+          `<div style="margin-top: 3px;"><strong>Implementation:</strong> ${formatPartners(partnerGroups.implementation)}</div>`,
+        )}
+
+      </div>
+      `,
+    )}
+
+  </div>
+  `;
+};
+```

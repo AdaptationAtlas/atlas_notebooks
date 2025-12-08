@@ -1,0 +1,400 @@
+---
+page-title: "Aez Solutions"
+---
+
+```{ojs}
+Inputs.form([
+  buildAEZcropSelect(),
+  buildAEZselect()
+], {template: (inputs) => html`<div style="display: flex; gap: 2em;">${inputs}</div>`})
+
+viewof aezPlotParams = Inputs.form([
+  buildAEZsort(),
+  buildAEZci()
+])
+
+// viewof aezSort = buildAEZsort()
+// viewof aezConfidence = buildAEZci()
+```
+
+```{ojs}
+plotDotAEZ = buildDotAEZ();
+plotDotAEZ.legend("color", { columns: 3 });
+```
+
+<!-- Data Backend -->
+
+```{ojs}
+cropPracticeAEZ = await FileAttachment(
+  "/data/solutionsNb/data_meanDiff_aezPracticeCrop.json",
+).json();
+
+meanDiffCropList = Array.from(
+  new Set(cropPracticeAEZ.map((x) => x.Crop)),
+).sort();
+```
+
+<!-- Inputs -->
+
+```{ojs}
+viewof selectCropMeanDiff = Inputs.input("Maize"); //Default global holder for this
+
+buildAEZcropSelect = () => {
+  return Inputs.bind(
+    Inputs.select(meanDiffCropList, {label: "Crop", value: 'Maize'}),
+    viewof selectCropMeanDiff
+  )
+}
+```
+
+```{ojs}
+viewof aezSelect = Inputs.input(null);
+
+aezCropList = {
+  const _filtered = cropPracticeAEZ.filter(
+    (x) => x.Crop === selectCropMeanDiff,
+  );
+  return [
+    null,
+    ...Array.from(new Set(_filtered.map((x) => x.AEZ_Class_FAO))).sort(),
+  ];
+};
+
+buildAEZselect = () => {
+  return Inputs.bind(
+    Inputs.select(aezCropList, {
+      label: "AEZ",
+      format: (d) => d,
+      value: null,
+    }),
+  viewof aezSelect
+  )
+};
+```
+
+```{ojs}
+buildAEZsort = () => {
+  const data = [
+    {
+      key: "mean",
+      label: "mean",
+      channel: "x",
+      reverse: true,
+    },
+    {
+      key: "observations",
+      label: "observations",
+      channel: "nObs",
+      reverse: true,
+    },
+    {
+      key: "alpha",
+      label: "alphabetical",
+      channel: "y",
+      reverse: false,
+    },
+  ];
+  return Inputs.radio(data, {
+    label: "Sort by",
+    format: (d) => d.label,
+    value: data.find((x) => x.key === "mean"),
+  });
+};
+```
+
+```{ojs}
+buildAEZci = () => {
+  return Inputs.checkbox(["Visible"], {
+    label: "Toggle Confidence",
+  });
+};
+```
+
+<!-- Plot Code -->
+
+```{ojs}
+aezColor_new = {
+  // const lookupAEZ = (aez) => _lang(td.AEZ_Class_FAO.values[aez])
+  const lookupAEZ = (aez) => aez
+  return {
+    domain: [
+      lookupAEZ('Desert/Arid climate'),
+      lookupAEZ("Tropics, highland; semi-arid"),
+      lookupAEZ("Tropics, lowland; semi-arid"),
+      lookupAEZ("Subtropics, moderately cool; sub-humid"),
+      lookupAEZ("Tropics, highland; sub-humid"),
+      lookupAEZ("Tropics, lowland; sub-humid"),
+      lookupAEZ("Tropics, highland; humid"),
+      lookupAEZ("Tropics, lowland; humid"),
+      lookupAEZ("Land with ample irrigated soils"),
+      lookupAEZ("Severe soil/terrain limitations"),
+      lookupAEZ("Dominantly urban/built-up land"),
+    ],
+    range: [
+      "#F3D6B0",
+      "#FCA034",
+      "#F7D732",
+      "#523D4E",
+      "#EF6D94",
+      "#F9B1C1",
+      "#2A79A8",
+      "#79A1B7",
+      "#74B95A",
+      "#2E7637",
+      "#B1B1B1"
+    ]
+  };
+}
+```
+
+```{ojs}
+buildDotAEZ = () => {
+  const [aezSort, aezConfidence] = aezPlotParams;
+
+  const formatNum = d3.format(".2f");
+  const baseData = cropPracticeAEZ;
+
+  // Filter by selected crop
+  const plotData = baseData.filter((d) => d.Crop === selectCropMeanDiff);
+
+  // Filter by selected AEZ (still optional)
+  let aezData = plotData;
+  if (aezSelect != null) {
+    aezData = aezData.filter((d) => d.AEZ_Class_FAO === aezSelect);
+  }
+
+  aezData = [...aezData].sort((a, b) => a.Mean_Difference - b.Mean_Difference);
+
+  const colorDomain = aezColor_new.domain;
+  const colorRange = aezColor_new.range;
+
+  const marginBottom = 20;
+  const marginTop = 80;
+  const yHeight = 25;
+
+  const height =
+    marginTop +
+    marginBottom +
+    new Set(plotData.map((d) => d.Practice)).size * yHeight;
+
+  // Replace language lookup with placeholder comment hooks
+  const langLookup = {
+    xLabel: /* translate(xMeanDiff) */ "Mean Difference",
+    tooltip: {
+      aez: /* translate(aez) */ "AEZ",
+      meanDiff: /* translate(meanDiff) */ "Mean Difference",
+      meanControl: /* translate(meanControl) */ "Mean Control",
+      crop: /* translate(crop) */ "Crop",
+      ciLo: /* translate(ciLower) */ "CI Lower",
+      ciHi: /* translate(ciUpper) */ "CI Upper",
+      obs: /* translate(observations) */ "Observations",
+      practice: /* translate(practice) */ "Practice",
+    },
+  };
+
+  // Replace language lookup for y-axis categories
+  const y = (d) => /* translate practice value */ d;
+  const color = (d) => /* translate AEZ class name */ d;
+
+  return Plot.plot({
+    height,
+    marginBottom,
+    marginTop,
+    marginLeft: 175,
+    marginRight: 70,
+    width: 1000,
+    x: {
+      axis: "top",
+      nice: true,
+      grid: true,
+      label: langLookup.xLabel,
+      labelAnchor: "center",
+      labelOffset: 40,
+      labelArrow: "none",
+    },
+    y: {
+      tickSize: 0,
+      label: null,
+    },
+    color: {
+      domain: colorDomain,
+      range: colorRange,
+    },
+    marks: [
+      // y-axis
+      Plot.axisY({ tickSize: 0 }),
+
+      // pointer highlight white-out
+      Plot.axisY(
+        Plot.pointerY({
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0,
+        }),
+      ),
+
+      // pointer bold text
+      Plot.axisY(
+        Plot.pointerY({
+          fontWeight: "bold",
+          tickSize: 0,
+        }),
+      ),
+
+      // zero line
+      Plot.ruleX([0], { stroke: "#333", strokeDasharray: [4] }),
+
+      // base (gray) dots
+      Plot.dot(plotData, {
+        x: "Mean_Difference",
+        y: (d) => y(d.Practice),
+        sort: {
+          y: aezSort.channel,
+          reverse: aezSort.reverse,
+        },
+        r: 8,
+        stroke: "#fff",
+        strokeWidth: 0.7,
+        fill: "#efefef",
+        channels: {
+          nObs: { label: "# Observations", value: "N_Obs" },
+        },
+      }),
+
+      // CI lines (only shown when toggled)
+      Plot.ruleY(aezConfidence.length > 0 ? aezData : [], {
+        y: (d) => y(d.Practice),
+        x1: (d) => (d.Lower === "NA" ? null : d.Lower),
+        x2: (d) => (d.Upper === "NA" ? null : d.Upper),
+        stroke: "#333",
+      }),
+
+      // main colored dots
+      Plot.dot(aezData, {
+        x: "Mean_Difference",
+        y: (d) => y(d.Practice),
+        fill: (d) => color(d.AEZ_Class_FAO),
+        r: 8,
+        stroke: "#fff",
+        strokeWidth: 0.7,
+        channels: {
+          aez: {
+            label: langLookup.tooltip.aez,
+            value: (d) => color(d.AEZ_Class_FAO),
+          },
+          nObs: { label: langLookup.tooltip.obs, value: "N_Obs" },
+          diff: {
+            label: langLookup.tooltip.meanDiff,
+            value: "Mean_Difference",
+          },
+          control: {
+            label: langLookup.tooltip.meanControl,
+            value: "Mean_Control",
+          },
+          prac: {
+            label: langLookup.tooltip.practice,
+            value: (d) => y(d.Practice),
+          },
+          crop: { label: langLookup.tooltip.crop, value: "Crop" },
+          ciLow: { label: langLookup.tooltip.ciLo, value: "Lower" },
+          ciHigh: { label: langLookup.tooltip.ciHi, value: "Upper" },
+        },
+        tip: {
+          format: {
+            x: false,
+            y: false,
+            fill: false,
+            prac: false,
+            crop: false,
+            aez: true,
+            diff: (d) => formatNum(d),
+            control: (d) => formatNum(d),
+            ciLow: (d) => formatNum(d),
+            ciHigh: (d) => formatNum(d),
+            nObs: true,
+          },
+        },
+      }),
+
+      // hover highlight dot
+      Plot.dot(
+        aezData,
+        Plot.pointer({
+          x: "Mean_Difference",
+          y: (d) => y(d.Practice),
+          r: 8,
+          fill: (d) => d.AEZ_Class_FAO,
+          stroke: "#333",
+          strokeWidth: 0.7,
+          channels: {
+            nObs: { label: "# Observations", value: "N_Obs" },
+          },
+        }),
+      ),
+
+      // total observations at right side
+      Plot.textY(
+        aezData,
+        Plot.map(
+          { text: (values) => values.map((d) => d + " obs.") },
+          Plot.groupY(
+            { text: "sum" },
+            {
+              y: (d) => y(d.Practice),
+              text: "N_Obs",
+              frameAnchor: "right",
+              textAnchor: "start",
+              dx: 16,
+            },
+          ),
+        ),
+      ),
+
+      // white-out pointer bg for obs text
+      Plot.textY(
+        aezData,
+        Plot.pointerY(
+          Plot.map(
+            { text: (values) => values.map((d) => d + " obs.") },
+            Plot.groupY(
+              { text: "sum" },
+              {
+                y: (d) => y(d.Practice),
+                text: "N_Obs",
+                frameAnchor: "right",
+                textAnchor: "start",
+                dx: 16,
+                fill: "white",
+                stroke: "white",
+                strokeWidth: 2,
+              },
+            ),
+          ),
+        ),
+      ),
+
+      // bold obs text on hover
+      Plot.textY(
+        aezData,
+        Plot.pointerY(
+          Plot.map(
+            { text: (values) => values.map((d) => d + " obs.") },
+            Plot.groupY(
+              { text: "sum" },
+              {
+                y: (d) => y(d.Practice),
+                text: "N_Obs",
+                frameAnchor: "right",
+                textAnchor: "start",
+                dx: 16,
+                fontWeight: "bold",
+              },
+            ),
+          ),
+        ),
+      ),
+    ],
+  });
+};
+```
