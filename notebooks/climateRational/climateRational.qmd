@@ -9,7 +9,6 @@ date-edited: today
 
 ```{ojs}
 import {
-  atlasTOC,
   atlasHero,
   dataTable,
   downloadButton,
@@ -21,7 +20,9 @@ import { cleanAdminInput_SQL } from "/helpers/data.js";
 
 import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
 
-atlasHero(nbTitle, hero_url);
+import { atlasTOC } from "/helpers/toc.ojs";
+
+atlasHero(nbTitle, "../../images/default_crop.webp");
 ```
 
 # `{ojs} heading1` {#overview}
@@ -38,9 +39,6 @@ md`${_lang(nbText.sections.intro.text)}`; // wrapped in md for lists to work
 section1A0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
 section1A1 = renderA1Multi({ maxSelections: 3 });
 inputTemplate()([section1A0, section1A1]);
-
-admin1Select;
-admin0Select;
 ```
 
 ```{ojs}
@@ -158,8 +156,6 @@ inputTemplate()([section4A0, section4A1]);
 climateForm();
 
 bars_extremeEvents();
-
-extremeEvents_plotData;
 ```
 
 `{ojs} downloadButton(extremeEvents_plotData, "extremeEvents")`
@@ -172,10 +168,29 @@ extremeEvents_plotData;
 section5A0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
 section5A1 = renderA1Multi({ maxSelections: 3 });
 inputTemplate()([section5A0, section5A1]);
+
+Inputs.bind(
+  Inputs.select([null, ...Object.keys(exposure_groups)], {
+  format: (d) => d || "All Commodities",
+    value: null,
+    label: "Production Type",
+  }), 
+  viewof prod_type
+);
 ```
 
 ```{ojs}
 loaderDiv("plotHazardExposure");
+```
+
+```{ojs}
+//| output: false
+{
+  const div = document.getElementById("plotHazardExposure");
+  div.innerHTML = "";
+  const viz = stackbars_hazardExposure();
+  div.appendChild(viz);
+}
 ```
 
 # `{ojs} summary` {#summary}
@@ -940,6 +955,7 @@ exposureBars_keyFacts = function () {
     facet: {
       data: _data,
       x: "adminName",
+      label: null,
     },
 
     color: {
@@ -1481,15 +1497,73 @@ bars_extremeEvents = () => {
 ### hazardExposure
 
 ```{ojs}
-{
-  const _data = hazardExposure_plotData.filter(
+stackbars_hazardExposure = () => {
+  // --- 1. Assign category to each crop (same as first chart) ---
+  const dataWithCategory = hazardExposure_plotData.map((row) => {
+    const category =
+      Object.entries(exposure_groups).find(([group, crops]) =>
+        crops.includes(row.crop),
+      )?.[0] || "other";
+
+    return { ...row, category };
+  });
+
+  // --- 2. Compute category totals using hazard === "any" ---
+  const totalsByCategory = new Map(
+    d3.rollup(
+      dataWithCategory.filter((d) => d.hazard === "any"),
+      (v) => d3.sum(v, (d) => d.value),
+      (d) => d.adminName,
+      (d) => d.category,
+      (d) => d.timeframe,
+      (d) => d.scenario,
+    ),
+  );
+
+  // --- 3. Filter to only needed timeframe/scenario AND remove "any" ---
+  let baseFiltered = dataWithCategory.filter(
     (d) =>
       d.hazard !== "any" &&
       ["1995-2014", "2021-2040"].includes(d.timeframe) &&
-      ["historic", "ssp245", "ssp585"].includes(d.scenario) &&
-      d.crop !== "generic-crop"
+      ["historic", "ssp245", "ssp585"].includes(d.scenario),
   );
 
+  // --- 4. Apply prod_type logic (same as first chart) ---
+  let dataForAggregation;
+  if (!prod_type) {
+    // Aggregate hazards by category (not crop)
+    dataForAggregation = Array.from(
+      d3.rollup(
+        baseFiltered,
+        (v) => d3.sum(v, (d) => d.value),
+        (d) => d.adminName,
+        (d) => d.category,
+        (d) => d.timeframe,
+        (d) => d.scenario,
+        (d) => d.hazard,
+      ),
+      ([adminName, catMap]) =>
+        Array.from(catMap, ([category, tMap]) =>
+          Array.from(tMap, ([timeframe, sMap]) =>
+            Array.from(sMap, ([scenario, hMap]) =>
+              Array.from(hMap, ([hazard, value]) => ({
+                adminName,
+                crop: category,
+                timeframe,
+                scenario,
+                hazard,
+                value,
+              })),
+            ),
+          ),
+        ),
+    ).flat(4);
+  } else {
+    // Filter to only the selected category
+    dataForAggregation = baseFiltered.filter((d) => d.category === prod_type);
+  }
+
+  // --- 5. Hazards stacked in defined order ---
   const _hazards = [
     "wet",
     "dry",
@@ -1497,11 +1571,32 @@ bars_extremeEvents = () => {
     "dry+heat",
     "dry+wet",
     "heat+wet",
-    "heat+wet+dry"
+    "heat+wet+dry",
   ];
+
+  if (dataForAggregation.length === 0) {
+    return html`
+      <div style="
+        width: ${width}px;
+        height: 400px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f5f5f5;
+        border-radius: 4px;
+        color: #666;
+        font-size: 16px;
+      ">
+        No data available for the plot
+      </div>
+    `;
+  }
+
+  // --- 6. Final hazard plot by category (or filtered category) ---
   return Plot.plot({
     width,
     marginLeft: 100,
+
     color: {
       legend: true,
       range: [
@@ -1512,59 +1607,57 @@ bars_extremeEvents = () => {
         "#B34E65",
         "#8C3E5F",
         "#523D4E",
-        "#EFEFEF"
+        "#EFEFEF",
       ],
-      domain: _hazards
+      domain: _hazards,
     },
+
     x: {
       ticks: 1,
       axis: "top",
-      // domain: [0, 100],
-      grid: true
+      grid: true,
     },
+
     facet: {
-      data: _data,
+      data: dataForAggregation,
       x: "scenario",
+      y: "adminName",
+      label: null,
     },
+
     marks: [
-      // main y-axis
-      Plot.axisY({
-        tickSize: 0
-      }),
-      // pointer white-out
+      Plot.axisY({ tickSize: 0 }),
       Plot.axisY(
         Plot.pointerY({
           fill: "white",
           textStroke: "white",
           textStrokeWidth: 2,
-          tickSize: 0
-        })
+          tickSize: 0,
+        }),
       ),
-      // bold pointer
       Plot.axisY(
         Plot.pointerY({
           fontWeight: "bold",
-          tickSize: 0
-        })
+          tickSize: 0,
+        }),
       ),
       Plot.barX(
-        _data,
+        dataForAggregation,
         Plot.stackX(
           { order: _hazards },
           {
-            x: (d) => d.value,
-            // x: (d) => (d.value / d.total_value) * 100,
+            x: "value",
             y: "crop",
             fill: "hazard",
             stroke: "#fff",
             strokeWidth: 0.25,
-            tip: true
-          }
-        )
-      )
-    ]
+            tip: true,
+          },
+        ),
+      ),
+    ],
   });
-}
+};
 ```
 
 <style>
