@@ -1,0 +1,225 @@
+---
+page-title: "Reusable toc component for the Atlas"
+---
+
+::: {.column-margin}
+
+```{=html}
+<div class="atlas-toc">
+  <span id="atlasTOCHeader" class = "atlas-toc-heading">Contents</span>
+  <div id="atlasTOC"></div>
+</div>
+```
+
+:::
+
+```{=html}
+<script>
+function setupScrollSpy(links) {
+    const sections = links.map(link => {
+        const id = link.getAttribute("href").slice(1); // remove #
+        return document.getElementById(id);
+    });
+
+    function setActiveLink(activeLink) {
+        links.forEach(link => link.classList.remove("active"));
+        if (activeLink) activeLink.classList.add("active");
+    }
+
+    function onScroll() {
+        let closestIndex = 0;
+        let closestDistance = Infinity;
+
+        sections.forEach((sec, i) => {
+            if (!sec) return; // safety
+
+            const rect = sec.getBoundingClientRect();
+            const distance = Math.abs(rect.top);
+
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestIndex = i;
+            }
+        });
+
+        setActiveLink(links[closestIndex]);
+    }
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll(); // initialize
+}
+
+function observeHeadingChangesForTOC(options = {}) {
+    // Default options
+    const {
+        outputElementId = 'atlasTOC',
+        idsToIgnore = [],
+        headingLevels = [1] // default to h1 only
+    } = options;
+
+    const outputElement = document.getElementById(outputElementId);
+    const ignoredIdSet = new Set(idsToIgnore);
+
+    // Create selector for specified heading levels
+    const headingSelector = headingLevels.map(level => `h${level}`).join(', ');
+
+    // Slug helper
+    const slugify = (text) => {
+        return text.toString().toLowerCase()
+            .trim()
+            .replace(/\s+/g, '-')
+            .replace(/[^\w\-]+/g, '')
+            .replace(/\-\-+/g, '-');
+    };
+
+    let sections = []; // Cached section DOM nodes
+    let links = [];    // Cached TOC link DOM nodes
+
+    // Set active link
+    function setActiveLink(activeLink) {
+        links.forEach(link => link.classList.remove("active"));
+        if (activeLink) activeLink.classList.add("active");
+    }
+
+    // ScrollSpy: highlight the closest section to the top
+    function onScroll() {
+        if (!sections.length) return;
+
+        let closestIndex = 0;
+        let closestDistance = Infinity;
+
+        sections.forEach((sec, i) => {
+            if (!sec) return;
+            const rect = sec.getBoundingClientRect();
+            const distance = Math.abs(rect.top - 50); // bias slightly downward
+
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestIndex = i;
+            }
+        });
+
+        setActiveLink(links[closestIndex]);
+    }
+
+    // Build the TOC
+    const updateHeadingList = () => {
+        const headingElements = document.querySelectorAll(headingSelector);
+        const container = document.createElement('div');
+
+        links = [];
+        sections = [];
+
+        headingElements.forEach((heading) => {
+            const headingText = heading.textContent.trim();
+            let id = heading.id;
+
+            // Create/ensure ID
+            if (!id) {
+                id = slugify(headingText);
+                let suffix = 1;
+                let finalId = id;
+                while (document.getElementById(finalId)) {
+                    finalId = id + '-' + suffix++;
+                }
+                heading.id = finalId;
+                id = finalId;
+            }
+
+            if (ignoredIdSet.has(id)) return;
+
+            // Build link
+            const a = document.createElement('a');
+            a.href = `#${id}`;
+            a.textContent = headingText || '[Empty Heading]';
+            a.classList.add('toc-link');
+
+            container.appendChild(a);
+
+            links.push(a);
+            sections.push(heading);
+        });
+
+        // Render TOC
+        outputElement.innerHTML = '';
+        outputElement.appendChild(container);
+
+        // Initialize scrollspy immediately
+        onScroll();
+    };
+
+    // MutationObserver to auto-refresh TOC
+    const domObserver = new MutationObserver((mutationsList) => {
+        let needsUpdate = false;
+
+        for (const mutation of mutationsList) {
+            if (mutation.type === 'childList') {
+                const relevantNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+                if (relevantNodes.some(node => {
+                    if (node.nodeType === 1) {
+                        return headingLevels.some(level =>
+                            node.matches(`h${level}`) || node.querySelector(`h${level}`)
+                        );
+                    }
+                    return false;
+                })) {
+                    needsUpdate = true;
+                    break;
+                }
+            } else if (mutation.type === 'characterData') {
+                if (mutation.target.parentElement) {
+                    const isRelevantHeading = headingLevels.some(level =>
+                        mutation.target.parentElement.matches(`h${level}`)
+                    );
+                    if (isRelevantHeading) {
+                        needsUpdate = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (needsUpdate) requestAnimationFrame(updateHeadingList);
+    });
+
+    domObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+    // Initial render
+    updateHeadingList();
+
+    // ScrollSpy handler
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    return {
+        update: updateHeadingList,
+        disconnect: () => domObserver.disconnect()
+    };
+}
+document.addEventListener('DOMContentLoaded', () => {
+    // H1 only (original behavior)
+    observeHeadingChangesForTOC({
+        outputElementId: "atlasTOC",
+        idsToIgnore: ['atlas-definitions-1'],
+        headingLevels: [1]
+    });
+
+    // H1 and H2
+    // observeHeadingChangesForTOC({
+    //     outputElementId: 'toc',
+    //     headingLevels: [1, 2]
+    // });
+
+    // H1, H2, and H3
+    // observeHeadingChangesForTOC({
+    //     outputElementId: 'toc',
+    //     headingLevels: [1, 2, 3]
+    // });
+
+    // All headings (H1 through H6)
+    // observeHeadingChangesForTOC({
+    //     outputElementId: 'toc',
+    //     headingLevels: [1, 2, 3, 4, 5, 6]
+    // });
+});
+</script>
+```
