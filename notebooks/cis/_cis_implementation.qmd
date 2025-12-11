@@ -56,10 +56,12 @@ s3CisReadinessAdmin0 = {
     d => d.admin0_name
   );
   
-  return Array.from(grouped, ([admin0_name, data]) => ({
-    admin0_name,
-    ...data
-  }));
+  return Array.from(grouped, ([admin0_name, data]) => {
+    return {
+      admin0_name: admin0_name,
+      ...data
+    };
+  });
 }
 
 // Aggregate access data to Admin 0 level (average)
@@ -77,10 +79,12 @@ s3AccessAdmin0 = {
     d => d.admin0_name
   );
   
-  return Array.from(grouped, ([admin0_name, data]) => ({
-    admin0_name,
-    ...data
-  }));
+  return Array.from(grouped, ([admin0_name, data]) => {
+    return {
+      admin0_name: admin0_name,
+      ...data
+    };
+  });
 }
 
 // Join CIS readiness with access data at Admin 0 level
@@ -471,20 +475,57 @@ s3Legend = {
           legend: false
         },
         marks: [
-          Plot.geo(s3GeoData, {
+          Plot.geo(s3GeoData.features, {
             fill: d => s3BivariateColors[d.properties.bivariateClass] || "#cccccc",
             stroke: "#333",
-            strokeWidth: 0.5,
-            title: d => {
-              const isOptimal = d.properties.bivariateClass === "High × High";
-              const optimalLabel = isOptimal ? `\n✓ ${_lang(cis.s3OptimalZone)}` : "";
-              
-              return `${d.properties.admin0_name}\n` +
-                     `${_lang(cis.s3ReadinessLabel)}: ${d.properties.cis_readiness_avg?.toFixed(2)} (${d.properties.readinessClass})\n` +
-                     `${s3CurrentAccessLabel}: ${d.properties.accessValue !== null ? (d.properties.accessValue * 100).toFixed(1) + '%' : 'N/A'} (${d.properties.accessClass})\n` +
-                     `Category: ${d.properties.bivariateClass}${optimalLabel}`;
-            }
-          })
+            strokeWidth: 0.5
+          }),
+          Plot.tip(
+            s3GeoData.features,
+            Plot.pointer(
+              Plot.centroid({
+                channels: {
+                  country: {
+                    label: "Country",
+                    value: (d) => d.properties.admin0_name
+                  },
+                  readiness: {
+                    label: _lang(cis.s3ReadinessLabel),
+                    value: (d) => d.properties.cis_readiness_avg
+                  },
+                  readinessClass: {
+                    label: "Readiness Class",
+                    value: (d) => d.properties.readinessClass
+                  },
+                  access: {
+                    label: s3CurrentAccessLabel,
+                    value: (d) => d.properties.accessValue
+                  },
+                  accessClass: {
+                    label: "Access Class",
+                    value: (d) => d.properties.accessClass
+                  },
+                  category: {
+                    label: "Category",
+                    value: (d) => d.properties.bivariateClass
+                  },
+                  optimal: {
+                    label: "Optimal Zone",
+                    value: (d) => d.properties.bivariateClass === "High × High" ? `✓ ${_lang(cis.s3OptimalZone)}` : ""
+                  }
+                },
+                format: {
+                  country: true,
+                  readiness: (d) => d != null ? d.toFixed(2) : "N/A",
+                  readinessClass: true,
+                  access: (d) => d != null ? (d * 100).toFixed(1) + '%' : "N/A",
+                  accessClass: true,
+                  category: true,
+                  optimal: true
+                }
+              })
+            )
+          )
         ]
       })}
       ${s3Legend}
@@ -497,6 +538,9 @@ s3Legend = {
     </div>`;
     } else {
   const chartHeight = Math.max(600, s3SortedData.length * 25);
+  const linkData = s3SortedData.filter(d => d.accessValue !== null && !isNaN(d.accessValue));
+  const accessData = s3SortedData.filter(d => d.accessValue !== null && !isNaN(d.accessValue));
+  const allTipData = [...s3SortedData, ...accessData];
   
       yield html`<div style="width: 100%; overflow-x: auto;">
     <div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
@@ -528,35 +572,67 @@ s3Legend = {
       marks: [
         Plot.axisX({anchor: "bottom", label: "Value (0-1 scale)"}),
         // Connecting lines
-            Plot.link(s3SortedData.filter(d => d.accessValue !== null && !isNaN(d.accessValue)), {
+        Plot.link(linkData, {
           x1: "cis_readiness_avg",
           x2: "accessValue",
           y1: "admin0_name",
           y2: "admin0_name",
-              stroke: d => {
-                if (d.gap === null || isNaN(d.gap)) return "#999999";
-                return d.gap > 0.05 ? "#4daf4a" : d.gap < -0.05 ? "#e41a1c" : "#999999";
-              },
-          strokeWidth: 2,
-          title: d => `${d.admin0_name}\n${_lang(cis.s3GapLabel)}: ${d.gap?.toFixed(3)} (${d.gap > 0 ? _lang(cis.s3PositiveGap) : _lang(cis.s3NegativeGap)})`
+          stroke: d => {
+            if (d.gap === null || isNaN(d.gap)) return "#999999";
+            return d.gap > 0.05 ? "#4daf4a" : d.gap < -0.05 ? "#e41a1c" : "#999999";
+          },
+          strokeWidth: 2
         }),
         // Readiness dots (left)
         Plot.dot(s3SortedData, {
           x: "cis_readiness_avg",
           y: "admin0_name",
           fill: "#377eb8",
-          r: 5,
-          title: d => `${d.admin0_name}\n${_lang(cis.s3ReadinessLabel)}: ${d.cis_readiness_avg?.toFixed(3)}`
+          r: 5
         }),
         // Access dots (right)
-            Plot.dot(s3SortedData.filter(d => d.accessValue !== null && !isNaN(d.accessValue)), {
+        Plot.dot(accessData, {
           x: "accessValue",
           y: "admin0_name",
           fill: "#ff7f00",
           r: 5,
-              shape: "triangle",
-          title: d => `${d.admin0_name}\n${s3CurrentAccessLabel}: ${(d.accessValue * 100)?.toFixed(1)}%`
-        })
+          shape: "triangle"
+        }),
+        Plot.tip(
+          allTipData,
+          Plot.pointer({
+            x: (d) => d.cis_readiness_avg != null ? d.cis_readiness_avg : d.accessValue,
+            y: "admin0_name",
+            channels: {
+              country: {
+                label: "Country",
+                value: (d) => d.admin0_name
+              },
+              readiness: {
+                label: _lang(cis.s3ReadinessLabel),
+                value: (d) => d.cis_readiness_avg
+              },
+              access: {
+                label: s3CurrentAccessLabel,
+                value: (d) => d.accessValue
+              },
+              gap: {
+                label: _lang(cis.s3GapLabel),
+                value: (d) => d.gap
+              }
+            },
+            format: {
+              country: true,
+              readiness: (d) => d != null ? d.toFixed(3) : "N/A",
+              access: (d) => d != null ? (d * 100).toFixed(1) + '%' : "N/A",
+              gap: (d) => {
+                if (d == null || isNaN(d)) return "N/A";
+                const label = d > 0 ? _lang(cis.s3PositiveGap) : _lang(cis.s3NegativeGap);
+                return `${d.toFixed(3)} (${label})`;
+              }
+            }
+          })
+        )
       ]
     })}
     <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
@@ -577,6 +653,11 @@ s3Legend = {
       <em>Scatter plot will appear once data is loaded...</em>
     </div>`;
     } else {
+      const scatterData = s3ProcessedData.filter(d => 
+        d.accessValue !== null && 
+        !isNaN(d.accessValue)
+      );
+      
       yield html`<div style="width: 100%; overflow-x: auto;">
     <div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
       <div style="font-size: 12px;">
@@ -584,70 +665,87 @@ s3Legend = {
       </div>
     </div>
     ${Plot.plot({
-      width: 1000,
-      height: 1000,
-      marginTop: 80,
-      marginBottom: 80,
-      x: {
-        domain: [0, 1],
-        label: _lang(cis.s3ReadinessLabel) + " →",
-        grid: true,
-        axis: "top"
-      },
-      y: {
-        domain: [0, 1],
-        label: s3CurrentAccessLabel + " →",
-        grid: true
-      },
-      marks: [
-        Plot.axisX({anchor: "bottom", label: _lang(cis.s3ReadinessLabel) + " →"}),
-        // Diagonal reference line (parity)
-        Plot.line([[0, 0], [1, 1]], {
-          stroke: "#999",
-          strokeWidth: 2,
-          strokeDasharray: "5,5"
-        }),
-        // All countries (not highlighted)
-        Plot.dot(
-          s3ProcessedData.filter(d => 
-            d.accessValue !== null && 
-                !isNaN(d.accessValue) &&
-            !s3HighlightedCountries.includes(d.admin0_name)
-          ),
-          {
-            x: "cis_readiness_avg",
-            y: "accessValue",
-                fill: d => s3BivariateColors[d.bivariateClass] || "#cccccc",
-            stroke: "#333",
-            strokeWidth: 1,
-            r: 6,
-            title: d => `${d.admin0_name}\n${_lang(cis.s3ReadinessLabel)}: ${d.cis_readiness_avg?.toFixed(3)}\n${s3CurrentAccessLabel}: ${(d.accessValue * 100)?.toFixed(1)}%\n${_lang(cis.s3GapLabel)}: ${d.gap?.toFixed(3)}`
-          }
-        ),
-        // Highlighted countries
-        Plot.dot(
-          s3ProcessedData.filter(d => 
-            d.accessValue !== null && 
-                !isNaN(d.accessValue) &&
-            s3HighlightedCountries.includes(d.admin0_name)
-          ),
-          {
-            x: "cis_readiness_avg",
-            y: "accessValue",
-                fill: "#0066cc",
-            stroke: "#000",
+        width: 1000,
+        height: 1000,
+        marginTop: 80,
+        marginBottom: 80,
+        x: {
+          domain: [0, 1],
+          label: _lang(cis.s3ReadinessLabel) + " →",
+          grid: true,
+          axis: "top"
+        },
+        y: {
+          domain: [0, 1],
+          label: s3CurrentAccessLabel + " →",
+          grid: true
+        },
+        marks: [
+          Plot.axisX({anchor: "bottom", label: _lang(cis.s3ReadinessLabel) + " →"}),
+          // Diagonal reference line (parity)
+          Plot.line([[0, 0], [1, 1]], {
+            stroke: "#999",
             strokeWidth: 2,
-            r: 10,
-            title: d => `${d.admin0_name}\n${_lang(cis.s3ReadinessLabel)}: ${d.cis_readiness_avg?.toFixed(3)}\n${s3CurrentAccessLabel}: ${(d.accessValue * 100)?.toFixed(1)}%\n${_lang(cis.s3GapLabel)}: ${d.gap?.toFixed(3)}`
-          }
-        ),
+            strokeDasharray: "5,5"
+          }),
+          // All countries (not highlighted)
+          Plot.dot(
+            scatterData.filter(d => !s3HighlightedCountries.includes(d.admin0_name)),
+            {
+              x: "cis_readiness_avg",
+              y: "accessValue",
+              fill: d => s3BivariateColors[d.bivariateClass] || "#cccccc",
+              stroke: "#333",
+              strokeWidth: 1,
+              r: 6
+            }
+          ),
+          // Highlighted countries
+          Plot.dot(
+            scatterData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
+            {
+              x: "cis_readiness_avg",
+              y: "accessValue",
+              fill: "#0066cc",
+              stroke: "#000",
+              strokeWidth: 2,
+              r: 10
+            }
+          ),
+          Plot.tip(
+            scatterData,
+            Plot.pointer({
+              x: "cis_readiness_avg",
+              y: "accessValue",
+              channels: {
+                country: {
+                  label: "Country",
+                  value: (d) => d.admin0_name
+                },
+                readiness: {
+                  label: _lang(cis.s3ReadinessLabel),
+                  value: (d) => d.cis_readiness_avg
+                },
+                access: {
+                  label: s3CurrentAccessLabel,
+                  value: (d) => d.accessValue
+                },
+                gap: {
+                  label: _lang(cis.s3GapLabel),
+                  value: (d) => d.gap
+                }
+              },
+              format: {
+                country: true,
+                readiness: (d) => d != null ? d.toFixed(3) : "N/A",
+                access: (d) => d != null ? (d * 100).toFixed(1) + '%' : "N/A",
+                gap: (d) => d != null ? d.toFixed(3) : "N/A"
+              }
+            })
+          ),
         // Labels for highlighted countries
         Plot.text(
-          s3ProcessedData.filter(d => 
-            d.accessValue !== null && 
-                !isNaN(d.accessValue) &&
-            s3HighlightedCountries.includes(d.admin0_name)
-          ),
+          scatterData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
           {
             x: "cis_readiness_avg",
             y: "accessValue",
