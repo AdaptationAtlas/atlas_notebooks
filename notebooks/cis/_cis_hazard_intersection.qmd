@@ -154,22 +154,28 @@ s2ProcessedData = {
   const hazardColumn = s2HazardType === "drought" ? "drought_ndws" : "waterlogging_ndwl0";
   const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
   
-  // Filter by Section 1's admin selections
+  // Filter by Section 1's admin selections using the same logic
   let filtered = combinedData;
   
-  if (s2CurrentAdminLevel === 2) {
+  // Default: No admin0 selected - show all admin0 level data
+  if (selectedAdmin0.length === 0) {
+    filtered = filtered.filter(d => d.admin1_name == null);
+  }
+  // Admin0 selected, no admin1 - show all admin1 data for selected countries
+  else if (selectedAdmin1.length === 0) {
+    filtered = filtered.filter(d => 
+      selectedAdmin0.includes(d.admin0_name) && 
+      d.admin1_name != null && 
+      d.admin2_name == null
+    );
+  }
+  // Admin1 selected - show all admin2 data for selected admin1 regions
+  else {
     filtered = filtered.filter(d => 
       selectedAdmin0.includes(d.admin0_name) &&
       selectedAdmin1.includes(d.admin1_name) &&
-      selectedAdmin2.includes(d.admin2_name)
+      d.admin2_name != null
     );
-  } else if (s2CurrentAdminLevel === 1) {
-    filtered = filtered.filter(d => 
-      selectedAdmin0.includes(d.admin0_name) &&
-      selectedAdmin1.includes(d.admin1_name)
-    );
-  } else {
-    filtered = filtered.filter(d => selectedAdmin0.includes(d.admin0_name));
   }
   
   // Filter by readiness threshold and remove nulls
@@ -262,16 +268,65 @@ s2GeoData = {
                         s2CurrentAdminLevel === 1 ? 'gaul1_code' :
                         'gaul2_code';
   
-  const features = s2Boundaries.features.map(feature => {
+  // Filter boundaries based on current selection - use same approach as Section 1
+  let filteredBoundaries = s2Boundaries;
+  if (s2CurrentAdminLevel === 2) {
+    // When showing admin2, only include boundaries that match our processed data
+    const filteredGaulCodes = new Set(s2MapData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...s2Boundaries,
+      features: s2Boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
+        return matchesData || (matchesAdmin0 && matchesAdmin1);
+      })
+    };
+  } else if (s2CurrentAdminLevel === 1) {
+    // When showing admin1, filter by admin0 and match with processed data
+    const filteredGaulCodes = new Set(s2MapData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...s2Boundaries,
+      features: s2Boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        return matchesData || matchesAdmin0;
+      })
+    };
+  }
+  
+  const features = filteredBoundaries.features.map(feature => {
     const gaulCode = feature.properties[gaulCodeField];
-    const match = s2MapData.find(d => d[gaulCodeField] === gaulCode);
+    let match = s2MapData.find(d => d[gaulCodeField] === gaulCode);
+    
+    // Fallback: try matching by admin names if GAUL code fails
+    if (!match && s2CurrentAdminLevel === 2) {
+      match = s2MapData.find(d => 
+        d.admin0_name === feature.properties.admin0_name &&
+        d.admin1_name === feature.properties.admin1_name &&
+        d.admin2_name === feature.properties.admin2_name
+      );
+    } else if (!match && s2CurrentAdminLevel === 1) {
+      match = s2MapData.find(d => 
+        d.admin0_name === feature.properties.admin0_name &&
+        d.admin1_name === feature.properties.admin1_name
+      );
+    }
+    
+    // Check if this admin2 region is highlighted
+    const isHighlighted = s2CurrentAdminLevel === 2 && 
+                          highlightedAdmin2.length > 0 && 
+                          highlightedAdmin2.includes(feature.properties.admin2_name);
     
     return {
       type: "Feature",
       geometry: feature.geometry,
       properties: {
         ...feature.properties,
-        ...(match || {})
+        ...(match || {}),
+        isHighlighted: isHighlighted
       }
     };
   }).filter(f => f.properties.bivariateClass);
@@ -385,8 +440,8 @@ s2Legend = {
       marks: [
         Plot.geo(s2GeoData, {
           fill: d => bivariateColors[d.properties.bivariateClass],
-          stroke: "#333",
-          strokeWidth: 0.5,
+          stroke: d => d.properties.isHighlighted ? "#000" : "#333",
+          strokeWidth: d => d.properties.isHighlighted ? 2.5 : 0.5,
           title: d => {
             const adminName = s2CurrentAdminLevel === 0 
               ? d.properties.admin0_name 
@@ -480,16 +535,21 @@ s2Insights = {
   const hazardName = s2HazardType === "drought" ? "Drought" : "Waterlogging";
   const selectedRegion = breadcrumb; // Use the breadcrumb from Section 1
   
+  // If admin2 regions are highlighted, only use those for insights
+  const insightData = highlightedAdmin2.length > 0 
+    ? s2MapData.filter(d => highlightedAdmin2.includes(d.admin2_name))
+    : s2MapData;
+  
   // Insight 1: Opportunity (High × High zones)
-  const highHazardHighReadiness = s2MapData.filter(d => d.bivariateClass === "High × High");
-  const percentHighHigh = s2MapData.length > 0 
-    ? (highHazardHighReadiness.length / s2MapData.length * 100).toFixed(1)
+  const highHazardHighReadiness = insightData.filter(d => d.bivariateClass === "High × High");
+  const percentHighHigh = insightData.length > 0 
+    ? (highHazardHighReadiness.length / insightData.length * 100).toFixed(1)
     : 0;
   
   const insight1 = `In ${selectedRegion}, **${percentHighHigh}%** of areas fall in High-Readiness & High-${hazardName} zones, indicating strong potential for CIS as an adaptation measure.`;
   
   // Insight 2: Gap (High hazard with Low readiness)
-  const highHazardAreas = s2MapData.filter(d => d.hazardClass === "High");
+  const highHazardAreas = insightData.filter(d => d.hazardClass === "High");
   const highHazardLowReadiness = highHazardAreas.filter(d => d.readinessClass === "Low");
   const percentGap = highHazardAreas.length > 0 
     ? (highHazardLowReadiness.length / highHazardAreas.length * 100).toFixed(1)
