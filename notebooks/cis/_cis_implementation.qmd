@@ -59,7 +59,7 @@ s3CisReadinessAdmin0 = {
   return Array.from(grouped, ([admin0_name, data]) => {
     return {
       admin0_name: admin0_name,
-      ...data
+    ...data
     };
   });
 }
@@ -82,7 +82,7 @@ s3AccessAdmin0 = {
   return Array.from(grouped, ([admin0_name, data]) => {
     return {
       admin0_name: admin0_name,
-      ...data
+    ...data
     };
   });
 }
@@ -416,52 +416,206 @@ s3GeoData = {
 ```{ojs}
 //| echo: false
 
-// Bivariate legend (3x3 grid) - simplified and integrated styling
-s3Legend = {
-  const size = 45;
+// Section 3 bivariate map with diamond legend (matching Section 2 style)
+s3BivariateMap = {
+  if (s3ViewType !== "map") return null;
+  
+  const height = 610;
+  const width = 775;
+  const padding = 20;
+  
+  // Remove existing tooltip
+  d3.select(".s3BivariateTip").remove();
+  
+  const tooltip = d3
+    .select("body")
+    .append("div")
+    .attr("class", "plotTooltip s3BivariateTip")
+    .style("position", "absolute")
+    .style("opacity", 0)
+    .style("background", "rgba(0, 0, 0, 0.8)")
+    .style("color", "white")
+    .style("padding", "8px 12px")
+    .style("border-radius", "4px")
+    .style("font-size", "12px")
+    .style("pointer-events", "none")
+    .style("z-index", "1000");
+  
+  const projection = d3.geoMercator();
+  const geo_path = d3.geoPath().projection(projection);
+  const color = d3.scaleOrdinal()
+    .domain(["Low × Low", "Low × Moderate", "Low × High", "Moderate × Low", "Moderate × Moderate", "Moderate × High", "High × Low", "High × Moderate", "High × High"])
+    .range(Object.values(s3BivariateColors));
+  
+  // Fit projection to features - leave extra space at bottom and left for legend
+  const bottomPadding = 200; // Extra space for rotated diamond legend
+  const leftPadding = 150; // Extra space for rotated diamond legend and labels
+  projection.fitExtent(
+    [
+      [padding + leftPadding, padding],
+      [width - padding, height - bottomPadding]
+    ],
+    s3GeoData
+  );
+  
+  // Expand viewBox to accommodate rotated legend (negative X for labels, extra Y for bottom)
+  const svg = d3
+    .create("svg")
+    .attr("viewBox", [-50, 0, 950, 800])
+    .attr("style", "overflow: visible;")
+    .attr("title", "Bivariate Map");
+  
+  // Render paths
+  const paths = svg
+    .append("g")
+    .selectAll("path")
+    .data(s3GeoData.features)
+    .join("path")
+    .attr("stroke", "white")
+    .attr("stroke-width", "1px")
+    .attr("fill", (d) => {
+      return color(d.properties.bivariateClass) || "#cccccc";
+    })
+    .attr("d", geo_path);
+  
+  // Tooltip on mousemove
+  paths
+    .on("mousemove", (event, d) => {
+      const country = d.properties.admin0_name;
+      const readiness = d.properties.cis_readiness_avg;
+      const readinessClass = d.properties.readinessClass;
+      const access = d.properties.accessValue;
+      const accessClass = d.properties.accessClass;
+      const category = d.properties.bivariateClass;
+      const optimal = d.properties.bivariateClass === "High × High" ? `✓ ${_lang(cis.s3OptimalZone)}` : "";
+      
+      tooltip
+        .style("top", event.pageY - 10 + "px")
+        .style("left", event.pageX + 10 + "px")
+        .style("opacity", 1)
+        .html(`${country}<br>${_lang(cis.s3ReadinessLabel)}: ${readiness != null ? readiness.toFixed(2) : "N/A"} (${readinessClass})<br>${s3CurrentAccessLabel}: ${access != null ? (access * 100).toFixed(1) + '%' : "N/A"} (${accessClass})<br>Category: ${category}${optimal ? "<br><strong>" + optimal + "</strong>" : ""}`);
+    })
+    .on("mouseout", () => {
+      tooltip.style("opacity", 0);
+    });
+  
+  // Add mesh/boundaries
+  const mesh = svg
+    .append("path")
+    .datum(s3GeoData)
+    .attr("fill", "none")
+    .attr("stroke", "black")
+    .attr("stroke-linejoin", "round")
+    .attr("d", geo_path);
+  
+  // Create legend tooltip (separate from map tooltip)
+  d3.select(".s3BivariateLegendTip").remove();
+  const legendTooltip = d3
+    .select("body")
+    .append("div")
+    .attr("class", "plotTooltip s3BivariateLegendTip")
+    .style("position", "absolute")
+    .style("opacity", 0)
+    .style("background", "rgba(0, 0, 0, 0.8)")
+    .style("color", "white")
+    .style("padding", "8px 12px")
+    .style("border-radius", "4px")
+    .style("font-size", "12px")
+    .style("pointer-events", "none")
+    .style("z-index", "1000");
+  
+  // Create bi_legend function (diamond shape - matching Section 2)
+  function bi_legend(selection) {
+  const size = 40;
   const gap = 2;
   const classes = ["Low", "Moderate", "High"];
-  const totalWidth = size * 3 + gap * 2;
-  const totalHeight = size * 3 + gap * 2 + 50;
+    const totalWidth = size * 3 + gap * 2;
+    const totalHeight = size * 3 + gap * 2;
+    const centerX = totalWidth / 2;
+    const centerY = totalHeight / 2;
+    
+    // Create inner group for the legend content (will be rotated)
+    const legendContent = selection.append("g");
+    
+    // Legend squares with hover tooltips
+    classes.forEach((accessClass, i) => {
+      classes.forEach((readinessClass, j) => {
+        const key = `${readinessClass} × ${accessClass}`;
+        const isPriority = readinessClass === "High" && accessClass === "High";
+        
+        const rect = legendContent
+          .append("rect")
+          .attr("x", j * (size + gap))
+          .attr("y", i * (size + gap))
+          .attr("width", size)
+          .attr("height", size)
+          .attr("fill", s3BivariateColors[key] || "#cccccc")
+          .attr("stroke", isPriority ? "#000" : "#999")
+          .attr("stroke-width", isPriority ? "2.5" : "0.5")
+          .style("cursor", "pointer");
+        
+        // Add hover tooltip
+        rect
+          .on("mousemove", (event) => {
+            legendTooltip
+              .style("top", event.pageY - 10 + "px")
+              .style("left", event.pageX + 10 + "px")
+              .style("opacity", 1)
+              .html(`${_lang(cis.s3ReadinessLabel)}: ${readinessClass}<br>${s3CurrentAccessLabel}: ${accessClass}<br>Category: ${key}`);
+          })
+          .on("mouseout", () => {
+            legendTooltip.style("opacity", 0);
+          });
+      });
+    });
+    
+    // Rotate the entire legend 45 degrees to make it a diamond
+    legendContent.attr("transform", `rotate(45, ${centerX}, ${centerY})`);
+    
+    // Diagonal axis labels (positioned outside the rotated grid)
+    // CIS Readiness label (diagonal from bottom-left towards top-right)
+    const readinessLabelX = -35;
+    const readinessLabelY = totalHeight + 25;
+    selection
+      .append("text")
+      .attr("x", readinessLabelX)
+      .attr("y", readinessLabelY)
+      .attr("font-size", "11")
+      .attr("fill", "#333")
+      .attr("font-weight", "600")
+      .attr("transform", `rotate(-45, ${readinessLabelX}, ${readinessLabelY})`)
+      .text(_lang(cis.s3ReadinessLabel));
+    
+    // Access label (diagonal from bottom-right towards top-left)
+    const accessLabelX = totalWidth + 35;
+    const accessLabelY = totalHeight + 25;
+    selection
+      .append("text")
+      .attr("x", accessLabelX)
+      .attr("y", accessLabelY)
+      .attr("font-size", "11")
+      .attr("fill", "#333")
+      .attr("font-weight", "600")
+      .attr("text-anchor", "end")
+      .attr("transform", `rotate(45, ${accessLabelX}, ${accessLabelY})`)
+      .text(s3CurrentAccessLabel);
+    
+    return selection;
+  }
   
-  return html`
-    <div style="margin-top: 20px; padding: 12px; background: #f8f9fa; border-radius: 4px; display: inline-block; font-family: system-ui, -apple-system, sans-serif;">
-      <svg width="${totalWidth + 100}" height="${totalHeight}">
-        <g transform="translate(0, 15)">
-          ${classes.flatMap((accessClass, i) => 
-            classes.map((readinessClass, j) => {
-              const bivClass = `${readinessClass} × ${accessClass}`;
-              const isPriority = readinessClass === "High" && accessClass === "High";
-              return svg`
-                <rect 
-                  x="${j * (size + gap)}" 
-                  y="${(2 - i) * (size + gap)}"
-                  width="${size}" 
-                  height="${size}"
-                  fill="${s3BivariateColors[bivClass]}"
-                  stroke="${isPriority ? '#000' : '#999'}"
-                  stroke-width="${isPriority ? '2.5' : '0.5'}"
-                />
-              `;
-            })
-          )}
-          <!-- Y-axis labels (Access) - right side -->
-          <text x="${totalWidth + 8}" y="${size * 0.5 + 3}" font-size="10" fill="#333" font-weight="500">High</text>
-          <text x="${totalWidth + 8}" y="${size * 1.5 + gap + 3}" font-size="10" fill="#333" font-weight="500">Moderate</text>
-          <text x="${totalWidth + 8}" y="${size * 2.5 + gap * 2 + 3}" font-size="10" fill="#333" font-weight="500">Low</text>
-          
-          <!-- X-axis labels (CIS Readiness) - bottom -->
-          <text x="${size * 0.5}" y="${size * 3 + gap * 2 + 12}" font-size="10" text-anchor="middle" fill="#333" font-weight="500">Low</text>
-          <text x="${size * 1.5 + gap}" y="${size * 3 + gap * 2 + 12}" font-size="10" text-anchor="middle" fill="#333" font-weight="500">Moderate</text>
-          <text x="${size * 2.5 + gap * 2}" y="${size * 3 + gap * 2 + 12}" font-size="10" text-anchor="middle" fill="#333" font-weight="500">High</text>
-          
-          <!-- Axis titles -->
-          <text x="${totalWidth / 2}" y="${size * 3 + gap * 2 + 28}" font-size="11" text-anchor="middle" fill="#333" font-weight="600">${_lang(cis.s3ReadinessLabel)} →</text>
-          <text x="${totalWidth + 50}" y="${size * 1.5 + gap}" font-size="11" fill="#333" font-weight="600" transform="rotate(90, ${totalWidth + 50}, ${size * 1.5 + gap})">${s3CurrentAccessLabel} ↑</text>
-        </g>
-      </svg>
-    </div>
-  `;
+  // Add legend to SVG - positioned to avoid overflow
+  // Position legend at bottom-left with enough space for rotated diamond and labels
+  // Account for rotation: when rotated 45°, the diagonal extends sqrt(2)/2 * size in each direction
+  const legendX = 50; // More space from left edge to accommodate labels
+  const legendY = 630; // Position below the map area
+  const legendGroup = svg
+    .append("g")
+    .attr("transform", `translate(${legendX}, ${legendY})`);
+  
+  // Apply the legend function to the group using .call()
+  legendGroup.call(bi_legend);
+  
+  return svg.node();
 }
 ```
 
@@ -472,73 +626,7 @@ s3Legend = {
 {
   if (s3ViewType === "map") {
     yield html`<div style="width: 100%; overflow-x: auto;">
-      ${Plot.plot({
-        width: 2000,
-        height: 1000,
-        projection: {
-          type: "mercator",
-          domain: s3GeoData
-        },
-        color: {
-          legend: false
-        },
-        marks: [
-          Plot.geo(s3GeoData.features, {
-            fill: d => s3BivariateColors[d.properties.bivariateClass] || "#cccccc",
-            stroke: "#333",
-            strokeWidth: 0.5
-          }),
-          Plot.tip(
-            s3GeoData.features,
-            Plot.pointer(
-              Plot.centroid({
-                channels: {
-                  country: {
-                    label: "Country",
-                    value: (d) => d.properties.admin0_name
-                  },
-                  readiness: {
-                    label: _lang(cis.s3ReadinessLabel),
-                    value: (d) => d.properties.cis_readiness_avg
-                  },
-                  readinessClass: {
-                    label: "Readiness Class",
-                    value: (d) => d.properties.readinessClass
-                  },
-                  access: {
-                    label: s3CurrentAccessLabel,
-                    value: (d) => d.properties.accessValue
-                  },
-                  accessClass: {
-                    label: "Access Class",
-                    value: (d) => d.properties.accessClass
-                  },
-                  category: {
-                    label: "Category",
-                    value: (d) => d.properties.bivariateClass
-                  },
-                  optimal: {
-                    label: "Optimal Zone",
-                    value: (d) => d.properties.bivariateClass === "High × High" ? `✓ ${_lang(cis.s3OptimalZone)}` : ""
-                  }
-                },
-                format: {
-                  country: true,
-                  readiness: (d) => d != null ? d.toFixed(2) : "N/A",
-                  readinessClass: true,
-                  access: (d) => d != null ? (d * 100).toFixed(1) + '%' : "N/A",
-                  accessClass: true,
-                  category: true,
-                  optimal: true
-                }
-              })
-            )
-          )
-        ]
-      })}
-      <div style="display: flex; justify-content: center; margin-top: 15px;">
-        ${s3Legend}
-      </div>
+      ${s3BivariateMap}
     </div>`;
   } else if (s3ViewType === "dumbbell") {
     // Dumbbell Chart - inline to prevent auto-display
@@ -587,10 +675,10 @@ s3Legend = {
           x2: "accessValue",
           y1: "admin0_name",
           y2: "admin0_name",
-          stroke: d => {
-            if (d.gap === null || isNaN(d.gap)) return "#999999";
-            return d.gap > 0.05 ? "#4daf4a" : d.gap < -0.05 ? "#e41a1c" : "#999999";
-          },
+              stroke: d => {
+                if (d.gap === null || isNaN(d.gap)) return "#999999";
+                return d.gap > 0.05 ? "#4daf4a" : d.gap < -0.05 ? "#e41a1c" : "#999999";
+              },
           strokeWidth: 2
         }),
         // Readiness dots (left)
@@ -675,50 +763,50 @@ s3Legend = {
       </div>
     </div>
     ${Plot.plot({
-        width: 1000,
-        height: 1000,
-        marginTop: 80,
-        marginBottom: 80,
-        x: {
-          domain: [0, 1],
-          label: _lang(cis.s3ReadinessLabel) + " →",
-          grid: true,
-          axis: "top"
-        },
-        y: {
-          domain: [0, 1],
-          label: s3CurrentAccessLabel + " →",
-          grid: true
-        },
-        marks: [
-          Plot.axisX({anchor: "bottom", label: _lang(cis.s3ReadinessLabel) + " →"}),
-          // Diagonal reference line (parity)
-          Plot.line([[0, 0], [1, 1]], {
-            stroke: "#999",
-            strokeWidth: 2,
-            strokeDasharray: "5,5"
-          }),
-          // All countries (not highlighted)
-          Plot.dot(
+      width: 1000,
+      height: 1000,
+      marginTop: 80,
+      marginBottom: 80,
+      x: {
+        domain: [0, 1],
+        label: _lang(cis.s3ReadinessLabel) + " →",
+        grid: true,
+        axis: "top"
+      },
+      y: {
+        domain: [0, 1],
+        label: s3CurrentAccessLabel + " →",
+        grid: true
+      },
+      marks: [
+        Plot.axisX({anchor: "bottom", label: _lang(cis.s3ReadinessLabel) + " →"}),
+        // Diagonal reference line (parity)
+        Plot.line([[0, 0], [1, 1]], {
+          stroke: "#999",
+          strokeWidth: 2,
+          strokeDasharray: "5,5"
+        }),
+        // All countries (not highlighted)
+        Plot.dot(
             scatterData.filter(d => !s3HighlightedCountries.includes(d.admin0_name)),
-            {
-              x: "cis_readiness_avg",
-              y: "accessValue",
-              fill: d => s3BivariateColors[d.bivariateClass] || "#cccccc",
-              stroke: "#333",
-              strokeWidth: 1,
+          {
+            x: "cis_readiness_avg",
+            y: "accessValue",
+                fill: d => s3BivariateColors[d.bivariateClass] || "#cccccc",
+            stroke: "#333",
+            strokeWidth: 1,
               r: 6
-            }
-          ),
-          // Highlighted countries
-          Plot.dot(
+          }
+        ),
+        // Highlighted countries
+        Plot.dot(
             scatterData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
-            {
-              x: "cis_readiness_avg",
-              y: "accessValue",
-              fill: "#0066cc",
-              stroke: "#000",
-              strokeWidth: 2,
+          {
+            x: "cis_readiness_avg",
+            y: "accessValue",
+                fill: "#0066cc",
+            stroke: "#000",
+            strokeWidth: 2,
               r: 10
             }
           ),
