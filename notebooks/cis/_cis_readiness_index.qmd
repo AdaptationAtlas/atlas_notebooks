@@ -1325,7 +1325,12 @@ s14MapData = {
       ]
     });
   } else if (s14ViewType === "Table") {
-    const tableData = filteredData.map(d => {
+    // Apply threshold filter
+    const thresholdFilteredData = filteredData.filter(d => 
+      d["cis_readiness_index"] != null && d["cis_readiness_index"] >= s14Threshold
+    );
+    
+    const tableData = thresholdFilteredData.map(d => {
       const adminName = currentAdminLevel === 0 
         ? d.admin0_name 
         : currentAdminLevel === 1
@@ -1350,85 +1355,67 @@ s14MapData = {
     });
   } else {
     // Heatmap
-    const heatmapData = filteredData.map(d => ({
-      admin: d[`admin${currentAdminLevel}_name`] || d.admin0_name,
-      "Weather Stations": d["weather-station_density"],
-      "Cloud Cover": d["cloud-coverage_meanannual"],
-      "Precip Agreement": parseFloat(d["cv-precipitation_agreement"]) / 4, // Normalize to 0-1
-      "Short-term Forecast": d["short-term_frcst_skill"],
-      "Long-term Forecast": d["seasonal_frcst_skill"],
-      "CIS Readiness": d["cis_readiness_index"]
-    })).slice(0, 30); // Limit to 30 rows for readability
+    // Apply threshold filter
+    const thresholdFilteredData = filteredData.filter(d => 
+      d["cis_readiness_index"] != null && d["cis_readiness_index"] >= s14Threshold
+    );
+    
+    // Prepare data with admin names
+    const heatmapData = thresholdFilteredData.map(d => {
+      const adminName = currentAdminLevel === 0 
+        ? d.admin0_name 
+        : currentAdminLevel === 1
+        ? `${d.admin1_name}, ${d.admin0_name}`
+        : `${d.admin2_name}, ${d.admin1_name}`;
+      
+      return {
+        country: adminName,
+        "Weather Stations": d["weather-station_density"],
+        "Cloud Cover": d["cloud-coverage_meanannual"],
+        "Precip Agreement": parseFloat(d["cv-precipitation_agreement"]) / 4, // Normalize to 0-1
+        "Short-term Forecast": d["short-term_frcst_skill"],
+        "Long-term Forecast": d["seasonal_frcst_skill"],
+        "CIS Readiness": d["cis_readiness_index"]
+      };
+    }).filter(d => d["CIS Readiness"] != null);
+    
+    // Sort by CIS Readiness (descending)
+    heatmapData.sort((a, b) => (b["CIS Readiness"] || 0) - (a["CIS Readiness"] || 0));
+    
+    const sortedCountries = heatmapData.map(d => d.country);
     
     const indicators = ["Weather Stations", "Cloud Cover", "Precip Agreement", "Short-term Forecast", "Long-term Forecast", "CIS Readiness"];
     
-    const heatData = heatmapData.flatMap(row => 
-      indicators.map(indicator => ({
-        admin: row.admin,
-        indicator: indicator,
-        value: row[indicator]
+    // Flatten data for heatmap
+    const longData = heatmapData.flatMap(row => 
+      indicators.map(metric => ({
+        country: row.country,
+        metric: metric,
+        value: row[metric]
       }))
-    );
+    ).filter(d => d.value != null);
+    
+    // Calculate responsive height
+    const geographyCount = heatmapData.length;
+    const height = Math.max(500, geographyCount * 30);
+    
+    // Calculate margin based on longest geography name
+    const maxNameLength = Math.max(...sortedCountries.map(name => name.length), 0);
+    const marginLeft = Math.max(200, maxNameLength * 8);
     
     return Plot.plot({
-      width: 2000,
-      height: Math.max(800, heatmapData.length * 30),
-      marginLeft: 250,
-      marginBottom: 120,
-      style: {
-        fontSize: "16px"  // Increase base font size
-      },
-      x: { 
-        label: null,
-        tickRotate: -45,
-        fontSize: 16,  // Larger x-axis labels
-        tickSize: 8
-      },
-      y: { 
-        label: null,
-        fontSize: 15,  // Larger y-axis labels
-        tickSize: 8
-      },
-      color: {
-        type: "linear",
-        domain: [0, 1],
-        scheme: "RdYlGn",
-        legend: true,
-        label: "Value (0-1)",
-        fontSize: 16  // Larger legend text
-      },
+      marginLeft: marginLeft,
+      width: 900,
+      height: height,
+      y: { domain: sortedCountries },
+      color: { scheme: "buylrd", legend: true },
       marks: [
-        Plot.cell(heatData, {
-          x: "indicator",
-          y: "admin",
-          fill: "value"
-        }),
-        Plot.tip(
-          heatData,
-          Plot.pointer({
-            x: "indicator",
-            y: "admin",
-            channels: {
-              admin: {
-                label: "Admin",
-                value: (d) => d.admin
-              },
-              indicator: {
-                label: "Indicator",
-                value: (d) => d.indicator
-              },
-              value: {
-                label: "Value",
-                value: (d) => d.value
-              }
-            },
-            format: {
-              admin: true,
-              indicator: true,
-              value: (d) => d != null ? d.toFixed(3) : "N/A"
-            }
-          })
-        )
+        Plot.cell(longData, { 
+          x: "metric", 
+          y: "country", 
+          fill: "value",
+          tip: true
+        })
       ]
     });
   }
