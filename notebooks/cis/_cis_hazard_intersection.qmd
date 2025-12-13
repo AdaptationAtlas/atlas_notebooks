@@ -134,11 +134,11 @@ viewof s2ReadinessThreshold = Inputs.range([0, 1], {
 });
 
 viewof s2ViewToggle = Inputs.radio(
-  ["map", "table", "plot"],
+  ["map", "table"],
   {
     label: _lang(cis.s2ViewToggle),
     value: "map",
-    format: d => d === "map" ? _lang(cis.s2ViewMap) : d === "table" ? _lang(cis.s2ViewTable) : "Bivariate Plot"
+    format: d => d === "map" ? _lang(cis.s2ViewMap) : _lang(cis.s2ViewTable)
   }
 );
 ```
@@ -616,16 +616,12 @@ s2BivariateMap = {
               ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
               : `${d.properties.admin2_name}, ${d.properties.admin1_name}`;
             
-      // Format tooltip as table matching Plot.tip pattern
+      // Format tooltip according to specification
       const tooltipHtml = `
         <table>
-          <tr><th>Region</th><td>${regionName}</td></tr>
-          <tr><th>CIS Readiness</th><td>${dataEntry.cis_readiness_index != null ? dataEntry.cis_readiness_index.toFixed(2) : "N/A"}</td></tr>
-          <tr><th>Readiness Class</th><td>${dataEntry.readinessClass || "N/A"}</td></tr>
+          <tr><th>Readiness (0–1)</th><td>${dataEntry.cis_readiness_index != null ? dataEntry.cis_readiness_index.toFixed(2) : "N/A"}</td></tr>
           <tr><th>${hazardName}</th><td>${dataEntry.hazardValue != null ? dataEntry.hazardValue.toFixed(1) : "N/A"}</td></tr>
-          <tr><th>Hazard Class</th><td>${dataEntry.hazardClass || "N/A"}</td></tr>
-          <tr><th>Category</th><td>${dataEntry.bivariateClass || "N/A"}</td></tr>
-          ${dataEntry.bivariateClass === "High × High" ? `<tr><th>Priority</th><td>🎯 PRIORITY ZONE</td></tr>` : ""}
+          <tr><th>Bivariate class</th><td>${dataEntry.bivariateClass || "N/A"}</td></tr>
         </table>
       `;
       
@@ -759,7 +755,7 @@ s2BivariateMap = {
   return svg.node();
 }
 
-// Render map, table, or plot based on toggle
+// Render map or table based on toggle
 {
   if (s2ViewToggle === "map") {
     yield html`
@@ -767,64 +763,6 @@ s2BivariateMap = {
         ${s2BivariateMap}
       </div>
     `;
-  } else if (s2ViewToggle === "plot") {
-    // Bivariate plot
-    const hazardName = s2HazardType === "drought" ? "Drought (Dry Spell Days)" : "Waterlogging (Days)";
-    const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
-    
-    // Prepare plot data
-    const plotData = s2MapData.map(d => ({
-      x: d.cis_readiness_index,
-      y: d.hazardValue,
-      bivariateClass: d.bivariateClass,
-      readinessClass: d.readinessClass,
-      hazardClass: d.hazardClass,
-      adminName: s2CurrentAdminLevel === 0 
-        ? d.admin0_name 
-        : s2CurrentAdminLevel === 1
-        ? `${d.admin1_name}, ${d.admin0_name}`
-        : `${d.admin2_name}, ${d.admin1_name}`
-    })).filter(d => d.x != null && d.y != null);
-    
-    // Get hazard cutoffs for reference lines
-    const hazardCutoffs = hazardTypeCode === "NDWS-mean" 
-      ? { low: 15, moderate: 20 }
-      : { low: 2, moderate: 5 };
-    
-    yield Plot.plot({
-      width: 900,
-      height: 600,
-      x: {
-        label: "CIS Readiness Index (0-1)",
-        domain: [0, 1],
-        grid: true
-      },
-      y: {
-        label: hazardName,
-        grid: true
-      },
-      color: {
-        domain: ["Low × Low", "Low × Moderate", "Low × High", "Moderate × Low", "Moderate × Moderate", "Moderate × High", "High × Low", "High × Moderate", "High × High"],
-        range: Object.values(bivariateColors),
-        legend: true
-      },
-      marks: [
-        // Reference lines for CIS Readiness cutoffs
-        Plot.ruleX([cisReadinessCutoffs.low], { stroke: "#666", strokeDasharray: "4,3", strokeWidth: 1 }),
-        Plot.ruleX([cisReadinessCutoffs.moderate], { stroke: "#666", strokeDasharray: "4,3", strokeWidth: 1 }),
-        // Reference lines for Hazard cutoffs
-        Plot.ruleY([hazardCutoffs.low], { stroke: "#666", strokeDasharray: "4,3", strokeWidth: 1 }),
-        Plot.ruleY([hazardCutoffs.moderate], { stroke: "#666", strokeDasharray: "4,3", strokeWidth: 1 }),
-        // Scatter points
-        Plot.dot(plotData, {
-          x: "x",
-          y: "y",
-          fill: "bivariateClass",
-          r: 4,
-          tip: true
-        })
-      ]
-    });
   } else {
     // Table view
     const hazardName = s2HazardType === "drought" ? "Drought (Days)" : "Waterlogging (Days)";
