@@ -11,6 +11,11 @@ date-edited: today
 import { atlasHero } from "/helpers/uiComponents.ojs";
 import { atlasTOC } from "/helpers/toc.ojs";
 
+hypq = import("https://cdn.jsdelivr.net/npm/hyparquet/+esm");
+hypq_compress = import(
+  "https://cdn.jsdelivr.net/npm/hyparquet-compressors/+esm"
+);
+
 hero_url = "./../../images/default_crop.webp";
 
 atlasHero(nbTitle, hero_url);
@@ -79,6 +84,14 @@ revenue, we show, is related to farm size as well as the type of hazard. Using
 the dropdowns you can explore these relationships between farm size and loss or
 lost revenue by type of hazard.
 
+```{ojs}
+viewof fig2_inputs = renderS2_inputs();
+
+renderS2_plot();
+
+renderS2_insight();
+```
+
 # `{ojs} heading4` {#example-heading4}
 
 To estimate the potential loss and lost revenue by farm size both historically
@@ -97,6 +110,21 @@ emissions scenario. We show the ensemble means, which we use to estimate loss
 and lost revenue in the next section, are remarkably conservative compared to
 the CMIP6 model outputs for both very wet and very dry conditions.
 
+```{ojs}
+renderS3_plot();
+```
+
+### Quick Insights for Extreme Events
+
+The number of very dry events are expected to **increase** by 2040–2060 for both
+SSP245 and SSP585.
+
+The number of very wet events are expected to **decrease** by 2040–2060 for both
+SSP245 and SSP585.
+
+The number of very dry and very wet events are **lower** for the ensemble
+average compared to individual models, with high model variability.
+
 # `{ojs} heading5` {#example-heading5}
 
 As we have outlined above, agriculture in critical to Africa and there is
@@ -112,6 +140,14 @@ impacted under future climate scenarios (SSP245 or SSP585). Furthermore, you can
 also explore the amount of revenue that could potentially be lost on these farms
 under either the baseline period or future climate scenarios for very dry and
 very wet events without additional adaptation.
+
+```{ojs}
+viewof fig4_inputs = genFig4_inputs();
+
+renderS4b_plot();
+
+renders4b_insight();
+```
 
 # `{ojs} nbSummary` {#summary}
 
@@ -226,7 +262,7 @@ smallholders. Africa Agriculture Adaptation Atlas. CGIAR.
 
 # `{ojs} appendix` {#appendix}
 
-# Source code {#source-code .hidden}
+<!-- Source code {#source-code .hidden} -->
 
 <!--
 NOTE:Everything below this point will not appear in the notebook.
@@ -240,8 +276,8 @@ actually appearing in the notebook.
 ```{ojs}
 // This cell is to contain all the headings and the notebook title
 nbTitle = _lang({
-  en: "This is a template to build Atlas notebooks",
-  fr: "Ceci est un modèle pour construire des notebooks Atlas",
+  en: "Loss and Damage",
+  fr: "Perte et dommage",
 });
 // key_insights = _lang({en: "Key Insights", fr: "Résumé"})
 heading1 = _lang({ en: "Overview", fr: "Titre 1" });
@@ -306,11 +342,426 @@ prettyLanguageView = {
 }
 ```
 
-### Data
+## Data
 
 ```{ojs}
-2;
-// db = DuckDBClient.of({ fig4a:  });
+// Add data to the notebook
+// db = await DuckDBClient.of({
+//   fig1_farmsize: await FileAttachment(
+//     "/data/lossDamageNb/fig1_farmsizelookup.parquet",
+//   ),
+//   fig1_data: await FileAttachment("/data/lossDamageNb/fig1_allshps.parquet"),
+//   fig4a_data: await FileAttachment(
+//     "/data/lossDamageNb/fig3_map_fin_spei12_high.parquet",
+//   ),
+//   fig4b_data: await FileAttachment("/data/lossDamageNb/fig4b.parquet"),
+// });
+console.log("hello world");
 ```
 
-#### fig.3 - data
+```{ojs}
+fig2_dat = await FileAttachment(
+  "./../../data/lossDamageNb/fig2_joined_eff.json",
+).json();
+
+fig3_data = await FileAttachment(
+  "./../../data/lossDamageNb/figure3_spei.json",
+).json();
+```
+
+## Section code
+
+### Section 1 code
+
+```{ojs}
+fig1_arrayBuf = await FileAttachment(
+  "/data/lossDamageNb/fig1_farmsizelookup.parquet",
+).arrayBuffer();
+
+fig1_selVars = (async () => {
+  const _data = await hypq.parquetQuery({
+    file: fig1_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: ["nm_slc0", "GID_0", "NAME_0", "farm_sz2", "variable"],
+  });
+
+  return {
+    iso3: Array.from(new Set(_data.map((d) => d.GID_0))),
+    country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
+    admin1_name: Array.from(new Set(_data.map((d) => d.NAME_0))),
+    farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
+    variable: Array.from(new Set(_data.map((d) => d.variable))),
+  };
+})();
+
+fig1_selVars;
+```
+
+```{ojs}
+"use strict";
+```
+
+### Section 2 code
+
+```{ojs}
+// Inputs
+fig2_groups = Array.from(new Set(fig2_dat.map((d) => d.group)));
+fig2_mod = Array.from(new Set(fig2_dat.map((d) => d.title)));
+
+renderS2_inputs = () => {
+  return Inputs.form(
+    [
+      Inputs.select(fig2_groups, {
+        label: "Event Type",
+        value: "Drought",
+      }),
+      Inputs.select(fig2_mod, {
+        label: "Loss",
+        value: "Predicted Probabilities of Loss",
+      }),
+    ],
+    {
+      template: (inputs) =>
+        html`<div style="display: flex; gap: 3em"> ${inputs} </div>`,
+    },
+  );
+};
+```
+
+```{ojs}
+figure2_filtered = (() => {
+  const [group_sel, mod_sel] = fig2_inputs;
+
+  const _data = fig2_dat.filter(
+    (d) => d.group === group_sel && d.title === mod_sel,
+  );
+
+  return _data;
+})();
+
+renderS2_plot = () => {
+  const [group_sel, mod_sel] = fig2_inputs;
+  return Plot.plot({
+    width,
+    height: 450,
+    marginLeft: 50,
+
+    title: mod_sel,
+
+    x: {
+      label: "Log Farm Size",
+      grid: true,
+    },
+
+    y: {
+      label: figure2_filtered[0].yax,
+      tickFormat: (d) => `${Math.round(d * 100)}%`,
+      grid: true,
+    },
+
+    marks: [
+      // Confidence ribbon (geom_ribbon)
+      Plot.areaY(figure2_filtered, {
+        x: "x",
+        y1: "conf.low",
+        y2: "conf.high",
+        fill: group_sel === "Drought" ? "red" : "blue",
+        fillOpacity: 0.3,
+      }),
+
+      // Predicted line (geom_line)
+      Plot.line(figure2_filtered, {
+        x: "x",
+        y: "predicted",
+        // stroke: pal,
+        strokeWidth: 2,
+        tip: true,
+      }),
+    ],
+  });
+};
+
+renderS2_insight = () => {
+  const _loss = fig2_inputs[1];
+  const _event = fig2_inputs[0];
+  const _trend = figure2_filtered[0].trend;
+  return md`### Quick Insights for ${_loss}  \n
+The **${_loss.toLowerCase()}** from ${_event.toLowerCase()} **${_trend}** as farm sizes get larger.
+  `;
+};
+```
+
+### Section 3 code
+
+```{ojs}
+ensemble2 = fig3_data.filter((d) => d.gcm === "Ensemble Average");
+joint3 = fig3_data.filter((d) => d.gcm !== "Ensemble Average");
+
+renderS3_plot = () => {
+  return Plot.plot({
+    width,
+    height: 500,
+
+    marginLeft: 70,
+    marginRight: 125,
+
+    x: {
+      label: "Number of Events",
+    },
+
+    y: {
+      label: null,
+    },
+
+    fy: {
+      label: null,
+      // axis: "left",
+    },
+
+    color: {
+      legend: true,
+    },
+
+    marks: [
+      // Ensemble Average bars (geom_col)
+      Plot.barX(ensemble2, {
+        x: "count",
+        fy: "model",
+        y: "variable",
+        fill: (d) => (d.variable === "Very Dry" ? "#F6A8A8" : "#A8D0F6"),
+        tip: true,
+      }),
+
+      // Individual GCM points (geom_point)
+      Plot.dot(joint3, {
+        x: "count",
+        fy: "model",
+        y: "variable",
+        stroke: "gcm",
+        r: 4,
+        strokeOpacity: 0.7,
+        tip: true,
+      }),
+    ],
+  });
+};
+```
+
+### Section 4 code
+
+#### 4a code
+
+```{ojs}
+fig4a_arrayBuf = await FileAttachment(
+  "/data/lossDamageNb/fig4_map_fin_spei12_hiigh.parquet",
+).arrayBuffer();
+
+fig4_selVars = (async () => {
+  const _data = await hypq.parquetQuery({
+    file: fig4a_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: [
+      "nm_slc0",
+      "GID_0",
+      "NAME_0",
+      "farm_sz2",
+      "variable",
+      "extEvent",
+      "model",
+    ],
+  });
+
+  return {
+    iso3: Array.from(new Set(_data.map((d) => d.GID_0))),
+    country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
+    admin1_name: Array.from(new Set(_data.map((d) => d.NAME_0))),
+    farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
+    variable: Array.from(new Set(_data.map((d) => d.variable))),
+    event: Array.from(new Set(_data.map((d) => d.extEvent))),
+    model: Array.from(new Set(_data.map((d) => d.model))),
+  };
+})();
+
+genFig4_inputs = () => {
+  return Inputs.form(
+    {
+      country: Inputs.select(fig4_selVars.country, {
+        label: "Country",
+        value: "Sub-Saharan Africa",
+      }),
+      fSize: Inputs.select(fig4_selVars.farm_sz2, {
+        label: "Farm Size",
+        value: "All Farms",
+      }),
+      event: Inputs.select(fig4_selVars.event, {
+        label: "Event",
+        value: "Very Dry",
+      }),
+      time: Inputs.select(fig4_selVars.model, {
+        label: "Model",
+        value: "baseline",
+      }),
+    },
+    {
+      template: (inputs) =>
+        html`<div style="display: flex; gap: 3em"> ${Object.values(inputs)} </div>`,
+    },
+  );
+};
+```
+
+```{ojs}
+fig4a_filtered = await hypq.parquetQuery({
+  file: fig4a_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig4_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig4_inputs.fSize,
+    },
+    extEvent: {
+      $eq: fig4_inputs.event,
+    },
+    model: {
+      $eq: fig4_inputs.time,
+    },
+  },
+  //TODO: Select only the applicable columns to boost perf.
+});
+
+fig4a_filtered;
+```
+
+#### 4b code
+
+```{ojs}
+fig4b_arrayBuf = await FileAttachment(
+  "/data/lossDamageNb/fig4b.parquet",
+).arrayBuffer();
+
+fig4b_filtered = await hypq.parquetQuery({
+  file: fig4b_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig4_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig4_inputs.fSize,
+    },
+    Event: {
+      $eq: fig4_inputs.event,
+    },
+    // losstype: {
+    //   $eq: "Loss",
+    // },
+    model: {
+      $eq: fig4_inputs.time,
+    },
+  },
+  //TODO: Select only the applicable columns to boost perf.
+});
+```
+
+```{ojs}
+renderS4b_plot = () => {
+  return Plot.plot({
+    width,
+    height: 420,
+
+    x: {
+      label: "Year",
+      tickFormat: "d",
+    },
+
+    y: {
+      label: "Number of Farms",
+      grid: true,
+    },
+
+    color: {
+      legend: true,
+      label: "Threshold",
+      domain: ["Farms Likely Impacted", "40% lost revenue", "50% lost revenue"],
+      // domain: ["baseline", "SSP245", "SSP585"],
+      range: ["#4E79A7", "#F28E2C", "#E15759"],
+    },
+
+    marks: [
+      Plot.line(fig4b_filtered, {
+        x: "year",
+        // y: "numberofarms",
+        y: "cum_sum",
+        fx: "losstype",
+        stroke: "threshold",
+        // stroke: "model",
+        strokeWidth: 2,
+        opacity: 0.85,
+        tip: true,
+      }),
+    ],
+  });
+};
+
+renders4b_insight = () => {
+  const _data = fig4b_filtered;
+  const years = _data.map((d) => d.year);
+  const minyear = Math.min(...years);
+  const maxyear = Math.max(...years);
+
+  const maxYearData = _data.filter((d) => d.year === maxyear);
+
+  const maxLoss = maxYearData.find((d) => d.losstype === "Loss");
+
+  const revenueAtMax = maxYearData.filter((d) => d.losstype === "Revenue");
+
+  const minThreshold = revenueAtMax.reduce((a, b) =>
+    a.threshold2 < b.threshold2 ? a : b,
+  );
+
+  const maxThreshold = revenueAtMax.reduce((a, b) =>
+    a.threshold2 > b.threshold2 ? a : b,
+  );
+
+  const payout = maxLoss.cum_sum / (maxyear - minyear);
+
+  const fmtVal = (d) =>
+    Intl.NumberFormat("en", { notation: "compact" }).format(d);
+
+  const _event = fig4_inputs.event.toLowerCase();
+  const _country = fig4_inputs.country;
+  const _ssp = fig4_inputs.time;
+
+  return md`
+#### Quick Insights for ${_country}
+
+Between ${minyear} and ${maxyear}, an estimated
+**${fmtVal(maxLoss.cum_sum)}**
+cumulative number of farms (${fig4_inputs.fSize} farm size class) will likely experience losses due to
+**${_event}**
+conditions in
+**${_country}**
+under the ${_ssp} model. This represents the potential need to
+**payout**
+an average of
+**${fmtVal(payout)}**
+farms per year.
+
+Of the farms likely impacted, a cumulative
+**${fmtVal(minThreshold.cum_sum)}**
+farms could lose more than
+**${minThreshold.threshold2}%**
+of their revenue and approximately
+**${fmtVal(maxThreshold.cum_sum)}**
+cumulative farms could lose more than
+**${maxThreshold.threshold2}%**
+of their revenue due to
+**${_event}**
+conditions in
+**${_country}**
+under the ${_ssp} model.
+`;
+};
+```
