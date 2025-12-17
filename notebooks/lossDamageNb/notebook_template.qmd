@@ -74,6 +74,14 @@ distribution by 2050. Here you can explore the number of farms by farm class
 size across the countries and sub-national regions in Africa and how they are
 predicted to change by 2050.
 
+```{ojs}
+viewof fig1_inputs = renderS1_inputs();
+
+plotMap(fig1a_spatial, "value", ["GID_0", "NAME_0", "NAME_1"]);
+
+renderS1_insight();
+```
+
 # `{ojs} heading3` {#example-heading3}
 
 As shown there is largely variability in the number of farms and farm size
@@ -143,6 +151,8 @@ very wet events without additional adaptation.
 
 ```{ojs}
 viewof fig4_inputs = genFig4_inputs();
+
+plotMap(fig4a_spatial, "high_fs");
 
 renderS4b_plot();
 
@@ -297,79 +307,44 @@ appendix = _lang(general_translations.appendix);
 
 {{< include /components/_lang.qmd >}}
 
-```{ojs}
-// import { NavbarLangSelector } from "/helpers/uiComponents.ojs"
-function NavbarLangSelector(language_obj, masterLanguage) {
-  let navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
-  if (navEnd) {
-    let existingLangSelector = document.getElementById("nav-lang-selector");
-    if (!existingLangSelector) {
-      let lang_sel = Inputs.bind(
-        Inputs.radio(language_obj, {
-          label: "",
-          format: (d) => d.label
-        }),
-        viewof masterLanguage
-      );
-      lang_sel.id = "nav-lang-selector";
-      
-      // Hack the css together for the observable inputs
-      lang_sel.style.display = "flex";
-      lang_sel.style.alignItems = "center";
-      lang_sel.style.marginLeft = "10px";
-      let lang_div = lang_sel.querySelector("div");
-      lang_div.style.display = "flex";
-      lang_div.style.flexDirection = "column";
-
-      // Insert the new item after the GitHub icon and other elements
-      navEnd.parentNode.appendChild(lang_sel);
-    }
-  }
-}
-
-NavbarLangSelector(languages, masterLanguage)
-```
-
-```{ojs}
-prettyLanguageView = {
-  return Inputs.bind(
-    Inputs.radio(languages, {
-      label: _lang(general_translations.language),
-      format: (d) => d.label
-    }),
-    viewof masterLanguage
-  );
-}
-```
-
 ## Data
 
 ```{ojs}
-// Add data to the notebook
-// db = await DuckDBClient.of({
-//   fig1_farmsize: await FileAttachment(
-//     "/data/lossDamageNb/fig1_farmsizelookup.parquet",
-//   ),
-//   fig1_data: await FileAttachment("/data/lossDamageNb/fig1_allshps.parquet"),
-//   fig4a_data: await FileAttachment(
-//     "/data/lossDamageNb/fig3_map_fin_spei12_high.parquet",
-//   ),
-//   fig4b_data: await FileAttachment("/data/lossDamageNb/fig4b.parquet"),
-// });
-console.log("hello world");
-```
+bound_arrayBuf = await FileAttachment(
+  "/data/lossDamageNb/bounds.parquet",
+).arrayBuffer();
 
-```{ojs}
-fig2_dat = await FileAttachment(
-  "./../../data/lossDamageNb/fig2_joined_eff.json",
-).json();
+getBounds = async (country) => {
+  const bounds = await hypq.parquetQuery({
+    file: bound_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: ["GID_0", "NAME_0", "NAME_1", "nm_slc0", "geometry"],
+    filter: !country
+      ? null
+      : {
+          nm_slc0: {
+            $eq: country,
+          },
+        },
+  });
+  return {
+    type: "FeatureCollection",
+    features: bounds.map(({ geometry, ...properties }) => ({
+      type: "Feature",
+      geometry: turfRewind(geometry, { reverse: true }),
+      properties,
+    })),
+  };
+};
 
-fig3_data = await FileAttachment(
-  "./../../data/lossDamageNb/figure3_spei.json",
-).json();
+mapBounds = await getBounds(fig1_inputs.country);
 ```
 
 ## Section code
+
+```{ojs}
+fmtVal = (d) => Intl.NumberFormat("en", { notation: "compact" }).format(d);
+```
 
 ### Section 1 code
 
@@ -386,23 +361,139 @@ fig1_selVars = (async () => {
     columns: ["nm_slc0", "GID_0", "NAME_0", "farm_sz2", "variable"],
   });
 
+  // const map = new Map();
+
+  // for (const d of _data) {
+  //   map.set(d.GID_0, d.nm_slc0);
+  // }
+
+  // const result = Array.from(map, ([value, label]) => ({
+  //   iso3: value,
+  //   label,
+  // }));
+
   return {
     iso3: Array.from(new Set(_data.map((d) => d.GID_0))),
     country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
+    // country: result,
     admin1_name: Array.from(new Set(_data.map((d) => d.NAME_0))),
     farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
     variable: Array.from(new Set(_data.map((d) => d.variable))),
   };
 })();
-
-fig1_selVars;
 ```
 
 ```{ojs}
-"use strict";
+renderS1_inputs = () => {
+  return Inputs.form(
+    {
+      country: Inputs.select(fig1_selVars.country, {
+        label: "Country",
+        value: "Sub-Saharan Africa",
+      }),
+      fSize: Inputs.select(fig1_selVars.farm_sz2, {
+        label: "Farm Size",
+        value: "All Farms",
+      }),
+      time: Inputs.select(fig1_selVars.variable, {
+        label: "Time",
+        value: "Current Farms",
+      }),
+    },
+    {
+      template: (inputs) =>
+        html`<div style="display: flex; gap: 3em"> ${Object.values(inputs)} </div>`,
+    },
+  );
+};
+```
+
+```{ojs}
+fig1a_filtered = await hypq.parquetQuery({
+  file: fig1_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig1_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig1_inputs.fSize,
+    },
+    variable: {
+      $eq: fig1_inputs.time,
+    },
+  },
+});
+
+fig1a_spatial = joinGeo({
+  data: fig1a_filtered,
+  dataKeys: ["GID_0", "NAME_0", "NAME_1", "nm_slc0"],
+  geojson: mapBounds,
+  geoKeys: ["GID_0", "NAME_0", "NAME_1", "nm_slc0"],
+  valueKeys: ["value"],
+});
+```
+
+```{ojs}
+fig1b_filtered = await hypq.parquetQuery({
+  file: await FileAttachment(
+    "/data/lossDamageNb/fig1_farmsizelookup.parquet",
+  ).arrayBuffer(),
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig1_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig1_inputs.fSize,
+    },
+    // variable: {
+    //   $eq: fig1_inputs.time,
+    // },
+  },
+});
+```
+
+```{ojs}
+renderS1_insight = () => {
+  const _data = fig1b_filtered;
+  const _present = _data.filter((d) => d.variable === "Current Farms");
+  const _future = _data.filter((d) => d.variable === "Farms 2050");
+
+  const sum = (arr) => arr.reduce((a, b) => a + b, 0);
+
+  // baseline
+  const sumpr = sum(_present.map((d) => d.value));
+
+  // future
+  const sumfr = sum(_future.map((d) => d.value));
+
+  const pct = ((sumfr - sumpr) / sumpr) * 100;
+  const trend = pct > 0 ? "an increase" : "a decrease";
+  const _country = fig1_inputs.country;
+
+  return html`
+  <div>
+    <h4>Quick Insights for ${_country}</h4>
+    <b>${_country}</b> has a total of 
+    <b>${fmtVal(sumpr)}</b> farms in the 
+    <b>${fig1_inputs.fSize}</b> farm size class for the baseline year, circa 2020.
+    <br><br>
+    The total number of farms is expected to change to 
+    <b>${fmtVal(sumfr)}</b> by 2050, under SSP 245. 
+    This represents <b>${trend}</b> of <b>${pct.toFixed(1)}%</b>.
+  </div>
+`;
+};
 ```
 
 ### Section 2 code
+
+```{ojs}
+fig2_dat = await FileAttachment(
+  "/data/lossDamageNb/fig2_joined_eff.json",
+).json();
+```
 
 ```{ojs}
 // Inputs
@@ -493,6 +584,10 @@ The **${_loss.toLowerCase()}** from ${_event.toLowerCase()} **${_trend}** as far
 ```
 
 ### Section 3 code
+
+```{ojs}
+fig3_data = await FileAttachment("/data/lossDamageNb/figure3_spei.json").json();
+```
 
 ```{ojs}
 ensemble2 = fig3_data.filter((d) => d.gcm === "Ensemble Average");
@@ -632,7 +727,13 @@ fig4a_filtered = await hypq.parquetQuery({
   //TODO: Select only the applicable columns to boost perf.
 });
 
-fig4a_filtered;
+fig4a_spatial = joinGeo({
+  data: fig4a_filtered,
+  dataKeys: ["GID_0", "NAME_0", "NAME_1", "nm_slc0"],
+  geojson: mapBounds,
+  geoKeys: ["GID_0", "NAME_0", "NAME_1", "nm_slc0"],
+  valueKeys: ["high_fs"],
+});
 ```
 
 #### 4b code
@@ -728,9 +829,6 @@ renders4b_insight = () => {
 
   const payout = maxLoss.cum_sum / (maxyear - minyear);
 
-  const fmtVal = (d) =>
-    Intl.NumberFormat("en", { notation: "compact" }).format(d);
-
   const _event = fig4_inputs.event.toLowerCase();
   const _country = fig4_inputs.country;
   const _ssp = fig4_inputs.time;
@@ -765,4 +863,84 @@ conditions in
 under the ${_ssp} model.
 `;
 };
+```
+
+### Geo helpers
+
+```{ojs}
+function makeKeyFrom(obj, keys, sep = "|") {
+  return keys.map((k) => obj?.[k] ?? "").join(sep);
+}
+
+function joinGeo({ data, dataKeys, geojson, geoKeys, valueKeys }) {
+  const lookup = new Map(
+    data.map((d) => [
+      makeKeyFrom(d, dataKeys),
+      Object.fromEntries(valueKeys.map((k) => [k, d[k]])),
+    ]),
+  );
+
+  return {
+    ...geojson,
+    features: geojson.features.map((f) => {
+      const key = makeKeyFrom(f.properties, geoKeys);
+      const values = lookup.get(key);
+      return values ? { ...f, properties: { ...f.properties, ...values } } : f;
+    }),
+  };
+}
+
+turfRewind = require("@turf/turf").then((t) => t.rewind);
+
+function plotMap(
+  geojson,
+  fillColumn,
+  tooltipColumns = [],
+  { height = 500, scheme = "YlGnBu" } = {},
+) {
+  return Plot.plot({
+    width,
+    height,
+    projection: {
+      type: "azimuthal-equal-area",
+      domain: geojson,
+    },
+    color: {
+      scheme,
+      legend: true,
+    },
+    marks: [
+      Plot.geo(geojson, {
+        fill: (d) => d.properties[fillColumn],
+        stroke: "#fff",
+        strokeWidth: 0.5,
+      }),
+      Plot.geo(
+        geojson,
+        Plot.pointer(
+          Plot.centroid({
+            stroke: "#333",
+            strokeWidth: 1.5,
+          }),
+        ),
+      ),
+      Plot.tip(
+        geojson.features,
+        Plot.pointer(
+          Plot.centroid({
+            channels: {
+              value: (d) => d.properties[fillColumn],
+              ...Object.fromEntries(
+                tooltipColumns.map((col) => [col, (d) => d.properties[col]]),
+              ),
+            },
+            format: {
+              value: true,
+            },
+          }),
+        ),
+      ),
+    ],
+  });
+}
 ```
