@@ -1,0 +1,3767 @@
+---
+nb-title: "View Projected Climate Impacts"
+nb-author:
+  - Sebastián García Acosta
+  - Brayden Youngberg
+---
+
+```{ojs}
+import { heroImage } from "/helpers/hero.js";
+hero_url = "./../../images/projectedImpacts.webp";
+
+hero = heroImage(notebookTitle, hero_url);
+html`${hero}`;
+```
+
+```{ojs}
+import { atlasTOC } from '/helpers/toc.ojs' 
+{
+  await nbText // force wait/reload with nbText to load so headings have correct labels/languages
+  return atlasTOC({
+      heading: `<b>${_lang({en:"In this notebook", fr:"Dans ce notebook"})}</b>`,
+      skip: [notebookTitle, "notebook-title", "Appendix", "source-code"]
+      })
+}
+```
+
+```{ojs}
+viewof prettyLanguageView = {
+  return Inputs.bind(
+    Inputs.radio(languages, {
+      label: _lang({en: "Language", fr: "Langue"}),
+      format: (d) => d.label
+    }),
+    viewof language
+  );
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.overview.title)}
+
+${_lang(nbText.overview.text)}`;
+```
+
+```{ojs}
+md`# ${_lang(nbText.regionalPicture.title)}
+
+${_lang(nbText.regionalPicture.text)}`;
+```
+
+```{ojs}
+{
+  const form = Inputs.form(
+    [
+      Inputs.bind(
+        Inputs.select(
+          ["maize", "rice", "wheat"],
+          {label: _lang(nbText.general.crop),
+          format: c => _lang(nbText.general.crops[c])}
+        ),
+      viewof crop_selector_yield),
+      Inputs.bind(
+        Inputs.select(
+          avaliable_unRegions,
+          {label: _lang(nbText.regionalPicture.beeswarm.yAxis),
+          format: d =>  _lang(nbText.regionalPicture.beeswarm.regions[d || "all"])} // No region is NULL so add a label
+        ),
+      viewof sel_region),
+    ],
+    {
+      template: formTemplate()
+    }
+  )
+  return form
+}
+```
+
+```{ojs}
+{
+  // ============================================================================
+  // DATA PREPARATION
+  // ============================================================================
+  
+  const cleanData = impacts_metaanalysis_data
+    .filter(d => 
+      !sel_region || d?.UNRegion === sel_region
+    )
+    .map(d => ({
+      ...d,
+      temp_band: classifyTempBand(d.preindustrial_temp_delta)
+    }));
+
+    const violin_tt_html = (temp, adaptation, mean, min, max, sd, n_obs) => {
+      return `<strong>With Adaptatation:</strong> ${adaptation}<br/>
+              <strong>Temperature:</strong> ${temp}<br/>
+              <strong>Yield loss (%):</strong><br/>
+              <strong>Mean:</strong> ${mean.toFixed(2)}<br/>
+              <strong>Min:</strong> ${min.toFixed(2)}<br/>
+              <strong>Max:</strong> ${max.toFixed(2)}<br/>
+              <strong>Std Dev:</strong> ${sd.toFixed(2)}<br/>
+              <strong>Observations:</strong> ${n_obs}<br/>`
+    }
+
+  // ============================================================================
+  // HELPER FUNCTIONS
+  // ============================================================================
+  
+  function classifyTempBand(temp) {
+    if (temp <= 2) return "≤ 2°C" // return "≤ 1.5°C";
+    if (temp <= 3) return "2-3°C"// return "1.5–2.5°C";
+    return "> 3°C"; // "> 2.5°C"
+  }
+
+  function gaussianKernel(u) {
+    return Math.exp(-0.5 * u * u) / Math.sqrt(2 * Math.PI);
+  }
+
+  function silvermanBandwidth(values) {
+    const n = values.length;
+    if (n < 2) return 1.5;
+    const sd = d3.deviation(values) || 1;
+    return Math.max(1, 1.06 * sd * Math.pow(n, -0.2));
+  }
+
+  function computeKDE(grid, samples, bandwidth) {
+    const invBw = 1 / bandwidth;
+    return grid.map(gridPoint => {
+      const density = d3.mean(samples, v => 
+        gaussianKernel((gridPoint - v) * invBw)
+      ) * invBw;
+      return [gridPoint, density || 0];
+    });
+  }
+  
+  function kdeWithinExtent(samples, step=0.25) { // Clamp the tails of the violin to min and max
+    const [lo, hi] = d3.extent(samples);
+    const bw = silvermanBandwidth(samples);
+    const grid = d3.range(lo, hi + step, step);
+    const density = computeKDE(grid, samples, bw);
+    const maxDensity = d3.max(density, d => d[1]) || 0;
+    return { density, maxDensity, lo, hi };
+  }
+
+  function computeDensitiesPerAdaptation(dataSubset) {
+    return d3.groups(dataSubset, d => d.Adaptation)
+      .map(([adaptation, records]) => {
+        const values = records.map(d => d.yield_impact_pct);
+        const { density, maxDensity, lo, hi } = kdeWithinExtent(values);
+        return { adaptation, records, density, maxDensity, lo, hi };
+    });
+  }
+
+  // ============================================================================
+  // SCALES AND DIMENSIONS
+  // ============================================================================
+  
+  const margin = { top: 60, right: 30, bottom: 30, left: 80 };
+  const width = 1000;
+  const height = 600;
+  const innerW = width - margin.left - margin.right;
+  const innerH = height - margin.top - margin.bottom;
+
+  // Y scale (yield impact)
+  // const yExtent = d3.extent(cleanData, d => d.yield_impact_pct);
+  const yExtent = [-100, 100]
+  const padding = 0;
+  const yMin = Math.min((yExtent[0] ?? -10) - padding, 0);
+  const yMax = Math.max((yExtent[1] ?? 10) + padding, 0);
+  
+  const yScale = d3.scaleLinear()
+    .domain([yMin, yMax])
+    .nice()
+    .range([innerH, 0]);
+
+  const yGrid = d3.range(
+    yScale.domain()[0], 
+    yScale.domain()[1] + 1e-9, 
+    (yScale.domain()[1] - yScale.domain()[0]) / 100
+  );
+
+  // Temperature band columns
+  // const tempBands = ["≤ 1.5°C", "1.5–2.5°C", "> 2.5°C"];
+  const tempBands = ["≤ 2°C", "2-3°C", "> 3°C"]
+  const xBandScale = d3.scaleBand()
+    .domain(tempBands)
+    .range([0, innerW])
+    .padding(0.15);
+
+  // Adaptation categories within each column
+  const adaptationTypes = Array.from(
+    new Set(cleanData.map(d => d.Adaptation))
+  ).sort(d3.ascending);
+  
+  const xInnerScale = d3.scalePoint()
+    .domain(adaptationTypes)
+    .range([0, xBandScale.bandwidth()])
+    .padding(0.6);
+
+  // Color scale
+  const colorScale = d3.scaleOrdinal()
+    .domain(adaptationTypes)
+    .range(d3.schemeTableau10);
+
+  // Violin width scale (shared across all columns)
+  const maxDensityGlobal = d3.max(
+    tempBands.map(band => {
+      const subset = cleanData.filter(d => d.temp_band === band);
+      return d3.max(computeDensitiesPerAdaptation(subset), d => d.maxDensity);
+    })
+  ) || 1;
+  
+  const maxViolinHalfWidth = Math.min(45, (xBandScale.bandwidth() / adaptationTypes.length) * 0.35);
+  const widthScale = d3.scaleLinear()
+    .domain([0, maxDensityGlobal])
+    .range([0, maxViolinHalfWidth]);
+
+  // Violin area generator
+  const areaGenerator = d3.area()
+    .curve(d3.curveCatmullRom)
+    .x0(d => -widthScale(d[1]))
+    .x1(d => +widthScale(d[1]))
+    .y(d => yScale(d[0]));
+
+  // ============================================================================
+  // SVG SETUP
+  // ============================================================================
+  const id = "impactfulViolin"
+  const svg = d3.create("svg")
+    .attr("width", width)
+    .attr("height", height)
+    // .style("background", "#fafafa")
+    // .style("font-family", "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
+
+  const chartArea = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  d3.selectAll(`#${id}-tooltip`).remove();
+  const tooltip = d3
+    .select("body")
+    .append("div")
+    .attr("id", `${id}-tooltip`)
+    .attr("class", "plotTooltip hazardTip")
+    .style("position", "absolute");
+
+  // ============================================================================
+  // DRAW COLUMNS (TEMPERATURE BANDS)
+  // ============================================================================
+  
+  const columnsGroup = chartArea.append("g").attr("class", "columns");
+  const jitterGenerator = d3.randomUniform.source(d3.randomLcg(42))(
+    -maxViolinHalfWidth * 0.85, 
+    maxViolinHalfWidth * 0.85
+  );
+
+  tempBands.forEach(band => {
+    const columnGroup = columnsGroup.append("g")
+      .attr("transform", `translate(${xBandScale(band)},0)`);
+
+    // Column header
+    columnGroup.append("text")
+      .attr("x", xBandScale.bandwidth() / 2)
+      .attr("y", -12)
+      .attr("text-anchor", "middle")
+      .attr("font-weight", 700)
+      .attr("font-size", 14)
+      .attr("fill", "#1a1a1a")
+      .text(band);
+
+    // Compute densities for this temperature band
+    const bandData = cleanData.filter(d => d.temp_band === band);
+    const densities = computeDensitiesPerAdaptation(bandData);
+
+    // Draw violins
+    densities.forEach(({ adaptation, density, records }) => {
+      const cx = xInnerScale(adaptation);
+      if (cx == null) return;
+
+      // Calc group stats for the tooltip and mean lines
+      const meanYield = d3.mean(records, d => d.yield_impact_pct);
+      const sdYield = d3.deviation(records, d => d.yield_impact_pct);
+      const minYield = d3.min(records, d => d.yield_impact_pct);
+      const maxYield = d3.max(records, d => d.yield_impact_pct);
+      const n_obs = records.length
+
+
+      const violinGroup = columnGroup.append("g")
+        .attr("transform", `translate(${cx},0)`);
+
+      violinGroup.append("path")
+        .attr("d", areaGenerator(density))
+        .attr("fill", colorScale(adaptation))
+        .attr("fill-opacity", 0.2)
+        .attr("stroke", colorScale(adaptation))
+        .attr("stroke-width", 1.5)
+        .style("filter", "drop-shadow(0 1px 2px rgba(0,0,0,0.05))");
+
+      violinGroup
+        .on("mousemove", (event, d) => {
+          tooltip
+            .style("top", event.pageY - 10 + "px")
+            .style("left", event.pageX + 10 + "px")
+            .style("opacity", 1)
+            .style("display", "block")
+            .html(violin_tt_html(band, adaptation, meanYield, minYield, maxYield, sdYield, n_obs));
+        })
+          .on("mouseout", function (event, d) {
+            d3.select(`#${id}-tooltip`).style("display", "none");
+        });
+      
+      // Mean line
+      const meanY = yScale(meanYield);
+      violinGroup.append("line")
+        .attr("x1", -maxViolinHalfWidth * 0.4)
+        .attr("x2", maxViolinHalfWidth * 0.4)
+        .attr("y1", meanY)
+        .attr("y2", meanY)
+        .attr("stroke", colorScale(adaptation))
+        .attr("stroke-width", 2.5)
+        .attr("stroke-opacity", 0.9);
+    });
+
+
+    // Draw data points
+    columnGroup.append("g")
+      .selectAll("circle")
+      .data(bandData)
+      .join("circle")
+        .attr("cx", d => xInnerScale(d.Adaptation) + jitterGenerator())
+        .attr("cy", d => yScale(d.yield_impact_pct))
+        .attr("r", 2.5)
+        .attr("fill", d => colorScale(d.Adaptation))
+        .attr("fill-opacity", 0.1)
+        .attr("stroke", d => colorScale(d.Adaptation))
+        .attr("stroke-width", 0.15)
+        .style("cursor", "pointer")
+      .append("title")
+        .text(d => `${d.Crop} • ${d.Country}
+Temperature: ${d.preindustrial_temp_delta}°C
+Yield Impact: ${d.yield_impact_pct.toFixed(2)}%
+Adaptation: ${d.Adaptation}
+Reference: ${d.Reference}`);
+  });
+
+  // ============================================================================
+  // AXES AND GRIDLINES
+  // ============================================================================
+  
+  // Y-axis
+  const yAxis = chartArea.append("g")
+    .attr("class", "y-axis")
+    .call(d3.axisLeft(yScale).ticks(8).tickSize(-innerW))
+    .call(g => g.select(".domain").remove())
+    .call(g => g.selectAll(".tick line")
+      .attr("stroke", "#e0e0e0")
+      .attr("stroke-dasharray", "2,2"))
+    .call(g => g.selectAll(".tick text")
+      .attr("fill", "#666")
+      .attr("font-size", 11));
+
+  // Zero reference line
+  chartArea.append("line")
+    .attr("x1", 0)
+    .attr("x2", innerW)
+    .attr("y1", yScale(0))
+    .attr("y2", yScale(0))
+    .attr("stroke", "#333")
+    .attr("stroke-width", 1.5)
+    .attr("stroke-dasharray", "4,4");
+
+  // Adaptation category ticks (within each column)
+  // const innerAxisGenerator = d3.axisBottom(xInnerScale).tickSize(0);
+  // tempBands.forEach(band => {
+  //   chartArea.append("g")
+  //     .attr("transform", `translate(${xBandScale(band)},${innerH})`)
+  //     .call(innerAxisGenerator)
+  //     .call(g => g.select(".domain").remove())
+  //     .call(g => g.selectAll("text")
+  //       .attr("dy", "1em")
+  //       .attr("font-size", 10)
+  //       .attr("fill", "#666")
+  //       .text(d => _lang(nbText.regionalPicture.beeswarm.legend[d])));
+  // });
+
+  // ============================================================================
+  // LABELS
+  // ============================================================================
+  
+  // Y-axis label
+  svg.append("text")
+    .attr("transform", `translate(20,${height/2}) rotate(-90)`)
+    .attr("text-anchor", "middle")
+    .attr("font-weight", 600)
+    .attr("font-size", 13)
+    .attr("fill", "#333")
+    .text("Yield Impact (%)");
+
+  // X-axis label
+  svg.append("text")
+    .attr("x", width / 2)
+    .attr("y", 10)
+    .attr("text-anchor", "middle")
+    .attr("font-weight", 600)
+    .attr("font-size", 13)
+    .attr("fill", "#333")
+    .text("Temperature Increase from Pre-Industrial Levels");
+
+  // ============================================================================
+  // Legend
+  // ============================================================================
+
+  const legendItems = adaptationTypes.map(a => ({
+    key: a,
+    // use your localized label if available; else fall back to the raw key
+    label: (_lang?.(nbText?.regionalPicture?.beeswarm?.legend?.[a])) ?? a,
+    color: colorScale(a)
+  }));
+
+  const sw = 12;            // swatch size
+  const rowH = 20;          // row height
+  const gap = 8;            // gap between swatch and text
+  const colWidth = 170;     // width per legend column
+  const cols = legendItems.length > 6 ? 2 : 1;
+
+  // position top-right inside the chart area
+  const legendX = margin.left + 5;
+  const legendY = margin.top + 8;
+
+  const legend = svg.append("g")
+    .attr("class", "legend")
+    .attr("transform", `translate(${legendX}, ${legendY})`)
+    .attr("aria-label", "Legend");
+
+  const items = legend.append("g");
+
+  items.selectAll("g.item")
+    .data(legendItems)
+    .join("g")
+      .attr("class", "item")
+      .attr("transform", (d, i) => {
+        const col = Math.floor(i / Math.ceil(legendItems.length / cols));
+        const row = i % Math.ceil(legendItems.length / cols);
+        return `translate(${col * colWidth}, ${row * rowH})`;
+      })
+    .each(function(d) {
+      const g = d3.select(this);
+        g.append("rect")
+          .attr("width", sw)
+          .attr("height", sw)
+          .attr("rx", 2)
+          .attr("ry", 2)
+          .attr("y", 0)
+          .attr("fill", d.color)
+          .attr("fill-opacity", 0.2)
+          .attr("stroke", d.color)
+          .attr("stroke-width", 1.5);
+        
+        g.append("text")
+          .attr("x", sw + gap)
+          .attr("y", sw/2)
+          .attr("dominant-baseline", "middle")
+          .attr("font-size", 11)
+          .attr("fill", "#333")
+          .text(d.label);
+    });
+
+  return svg.node();
+}
+```
+
+```{ojs}
+beeswarm_insight_title = {
+  let template = _lang(nbText.regionalPicture.beeswarmInsight.title)
+  let items = [
+    {name: "SelectedCrop", value: selected_crop_global.map((c) => _lang(nbText.general.crops[c]))},
+    {name: "warmingLevel", value: warming_level},
+  ]
+return md`### ${Lang.reduceReplaceTemplateItems(template, items)}`
+}
+```
+
+```{ojs}
+viewof warming_level = {
+  return Inputs.select(
+      temp_opts,
+      {label: _lang(nbText.regionalPicture.selectors.warmingLevel.title) }
+  )  
+}
+```
+
+```{ojs}
+violin_insight = {
+
+  let band_sel = warming_level
+  const tempBand_data = {
+    temp_band: band_sel,
+    ...violin_insight_data.median_yields[band_sel],
+    ...violin_insight_data.worst_region[band_sel]
+  };
+// return tempBand_data
+  //Point 1
+  const template_insight1 = _lang(nbText.regionalPicture.beeswarmInsight.text.insight1)
+  const values_insight1 = [
+        {name: "warmingLevel", value: band_sel},
+        {name: "crops", value: selected_crop_global.map((c) => _lang(nbText.general.crops[c]))},
+        {name: "yieldReduction", value: tempBand_data.median_without_adaptation.toFixed(2)}
+    ]
+  const insight1 = Lang.reduceReplaceTemplateItems(template_insight1, values_insight1)
+
+  //Point 2
+  let template_insight2 = _lang(nbText.regionalPicture.beeswarmInsight.text.insight2.mostAffected)
+  let values_insight2 = [
+      {name: "mostAffected_adaptation", value: tempBand_data.worst_region_with_adaptation.region},
+      {name: "mostAffected_noadaptation", value: tempBand_data.worst_region_without_adaptation.region},
+    ]
+  const insight2 = Lang.reduceReplaceTemplateItems(template_insight2, values_insight2)
+
+  //Point 3
+  let insight3;
+  if (!!tempBand_data.median_with_adaptation) {
+    let template_insight3 = _lang(nbText.regionalPicture.beeswarmInsight.text.insight3.compelling);
+    const values_insight3 = [
+      {name: "loss_gain", value: "losses"}, // Hard coded for now as all data is better with adaptation
+      {name: "withAdaptation", value: tempBand_data.median_with_adaptation.toFixed(2)},
+    ]
+    insight3 = Lang.reduceReplaceTemplateItems(template_insight3, values_insight3)
+  } else {
+    insight3 = _lang(nbText.regionalPicture.beeswarmInsight.text.insight3.notCompelling);
+  }
+  
+return md`
+* ${insight2}
+* ${insight1}
+* ${insight3}`
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.zoomToStable.title)}
+
+${_lang(nbText.zoomToStable.text)}`;
+```
+
+```{ojs}
+zoom_in_selectors = {
+  const form = Inputs.form(zoom_in_elements, {template: formTemplate()})
+  return form
+}
+```
+
+```{ojs}
+// format admin selections
+// bind to appendix inputs, add template to format
+geoImpactAdminSelectors = Inputs.form(
+  [
+    Inputs.bind(
+      Inputs.select(dataAdmin0, { label: _lang(nbText.general.country), format: x => x == null ? _lang(nbText.general.adminNames['SSA']): _lang(nbText.general.adminNames[x])}),
+      viewof selectAdmin0
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin1, { label: _lang(nbText.general.region) }),
+      viewof selectAdmin1
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin2, { label: _lang(nbText.general.subRegion) }),
+      viewof selectAdmin2
+    )
+  ],
+  {
+    template: formTemplate()
+  }
+)
+```
+
+```{ojs}
+// define choices for the data value
+viewof selectGeoDataType = {
+  const options = [
+/*    
+    {
+      key: "population", // lookup id for data option
+      dataColumn: "rural_pop", // data column
+      label: "Rural population", // label
+      labelTip: "Rural population", // label for tooltip
+      labelLegend: "Rural population", // label for legend
+      formatFunc: formatNumCompactShort, // formatting function for raw data value
+      colorRange: colorScales.range.yellowGreen, // color range
+      colorUnknown: colorScales.unknown, // unknown fill color 
+    },
+    {
+      key: "vop",
+      dataColumn: "vop_total",
+      label: "Total Value of Production (VoP)",
+      labelTip: "VoP",
+      labelLegend: "Value of Production ($)",
+      formatFunc: formatUSD,
+      colorRange: colorScales.range.yellowGreen,
+      colorUnknown: colorScales.unknown,
+    },
+*/
+    {
+      key: "wmean_yield_rfd",
+      dataColumn: "wmean_yield_rfd",
+      label: _lang(nbText.zoomToStable.selectors.layer.values.rainfed),//"Mean rainfed potential yield", 
+      labelTip: "rfd",
+      labelLegend: _lang(nbText.zoomToStable.selectors.layer.values.rainfed),
+      formatFunc: formatNumCompactShort,
+      colorRange: colorScales.range.yellowGreen,
+      colorUnknown: colorScales.unknown,
+    },
+    {
+      key: "wmean_yield_irr",
+      dataColumn: "wmean_yield_irr",
+      label:  _lang(nbText.zoomToStable.selectors.layer.values.irrigated),
+      labelTip: "irr",
+      labelLegend: _lang(nbText.zoomToStable.selectors.layer.values.irrigated),
+      formatFunc: formatNumCompactShort,
+      colorRange: colorScales.range.yellowGreen,
+      colorUnknown: colorScales.unknown,
+    },
+  ];
+  return Inputs.radio(options.sort((a,b) => b.key.localeCompare(a.key)), {
+    width: 300,
+    label:  _lang(nbText.zoomToStable.selectors.layer.title),
+    format: (x) => x.label,
+    value: options.find((t) => t.key === "wmean_yield_rfd")
+  });
+}
+```
+
+```{ojs}
+plotChoroplethGeoImpact = {
+  const data = mapDataGeoImpact
+  const selector = selectGeoDataType
+  const dataColumn = mapDataColumn;
+  
+  // return plot
+  return Plot.plot({
+    width: mapWidth,
+    height: 550,
+    caption: _lang(nbText.general.greyNoData),
+    projection: {
+      type: "azimuthal-equal-area",
+      domain: data
+    },
+    color: {
+      legend: true,
+      label: selector.labelLegend,
+      range: selector.colorRange,
+      unknown: selector.colorUnknown,
+      tickFormat: selector.formatFunc,
+    },
+    marks: [
+      // geo data
+      Plot.geo(data.features, {
+        fill: (d) => {
+          const fillValue = d.properties.data ? d.properties.data[dataColumn] : null; // handle missing data
+          return fillValue
+        },
+        stroke: "#fff",
+        strokeWidth: 0.5
+      }),
+      // admin2 highlight 
+      // if Admin selection includes admin2, highlight section
+      Plot.geo(adminSelections.selectAdmin2 
+               ? data.features.filter(d => d.properties.admin2_name == adminSelections.selectAdmin2)
+               : [], {
+        fill: null,
+        stroke: "#333",
+        strokeWidth: 1.5
+      }),
+      // geo pointer
+      Plot.geo(data, Plot.pointer(
+        Plot.centroid({
+        stroke: "#333",
+        strokeWidth: 1.5,
+      }))),
+      // tooltip
+      Plot.tip(
+        data.features,
+        Plot.pointer(
+          Plot.centroid({
+            channels: {
+              name: {
+                // region label, based on selection
+                label: getLowerLevelAdminLabel(), // plot-level so inputs don't reload
+                value: (d) => d.properties.admin_name
+              },
+              country: (d) => d.properties.admin0_name,
+              data: {
+                label: selector.labelTip,
+                value: (d) => {
+                const data = d.properties.data ? d.properties.data[dataColumn] : undefined
+                return data
+              },
+              }
+            },
+            format: {
+              name: true,
+              country: false,
+              data: (d) => selector.formatFunc(d)
+            }
+          })
+        )
+      )
+    ]
+  });
+}
+```
+
+```{ojs}
+map_insights = {
+  async function quick_insight_map_admin_rank(data_column){
+    let none_admins_for_same_level = getAdminsNoneForSameLevel()
+    let query = `
+        SELECT *
+        FROM aggregated
+        WHERE cycle = '${selected_cycle_options.cycle}'
+        AND crop = '${crop_selector_dynamic_insights}'
+        AND cultivar = '${selected_cultivar.value}'`
+    if (none_admins_for_same_level.length > 0) {
+      query += ` AND ${none_admins_for_same_level.map(col => `${col} IS NULL`).join(' AND ')}`
+    }
+    let same_level = await db.query(query)
+      .then((r) => r.toArray())
+    // Sort by absolute yield changes, descending order
+    // TODO: absolute value?
+    same_level.sort((a, b) => Math.abs(a[data_column]) - Math.abs(b[data_column])).reverse();
+  
+    let ranking = 0;
+    let selected_admin = get_selected_admin_atfc();
+    let admins_to_names = {
+      admin0_name: "countries",
+      admin1_name: "regions",
+      admin2_name: "subregions",
+    }
+    for (let i = 0; i < same_level.length; i++){
+      let obj = same_level[i];
+      if (obj[selected_admin.admin] != selected_admin.highlight)
+        continue
+      ranking = i + 1;
+      break
+    }
+    
+    return {
+      data: same_level,
+      ranking: ranking,
+      selected_geo: selected_admin.highlight,
+      admin_name: admins_to_names[selected_admin.admin],
+      out_of: same_level.length,
+    };
+  }
+
+  function average_first_insight_for_all_subsaharan_africa(filtered) {
+    const yield_in_selected_geo = filtered.filter(d => d.admin1_name == null)
+    const colname = get_yield_column(selected_yield_output.label, selectGeoDataType.labelTip);
+    //const colname = "yield_"+selectGeoDataType.labelTip+"_avg";
+    const values = yield_in_selected_geo.map(d => d[mapDataColumn]);
+    let obj = {}
+    obj[colname] = average(values)
+    return [obj]
+  }
+
+
+  // Title
+  let geogs = Object.values(adminSelections).filter(d => d !== null)
+  if (geogs.length == 0){ 
+    // geogs = _lang(nbText.general.country_article2.SSA);  
+    geogs = _lang(nbText.general.adminNames.SSA);  
+  } else {
+    geogs = geogs.map(val => _lang(nbText.general.adminNames[val]) || val).join(", ")
+    // geogs = geogs.map(val => _lang(nbText.general.country_article2[val]) || val).join(", ")
+  }
+  let yield_in_selected_geo = dataYield.filter(filterYieldDataByAdmins);
+  if (selectAdmin0 == null){
+    yield_in_selected_geo = average_first_insight_for_all_subsaharan_africa(yield_in_selected_geo) 
+  }
+
+  let title_template = _lang(nbText.zoomToStable.MapInsight.title)
+
+  let title_values = [
+    {name:"geography", value: geogs},
+    {name:"scenario_selection", value: selected_scenario.label.toLowerCase()},
+    {name:"crop_selection", value: _lang(nbText.general.crops[crop_selector_dynamic_insights.toLowerCase()])}
+  ]
+  
+  const title = Lang.reduceReplaceTemplateItems(title_template, title_values)
+
+  // Globals
+  const _outputName = _lang(nbText.zoomToStable.selectors.YieldOutput.values[selected_yield_output.label]).toLowerCase()
+  const _outputUnit = _outputName.match(/\(([^)]+)\)/g);
+
+  //Insight 1
+  let insight1 = ""
+  // Rainfed yield
+  if (yield_in_selected_geo !== null && yield_in_selected_geo.length == 1){
+    let yield_in_selected_geo_obj = yield_in_selected_geo[0];
+    if (yield_in_selected_geo_obj[mapDataColumn] != null){
+      let rounded = Math.round(yield_in_selected_geo_obj[mapDataColumn] * 100) / 100;
+      
+      let insight1_template = _lang(nbText.zoomToStable.MapInsight.insight1)
+      
+      let insight1_values = [
+        {name:"geography", value: geogs},
+        {name:"scenario_selection", value: selected_scenario.label.toLowerCase()},
+        {name:"crop_selection", value: crop_selector_dynamic_insights},
+        {name:"yield_selection", value: _outputName},
+        {name:"value", value: rounded}
+      ]
+      
+      insight1 = `* ${Lang.reduceReplaceTemplateItems(insight1_template, insight1_values)}`  
+    }
+  }
+
+  // Insight 2
+  let insight2 = ""
+let pre_filtered = await db.query(`
+  SELECT *
+  FROM aggregated 
+  WHERE cycle = '${selected_cycle_options.cycle}'
+  AND crop = '${crop_selector_dynamic_insights.toLowerCase()}'
+  AND cultivar = '${selected_cultivar.value}'
+`).then((r) => r.toArray())
+  
+  if (adminSelections.selectAdmin0 != null){
+   pre_filtered = pre_filtered.filter(filterYieldDataByAdmins);
+  }
+
+  // A climate change scenario ...
+  if (selected_scenario.label.toLowerCase() != "historical"){
+    let climate_change_scenarios;
+    if (adminSelections.selectAdmin0 == null){
+      const africa_pre_filtered = pre_filtered.filter(d => d.admin1_name == null && d.ssp == selected_scenario.ssp);
+      const horizons = [2030, 2050];
+      climate_change_scenarios = [];
+      for(let i = 0; i < horizons.length; i++){
+        const temp_h = horizons[i];
+        let averaged_horizon = average_first_insight_for_all_subsaharan_africa(
+          africa_pre_filtered.filter(d => d.horizon == temp_h)
+        );
+        averaged_horizon[0]["horizon"] = temp_h;
+        averaged_horizon[0]["ssp"] = selected_scenario.ssp; 
+        climate_change_scenarios.push(...averaged_horizon)
+      }
+    } else {
+      climate_change_scenarios = pre_filtered.filter((d) => (
+        (d.ssp == selected_scenario.ssp)
+      ));
+    }
+    for (let i = 0; i < climate_change_scenarios.length; i++){
+      let emissions = climate_change_scenarios[i].ssp == "SSP370" ? "moderate ": "high ";
+      emissions += climate_change_scenarios[i].ssp
+      let impact = Math.round(climate_change_scenarios[i][mapDataColumn] * 100) / 100;
+      let horizon = climate_change_scenarios[i].horizon
+      if (horizon == 2005)
+        continue
+      let change;
+      if (impact == 0)
+        change = "neutral"
+      else
+        change = impact > 0 ? "positive" : "negative";
+
+      let insight2_template = _lang(nbText.zoomToStable.MapInsight.insight2)
+      
+      let insight2_values = [
+        {name:"emission_level", value: emissions},
+        {name:"horizon", value: horizon},
+        {name:"change_type", value: _lang(nbText.general[change])},
+        {name:"impact_pct", value: impact},
+        {name:"change_unit", value: _outputUnit}
+      ]
+
+      insight2 += `* ${Lang.reduceReplaceTemplateItems(insight2_template, insight2_values)}\n`
+
+      // insights += `* A climate change scenario with ${emissions} emissions by **${horizon}** has a **${change}** impact on yield of ${impact}%. \n`
+    }
+  }
+
+  let insight3 = ""
+  if (selected_yield_output.label == "Yield change (%)"){
+    const values_col = get_yield_column("Yield change (%)", selectGeoDataType.labelTip);
+    const change_values = pre_filtered
+      .filter(d => ((d[values_col] !== null)))
+      .map(d => d[values_col]);
+    let max_change = Math.round(arrayMax(change_values) * 100) / 100;
+    let min_change = Math.round(arrayMin(change_values) * 100) / 100;
+
+    let insight3_template = _lang(nbText.zoomToStable.MapInsight.insight3)
+    
+    let insight3_values = [
+      {name:"minChange", value: min_change},
+      {name:"maxChange", value: max_change},
+    ]
+
+    insight3 = `* ${Lang.reduceReplaceTemplateItems(insight3_template, insight3_values)}`
+
+//     insights += `* The projected yield changes arise from simulating yield under various plausible futures, which implies uncertainty. Accordingly, the range of projected changes is **${min_change}%** to **${max_change}%** across the climate models used.
+// `
+  }
+
+  //insight 4
+  let insight4 = ""
+  if (adminSelections.selectAdmin0 != null){
+    // Absolute yield changes
+    let data_column = get_yield_column("Yield change (ton/ha)", selectGeoDataType.labelTip);
+    let result = await quick_insight_map_admin_rank(data_column);
+    
+    let insight4_template = _lang(nbText.zoomToStable.MapInsight.insight4)
+    let insight4_values = [
+      {name:"geography", value: result.selected_geo},
+      {name:"rank", value: result.ranking},
+      {name:"num", value: result.out_of},
+      {name:"adminLvl", value: result.admin_name},
+    ]
+
+    insight4 = `* ${Lang.reduceReplaceTemplateItems(insight4_template, insight4_values)}`
+    // insights += `* Across all of Sub-Saharan Africa, ${result.selected_geo} ranks ${result.ranking} out of ${result.out_of} ${result.admin_name} at the same level, with regard to absolute yield changes.\n`
+  }
+
+  
+  return md`
+### ${title}
+${insight1}
+${insight2}
+${insight3}
+${insight4}`
+  
+// ${insights}`
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.adaptFutureChange.title)}
+
+${_lang(nbText.adaptFutureChange.text)}`;
+```
+
+```{ojs}
+atfc_form = Inputs.form([
+    viewof atfc_crop_selector,
+    viewof atfc_cycle_selector,
+    viewof atfc_scenario_selector
+], {template: formTemplate()})
+```
+
+```{ojs}
+geoImpactAdminSelectorsAFC = Inputs.form(
+  [
+    Inputs.bind(
+      Inputs.select(dataAdmin0, { label: _lang(nbText.general.country), format: x => x == null ? _lang(nbText.general.adminNames['SSA']): _lang(nbText.general.adminNames[x])}),
+      viewof selectAdmin0
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin1, { label: _lang(nbText.general.region) }),
+      viewof selectAdmin1
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin2, { label: _lang(nbText.general.subRegion) }),
+      viewof selectAdmin2
+    )
+  ],
+  {
+    template: formTemplate()
+  }
+)
+```
+
+```{ojs}
+viewof radioSortDotPlotCrop = {
+  const data = [
+    {
+      key: "observations",
+      label: _lang(nbText.adaptFutureChange.selectors.sort.values.noAdapt),
+      channel: "nObs",
+      reverse: true,
+    },
+    {
+      key: "mean",
+      label: _lang(nbText.adaptFutureChange.selectors.sort.values.meanDiff),
+      channel: "x",
+      reverse: true,
+    },
+    {
+      key: "alpha",
+      label: _lang(nbText.adaptFutureChange.selectors.sort.values.alphabet),
+      channel: "y",
+      reverse: false,
+    },
+  ]
+  return Inputs.radio(data, { label: "Sort", format: d => d.label, value: data.find(x => x.key === 'mean') });
+}
+```
+
+```{ojs}
+plotDotAEZ = {
+  const baseData = dataYieldATFC;
+  const plotData = baseData.filter(d => (
+      (d.crop.toLowerCase().trim() == selected_crop_atfc.toLowerCase().trim())
+    )
+  );
+  var toHiglight = get_selected_admin_atfc();
+  if (selectAdmin0 == null){
+    toHiglight = {
+      admin: "admin0_name",
+      highlight: ""
+    }
+  }
+  const aezColor = {
+    domain: [
+      "historical",
+      "2030",
+      "2050",
+    ],
+    range: [
+      "#74B95A",
+      "#F3D6B0",
+      "#B02B19",
+    ],
+  }
+  const aezData = T.tidy(
+    plotData,
+    T.filter((d) => {
+      if (toHiglight.highlight == null) return d;
+      return d[toHiglight.admin] == toHiglight.highlight;
+    }),
+    T.arrange("mean_difference")
+  );
+  
+  const colorDomain = aezColor.domain;
+  const colorRange = aezColor.range;
+  const marginBottom = 0;
+  const marginTop = 50;
+  const yHeight = 35;
+  const height =
+    marginTop +
+    marginBottom +
+    d3.group(plotData, (d) => d.adaptation).size * yHeight;
+  const _formatNum = formatNum;
+  // const _toggleCIs = toggleCIsCrop[0]; // Remove as CI are too small to see on plot
+  const _radioSort = radioSortDotPlotCrop;
+  
+  return Plot.plot({
+    height,
+    marginBottom,
+    marginTop,
+    marginLeft: 160,
+    marginRight: 50,
+    width: 1000,
+    x: {
+      axis: "top",
+      nice: true,
+      grid: true,
+      label: _lang(nbText.adaptFutureChange.plot.xAxis.title),
+      labelAnchor: "center",
+      labelOffset: 40,
+      labelArrow: "none"
+    },
+    y: {
+      tickSize: 0,
+      label: null
+    },
+    color: {
+      domain: colorDomain,
+      range: colorRange,
+      tickFormat: l => l === "historical"? _lang(nbText.general.historical) : l,
+      legend: true
+    },
+    marks: [
+      // main y-axis
+      Plot.axisY({
+        tickSize: 0,
+        tickFormat: d => _lang(nbText.adaptFutureChange.plot.yAxis[d])
+      }),
+      // pointer white-out
+      Plot.axisY(
+        Plot.pointerY({
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0,
+          tickFormat: d => _lang(nbText.adaptFutureChange.plot.yAxis[d])
+        })
+      ),
+      // bold pointer
+      Plot.axisY(
+        Plot.pointerY({
+          fontWeight: "bold",
+          tickSize: 0,
+          tickFormat: d => _lang(nbText.adaptFutureChange.plot.yAxis[d])
+        })
+      ),
+      // zero point
+      Plot.ruleX([0], { stroke: "#333", strokeDasharray: [4] }),
+      // base dots
+      Plot.dot(plotData, {
+        x: "mean_difference",
+        y: "adaptation",
+        sort: { y: _radioSort.channel, reverse: _radioSort.reverse },
+        r: 8,
+        stroke: "#fff",
+        strokeWidth: 0.7,
+        fill: "#efefef",
+        channels: {
+          nObs: {
+            label: "# Observations",
+            value: "N_Obs"
+          }
+        }
+      }),
+      // selection: span lines: CI - Removed as the CI are so small they do not apperar
+      // Plot.ruleY(_toggleCIs == "Visible" ? aezData : [], {
+      //   y: "adaptation",
+      //   x1: (d) => (d.ci_upper == null ? null : d.ci_upper),
+      //   x2: (d) => (d.ci_lower  == null ? null : d.ci_lower),
+      //   stroke: "#333"
+      // }),
+      // selection: mean diff dots
+      Plot.dot(aezData, {
+        x: "mean_difference",
+        y: "adaptation",
+        fill: (d) => {
+          return d.horizon;
+        },
+        r: 8,
+        stroke: "#fff",
+        strokeWidth: 0.7,
+        channels: {
+          aez: {
+            label: _lang(nbText.adaptFutureChange.plot.channels.aez),
+            value: "horizon"
+          },
+          // nObs: {
+          //   label: _lang(nbText.adaptFutureChange.plot.channels.nObs),
+          //   value: "N_Obs"
+          // },
+          diff: {
+            label: _lang(nbText.adaptFutureChange.plot.channels.diff),
+            value: "mean_difference"
+          },
+          control: {
+            label: _lang(nbText.adaptFutureChange.plot.channels.control),
+            value: "Mean_Control"
+          },
+          prac: {
+            label: _lang(nbText.adaptFutureChange.plot.channels.prac),
+            value: "adaptation"
+          },
+          crop: {
+            label: _lang(nbText.general.crop),
+            value: "Crop"
+          },
+          ciLow: {
+            label: _lang(nbText.adaptFutureChange.plot.channels.ciLow),
+            value: "Lower"
+          },
+          ciHigh: {
+            label: _lang(nbText.adaptFutureChange.plot.channels.ciHigh),
+            value: "Upper"
+          }
+        },
+        tip: {
+          format: {
+            x: false,
+            y: false,
+            fill: false,
+            prac: false,
+            crop: false,
+            aez: (d) => d === "historical"? _lang(nbText.general.historical) : d,
+            diff: (d) => _formatNum(d),
+            control: (d) => _formatNum(d),
+            ciLow: (d) => _formatNum(d),
+            ciHigh: (d) => _formatNum(d),
+            nObs: true
+          }
+        }
+      }),
+      // dot highlight on hover
+      Plot.dot(
+        aezData,
+        Plot.pointer({
+          x: "mean_difference",
+          y: "adaptation",
+          r: 8,
+          fill: (d) => {
+            return d.horizon;
+          },
+          stroke: "#333",
+          strokeWidth: 0.7,
+          channels: {
+            nObs: {
+              label: "# Observations",
+              value: "N_Obs"
+            }
+          }
+        })
+      ),
+      // observation counts
+      // Plot.textY(
+      //   aezData,
+      //   Plot.map(
+      //     { text: (values) => values.map((d) => d + " obs.") },
+      //     Plot.groupY(
+      //       { text: "sum" },
+      //       {
+      //         y: "adaptation",
+      //         text: "N_Obs",
+      //         frameAnchor: "right",
+      //         textAnchor: "start",
+      //         dx: 16
+      //       }
+      //     )
+      //   )
+      // ),
+    ]
+  });
+}
+```
+
+```{ojs}
+adaptation_insights = {
+
+  //Title Processing
+  let geogs = Object.values(adminSelections).filter(d => d !== null)
+  if (geogs.length == 0){ // renamed to avaoid future name issues if using geos-wasm
+    // geogs = _lang(nbText.general.country_article2.SSA);  
+    geogs = _lang(nbText.general.adminNames.SSA);  
+  } else {
+    // geogs = geogs.map(val => _lang(nbText.general.country_article2[val]) || val).join(", ")
+    geogs = geogs.map(val => _lang(nbText.general.adminNames[val]) || val).join(", ")
+  }
+  let title_template = _lang(nbText.adaptFutureChange.insight.title)
+  let title_values = [
+    {name:"geography", value: geogs},
+    {name:"scenario_name", value: atfc_scenario_selector.toLowerCase()},
+    {name:"crop_name", value: selected_crop_atfc}
+  ]
+  let title = Lang.reduceReplaceTemplateItems(title_template, title_values)
+
+  //Conditionals for insight 1 and 2
+  let insight1 = ''
+  let insight2 = ''
+  //Insight 1 processing
+
+  var selected_geo = get_selected_admin_atfc();
+  if (selectAdmin0 == null){
+    selected_geo = {
+      admin: "admin0_name",
+      highlight: "SSA"
+    }
+  }
+  if (highlighted_data.length > 0){
+    let better_than_no_adpt = get_adpt_options_higher_yield_than_no_adaptation(highlighted_data);
+    let num_options_better_than_no_apt = better_than_no_adpt.length;
+    let lower_best = round(Math.min(...better_than_no_adpt.map(d => d["2050"])), 2);
+    let upper_best = round(Math.max(...better_than_no_adpt.map(d => d["historical"])), 2);
+
+    let insight1_template = _lang(nbText.adaptFutureChange.insight.insight1)
+    
+    let insight1_values = [
+      {name:"selected_geo", value: _lang(nbText.general.countries_article[selected_geo.highlight])},
+      {name:"numBetter", value: num_options_better_than_no_apt},
+      {name:"lowerBest", value: lower_best},
+      {name:"upperBest", value: upper_best}
+    ]
+    insight1 = `* ${Lang.reduceReplaceTemplateItems(insight1_template, insight1_values)}`
+
+    //Insight 2 processing
+
+    // Select top 3 or less
+    const top = Math.min(...[3, better_than_no_adpt.length]);
+    const best_options = [];
+    let max_improvement = 0;
+    for(let j = 0; j < top; j ++){
+      best_options.push(better_than_no_adpt[j].option);
+      max_improvement = Math.max(better_than_no_adpt[j].historical, max_improvement);
+    }
+    let insight2_template = _lang(nbText.adaptFutureChange.insight.insight2)
+    let insight2_values = [
+      {name:"bestOptions", value: best_options.map((d) => _lang(nbText.summary.adaptationOptions[d])).join(", ")},
+      {name:"maxImprovement", value: round(max_improvement, 2)}
+    ]
+
+    insight2 = `* ${Lang.reduceReplaceTemplateItems(insight2_template, insight2_values)}`
+  }
+
+
+  let insight3 = `* ${_lang(nbText.adaptFutureChange.insight.insight3)}`
+  
+  return md`
+### ${title}
+${insight1}
+${insight2}
+${insight3}`
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.summary.title)}`;
+```
+
+```{ojs}
+summary_text = {
+  let vals_without_adapt = quick_insights_projected_2.filter(d => d.crops.length == 4).map(d => d.without_adaptation);
+  let avg = average(vals_without_adapt);
+  let template_insight1 = _lang(nbText.summary.text1)
+  let insight1 = Lang.reduceReplaceTemplateItems(template_insight1, [{name:"avg_loss", value: round(avg, 2)}])
+  // let insights = `Climate change without adaptation implies a reduction of ${round(avg, 2)}% in the supply of cereal grains in Sub-Saharan Africa.`
+  let insight2 = ''
+  if (adminSelections.selectAdmin0 != null && highlighted_data.length > 0){
+    const selected_geo = get_selected_admin_atfc();
+    let better_than_no_adpt = get_adpt_options_higher_yield_than_no_adaptation(highlighted_data);
+    let num_options_better_than_no_apt = better_than_no_adpt.length;
+    let lower_best = round(Math.min(...better_than_no_adpt.map(d => d["2050"])), 2);
+    let upper_best = round(Math.max(...better_than_no_adpt.map(d => d["historical"])), 2);
+    
+    // Select top 3 or less
+    const top = Math.min(...[3, better_than_no_adpt.length]);
+    const best_options = [];
+    let max_improvement = 0;
+    for(let j = 0; j < top; j ++){
+      let option = _lang(nbText.summary.adaptationOptions[better_than_no_adpt[j].option])
+      best_options.push(option);
+      max_improvement = Math.max(better_than_no_adpt[j].historical, max_improvement);
+    }
+    let template_insight2 = _lang(nbText.summary.text2)
+    let values_insight2 = [
+      {name:"selectedGeo", value: _lang(nbText.general.countries_article[selected_geo.highlight])},
+      {name:"bestOptions", value: best_options.join(", ")}
+    ]
+    insight2 = Lang.reduceReplaceTemplateItems(template_insight2, values_insight2)
+  }
+  return md`
+${insight1}
+
+${insight2}` 
+  
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.MethodsSources.title)}`;
+```
+
+```{ojs}
+md`## ${_lang(nbText.MethodsSources.sources.title)}`;
+```
+
+```{ojs}
+md`### ${_lang(nbText.MethodsSources.sources.cropYieldDB.title)}
+
+${_lang(nbText.MethodsSources.sources.cropYieldDB.text)}`;
+```
+
+```{ojs}
+md`### ${_lang(nbText.MethodsSources.sources.cropYieldProjections.title)}
+
+${_lang(nbText.MethodsSources.sources.cropYieldProjections.text)}`;
+```
+
+```{ojs}
+md`### ${_lang(nbText.MethodsSources.sources.harvestedArea.title)}
+
+${_lang(nbText.MethodsSources.sources.harvestedArea.text)}`;
+```
+
+```{ojs}
+md`### ${_lang(nbText.MethodsSources.sources.boundaries.title)}
+
+${_lang(nbText.MethodsSources.sources.boundaries.text)}`;
+```
+
+```{ojs}
+md`## ${_lang(nbText.MethodsSources.methods.title)}`;
+```
+
+```{ojs}
+md`### ${_lang(nbText.MethodsSources.methods.beeswarm.title)}
+
+${_lang(nbText.MethodsSources.methods.beeswarm.text)}`;
+```
+
+```{ojs}
+md`### ${_lang(nbText.MethodsSources.methods.mappingHistoricalFuture.title)}
+
+${_lang(nbText.MethodsSources.methods.mappingHistoricalFuture.text)}`;
+```
+
+```{ojs}
+md`### ${_lang(nbText.MethodsSources.methods.adaptationAnalysis.title)}
+
+${_lang(nbText.MethodsSources.methods.adaptationAnalysis.text)}`;
+```
+
+```{ojs}
+md`## ${_lang(nbText.MethodsSources.methods.references.title)}
+
+- Alimagham, S. et al. (2024) Climate change impact and adaptation of rainfed cereal crops in sub-Saharan Africa. European Journal of Agronomy 155 (127137), [doi:10.1016/j.eja.2024.127137](https://doi.org/10.1016/j.eja.2024.127137)
+- Hasegawa, T., Wakatsuki, H., Ju, H. et al. (2022) A global dataset for the projected impacts of climate change on four major crops. Sci Data 9, 58. [doi:10.1038/s41597-022-01150-7](https://doi.org/10.1038/s41597-022-01150-7)
+- Yu, Q., You, L., Wood-Sichra, U., et al. (2020) A cultivated planet in 2010: 2. the global gridded agricultural production maps, Earth Syst. Sci. Data Discuss., 2020. [doi:10.5194/essd-2020-11](https://doi.org/10.5194/essd-2020-11)`;
+```
+
+# Appendix {.hidden}
+
+
+```{ojs}
+{
+  return md`---
+## Work by Topic
+*Cells that power different sections*`
+}
+```
+
+```{ojs}
+{
+  return md`---
+### Support notebook
+[Support Notebook](https://observablehq.com/@periscopic/ab-atlas-spotlight-support): used for imports across spotlights.`
+}
+```
+
+```{ojs}
+{
+  return md`---
+### Notebook Variables
+_Main variables across notebook_`
+}
+```
+
+```{ojs}
+// main title of the notebook
+notebookTitle = _lang({
+  en: "View Projected Climate Impacts",
+  fr: "Visualiser les projections d’ impacts climatiques",
+});
+```
+
+```{ojs}
+// info for the admin selectors
+adminRegions = {
+  return {
+    labels: {
+      admin0: 'Country',
+      admin1: 'Region',
+      admin2: 'Subregion'
+    }
+  };
+}
+```
+
+```{ojs}
+function getLowerLevelAdminLabel(selections = adminSelections) {
+  // based on admin selection, get the lower level label
+  if (selections.selectAdmin2) return _lang(nbText.general.subRegion);
+  if (selections.selectAdmin1) return _lang(nbText.general.subRegion);
+  if (selections.selectAdmin0) return _lang(nbText.general.region);
+  else return _lang(nbText.general.country);
+}
+```
+
+```{ojs}
+// width of the maps
+mapWidth = 625;
+```
+
+```{ojs}
+md`### Language and Translation tools`;
+```
+
+```{ojs}
+import { Lang } from "7d46679f7d0d917e";
+```
+
+```{ojs}
+_lang = Lang.lg(language.key);
+```
+
+```{ojs}
+languages = [
+  { key: "en", label: "English", locale: "en-US" },
+  { key: "fr", label: "Français", locale: "fr-FR" },
+];
+```
+
+```{ojs}
+defaultLangKey = {
+  const name = "lang";
+  const list = languages.map((d) => d.key);
+  const defaultKey = "en";
+
+  const queryParam = await Lang.getParamFromList({ name, list });
+
+  return queryParam ?? defaultKey;
+}
+```
+
+```{ojs}
+viewof language = Inputs.radio(languages, {
+  label: "Main language toggle",
+  format: (d) => d.key,
+  value: languages.find((x) => x.key === defaultLangKey),
+})
+```
+
+```{ojs}
+nbText = new Object({
+  toc: {
+    title: { en: "In this notebook", fr: "Dans ce notebook" },
+  },
+  overview: {
+    title: { en: "Overview", fr: "Vue d’Ensemble" },
+    text: {
+      en: `Sub-Saharan Africa’s greatest challenge is to be able to feed a population of 2.1 billion people by 2050 (about 2.5x larger than today) ideally on the same amount of arable land, and under less hospitable weather conditions due to climate change. But by 2050, most of the region will experience at least 2ºC warmer temperatures. Without adaptation, climate change could have dire consequences on food supply, in particular because over 95% of crop production happens under rainfed conditions and weather variability dictates more than one-third of year-on-year yield fluctuations. Cereal grains including maize, sorghum, rice, millet, and wheat are especially important as they provide 50% of daily caloric intake across the region. In this notebook, users can investigate the projected reductions in yield for key cereal crops and the adaptation benefits of some options for specific locations.`,
+      fr: `Le plus grand défi de l'Afrique subsaharienne est de pouvoir nourrir une population de 2,1 milliards de personnes d'ici 2050 (environ 2,5 fois plus qu'aujourd'hui), idéalement sur la même quantité de terres arables, et dans des conditions météorologiques moins hospitalières en raison du changement climatique. Mais d'ici 2050, la plupart de la région connaîtra des températures au moins 2ºC plus chaudes. Sans adaptation, le changement climatique pourrait avoir des conséquences désastreuses sur l'approvisionnement alimentaire, notamment parce que plus de 95 % de la production agricole se fait sous des conditions de culture pluviale et que la variabilité climatique dicte plus d'un tiers des fluctuations annuelles des rendements. Les céréales, notamment le maïs, le sorgho, le riz, le millet et le blé, sont particulièrement importantes car elles fournissent 50 % de l'apport calorique quotidien dans toute la région. Dans ce notebook, les utilisateurs peuvent examiner les réductions projetées des rendements pour les principales cultures céréalières et les avantages de l'adaptation de certaines options pour des lieux spécifiques.`,
+    },
+  },
+  regionalPicture: {
+    title: { en: "The Regional Picture", fr: "La Situation Régionale" },
+    text: {
+      en: `The beeswarm plot visualization below helps you explore climate change impacts on maize, wheat, rice, and soybean for various regions in Sub-Saharan Africa. The impacts can be navigated by crop and levels of warming, and can be visualized with adaptation and without adaptation.`,
+      fr: `La visualisation en diagramme de nuage de points ci-dessous vous aide à explorer les impacts du changement climatique sur le maïs, le blé, le riz et le soja pour diverses régions d'Afrique subsaharienne. Les impacts peuvent être explorés par culture et par niveaux de réchauffement, et peuvent être visualisés avec ou sans adaptation.`,
+    },
+    selectors: {
+      crops: {
+        title: { en: "Crops", fr: "Cultures" },
+      },
+      warmingLevel: {
+        title: { en: "Warming Level (℃)", fr: "Niveau de réchauffement (℃)" },
+      },
+      adaptation: {
+        title: { en: "Adaptation", fr: "Adaptation" },
+        values: {
+          Yes: { en: "Yes", fr: "Oui" },
+          No: { en: "No", fr: "Non" },
+          "All data": { en: "All data", fr: "Toutes les données" },
+        },
+      },
+    },
+    beeswarm: {
+      xAxis: {
+        en: "Climate impacts relative to 2005 (%)",
+        fr: "Impacts climatiques par rapport à 2005 (%)",
+      },
+      yAxis: { en: "UN Region", fr: "Région ONU" },
+      regions: {
+        all: { en: "All", fr: "Tous" },
+        Western: { en: "Western", fr: "Ouest" },
+        Southern: { en: "Southern", fr: "Sud" },
+        Northern: { en: "Northern", fr: "Nord" },
+        Eastern: { en: "Eastern", fr: "Est" },
+        Central: { en: "Central", fr: "Central" },
+      },
+      legend: {
+        "With adaptation": { en: "With Adaptation", fr: "Avec Adaptation" },
+        "Without adaptation": {
+          en: "Without Adaptation",
+          fr: "Sans Adaptation",
+        },
+        Yes: { en: "With Adaptation", fr: "Avec Adaptation" },
+        No: { en: "Without Adaptation", fr: "Sans Adaptation" },
+      },
+    },
+    beeswarmInsight: {
+      title: {
+        en: `Quick insights for :::SelectedCrop::: and warming level (:::warmingLevel:::)`,
+        fr: `Aperçus rapides pour les cultures de :::SelectedCrop::: et niveau de réchauffement (:::warmingLevel:::)`,
+      },
+      text: {
+        insight1: {
+          en: `At :::warmingLevel:::, **:::crops:::** is projected to experience a median yield reduction of **:::yieldReduction:::%** if no adaptation actions are taken`,
+          fr: `À :::warmingLevel:::, les cultures sélectionnées de **:::crops:::** devraient connaître une réduction médiane des rendements de **:::yieldReduction:::%** si aucune mesure d'adaptation n'est prise.`,
+        },
+        insight2: {
+          main: {
+            en: `The most negatively impacted region is :::mostAffected:::`,
+            fr: `La région la plus négativement impactée est :::mostAffected:::`,
+          },
+          mostAffected: {
+            en: `The most negatively impacted region is **:::mostAffected_adaptation:::** with adaptation and **:::mostAffected_noadaptation:::** without adaptation`,
+            fr: `La région la plus négativement impactée est **:::mostAffected_adaptation:::** avec adaptation et **:::mostAffected_noadaptation:::** sans adaptation`,
+          },
+        },
+        insight3: {
+          compelling: {
+            en: `Adaptation can offset these projected :::loss_gain::: with yield changes under adaptation being **:::withAdaptation:::%**.`,
+            fr: `L'adaptation peut compenser ces projections de pertes avec des changements de rendement sous adaptation étant de **:::withAdaptation:::%**.`,
+          },
+          notCompelling: {
+            en: "No compelling evidence of adaptation benefits exists in our data",
+            fr: "Aucune preuve convaincante des avantages de l'adaptation n'existe dans nos données.",
+          },
+        },
+      },
+      regions: {
+        "Western Africa": { en: "Western Africa", fr: "L’Afrique de l’Ouest" },
+        "Southern Africa": { en: "Southern Africa", fr: "L’Afrique du Sud" },
+        "Northern Africa": { en: "Northern Africa", fr: "L’Afrique du Nord" },
+        "Eastern Africa": { en: "Eastern Africa", fr: "L’Afrique de l’Est" },
+        "Central Africa": { en: "Central Africa", fr: "L’Afrique Centrale" },
+      },
+    },
+  },
+  zoomToStable: {
+    title: {
+      en: "Zooming Into Africa’s Staple Cereal Crops",
+      fr: "Un zoom sur les cultures céréalières de base en Afrique",
+    },
+    text: {
+      en: `Global and regional averages hide a much more nuanced story about climate impacts on crop yield at national and subnational scales. Moreover, future scenarios also matter, with the trajectory of climate change inducing different levels of impact. This section navigates through country-level and within-country variation in projected impacts on crop yield using crop model-based projections.`,
+      fr: `Les moyennes mondiales et régionales masquent une histoire bien plus nuancée des impacts climatiques sur les rendements des cultures à l'échelle nationale et infranationale. De plus, les scénarios futurs sont également importants, la trajectoire du changement climatique induisant différents niveaux d'impact. Cette section explore les variations au niveau des pays et à l'intérieur des pays concernant les impacts projetés sur les rendements des cultures en utilisant des projections basées sur des modèles de culture.`,
+    },
+    selectors: {
+      growSeason: {
+        title: { en: "Growing Season", fr: "Saison de croissance" },
+        values: {
+          both: { en: "Both (Average)", fr: "Les deux (Moyenne)" },
+          first: { en: "First", fr: "Première" },
+          second: { en: "Second", fr: "Deuxième" },
+        },
+      },
+      YieldOutput: {
+        title: { en: "Yield Output", fr: "Production de rendement" },
+        values: {
+          "Yield change (ton/ha)": {
+            en: "Yield change (ton/ha)",
+            fr: "Changement de rendement (tonnes/ha)",
+          },
+          "Yield (ton/ha)": {
+            en: "Yield (ton/ha)",
+            fr: "Rendement (tonnes/ha)",
+          },
+          "Yield change (%)": {
+            en: "Yield change (%)",
+            fr: "Changement de rendement (%)",
+          },
+          "Uncertainty in yield (ton/ha)": {
+            en: "Uncertainty in yield (ton/ha)",
+            fr: "Incertitude du rendement (tonnes/ha)",
+          },
+        },
+      },
+      Cultivar: {
+        title: { en: "Cultivar", fr: "Cultivar" },
+        values: {
+          current: { en: "Current", fr: "Actuel" },
+          early: { en: "Early maturity", fr: "Maturité précoce" },
+          late: { en: "Late maturity", fr: "Maturité tardive" },
+        },
+      },
+      layer: {
+        title: { en: "Map Layer", fr: "Couche de la carte" },
+        values: {
+          rainfed: {
+            en: "Mean rainfed potential yield",
+            fr: "Rendement potentiel moyen en culture pluviale",
+          },
+          irrigated: {
+            en: "Mean irrigated potential yield",
+            fr: "Rendement potentiel moyen en culture irriguée",
+          },
+        },
+      },
+    },
+    MapInsight: {
+      title: {
+        en: "Quick Insights for :::geography:::, under :::scenario_selection::: for :::crop_selection:::",
+        fr: "Aperçu rapide pour la région de :::geography:::, sous :::scenario_selection::: pour les cultures de :::crop_selection:::",
+      },
+      insight1: {
+        // en:  ":::geography:::’s :::scenario_selection::: :::crop_selection::: rainfed/irrigated :::yield_selection::: is **:::value:::**",
+        en: "The :::yield_selection::: for  :::crop_selection::: is **:::value:::**",
+        fr: "Le changement de rendement des cultures de :::crop_selection::: en culture pluviale :::yield_selection::: est de **:::value:::**",
+        // fr:  ":::geography:::’s :::scenario_selection::: :::crop_selection::: rainfed/irrigated :::yield_selection::: is **:::value:::**"
+      },
+      insight2: {
+        en: "A climate change scenario with :::emission_level::: emissions by **:::horizon:::** has a **:::change_type:::** impact on yield of :::impact_pct:::  :::change_unit:::",
+        fr: "Un scénario de changement climatique avec des :::emission_level::: d'ici **:::horizon:::** a un impact **:::change_type:::** sur le rendement de :::impact_pct:::  :::change_unit:::",
+      },
+      insight3: {
+        en: "The projected yield changes arise from simulating yield under various plausible futures, which implies uncertainty. Accordingly, the range of projected changes is **:::minChange:::%** to **:::maxChange:::%** across the climate models used",
+        fr: "Les projections de changements de rendement résultent de la simulation du rendement sous divers futurs plausibles, ce qui implique une incertitude. En conséquence, l’intervalle de projection de changement est de **:::minChange:::%** à **:::maxChange:::%** à travers les modèles climatiques utilisés.",
+      },
+      insight4: {
+        en: "Across all of Sub-Saharan Africa, :::geography::: ranks :::rank::: out of :::num::: :::adminLvl::: at the same level, with regard to absolute yield changes",
+        fr: "Dans toute l'Afrique subsaharienne, :::geography::: se classe :::rank::: sur :::num::: au même niveau, en ce qui concerne les changements absolus de rendement",
+      },
+    },
+  },
+  adaptFutureChange: {
+    title: {
+      en: "Adapting To The Future Changes",
+      fr: "S'adapter aux changements futurs",
+    },
+    text: {
+      en: `Adaptation is no longer optional, it is a must-do for all Sub-Saharan African countries. This section allows exploring some adaptation solutions, and their specific benefits across and within countries in the region.`,
+      fr: `L'adaptation n'est plus optionnelle, elle est incontournable pour tous les pays d'Afrique subsaharienne. Cette section permet d'explorer certaines solutions d'adaptation et leurs avantages spécifiques à travers les pays et au sein des pays de la région.`,
+    },
+    selectors: {
+      sort: {
+        title: { en: "Sort", fr: "Trier" },
+        values: {
+          noAdapt: { en: "No adaptation", fr: "Sans adaptation" },
+          meanDiff: { en: "Mean difference", fr: "Différence moyenne" },
+          alphabet: { en: "Alphabetical", fr: "Alphabétique" },
+        },
+      },
+      confidence: {
+        title: { en: "Confidence intervals", fr: "Intervalles de confiance" },
+        visible: { en: "Visible", fr: "Visible" }, // Added in even though same to make adding/updating easier
+      },
+    },
+    plot: {
+      yAxis: {
+        "Late maturity, irrigation": {
+          en: "Late maturity - irrigation",
+          fr: "Maturité tardive - irrigation",
+        },
+        "Current cultivar, irrigation": {
+          en: "Current cultivar - irrigation",
+          fr: "Cultivar actuel - irrigation",
+        },
+        "Early maturity, irrigation": {
+          en: "Early maturity - irrigation",
+          fr: "Maturité précoce - irrigation",
+        },
+        "Late maturity, no irrigation": {
+          en: "Late maturity - no irrigation",
+          fr: "Maturité tardive - sans irrigation",
+        },
+        "No adaptation": { en: "No adaptation", fr: "Sans adaptation" },
+        "Early maturity, no irrigation": {
+          en: "Early maturity - no irrigation",
+          fr: "Maturité précoce - sans irrigation",
+        },
+      },
+      xAxis: {
+        title: { en: "Yield (ton/ha)", fr: "Rendement (tonnes/ha)" },
+      },
+      channels: {
+        aez: { en: "Horizon", fr: "Horizon" },
+        nObs: { en: "Observations", fr: "Observations" },
+        diff: { en: "Mean", fr: "Moyenne" }, // Was mean difference but it is actuall just mean value
+        control: { en: "Mean control", fr: "Moyenne du témoin" },
+        prac: { en: "adaptation", fr: "Adaptation" },
+        ciLow: {
+          en: "Lower Confidence interval",
+          fr: "Intervalle de confiance inférieur",
+        },
+        ciHigh: {
+          en: "Upper Confidence interval",
+          fr: "Intervalle de confiance supérieur",
+        },
+      },
+    },
+    insight: {
+      title: {
+        en: "Quick Insights for :::geography:::, :::scenario_name::: scenario, and :::crop_name:::",
+        fr: "Aperçu rapide pour la région de :::geography:::, sous :::scenario_name::: pour les cultures de :::crop_name:::",
+      },
+      insight1: {
+        en: ":::selected_geo:::'s adaptation analysis show that :::numBetter::: options would generate yield improvements for historical and future periods. These improvements vary between :::lowerBest::: (ton/ha) to :::upperBest::: (ton/ha) compared to no adaptation",
+        fr: "L'analyse d'adaptation :::selected_geo::: montre que :::numBetter::: options généreraient des améliorations de rendement pour les périodes historiques et futures. Ces améliorations varient entre :::lowerBest::: (tonnes/ha) - :::upperBest::: (tonnes/ha) par rapport à l'absence d'adaptation.",
+      },
+      insight2: {
+        en: "Adaptation options with the greatest benefits include :::bestOptions:::, which together can generate yield gains of up to :::maxImprovement::: ton/ha compared to a no adaptation situation",
+        fr: "Les options d'adaptation avec les plus grands bénéfices incluent :::bestOptions:::, qui ensemble peuvent générer des gains de rendement allant jusqu'à :::maxImprovement::: (tonne/ha) par rapport à une situation sans adaptation.",
+      },
+      insight3: {
+        en: "Explore more adaptation options for a greater number of crops and systems at our notebook on [On-farm Solutions for Today](https://observablehq.com/d/7539fd16f4fc40e3)",
+        fr: "Explorez plus d'options d'adaptation pour un plus grand nombre de cultures et de systèmes dans notre notebook sur [les solutions agricoles pour aujourd'hui](https://observablehq.com/d/7539fd16f4fc40e3)",
+      },
+    },
+  },
+  summary: {
+    title: { en: "Summary", fr: "Résumé" },
+    text1: {
+      en: "Climate change without adaptation implies a reduction of :::avg_loss:::% in the supply of cereal grains in Sub-Saharan Africa",
+      fr: "Le changement climatique sans adaptation implique une réduction de :::avg_loss:::% de l'approvisionnement en céréales en Afrique subsaharienne.",
+    },
+    text2: {
+      en: `Specifically in :::selectedGeo:::, these reductions would come on top of already low yields from inadequate crop management. Adaptation investments should target **:::bestOptions:::** to reduce downstream risks of food insecurity, hunger, and poverty that may stem from projected yield reductions.`,
+      fr: `En particulier :::selectedGeo:::, ces réductions s'ajouteraient à des rendements déjà faibles dus à une gestion inadéquate des cultures. Les investissements dans l'adaptation devraient cibler  **:::bestOptions:::** pour réduire les risques en aval d'insécurité alimentaire, de faim et de pauvreté qui pourraient découler des réductions de rendement projetées.`,
+    },
+    adaptationOptions: {
+      "Late maturity, irrigation": {
+        en: "late maturity with irrigation",
+        fr: "maturité tardive avec irrigation",
+      },
+      "Current cultivar, irrigation": {
+        en: "current cultivar with irrigation",
+        fr: "cultivar actuel avec irrigation",
+      },
+      "Early maturity, irrigation": {
+        en: "early maturity with irrigation",
+        fr: "maturité précoce avec irrigation",
+      },
+      "Late maturity, no irrigation": {
+        en: "late maturity with no irrigation",
+        fr: "maturité tardive sans irrigation",
+      },
+      "Early maturity, no irrigation": {
+        en: "early maturity with no irrigation",
+        fr: "maturité précoce sans irrigation",
+      },
+    },
+  },
+  MethodsSources: {
+    title: { en: "Methods & Sources", fr: "Méthodes et sources" },
+    sources: {
+      title: { en: "Datasets", fr: "Jeux de données" },
+      cropYieldDB: {
+        title: {
+          en: "Crop yield meta-analysis database",
+          fr: "Base de données de méta-analyse des rendements des cultures",
+        },
+        text: {
+          en: `The crop yield meta analysis dataset is from [Hasegawa et al. (2022)](https://doi.org/10.1038/s41597-022-01150-7). This dataset compiles estimates of climate change impacts on crop productivity derived from crop simulations under historical and future climates, with and without adaptation. The climate change impact estimates are derived from a comprehensive literature review of 202 studies published between 1984 and 2020. The dataset includes a total of 8,703 individual simulations, covers four crops (maize, rice, soybean, and wheat), and extends to 91 countries across the globe. The data include crop yield estimates under historical and future climates (for various emissions trajectories), current and future temperature and precipitation levels, and the use (or not) of adaptation options.`,
+          fr: `Le jeu de données de méta-analyse des rendements des cultures provient de [Hasegawa et al. (2022)](https://doi.org/10.1038/s41597-022-01150-7). Ce jeu de données compile des estimations des impacts du changement climatique sur la productivité des cultures dérivées de simulations de cultures sous climats historiques et futurs, avec et sans adaptation. Les estimations des impacts du changement climatique sont dérivées d'une revue complète de la littérature de 202 études publiées entre 1984 et 2020. Le jeu de données inclut un total de 8 703 simulations individuelles, couvre quatre cultures (maïs, riz, soja et blé), et s'étend à 91 pays à travers le monde. Les données comprennent des estimations des rendements des cultures sous climats historiques et futurs (pour divers scénarios d'émissions), les niveaux actuels et futurs de température et de précipitations, et l'utilisation (ou non) des options d'adaptation.`,
+        },
+      },
+      cropYieldProjections: {
+        title: {
+          en: "Crop yield projections for cereals under climate change and adaptation",
+          fr: "Projections de rendements des céréales sous l'effet du changement climatique et de l'adaptation",
+        },
+        text: {
+          en: `The historical and future simulated crop yield for maize, sorghum, millet, and wheat were derived from the [Global Yield Gap Atlas (GYGA)](https://www.yieldgap.org/). The method for deriving these data is described by [Alimagham et al. (2024)](https://doi.org/10.1016/j.eja.2024.127137). In brief, the WOFOST (World Food Studies) crop model is used to simulate water-limited and potential (i.e., irrigated) production of each of the four crops across 109 reference weather station locations in Sub-Saharan Africa. The historical weather data (1995–2014) were derived from local weather stations, whereas the future climate data for 2030 (2021-2040) and 2050 (2041–2060) are from bias-corrected General Circulation Models (GCMs) from the Coordinated Modelling Intercomparison Project-Phase 6 (CMIP6). The GCMs were GFDL-ESM4, IPSL-CM6A-LR, MPI-ESM1–2-HR, MRI-ESM2–0, and UKESM1–0-LL. Two Shared Socioeconomic Pathways (SSPs) were used, namely, SSP3-7.0 and SSP5-8.5. The bias correction of the future weather data uses the delta method, as documented by [Navarro-Racines et al. (2020)](https://doi.org/10.1038/s41597-019-0343-8). Carbon dioxide (CO2) concentrations were specified for each future scenario and time period.
+
+The crop model also requires soil and management (cultivar, planting dates) data as inputs. These data are available through the GYGA portal. Originally, these data have been collected and evaluated through an extensive network of agronomists and crop modelers that make part of the GYGA project. Cultivars are specified using thermal times derived from locally available planting, flowering, and maturity times. In addition to current cultivars, simulations are also conducted for ‘late maturity’ (12% longer thermal time) and ‘early maturity’ (12% shorter thermal time) cultivars. Soil data were obtained from the Africa Soil Information Service ([AfSIS](https://www.isric.org/projects/africa-soil-information-service-afsis)). At each weather station location, estimates of yield, phenology (planting, flowering, harvest time) were used into a random forest (RF) regressor that helped create extrapolated estimates of yield and phenology across the entirety of Sub-Saharan Africa using gridded weather data from elsewhere in the continent. The RF regressor explains over 90% of the variance in the WOFOST simulated yield, tested out of sample across scenarios and locations.
+
+GYGA simulated crop yield reports two types of adaptations, namely, shifts in cultivars, and irrigation. For cultivars, early and late maturity (in addition to currently used cultivars) are reported. For irrigation, a fully irrigated crop model simulation is available. The full combinatorial (i.e., each cultivar with and without irrigation) of these is available. This allows exploring five adaptation scenarios, in addition to the no adaptation (i.e., rainfed, current cultivar) scenario. All GYGA data are available at  https://www.yieldgap.org/. Specific licensing arrangements depending on user and/or institution type are described [here](https://www.yieldgap.org/web/guest/subscription-and-service).`,
+          fr: `Les rendements historiques et futurs simulés pour le maïs, le sorgho, le millet et le blé ont été dérivés du [Global Yield Gap Atlas (GYGA)](https://www.yieldgap.org/). La méthode pour obtenir ces données est décrite par [Alimagham et al. (2024)](https://doi.org/10.1016/j.eja.2024.127137). En résumé, le modèle de culture WOFOST (World Food Studies) est utilisé pour simuler la production sous contrainte hydrique et la production potentielle (c'est-à-dire irriguée) de chacune des quatre cultures dans 109 stations météorologiques de référence en Afrique subsaharienne. Les données météorologiques historiques (1995-2014) proviennent de stations météorologiques locales, tandis que les données climatiques futures pour 2030 (2021-2040) et 2050 (2041-2060) proviennent de modèles de circulation générale (GCM) corrigés des biais du projet de comparaison de modèles coordonnés - Phase 6 (CMIP6). Les GCM utilisés étaient GFDL-ESM4, IPSL-CM6A-LR, MPI-ESM1-2-HR, MRI-ESM2-0, et UKESM1-0-LL. Deux trajectoires socio-économiques partagées (SSP) ont été utilisées, à savoir SSP3-7.0 et SSP5-8.5. La correction des biais des données climatiques futures utilise la méthode delta, comme documenté par [Navarro-Racines et al. (2020)](https://doi.org/10.1038/s41597-019-0343-8). Les concentrations de dioxyde de carbone (CO2) étaient spécifiées pour chaque scénario futur et chaque période.
+
+Le modèle de culture nécessite également des données sur le sol et la gestion (cultivar, dates de plantation) comme entrées. Ces données sont disponibles via le portail GYGA. À l'origine, ces données ont été collectées et évaluées grâce à un vaste réseau d'agronomes et de modélisateurs de cultures faisant partie du projet GYGA. Les cultivars sont spécifiés en utilisant les temps thermiques dérivés des périodes de plantation, de floraison et de maturité disponibles localement. En plus des cultivars actuels, des simulations sont également effectuées pour des cultivars de "maturité tardive" (temps thermique 12% plus long) et de "maturité précoce" (temps thermique 12% plus court). Les données sur les sols ont été obtenues auprès du service d'information sur les sols en Afrique ([AfSIS](https://www.isric.org/projects/africa-soil-information-service-afsis)). À chaque station météorologique, les estimations de rendement et de phénologie (plantation, floraison, récolte) ont été utilisées dans un régressif par forêt aléatoire (RF) qui a permis de créer des estimations extrapolées de rendement et de phénologie pour l'ensemble de l'Afrique subsaharienne en utilisant des données météorologiques maillées provenant d'ailleurs sur le continent. Le régressif RF explique plus de 90% de la variance dans le rendement simulé par WOFOST, testé hors échantillon à travers des scénarios et des lieux.
+
+GYGA rapporte deux types d'adaptations pour les rendements simulés, à savoir les changements de cultivars et l'irrigation. Pour les cultivars, les maturités précoce et tardive (en plus des cultivars actuellement utilisés) sont rapportées. Pour l'irrigation, une simulation de modèle de culture entièrement irriguée est disponible. La combinaison complète (c'est-à-dire chaque cultivar avec et sans irrigation) de ces scénarios est disponible. Cela permet d'explorer cinq scénarios d'adaptation, en plus du scénario sans adaptation (c'est-à-dire pluvial, cultivar actuel). Toutes les données GYGA sont disponibles sur https://www.yieldgap.org/. Les arrangements de licence spécifiques en fonction du type d'utilisateur et/ou d'institution sont décrits [ici](https://www.yieldgap.org/web/guest/subscription-and-service).`,
+        },
+      },
+      harvestedArea: {
+        title: { en: "Harvested Area", fr: "Superficie récoltée" },
+        text: {
+          en: `[Harvested area data](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/exposure_catalog/mapspam2017/crop_ha/crop_ha.json) comes from  MapSPAM 2017 V2r3 (Spatial Production Allocation Model). This dataset is an updated version of MapSPAM specifically tailored for this project. It includes bug fixes and incorporates more data sources and at greater resolution. The MapSPAM methodology is fully documented by [Yu et al. (2020)](https://doi.org/10.5194/essd-2020-11).`,
+          fr: `[Les données de superficie récoltée](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/exposure_catalog/mapspam2017/crop_ha/crop_ha.json?.language=fr) proviennent de MapSPAM 2017 V2r3 (Spatial Production Allocation Model). Ce jeu de données est une version mise à jour de MapSPAM spécifiquement adaptée à ce projet. Il comprend des corrections de bogues et intègre davantage de sources de données avec une résolution plus élevée. La méthodologie de MapSPAM est entièrement documentée par [Yu et al. (2020)](https://doi.org/10.5194/essd-2020-11).`,
+        },
+      },
+      boundaries: {
+        title: { en: "Boundaries", fr: "Délimitations" },
+        text: {
+          en: `[Administrative areas](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/boundary_catalog/geoBoundaries_SSA/collection.json) used in this notebook come from [geoBoundaries 6.0.0](https://github.com/wmgeolab/geoBoundaries). The gbHumanitarian boundaries are used and if not available then the gbOpen boundaries are substituted.`,
+          fr: `[Les zones administratives](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/boundary_catalog/geoBoundaries_SSA/collection.json?.language=fr) utilisées dans ce notebook proviennent de [geoBoundaries 6.0.0](https://github.com/wmgeolab/geoBoundaries). Les frontières gbHumanitarian sont utilisées et, si elles ne sont pas disponibles, les frontières gbOpen sont substituées.`,
+        },
+      },
+    },
+    methods: {
+      title: { en: "Methods", fr: "Méthodologie" },
+      beeswarm: {
+        title: {
+          en: "Crop yield meta analysis (beeswarm plot)",
+          fr: "Méta-analyse des rendements des cultures (diagramme de nuage de points)",
+        },
+        text: {
+          en: `We produced a beeswarm plot that shows the individual estimates of crop yield from the meta-analysis dataset. We subset the original dataset to cover only Sub-Saharan Africa (SSA), and display data per region within SSA. We allow splits of the data for visualization by warming levels, crops, and adaptation (with and without adaptation).`,
+          fr: `Nous avons produit un diagramme de nuage de points qui montre les estimations individuelles des rendements des cultures à partir du jeu de données de méta-analyse. Nous avons extrait un sous-ensemble du jeu de données original pour ne couvrir que l'Afrique subsaharienne (SSA), et afficher les données par région au sein de la SSA. Nous permettons de diviser les données pour la visualisation par niveaux de réchauffement, cultures, et adaptation (avec et sans adaptation).`,
+        },
+      },
+      mappingHistoricalFuture: {
+        title: {
+          en: "Mapping historical and future projected crop yields",
+          fr: "Cartographie des rendements des cultures historiques et projetés futurs",
+        },
+        text: {
+          en: `We aggregate GYGA’s crop yield projections at three administrative levels, namely, national, subnational level 1 (referred to as region across the notebook), and subnational level 2 (referred to as subregion across the notebook). The aggregation uses the weighted average of the crop yield and the harvested area present within the point location where a WOFOST simulation has been conducted, within the respective administrative boundaries. Data aggregation is done for rainfed and irrigated crop yields, for each crop, and for each scenario (period and Shared Socioeconomic Pathway –SSP) separately. Four indicators are mapped, namely, the average yield (in ton/ha), the yield change (in ton/ha), yield change (in percentage), and the uncertainty in yield (in ton/ha). For the latter, the individual climate model projections are used to compute the range (max. – min.) across the individual GCM projections.`,
+          fr: `Nous agrégeons les projections de rendement des cultures de GYGA à trois niveaux administratifs, à savoir, national, sous-national niveau 1 (appelé région dans le notebook), et sous-national niveau 2 (appelé sous-région dans le notebook). L'agrégation utilise la moyenne pondérée du rendement des cultures et de la superficie récoltée présente à l'emplacement où une simulation WOFOST a été réalisée, dans les limites administratives respectives. L'agrégation des données est effectuée pour les rendements des cultures en sec et irriguées, pour chaque culture, et pour chaque scénario (période et Trajectoire Socio-économique Partagée – SSP) séparément. Quatre indicateurs sont cartographiés, à savoir, le rendement moyen (en tonnes/ha), le changement de rendement (en tonnes/ha), le changement de rendement (en pourcentage), et l'incertitude du rendement (en tonnes/ha). Pour ce dernier, les projections individuelles des modèles climatiques sont utilisées pour calculer l'écart (max. – min.) entre les projections individuelles des GCM.`,
+        },
+      },
+      adaptationAnalysis: {
+        title: { en: "Analysis of adaptation", fr: "Analyse de l'adaptation" },
+        text: {
+          en: `We display the mean yield of each adaptation option as simulated for each of the crops, for each climate scenario, and at different administrative boundary levels, namely, all Sub-Saharan Africa, national, subnational level 1, and subnational level 2. The objective is to provide a clear overview of the simulated yield level in the historical and future scenarios without adaptation, and the comparative performance of the various adaptation solutions against the no adaptation scenario. Crop yield is aggregated using weighted average against the MapSPAM harvested area. Confidence intervals extend to 5–95% of the individual GCMs (of which there are five).`,
+          fr: `Nous affichons le rendement moyen de chaque option d'adaptation tel que simulé pour chacune des cultures, pour chaque scénario climatique, et à différents niveaux de limites administratives, à savoir, toute l'Afrique subsaharienne, national, sous-national niveau 1 et sous-national niveau 2. L'objectif est de fournir une vue d'ensemble claire du niveau de rendement simulé dans les scénarios historiques et futurs sans adaptation, et de la performance comparative des différentes solutions d'adaptation par rapport au scénario sans adaptation. Le rendement des cultures est agrégé en utilisant la moyenne pondérée par rapport à la superficie récoltée de MapSPAM. Les intervalles de confiance s'étendent de 5 à 95 % des modèles climatiques globaux (GCM) individuels (dont il y en a cinq).`,
+        },
+      },
+      references: {
+        title: { en: "References", fr: "Références" },
+      },
+    },
+  },
+  appendix: {
+    title: { en: "Appendix", fr: "Annexes" },
+    text: {
+      en: "This large section includes all the cells that power the notebook.This large section includes all the cells that power the notebook.",
+      fr: "Cette grande section comprend toutes les cellules qui alimentent le notebook",
+    },
+  },
+  general: {
+    positive: { en: "positive", fr: "positif" },
+    negative: { en: "negative", fr: "négatif" },
+    crops: {
+      maize: { en: "Maize", fr: "Maïs" },
+      rice: { en: "Rice", fr: "Riz" },
+      wheat: { en: "Wheat", fr: "Blé" },
+      sorghum: { en: "Sorghum", fr: "Sorgho" },
+      millet: { en: "Millet", fr: "Millet" },
+    },
+    crop: { en: "Crop", fr: "Culture" },
+    country: { en: "Country", fr: "Pays" },
+    region: { en: "Region", fr: "Région" },
+    subRegion: { en: "Sub-Region", fr: "Sous-région" },
+    scenario: { en: "Scenario", fr: "Scénario" },
+    historical: { en: "Historical", fr: "Historique" },
+    noData: { en: "No Data", fr: "" },
+    greyNoData: {
+      en: "Grey regions signal lack of data",
+      fr: "Les régions grises indiquent un manque de données",
+    },
+    emission_ssp370: { en: "Moderate emissions", fr: "émissions modérées" },
+    emission_ssp585: { en: "High emissions", fr: "émissions élevées" },
+    countries_article: {
+      Angola: { en: "Angola", fr: "En Angola" },
+      Benin: { en: "Benin", fr: "Au Bénin" },
+      Botswana: { en: "Botswana", fr: "Au Botswana" },
+      "Burkina Faso": { en: "Burkina Faso", fr: "Au Burkina Faso" },
+      Burundi: { en: "Burundi", fr: "Au Burundi" },
+      Cameroon: { en: "Cameroon", fr: "Au Cameroun" },
+      "Central African Republic": {
+        en: "Central African Republic",
+        fr: "En République Centrafricaine",
+      },
+      Chad: { en: "Chad", fr: "Au Tchad" },
+      "Congo - Brazzaville": {
+        en: "Congo - Brazzaville",
+        fr: "Au Congo - Brazzaville",
+      },
+      "Congo - Kinshasa": { en: "Congo - Kinshasa", fr: "Au Congo - Kinshasa" },
+      "Côte d'Ivoire": { en: "Côte d'Ivoire", fr: "En Côte d'Ivoire" },
+      Djibouti: { en: "Djibouti", fr: "A Djibouti" },
+      "Equatorial Guinea": {
+        en: "Equatorial Guinea",
+        fr: "En Guinée Équatoriale",
+      },
+      Eritrea: { en: "Eritrea", fr: "En Érythrée" },
+      Eswatini: { en: "Eswatini", fr: "En Eswatini" },
+      Ethiopia: { en: "Ethiopia", fr: "En Éthiopie" },
+      Gabon: { en: "Gabon", fr: "Au Gabon" },
+      Gambia: { en: "Gambia", fr: "En Gambie" },
+      Ghana: { en: "Ghana", fr: "Au Ghana" },
+      Guinea: { en: "Guinea", fr: "En Guinée" },
+      "Guinea-Bissau": { en: "Guinea-Bissau", fr: "En Guinée-Bissau" },
+      Kenya: { en: "Kenya", fr: "Au Kenya" },
+      Lesotho: { en: "Lesotho", fr: "Au Lesotho" },
+      Liberia: { en: "Liberia", fr: "Au Libéria" },
+      Madagascar: { en: "Madagascar", fr: "À Madagascar" },
+      Malawi: { en: "Malawi", fr: "Au Malawi" },
+      Mali: { en: "Mali", fr: "Au Mali" },
+      Mauritania: { en: "Mauritania", fr: "En Mauritanie" },
+      Mozambique: { en: "Mozambique", fr: "Au Mozambique" },
+      Namibia: { en: "Namibia", fr: "En Namibie" },
+      Niger: { en: "Niger", fr: "Au Niger" },
+      Nigeria: { en: "Nigeria", fr: "Au Nigéria" },
+      Rwanda: { en: "Rwanda", fr: "Au Rwanda" },
+      Senegal: { en: "Senegal", fr: "Au Sénégal" },
+      "Sierra Leone": { en: "Sierra Leone", fr: "À Sierra Leone" },
+      Somalia: { en: "Somalia", fr: "En Somalie" },
+      "South Africa": { en: "South Africa", fr: "En Afrique du Sud" },
+      "South Sudan": { en: "South Sudan", fr: "Au Soudan du Sud" },
+      Sudan: { en: "Sudan", fr: "Au Soudan" },
+      Tanzania: { en: "Tanzania", fr: "En Tanzanie" },
+      Togo: { en: "Togo", fr: "Au Togo" },
+      Uganda: { en: "Uganda", fr: "En Ouganda" },
+      Zambia: { en: "Zambia", fr: "En Zambie" },
+      Zimbabwe: { en: "Zimbabwe", fr: "Au Zimbabwe" },
+      SSA: { en: "Sub-Saharan Africa", fr: "En Afrique Subsaharienne" },
+    },
+    country_article2: {
+      Angola: { en: "Angola", fr: "L’Angola" },
+      Benin: { en: "Benin", fr: "Le Bénin" },
+      Botswana: { en: "Botswana", fr: "Le Botswana" },
+      "Burkina Faso": { en: "Burkina Faso", fr: "Le Burkina Faso" },
+      Burundi: { en: "Burundi", fr: "Le Burundi" },
+      Cameroon: { en: "Cameroon", fr: "Le Cameroun" },
+      "Central African Republic": {
+        en: "Central African Republic",
+        fr: "La République Centrafricaine",
+      },
+      Chad: { en: "Chad", fr: "Le Tchad" },
+      "Congo - Brazzaville": {
+        en: "Congo - Brazzaville",
+        fr: "Le Congo - Brazzaville",
+      },
+      "Congo - Kinshasa": { en: "Congo - Kinshasa", fr: "Le Congo - Kinshasa" },
+      "Côte d'Ivoire": { en: "Côte d'Ivoire", fr: "La Côte d'Ivoire" },
+      Djibouti: { en: "Djibouti", fr: "Djibouti" },
+      "Equatorial Guinea": {
+        en: "Equatorial Guinea",
+        fr: "La Guinée Équatoriale",
+      },
+      Eritrea: { en: "Eritrea", fr: "L’Érythrée" },
+      Eswatini: { en: "Eswatini", fr: "L’Eswatini" },
+      Ethiopia: { en: "Ethiopia", fr: "L’Éthiopie" },
+      Gabon: { en: "Gabon", fr: "Le Gabon" },
+      Gambia: { en: "Gambia", fr: "La  Gambie" },
+      Ghana: { en: "Ghana", fr: "Le Ghana" },
+      Guinea: { en: "Guinea", fr: "La Guinée" },
+      "Guinea-Bissau": { en: "Guinea-Bissau", fr: "La Guinée-Bissau" },
+      Kenya: { en: "Kenya", fr: "Le Kenya" },
+      Lesotho: { en: "Lesotho", fr: "Le Lesotho" },
+      Liberia: { en: "Liberia", fr: "Le Libéria" },
+      Madagascar: { en: "Madagascar", fr: "Madagascar" },
+      Malawi: { en: "Malawi", fr: "Le Malawi" },
+      Mali: { en: "Mali", fr: "Le Mali" },
+      Mauritania: { en: "Mauritania", fr: "La Mauritanie" },
+      Mozambique: { en: "Mozambique", fr: "Le Mozambique" },
+      Namibia: { en: "Namibia", fr: "La Namibie" },
+      Niger: { en: "Niger", fr: "Le Niger" },
+      Nigeria: { en: "Nigeria", fr: "Le Nigéria" },
+      Rwanda: { en: "Rwanda", fr: "Le Rwanda" },
+      Senegal: { en: "Senegal", fr: "Le Sénégal" },
+      "Sierra Leone": { en: "Sierra Leone", fr: "Sierra Leone" },
+      Somalia: { en: "Somalia", fr: "La Somalie" },
+      "South Africa": { en: "South Africa", fr: "L’Afrique du Sud" },
+      "South Sudan": { en: "South Sudan", fr: "Le Soudan du Sud" },
+      Sudan: { en: "Sudan", fr: "Le Soudan" },
+      Tanzania: { en: "Tanzania", fr: "La Tanzanie" },
+      Togo: { en: "Togo", fr: "Le Togo" },
+      Uganda: { en: "Uganda", fr: "L’Ouganda" },
+      Zambia: { en: "Zambia", fr: "La Zambie" },
+      Zimbabwe: { en: "Zimbabwe", fr: "Le Zimbabwe" },
+      SSA: { en: "SSA", fr: "L’Afrique Subsaharienne" },
+    },
+    adminNames: {
+      "Full Country": { en: "Full Country", fr: "Pays Entier" },
+      Angola: {
+        en: "Angola",
+        fr: "Angola",
+      },
+      Benin: {
+        en: "Benin",
+        fr: "Bénin",
+      },
+      Botswana: {
+        en: "Botswana",
+        fr: "Botswana",
+      },
+      "Burkina Faso": {
+        en: "Burkina Faso",
+        fr: "Burkina Faso",
+      },
+      Burundi: {
+        en: "Burundi",
+        fr: "Burundi",
+      },
+      Cameroon: {
+        en: "Cameroon",
+        fr: "Cameroun",
+      },
+      "Central African Republic": {
+        en: "Central African Republic",
+        fr: "République Centrafricaine",
+      },
+      Chad: {
+        en: "Chad",
+        fr: "Tchad",
+      },
+      "Congo - Brazzaville": {
+        en: "Congo - Brazzaville",
+        fr: "Congo - Brazzaville",
+      },
+      "Congo - Kinshasa": {
+        en: "Congo - Kinshasa",
+        fr: "Congo - Kinshasa",
+      },
+      "Côte d’Ivoire": {
+        en: "Côte d’Ivoire",
+        fr: "Côte d’Ivoire",
+      },
+      Djibouti: {
+        en: "Djibouti",
+        fr: "Djibouti",
+      },
+      "Equatorial Guinea": {
+        en: "Equatorial Guinea",
+        fr: "Guinée Équatoriale",
+      },
+      Eritrea: {
+        en: "Eritrea",
+        fr: "Érythrée",
+      },
+      Eswatini: {
+        en: "Eswatini",
+        fr: "Eswatini",
+      },
+      Ethiopia: {
+        en: "Ethiopia",
+        fr: "Éthiopie",
+      },
+      Gabon: {
+        en: "Gabon",
+        fr: "Gabon",
+      },
+      Gambia: {
+        en: "Gambia",
+        fr: "Gambie",
+      },
+      Ghana: {
+        en: "Ghana",
+        fr: "Ghana",
+      },
+      Guinea: {
+        en: "Guinea",
+        fr: "Guinée",
+      },
+      "Guinea-Bissau": {
+        en: "Guinea-Bissau",
+        fr: "Guinée-Bissau",
+      },
+      Kenya: {
+        en: "Kenya",
+        fr: "Kenya",
+      },
+      Lesotho: {
+        en: "Lesotho",
+        fr: "Lesotho",
+      },
+      Liberia: {
+        en: "Liberia",
+        fr: "Libéria",
+      },
+      Madagascar: {
+        en: "Madagascar",
+        fr: "Madagascar",
+      },
+      Malawi: {
+        en: "Malawi",
+        fr: "Malawi",
+      },
+      Mali: {
+        en: "Mali",
+        fr: "Mali",
+      },
+      Mauritania: {
+        en: "Mauritania",
+        fr: "Mauritanie",
+      },
+      Mozambique: {
+        en: "Mozambique",
+        fr: "Mozambique",
+      },
+      Namibia: {
+        en: "Namibia",
+        fr: "Namibie",
+      },
+      Niger: {
+        en: "Niger",
+        fr: "Niger",
+      },
+      Nigeria: {
+        en: "Nigeria",
+        fr: "Nigéria",
+      },
+      Rwanda: {
+        en: "Rwanda",
+        fr: "Rwanda",
+      },
+      Senegal: {
+        en: "Senegal",
+        fr: "Sénégal",
+      },
+      "Sierra Leone": {
+        en: "Sierra Leone",
+        fr: "Sierra Leone",
+      },
+      Somalia: {
+        en: "Somalia",
+        fr: "Somalie",
+      },
+      "South Africa": {
+        en: "South Africa",
+        fr: "Afrique du Sud",
+      },
+      "South Sudan": {
+        en: "South Sudan",
+        fr: "Soudan du Sud",
+      },
+      Sudan: {
+        en: "Sudan",
+        fr: "Soudan",
+      },
+      Tanzania: {
+        en: "Tanzania",
+        fr: "Tanzanie",
+      },
+      Togo: {
+        en: "Togo",
+        fr: "Togo",
+      },
+      Uganda: {
+        en: "Uganda",
+        fr: "Ouganda",
+      },
+      Zambia: {
+        en: "Zambia",
+        fr: "Zambie",
+      },
+      Zimbabwe: {
+        en: "Zimbabwe",
+        fr: "Zimbabwe",
+      },
+      SSA: {
+        en: "Sub-Saharan Africa",
+        fr: "Afrique Subsaharienne",
+      },
+      "Sub-Saharan Africa": {
+        en: "Sub-Saharan Africa",
+        fr: "Afrique Subsaharienne",
+      },
+    },
+  },
+});
+```
+
+```{ojs}
+html`<style>
+.plotTooltip {
+  z-index:2;
+  padding: 10px 10px;
+  color: black;
+  border-radius: 4px;
+  border: 1px solid rgba(0,0,0,1);
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+  font-family: "IBM Plex Sans", "Source Serif Pro";
+  font-size: 14px;
+  background: rgba(255,255,255, 1);
+  transition: 0.3s opacity ease-out, 0.1s border-color ease-out;
+  position: relative;
+  display: none;
+}
+
+.plotTooltip::before {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: black transparent transparent transparent;
+}
+
+.plotTooltip::after {
+  content: "";
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 50%;
+  margin-left: -4.9px;
+  border-width: 4.9px;
+  border-style: solid;
+  border-color: white transparent transparent transparent;
+}
+</style>`;
+```
+
+```{ojs}
+formTemplate = ({ gap = "2em" } = {}) => {
+  // template for input display
+  return (inputs) =>
+    html`<div style="display: flex; gap: ${gap};">${inputs}</div>`;
+};
+```
+
+```{ojs}
+html`<style>
+    /* Styling for tooltip labels */
+    .tooltip {
+        position: relative;
+        display: inline-block;
+        cursor: pointer;
+        width: 100%;
+    }
+
+    .tooltip .tooltiptext {
+        position: absolute;
+        z-index: 1;
+        visibility: hidden; 
+        left: 0;
+        bottom: 100%;
+        background-color: #efefef;
+        color: #333;
+        border: 0px solid #333;
+        border-radius: 0;
+        padding: 0px 0px;
+        margin-bottom: 00px;
+        text-transform: none;
+        font-size: 14px;
+        line-height: 1.6;
+        text-align: left;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+
+    .tooltip:hover .tooltiptext {
+        visibility: visible;
+        opacity: 1;
+        cursor: default;
+    }
+</style>`;
+```
+
+```{ojs}
+{
+  return md`**Color Scales**`
+}
+```
+
+```{ojs}
+// color scale info
+colorScales = {
+  return {
+    range: {
+      green: ['#E4F5D0', '#015023'],
+      blue: ['#E8F2FF', '#003E6B'],
+      brown: ['#FFFDE5', '#A87B00'],
+      yellowGreen: ['#F7D732', '#216729'],
+      orangeRed: ['#F4BB21', '#EC5A47'],
+    },
+    unknown: "#ccc"
+  }
+}
+```
+
+```{ojs}
+md`---
+### Admin Selection
+*Global admin selector using dropdowns*
+
+This is the global selector for the selected region
+- The completed data is contained within adminSelections to be used in queries
+- Dropdowns are defined below then bound for each section
+  - Defined as separate cells since they dynamically respond to different values
+    - In narrative, they are simply views of the data  
+  - Dropdowns are dynamic based on higher-level choices
+  - Options are defined from the geographic data
+  - null value means unselected region
+- Dropdowns are added to each section, using Inputs.bind to create synchronized inputs (see viewof for input definitions). A form input is used to consolidate and apply a template to format.`;
+```
+
+```{ojs}
+// get admin0 options from geo
+dataAdmin0 = {
+  const data = admin0_boundaries.features.map(d => d.properties)
+  // add a blank value
+  return [null, ...data.map(d => d.admin_name)]
+}
+```
+
+```{ojs}
+// get admin1 options based on admin0 selection
+// (the admin1 regions within selected admin0)
+dataAdmin1 = {
+  // admin 1, filter by 0 
+  const data = admin1_boundaries.features.map(d => d.properties)
+  .filter(d => d.admin0_name == selectAdmin0)
+  // add blank value
+  return [null, ...data.map(d => d.admin1_name)]
+}
+```
+
+```{ojs}
+// get admin2 options based on admin1 selection
+// (the admin2 regions within selected admin1)
+dataAdmin2 = {
+  const data = boundaries.admin2.features.map(d => d.properties)
+  .filter(d => d.admin0_name == selectAdmin0 && d.admin1_name == selectAdmin1)
+  // add blank value
+  return [null, ...data.map(d => d.admin2_name)]
+}
+```
+
+```{ojs}
+md`## Global impacts data`;
+```
+
+```{ojs}
+crop_options_items = {
+  return [
+      {id: 0, Crop: "maize"},
+      {id: 1, Crop: "rice"}, 
+      {id: 2, Crop: "soybean"},
+      {id: 3, Crop: "wheat"}
+  ];
+}
+```
+
+```{ojs}
+// make a label for selector
+// html with tooltip on hover
+function makeTooltipLabel({
+  labelText = "Dropdown label",
+  tooltipText = "Tooltip text",
+} = {}) {
+  return htl.html`<span class="tooltip">
+    <span for="inputField">${labelText}</span>
+    <span class="tooltiptext">${tooltipText}</span>
+</span>`;
+}
+```
+
+```{ojs}
+debounce = (delay, input) => {
+  class DelayedEvent extends Event {}
+  let id;
+  input.addEventListener("input", (e) => {
+    if (e instanceof DelayedEvent) return;
+    e.stopImmediatePropagation();
+    clearTimeout(id);
+    id = setTimeout(
+      () => input.dispatchEvent(new DelayedEvent("input", { bubbles: true })),
+      delay,
+    );
+  });
+  return input;
+};
+```
+
+```{ojs}
+debounceDelay = 500; // ms delay to respond
+```
+
+```{ojs}
+viewof select_crop = {
+  const checkbox = Inputs.checkbox(crop_options_items.map((d) => d.Crop), { label: "Crops", value: ['maize'] });
+  checkbox.addEventListener('input', () => {
+    if (checkbox.value.length === 0) {
+      checkbox.value = ['maize'];
+    }
+  });
+  return checkbox }
+```
+
+```{ojs}
+viewof crop_selector_yield = {
+  return Inputs.select(
+    ["maize", "rice", "wheat"],
+    {label: _lang(nbText.general.crop),
+    format: c => _lang(nbText.general.crops[c])}
+  )  
+}
+```
+
+```{ojs}
+viewof sel_region = {
+  return Inputs.select(
+    avaliable_unRegions,
+    {label: _lang(nbText.regionalPicture.beeswarm.yAxis),
+    format: d =>  _lang(nbText.regionalPicture.beeswarm.regions[d || "all"])} // No region is NULL so add a label
+  )  
+}
+```
+
+```{ojs}
+selected_crop_global = [crop_selector_yield];
+```
+
+```{ojs}
+warming_level_options = {
+  return {
+      0: {min: -Infinity, max: 1.5, label: "<1.5"},
+      1: {min: 1.5, max: 2.0, label: "1.5-2.0"},
+      2: {min: 2.0, max: 3.0, label: "2.0-3.0"},
+      3: {min: 3.0, max: Infinity, label: ">3.0"}
+  }
+}
+```
+
+```{ojs}
+impacts_metaanalysis_data = {
+  // Excuse the names.. the R export "cleaned" them...
+  let sqlQuery = `
+    SELECT 
+      LOWER(Crop) as Crop,
+      Country,
+      "Projected.yield..t.ha." as proj_yield,
+      "Climate.impacts...." as yield_impact_pct,
+      "Global.delta.T.from.pre.industrial.period" as preindustrial_temp_delta,
+      "Global.delta.T.from.2005" as temp_delta_2005,
+      Reference,
+      Adaptation,
+    FROM projected_impacts
+    WHERE Region = 'Africa'
+    AND LOWER(Crop) = '${crop_selector_yield}'`
+
+  let filtered = await db2.query(sqlQuery) // Put this in a seperate db (non-encrypted) to boost load time of first figure
+
+  filtered = filtered.map(item => ({
+    ...item,
+    UNRegion: country_to_region[item.Country.toLowerCase().trim()]
+  }));
+  return filtered;
+}
+```
+
+```{ojs}
+db2 = DuckDBClient.of({
+  projected_impacts: FileAttachment("projected-impacts_hasagawa.parquet"),
+});
+```
+
+```{ojs}
+avaliable_unRegions = new Set([
+  null,
+  ...impacts_metaanalysis_data.map((d) => d.UNRegion),
+]); // null for all of africa
+```
+
+```{ojs}
+violin_insight_data = {
+  let data = impacts_metaanalysis_data
+    .map(d => ({
+      ...d,
+      temp_band: classifyTempBand(d.preindustrial_temp_delta)
+    }));
+
+  let region_data = data
+    .filter(d => 
+      !sel_region || d?.UNRegion === sel_region
+    )
+
+  const median_yields = Object.fromEntries(
+    d3.groups(region_data, d => d.temp_band).map(([b, rows]) => [
+      b,
+      {
+        median_without_adaptation: d3.median(rows.filter(d => d.Adaptation === "No"), d => +d.yield_impact_pct) ?? null,
+        median_with_adaptation: d3.median(rows.filter(d => d.Adaptation === "Yes"), d => +d.yield_impact_pct) ?? null,
+      }
+    ])
+  );
+  
+  const worstRegionsByBand = Object.fromEntries( // this should use the unfiltered data with all regions
+    d3.groups(data, d => d.temp_band ?? "Unspecified").map(([b, rows]) => {
+      const by = subset => {
+        const rmap = d3.rollup(subset, v => d3.median(v, d => +d.yield_impact_pct), d => d.UNRegion ?? "Unspecified");
+        if (!rmap.size) return null;
+        const minVal = d3.min(rmap.values());
+        const worst = [...rmap].filter(([, m]) => m === minVal)
+                        .map(([r, medianLoss]) => ({ region: r, medianLoss }));
+        
+        return worst.length === 1 ? worst[0] : worst;
+      };
+      return [b, {
+        worst_region_without_adaptation: by(rows.filter(d => d.Adaptation === "No")),
+        worst_region_with_adaptation: by(rows.filter(d => d.Adaptation === "Yes")),
+      }];
+    })
+  );
+  
+  return{
+    median_yields,
+    worst_region: worstRegionsByBand
+  }
+}
+```
+
+```{ojs}
+function classifyTempBand(temp) {
+  if (temp <= 2) return "≤ 2°C"; // return "≤ 1.5°C";
+  if (temp <= 3) return "2-3°C"; // return "1.5–2.5°C";
+  return "> 3°C"; // "> 2.5°C"
+}
+```
+
+```{ojs}
+temp_opts = ["≤ 2°C", "2-3°C", "> 3°C"];
+```
+
+```{ojs}
+md`## Dynamic Insights`;
+```
+
+```{ojs}
+country_to_region = {
+    return {
+  "algeria": "Northern",
+   "egypt": "Northern",
+   "libya": "Northern",
+   "morocco": "Northern",
+   "sudan": "Northern",
+   "tunisia": "Northern",
+   "western sahara": "Northern",
+   "syria": "Northern",
+   "british indian ocean territory": "Eastern",
+   "burundi": "Eastern",
+   "comoros": "Eastern",
+   "djibouti": "Eastern",
+   "eritrea": "Eastern",
+   "ethiopia": "Eastern",
+   "french southern territories": "Eastern",
+   "kenya": "Eastern",
+   "madagascar": "Eastern",
+   "malawi": "Eastern",
+   "mauritius": "Eastern",
+   "mayotte": "Eastern",
+   "mozambique": "Eastern",
+   "réunion": "Eastern",
+   "rwanda": "Eastern",
+   "seychelles": "Eastern",
+   "somalia": "Eastern",
+   "south sudan": "Eastern",
+   "uganda": "Eastern",
+   "united republic of tanzania": "Eastern",
+   "zambia": "Eastern",
+   "zimbabwe": "Eastern",
+   "tanzania": "Eastern",
+   "angola": "Central",
+   "cameroon": "Central",
+   "central african republic": "Central",
+   "chad": "Central",
+   "congo": "Central",
+   "democratic republic of the congo": "Central",
+   "equatorial guinea": "Central",
+   "gabon": "Central",
+   "sao tome and principe": "Central",
+   "botswana": "Southern",
+   "eswatini": "Southern",
+   "lesotho": "Southern",
+   "namibia": "Southern",
+   "south africa": "Southern",
+   "benin": "Western",
+   "burkina faso": "Western",
+   "cabo verde": "Western",
+   "cote d'lvoire": "Western",
+   "gambia": "Western",
+   "ghana": "Western",
+   "guinea": "Western",
+   "guinea-bissau": "Western",
+   "liberia": "Western",
+   "mali": "Western",
+   "mauritania": "Western",
+   "niger": "Western",
+   "nigeria": "Western",
+   "saint helena, ascension and tristan da cunha": "Western",
+   "saint helena": "Western",
+   "ascension island": "Western",
+   "tristan da cunha": "Western",
+   "senegal": "Western",
+   "sierra leone": "Western",
+   "togo": "Western",
+   "sudan savanna": "Western",
+   "guinea bissau": "Western"
+  }}
+```
+
+```{ojs}
+viewof crop_selector_dynamic_insights = {
+  return Inputs.select(
+    ["maize", "sorghum", "millet", "wheat"],
+    {label: _lang(nbText.general.crop),
+    format: c => _lang(nbText.general.crops[c])}
+  )  
+}
+```
+
+```{ojs}
+cycle_selector_options_di = {
+  return {
+      0: {cycle: "both", label: _lang(nbText.zoomToStable.selectors.growSeason.values.both)},
+      1: {cycle: "1", label: _lang(nbText.zoomToStable.selectors.growSeason.values.first)},
+      2: {cycle: "2", label: _lang(nbText.zoomToStable.selectors.growSeason.values.second)},
+  }
+}
+```
+
+```{ojs}
+selected_cycle_options = Object.values(cycle_selector_options_di).find(
+  (option) => option.label === cycle_selector_di,
+);
+```
+
+```{ojs}
+viewof cycle_selector_di = {
+  return Inputs.select(
+      Object.values(cycle_selector_options_di).map((x) => x.label),
+      {label: _lang(nbText.zoomToStable.selectors.growSeason.title) }
+  )  
+}
+```
+
+```{ojs}
+scenario_options = {
+  return {
+      0: {ssp: "SSP370", horizon: 2030, label: "SSP3-7.0: 2021-2040"},
+      1: {ssp: "SSP370", horizon: 2005, label: _lang(nbText.general.historical)},
+      2: {ssp: "SSP370", horizon: 2050, label: "SSP3-7.0: 2041-2060"},
+      3: {ssp: "SSP585", horizon: 2030, label: "SSP5-8.5: 2021-2040"},
+      4: {ssp: "SSP585", horizon: 2050, label: "SSP5-8.5: 2041-2060"}
+  }
+}
+```
+
+```{ojs}
+viewof scenario_selector_di = {
+  return Inputs.select(
+      Object.values(scenario_options).map((x) => x.label),
+      {label: _lang(nbText.general.scenario),
+       format: l => l === "Historical"? _lang(nbText.general.historical) : l}
+  )  
+}
+```
+
+```{ojs}
+selected_scenario = Object.values(scenario_options).find(
+  (option) => option.label === scenario_selector_di,
+);
+```
+
+```{ojs}
+yield_output_options = {
+  return {
+    0: {label: "Yield change (ton/ha)"},
+    1: {label: "Yield (ton/ha)"},
+    2: {label: "Yield change (%)"},
+    3: {label: "Uncertainty in yield (ton/ha)"},
+  }
+}
+```
+
+```{ojs}
+viewof yield_output_selector_di = {
+ let options 
+   if (scenario_selector_di === "Historique" || scenario_selector_di === "Historic") {
+     options = ["Yield (ton/ha)", "Uncertainty in yield (ton/ha)"]
+   } else {
+     options = Object.values(yield_output_options).map((x) => x.label)
+   }
+  return Inputs.select(
+      options,
+      {label: _lang(nbText.zoomToStable.selectors.YieldOutput.title),
+       format: l => _lang(nbText.zoomToStable.selectors.YieldOutput.values[l])}
+  )  
+}
+```
+
+```{ojs}
+selected_yield_output = Object.values(yield_output_options).find(
+  (option) => option.label === yield_output_selector_di,
+);
+```
+
+```{ojs}
+cultivar_options = {
+  return {
+    0: {label: _lang(nbText.zoomToStable.selectors.Cultivar.values.current), value: "current"},
+    1: {label: _lang(nbText.zoomToStable.selectors.Cultivar.values.early), value: "early"},
+    2: {label: _lang(nbText.zoomToStable.selectors.Cultivar.values.late), value: "late"},
+  }
+}
+```
+
+```{ojs}
+viewof cultivar_selector_di = {
+  return Inputs.select(
+      Object.values(cultivar_options).map((x) => x.label),
+      {label: _lang(nbText.zoomToStable.selectors.Cultivar.title) }
+  )  
+}
+```
+
+```{ojs}
+selected_cultivar = Object.values(cultivar_options).find(
+  (option) => option.label === cultivar_selector_di,
+);
+```
+
+```{ojs}
+zoom_in_elements = {
+  const form = [
+      viewof crop_selector_dynamic_insights,
+      viewof cycle_selector_di,
+      viewof scenario_selector_di,
+      viewof yield_output_selector_di,
+      viewof cultivar_selector_di,
+  ]
+  return form
+}
+```
+
+```{ojs}
+viewof selectAdmin0 = Inputs.select(dataAdmin0, {label: adminRegions.labels.admin0})
+```
+
+```{ojs}
+viewof selectAdmin1 = Inputs.select(dataAdmin1, {label: adminRegions.labels.admin1})
+```
+
+```{ojs}
+viewof selectAdmin2 = Inputs.select(dataAdmin2, {label: adminRegions.labels.admin2})
+```
+
+```{ojs}
+// selected admin regions from dropdowns
+adminSelections = new Object({
+  selectAdmin0,
+  selectAdmin1,
+  selectAdmin2,
+});
+```
+
+```{ojs}
+function arrayMin(arr) {
+  var len = arr.length,
+    min = Infinity;
+  while (len--) {
+    if (arr[len] < min) {
+      min = arr[len];
+    }
+  }
+  return min;
+}
+```
+
+```{ojs}
+function arrayMax(arr) {
+  var len = arr.length,
+    max = -Infinity;
+  while (len--) {
+    if (arr[len] > max) {
+      max = arr[len];
+    }
+  }
+  return max;
+}
+```
+
+```{ojs}
+function get_yield_column(yield_output_selection, yield_type) {
+  return {
+    "Yield (ton/ha)": "yield_" + yield_type + "_avg",
+    "Yield change (ton/ha)": "yield_" + yield_type + "_abs_change",
+    "Yield change (%)": "yield_" + yield_type + "_rlt_change",
+    "Uncertainty in yield (ton/ha)": "yield_" + yield_type + "_rng",
+  }[yield_output_selection];
+}
+```
+
+```{ojs}
+mapDataColumn = get_yield_column(
+  selected_yield_output.label,
+  selectGeoDataType.labelTip,
+);
+```
+
+```{ojs}
+md`## Adapting to the future changes`;
+```
+
+```{ojs}
+colorYellowGreen = ["#F7D732", "#216729"];
+```
+
+```{ojs}
+formatNum = d3.format(".2f");
+```
+
+```{ojs}
+atfc_crop_options = {
+    const opts = {
+      0: {label: "maize", crop: "maize"},
+      1: {label: "sorghum", crop: "sorghum"},
+      2: {label: "millet", crop: "millet"},
+      3: {label: "wheat", crop: "wheat"},
+  }
+  return opts
+}
+```
+
+```{ojs}
+viewof atfc_crop_selector = {
+  return Inputs.select(
+    Object.values(atfc_crop_options).map((x) => x.label),
+    {label: _lang(nbText.general.crop),
+    format: l => _lang(nbText.general.crops[l])}
+  )
+}
+```
+
+```{ojs}
+selected_crop_atfc = Object.values(atfc_crop_options).find(
+  (option) => option.label == atfc_crop_selector,
+).crop;
+```
+
+```{ojs}
+/*
+[Adaptation option selector] Selector for the combinatorial of fields ‘cultivar’ and ‘irrigation’ in data file. Cultivar options are current (labeled as “Current (no cultivar adaptation)”), early (labeled as “Early maturity”), and late (labeled as “Late maturity”). Irrigation options are Yes, No. “Yes” uses the “yield_irr” data (needs to be aggregated in the same way it was done for “yield_rfd” above) and the “No” uses the “yield_rfd”.as follows,
+	No adaptation – this is data from ‘current’ cultivar, and ‘yield_rfd’
+	Current cultivar, irrigation – this is data from current cultivar but yield_irr
+	Early maturity, no irrigation – this is data from early cultivar but yield_rfd
+	Early maturity, irrigation – this is data from early cultivar but yield_irr
+	Late maturity, no irrigation – this is data from late cultivar but yield_rfd
+	Late maturity, irrigation – this is data from late cultivar but yield_irr
+<note: a second data file for adaptation will be shared by us. We’ll make it consistent with what you need.>
+*/
+adapting_to_future_changes_options = {
+    const adapting_to_future_changes_options = {
+      0: {cultivar: "", label: ""},
+      1: {cultivar: "current", yield: "yield_rfd", label: "No adaptation"},
+      2: {cultivar: "current", yield: "yield_irr", label: "Current cultivar, irrigation"},
+      3: {cultivar: "early", yield: "yield_rfd", label: "Early maturity, no irrigation"},
+      4: {cultivar: "early", yield: "yield_irr", label: "Early maturity, irrigation"},
+      5: {cultivar: "late", yield: "yield_rfd", label: "Late maturity, no irrigation"},
+      6: {cultivar: "late", yield: "yield_irr", label: "Late maturity, irrigation"}
+  }
+  return adapting_to_future_changes_options
+}
+```
+
+```{ojs}
+atfc_scenario_selector_options = {
+  return {
+    0: {label: `SSP3-7.0 (${_lang(nbText.general.emission_ssp370)})`, ssp: "SSP370"},
+    1: {label: `SSP5-8.5 (${_lang(nbText.general.emission_ssp585)})`, ssp: "SSP585"},
+  }
+}
+```
+
+```{ojs}
+viewof atfc_cycle_selector = {
+  return Inputs.select(
+      Object.values(cycle_selector_options_di).map((x) => x.cycle),
+      {label: _lang(nbText.zoomToStable.selectors.growSeason.title) }
+  )  
+}
+```
+
+```{ojs}
+viewof atfc_scenario_selector = {
+  return Inputs.select(
+      Object.values(atfc_scenario_selector_options).map((x) => x.ssp),
+      {label: "Scenario"}
+  )
+}
+```
+
+```{ojs}
+dataYieldATFC1 = {
+  return [
+    {
+      Practice:"No adaptation",
+      AEZ_Class_FAO: "historical",
+      Mean_Difference: 3,
+    },
+    {
+      Practice:"No adaptation",
+      AEZ_Class_FAO: "2030",
+      Mean_Difference: 2,
+    },
+    {
+      Practice:"No adaptation",
+      AEZ_Class_FAO: "2050",
+      Mean_Difference: 1,
+    },
+    {
+      Practice:"Irrigation",
+      AEZ_Class_FAO: "historical",
+      Mean_Difference: 3,
+    },
+    {
+      Practice:"Irrigation",
+      AEZ_Class_FAO: "2030",
+      Mean_Difference: 2,
+    },
+    {
+      Practice:"Irrigation",
+      AEZ_Class_FAO: "2050",
+      Mean_Difference: 1,
+    },
+    {
+      Practice:"Early cultivar",
+      AEZ_Class_FAO: "historical",
+      Mean_Difference: 3,
+    },
+    {
+      Practice:"Early cultivar",
+      AEZ_Class_FAO: "2030",
+      Mean_Difference: 2,
+    },
+    {
+      Practice:"Early cultivar",
+      AEZ_Class_FAO: "2050",
+      Mean_Difference: 1,
+    },
+    {
+      Practice:"Late cultivar",
+      AEZ_Class_FAO: "historical",
+      Mean_Difference: 3,
+    },
+    {
+      Practice:"Late cultivar",
+      AEZ_Class_FAO: "2030",
+      Mean_Difference: 2,
+    },
+    {
+      Practice:"Late cultivar",
+      AEZ_Class_FAO: "2050",
+      Mean_Difference: 1,
+    },
+    {
+      Practice:"Irrigation & early cultivar",
+      AEZ_Class_FAO: "historical",
+      Mean_Difference: 3,
+    },
+    {
+      Practice:"Irrigation & late cultivar",
+      AEZ_Class_FAO: "2030",
+      Mean_Difference: 2,
+    },
+    {
+      Practice:"Irrigation & late cultivar",
+      AEZ_Class_FAO: "2050",
+      Mean_Difference: 1,
+    },
+  ]
+}
+```
+
+```{ojs}
+dataYieldATFC = {
+  let query = `
+SELECT *
+FROM afc_data 
+${WhereAdminQuery_ATFC()} 
+AND ssp = '${atfc_scenario_selector.toUpperCase()}'
+AND cycle = '${atfc_cycle_selector}'
+`
+  mutable DBloaded = true
+  return db.query(query).then((r) => r.toArray());
+
+//     let query = `
+// SELECT * 
+// FROM afc_data 
+// WHERE 1 = 1 
+// AND ssp = '${atfc_scenario_selector.toUpperCase()}'
+// AND cycle = '${atfc_cycle_selector}'
+// `;
+//   if (adminSelections.selectAdmin0 != null) {
+//     const none_admins = getAdminsNoneForSameLevel();
+//     for (let i = 0; i < none_admins.length; i++)
+//       query += ` AND ${none_admins[i]} = ''`;
+//   }
+//   return db.query(query).then((r) => r.toArray());
+}
+```
+
+```{ojs}
+WhereAdminQuery_ATFC = () => {
+  if (!selectAdmin0 || !selectAdmin1) {
+    // where admin0_name is null, it is ssa, return admin 0 data
+    return `WHERE admin1_name = ''`;
+  } else if (!selectAdmin2 && selectAdmin1) {
+    // where admin0 and admin1 is not null, return admin 1 for selected country
+    return `WHERE admin1_name != '' AND admin2_name = '' AND admin0_name = '${selectAdmin0}'`;
+  } else {
+    return `WHERE admin2_name != '' AND admin0_name = '${selectAdmin0}' AND admin1_name = '${selectAdmin1}'`;
+  }
+};
+```
+
+```{ojs}
+function getRegionalGranularityLevel(adminSelections) {
+  if (adminSelections.selectAdmin0 == null) return "admin0_name";
+  if (adminSelections.selectAdmin1 == null) return "admin1_name";
+  if (adminSelections.selectAdmin2 == null) return "admin2_name";
+  return "admin2_name";
+}
+```
+
+```{ojs}
+function get_selected_admin_atfc() {
+  if (adminSelections.selectAdmin0 == null) {
+    return { admin: "admin0_name", highlight: null };
+  } else {
+    if (adminSelections.selectAdmin1 == null) {
+      return { admin: "admin0_name", highlight: adminSelections.selectAdmin0 };
+    } else {
+      if (adminSelections.selectAdmin2 == null) {
+        return {
+          admin: "admin1_name",
+          highlight: adminSelections.selectAdmin1,
+        };
+      } else {
+        return {
+          admin: "admin2_name",
+          highlight: adminSelections.selectAdmin2,
+        };
+      }
+    }
+  }
+}
+```
+
+```{ojs}
+function getAdminsNoneForSameLevel() {
+  if (adminSelections.selectAdmin0 == null)
+    return ["admin0_name", "admin1_name", "admin2_name"];
+  if (adminSelections.selectAdmin1 == null)
+    return ["admin1_name", "admin2_name"];
+  if (adminSelections.selectAdmin2 == null) return ["admin2_name"];
+  return [];
+}
+```
+
+```{ojs}
+function round(x, places) {
+  const pot = Math.pow(10, places);
+  return Math.round(x * pot) / pot;
+}
+```
+
+```{ojs}
+function get_adpt_options_higher_yield_than_no_adaptation(data) {
+  const maxMeanDifference = {
+    historical: -Infinity,
+    2030: -Infinity,
+    2050: -Infinity,
+  };
+
+  // Find the maximum mean_difference for "No adaptation" for each horizon
+  const options = new Set();
+  for (const row of data) {
+    if (row.adaptation == "No adaptation") {
+      maxMeanDifference[row.horizon] = Math.max(
+        maxMeanDifference[row.horizon],
+        row.mean_difference,
+      );
+      continue;
+    }
+    options.add(row.adaptation);
+  }
+
+  for (const row of data) {
+    if (row.adaptation == "No adaptation") continue;
+    if (row.mean_difference < maxMeanDifference[row.horizon]) {
+      options.delete(row.adaptation);
+    }
+  }
+
+  let results = [];
+
+  for (const option of options) {
+    const filt = data.filter((d) => d.adaptation == option);
+    let obj = {
+      option: option,
+      historical:
+        filt.find((d) => d.horizon == "historical").mean_difference -
+        maxMeanDifference.historical,
+      2030:
+        filt.find((d) => d.horizon == "2030").mean_difference -
+        maxMeanDifference["2030"],
+      2050:
+        filt.find((d) => d.horizon == "2050").mean_difference -
+        maxMeanDifference["2050"],
+    };
+    results.push(obj);
+  }
+  results.sort((a, b) => a.historical - b.historical).reverse();
+  return results;
+}
+```
+
+```{ojs}
+highlighted_data = {
+  var selected_geo = get_selected_admin_atfc();
+    if (selectAdmin0 == null){
+      selected_geo = {
+        admin: "admin0_name",
+        highlight: ""
+      }
+    }
+
+  return dataYieldATFC.filter(d => (
+        (d.crop.toLowerCase().trim() == selected_crop_atfc.toLowerCase().trim()) &&
+        (d.cycle == atfc_cycle_selector) &&
+        (d.ssp == atfc_scenario_selector) &&
+        (d[selected_geo.admin] == selected_geo.highlight)
+      )
+    );
+}
+```
+
+```{ojs}
+function average(vals) {
+  let sum = 0;
+  for (let i = 0; i < vals.length; i++) {
+    sum += vals[i];
+  }
+  return sum / vals.length;
+}
+```
+
+```{ojs}
+containsAll = (arr1, arr2) => arr2.every((arr2Item) => arr1.includes(arr2Item));
+```
+
+```{ojs}
+md`---
+### Admin Selection - Display
+*Showing admin selections*`;
+```
+
+```{ojs}
+// options for the global admin selection
+// used when no admin selection is made
+globalSelection = {
+  return {
+    label: "Sub-Saharan Africa",
+    labelGeneral: "Africa"
+  }
+}
+```
+
+```{ojs}
+function getAdminSelection(selections = adminSelections) {
+  // get the most granular admin selection made
+  const a0 = selections.selectAdmin0;
+  const a1 = selections.selectAdmin1;
+  const a2 = selections.selectAdmin2;
+  const global = globalSelection.label;
+
+  return a2 ? a2 : a1 ? a1 : a0 ? a0 : global;
+}
+```
+
+```{ojs}
+function getAdminSelectionAdmin0(selections = adminSelections) {
+  // get the selected admin0 or global value
+  const a0 = selections.selectAdmin0;
+  const global = globalSelection.label;
+
+  return a0 ? a0 : global;
+}
+```
+
+```{ojs}
+function getAdminSelectionMarkdownPath(selections = adminSelections) {
+  // function to show selected admin region
+  // return path showing nested admin selection
+
+  const delim = " → ";
+  const path = [
+    selections.selectAdmin0,
+    selections.selectAdmin1,
+    selections.selectAdmin2,
+  ].filter((d) => d);
+
+  const formatted = path
+    .filter((d) => d)
+    .map((d, i) => {
+      return i == path.length - 1 ? `**${d}**` : `*${d}*`;
+    });
+
+  return formatted.length == 0
+    ? `**${globalSelection.label}**` // no selection, all of Africa
+    : `${formatted.join(delim)}`;
+}
+```
+
+```{ojs}
+md`---
+### Choropleth map - Geographic Impact
+*Showing context for admin selection*
+
+There is some hoop-jumping to get the right data based on the Admin Selection. The tabular data is then bound to the applicable geojson, and visualized with Plot.`;
+```
+
+```{ojs}
+dataYield = {
+  let query = `
+SELECT *
+FROM aggregated
+${WhereAdminQuery()}
+AND ssp = '${selected_scenario.ssp}'
+AND horizon = '${selected_scenario.horizon}'
+AND cycle = '${selected_cycle_options.cycle}'
+AND crop = '${crop_selector_dynamic_insights}'
+AND cultivar = '${selected_cultivar.value}'
+`
+  let resp = await db.queryStream(query)
+  return resp.readRows()
+}
+```
+
+```{ojs}
+selected_cultivar;
+```
+
+```{ojs}
+// grab tabular data for choropleth
+dataGeoImpact = {
+  // get data for choropleth map based on choice
+  const dataSource = selectGeoDataType.key == "population"
+    ? dataYield
+    : dataYield
+
+  // select different data based on admin selections
+  if (adminSelections.selectAdmin1) {
+    // admin1 or 2 is selected, show all admin2's for selected admin1
+    return T.tidy(
+      dataSource,
+      T.filter((d) => {
+        return d.admin1_name == adminSelections.selectAdmin1
+          && d.admin2_name // always non-null
+      })
+    );
+  } else if (adminSelections.selectAdmin0) {
+    // admin0 is selected, with no admin1
+    // get all admin1 data for selected admin0
+    return T.tidy(
+      dataSource,
+      T.filter((d) => {
+        return d.admin0_name == adminSelections.selectAdmin0
+        && d.admin1_name // always non-null 
+        && !d.admin2_name // always null
+      })
+    )
+  } else {
+    // end case: admin0 is not selected
+    // get all admin0 data
+    return T.tidy(
+      dataSource,
+      T.filter((d) => {
+        return !d.admin1_name // always null 
+        && !d.admin2_name // always null
+      })
+    )
+  }
+}
+```
+
+```{ojs}
+// bind geojson to tabular data
+mapDataGeoImpact = {
+  // no selections
+  if (!adminSelections.selectAdmin0) {
+    return bindTabularToGeo({
+      data: dataGeoImpact,
+      dataBindColumn: "admin0_name",
+      geoData: boundaries.admin0,
+      geoDataBindColumn: "admin0_name"
+    });
+  }
+  // admin0 selected only
+  else if (!adminSelections.selectAdmin1) {
+    const data = T.tidy(
+      dataGeoImpact,
+      T.mutate({ a1_a0: (d) => [d.admin1_name, d.admin0_name].join("_") })
+    );
+    const geoData = {
+      ...boundaries.admin1,
+      features: boundaries.admin1.features.filter(
+        (d) => d.properties.admin0_name == adminSelections.selectAdmin0
+      )
+    };
+
+    return bindTabularToGeo({
+      data: data,
+      dataBindColumn: "a1_a0",
+      geoData: geoData,
+      geoDataBindColumn: "a1_a0"
+    });
+  }
+
+  // admin1 is selected
+  // show all admin2 regions within admin1
+  else {
+    const data = T.tidy(
+      dataGeoImpact,
+      T.mutate({
+        a2_a1_a0: (d) => [d.admin2_name, d.admin1_name, d.admin0_name].join("_")
+      })
+    );
+    const geoData = {
+      ...boundaries.admin2,
+      features: boundaries.admin2.features.filter(
+        (d) => d.properties.admin1_name == adminSelections.selectAdmin1
+      )
+    };
+
+    return bindTabularToGeo({
+      data: data,
+      dataBindColumn: "a2_a1_a0",
+      geoData: geoData,
+      geoDataBindColumn: "a2_a1_a0"
+    });
+  }
+}
+```
+
+```{ojs}
+function filterYieldDataByAdmins(d) {
+  if (adminSelections.selectAdmin0 == null) return d;
+  if (adminSelections.selectAdmin1 == null)
+    return (
+      d.admin0_name == adminSelections.selectAdmin0 && d.admin1_name == null
+    );
+  if (adminSelections.selectAdmin2 == null)
+    return (
+      d.admin0_name == adminSelections.selectAdmin0 &&
+      d.admin1_name == adminSelections.selectAdmin1 &&
+      d.admin2_name == null
+    );
+  return (
+    d.admin0_name == adminSelections.selectAdmin0 &&
+    d.admin1_name == adminSelections.selectAdmin1 &&
+    d.admin2_name == adminSelections.selectAdmin2
+  );
+}
+```
+
+```{ojs}
+WhereAdminQuery = () => {
+  if (!selectAdmin0) {
+    // where admin0_name is null, it is ssa, return admin 0 data
+    return `WHERE admin1_name IS NULL`;
+  } else if (selectAdmin0 && !selectAdmin1) {
+    // Where admin0 is selected, return all admin 1 for that country
+    return `WHERE admin0_name == '${selectAdmin0}' AND admin1_name IS NOT NULL AND admin2_name IS NULL`;
+    // } else if (selectAdmin1 && !selectAdmin2) { // where admin0 and admin1 is selected, return all admin2 for that region/country
+    //   return `WHERE admin0_name = '${selectAdmin0}' AND admin1_name = '${selectAdmin1}' AND admin2_name IS NOT NULL`
+  } else {
+    return `WHERE admin0_name = '${selectAdmin0}' AND admin1_name = '${selectAdmin1}' AND admin2_name IS NOT NULL`;
+  }
+};
+```
+
+```{ojs}
+md`---
+## Data
+*Data sources*
+- Data is from local files downloaded from S3, uploaded as a file attachments
+- Data is then wrapped as a duckDB database table (separate tables for each parquet file)
+- We are using some simplified data sources, suffixed with reduced.parquet in the S3 bucket`;
+```
+
+```{ojs}
+import { db } from "876b0cd897b4c214";
+```
+
+```{ojs}
+mutable DBloaded = false
+```
+
+```{ojs}
+{
+  if (!DBloaded) {
+    document.body.style.cursor = "wait";
+  } else {
+    document.body.style.cursor = "default";
+  }
+}
+```
+
+```{ojs}
+md`### Geographic data
+Geo files were converted to TopoJSON and reduced in complexity before uploading to the notebook, see [Simplify large spatial files](https://observablehq.com/d/258c68ee969e8ed5?collection=@periscopic/ab-atlas) notebook for method.
+- **admin0**: broadest level, country boundaries
+  - boundaries/atlas-region_admin0_harmonized.geojson
+- **admin1**: one level down from admin0, regions within each admin0 region
+  - boundaries/atlas-region_admin1_simplified.parquet
+- **admin2**: lowest level, subregions of every admin1 region
+  - These are only loaded when needed and are called directly from the S3 bucket to reduce bandwidth and memory requirements
+  - https://digital-atlas.s3.amazonaws.com/boundaries/atlas-region_admin2_simplified.parquet`;
+```
+
+```{ojs}
+admin0_boundaries = {
+  const input0 = await FileAttachment("atlas-region_admin0_harmonized.json").json()
+  return topojson.feature(input0, input0.objects["atlas-region_admin0_harmonized"])
+}
+```
+
+```{ojs}
+admin1_boundaries = getadmin1();
+```
+
+```{ojs}
+boundaries = {
+  const input1 = await getadmin1()
+  const input2 = await getadmin2()
+
+  const geo = {
+    admin0: admin0_boundaries,
+    admin1: admin1_boundaries,
+    admin2: await getadmin2(),
+  }
+  return geo
+}
+```
+
+```{ojs}
+getadmin1 = async () => {
+  let admin1_query = `WHERE admin0_name = '${selectAdmin0}'`;
+
+  let response = await geo_db.query(`
+    SELECT *
+    FROM admin1_geom
+    ${admin1_query}`);
+  let a1_names = response.map((d) => d.admin1_name);
+  // mutable admin1_names = ["Full Country"].concat(a1_names);
+  let wkb_list = response.map((d) => d.geometry);
+  let data = await response.map(({ geometry, ...rest }) => rest);
+
+  return geojsonFromWKB(wkb_list, data);
+};
+```
+
+```{ojs}
+getadmin2 = async () => {
+  if (!selectAdmin1) {
+    // If select Admin 1 is null, return without querying to save bandwidth
+    return {
+      type: "FeatureCollection",
+      features: [],
+    };
+  }
+  let admin2_query = `WHERE admin0_name = '${selectAdmin0}' AND admin1_name = '${selectAdmin1}'`;
+
+  let response = await geo_db.query(`
+    SELECT *
+    FROM admin2_geom
+    ${admin2_query}`);
+  let wkb_list = response.map((d) => d.geometry);
+  let data = await response.map(({ geometry, ...rest }) => rest);
+
+  return geojsonFromWKB(wkb_list, data);
+};
+```
+
+```{ojs}
+function geojsonFromWKB(wkb, data = null) {
+  if (data && wkb.length !== data.length) {
+    throw new Error(
+      `Data length mismatch: expected ${wkb.length}, got ${data.length}`,
+    );
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: wkb.map((wkbItem, i) => {
+      const geometry = wkx.Geometry.parse(Buffer.from(wkbItem)).toGeoJSON();
+      const geometryRewound = turfRewind(geometry, { reverse: true });
+      return {
+        type: "Feature",
+        geometry: geometryRewound,
+        properties: data ? data[i] : null,
+      };
+    }),
+  };
+}
+```
+
+```{ojs}
+geo_db = {
+  let db = await DuckDBClient.of({
+    admin1_geom: FileAttachment("atlas-region_admin1_simplified.parquet")
+  });
+  await db.query(`
+    CREATE VIEW admin2_geom AS
+    SELECT *
+    FROM read_parquet("${resolveWindowsCacheIssue(
+      "https://digital-atlas.s3.amazonaws.com/boundaries/atlas-region_admin2_simplified.parquet"
+    )}")`);
+  return db;
+}
+```
+
+```{ojs}
+import { resolveWindowsCacheIssue } from "72281be2f13a0a72";
+```
+
+```{ojs}
+Buffer = (await import("https://cdn.jsdelivr.net/npm/buffer@6.0.3/+esm"))
+  .Buffer;
+```
+
+```{ojs}
+wkx = require("https://bundle.run/wkx@0.5.0");
+```
+
+```{ojs}
+turfRewind = require("@turf/turf").then((t) => t.rewind);
+```
+
+```{ojs}
+md`***
+## Helpers
+*Functions and other good stuff*`;
+```
+
+```{ojs}
+md`---
+### Dynamic insights
+*functions for formatting results*`;
+```
+
+```{ojs}
+function filterByAdminNames(data) {
+  // filter down data by combined selected admin0/admin1/admin2 Admin Selections
+  // pass data from query, use tidyjs to filter by admin selection
+  const result = T.tidy(
+    data,
+    T.filter((d) => {
+      return (
+        d.admin0_name == adminSelections.selectAdmin0 &&
+        d.admin1_name == adminSelections.selectAdmin1 &&
+        d.admin2_name == adminSelections.selectAdmin2
+      );
+    }),
+  );
+  return result;
+}
+```
+
+```{ojs}
+// wrapper for format functions, show chosen default
+function formatWithDefault({
+  value = 1000,
+  format = (d) => d,
+  defaultValue = "---",
+  debug = false,
+} = {}) {
+  // apply a formatting function to a value
+  // return default value if undefined or null
+  if (value ?? true) {
+    return format(value);
+  } else {
+    return defaultValue;
+  }
+}
+```
+
+```{ojs}
+md`---
+### Data functions: format and transform
+*apply formatting to/transform a value*
+
+- Reference: [Intl.NumberFormat()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat)`;
+```
+
+```{ojs}
+md`### Transforms`;
+```
+
+```{ojs}
+// transform non-number to percent value
+transformPercent = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d * 100;
+};
+```
+
+```{ojs}
+md`### Formatting`;
+```
+
+```{ojs}
+// format non-number as percent
+formatPercentTenth = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d3.format(".1%")(d);
+};
+```
+
+```{ojs}
+// format non-number as percent
+formatPercentWhole = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d3.format(".0%")(d);
+};
+```
+
+```{ojs}
+// format US currency
+formatUSD = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+  style: "currency",
+  currency: "usd",
+}).format;
+```
+
+```{ojs}
+// format number, long notation
+formatNumCompactLong = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "long",
+  unitDisplay: "long",
+}).format;
+```
+
+```{ojs}
+// format number, long notation
+formatNumCompactShort = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+}).format;
+```
+
+```{ojs}
+md`---
+### Querying data
+*functions for querying data*`;
+```
+
+```{ojs}
+function getUniqueValues(col, tbl, db) {
+  // return unique values of from db tbl as a list
+  return db
+    .query(`select distinct ${col} from ${tbl}`)
+    .then((x) => x.map((d) => d[col]))
+    .then((r) => r.toArray());
+}
+```
+
+```{ojs}
+function bindTabularToGeo({
+  data = [],
+  dataBindColumn = "dataBindColumn",
+  geoData = [],
+  geoDataBindColumn = "geoDataBindColumn",
+}) {
+  // bind data to geojson
+  const index = new Map(data.map((d) => [d[dataBindColumn], d])); // map data by dataBindColumn
+  const geojson = JSON.parse(JSON.stringify(geoData)); // do a copy, rather than mutate
+  // join up data to geojson
+  for (const f of geojson.features) {
+    f.properties.data = index.get(f.properties[geoDataBindColumn]);
+  }
+  return geojson;
+}
+```
+
+```{ojs}
+md`## Imports`;
+```
+
+```{ojs}
+import { toc } from "@nebrius/indented-toc";
+```
+
+```{ojs}
+import { T } from "@pbeshai/tidyjs";
+```
+
+```{ojs}
+quick_insights_projected_1 = FileAttachment(
+  "quick_insights_projected_1@1.json",
+).json();
+```
+
+```{ojs}
+quick_insights_projected_2 = FileAttachment(
+  "quick_insights_projected_2@1.json",
+).json();
+```
+
+```{ojs}
+quick_insights_projected_3 = FileAttachment(
+  "quick_insights_projected_3_only_africa.json",
+).json();
+```

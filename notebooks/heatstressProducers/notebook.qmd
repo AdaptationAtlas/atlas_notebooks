@@ -1,0 +1,3707 @@
+---
+nb-title: "Understand Heat Stress on Producers"
+nb-author:
+  - Naia O Z
+---
+
+```{ojs}
+import { heroImage } from "/helpers/hero.js";
+hero_url = "./../../images/hsh.webp";
+
+hero = heroImage(notebookTitle, hero_url);
+html`${hero}`;
+```
+
+```{ojs}
+import { atlasTOC } from '/helpers/toc.ojs' 
+{
+  await nbText // force wait/reload with nbText to load so headings have correct labels/languages
+  return atlasTOC({
+      heading: `<b>${_lang({en:"In this notebook", fr:"Dans ce notebook"})}</b>`,
+      skip: [notebookTitle, "notebook-title", "Appendix", "source-code"]
+      })
+}
+```
+
+```{ojs}
+// pretty view of language toggle
+viewof prettyLanguageView = {
+  return Inputs.bind(
+    Inputs.radio(languages, {
+      label: _lang(nbText.legends.language),
+      format: (d) => d.label
+    }),
+    viewof language
+  );
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.sections.overview.title)}
+
+${_lang(nbText.sections.overview.intro)}`;
+```
+
+```{ojs}
+md`# ${_lang(nbText.sections.futureWorkforce.title)}
+
+${_lang(nbText.sections.futureWorkforce.intro)}`;
+```
+
+```{ojs}
+// format admin selections
+// bind to appendix inputs, add template to format
+geoImpactAdminSelectors = Inputs.form(
+  [
+    Inputs.bind(
+      Inputs.select(dataAdmin0, { label: adminRegions.labels.admin0, format: x => x.label }),
+      viewof selectAdmin0
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin1, { label: adminRegions.labels.admin1, format: x => x.label }),
+      viewof selectAdmin1
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin2, { label: adminRegions.labels.admin2, format: x => x.label }),
+      viewof selectAdmin2
+    )
+  ],
+  {
+    template: adminFormTemplate
+  }
+)
+```
+
+```{ojs}
+// define choices for the data value
+viewof selectGeoDataType = {
+  const options = [
+    {
+      key: "ag_workforce_data_2", // lookup id for data option
+      dataColumn: "corrected_ag_pop", // data column
+      label: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_2.label), // label
+      labelTip: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_2.labelTip), // label for tooltip
+      labelLegend: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_2.labelLegend), // label for legend
+      formatFunc: formatNumCompactShort({locale: language.locale}), // formatting function for raw data value
+      colorRange: colorScales.range.yellowGreen, // color range
+      colorUnknown: colorScales.unknown, // unknown fill color 
+    },
+    {
+      key: "ag_workforce_data_1",
+      dataColumn: "agw_total_mid",
+      label: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_1.label), 
+      labelTip: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_1.labelTip), 
+      labelLegend: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_1.labelLegend), 
+      formatFunc: d => `${formatNumCompactShort({locale: language.locale})(d)}%`,
+      colorRange: colorScales.range.redYellowGreen,
+      colorUnknown: colorScales.unknown,
+    },
+    {
+      key: "ag_workforce_data",
+      dataColumn: "agw_total",
+      label: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data.label), 
+      labelTip: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data.labelTip), 
+      labelLegend: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data.labelLegend), 
+      formatFunc: d => `${formatNumCompactShort({locale: language.locale})(d)}%`,
+      colorRange: colorScales.range.redYellowGreen,
+      colorUnknown: colorScales.unknown,
+    },
+    {
+      key: "ag_workforce_data_15",
+      dataColumn: "agw_total_mid_abs",
+      label: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_15.label), 
+      labelTip: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_15.labelTip), 
+      labelLegend: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_15.labelLegend), 
+      formatFunc: formatNumCompactShort({locale: language.locale}),
+      colorRange: colorScales.range.yellowGreen,
+      colorUnknown: colorScales.unknown,
+    },
+    {
+      key: "ag_workforce_data_10",
+      dataColumn: "agw_total_abs",
+      label: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_10.label), 
+      labelTip: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_10.labelTip), 
+      labelLegend: _lang(nbText.sections.futureWorkforce.map.mapLayer.values.ag_workforce_data_10.labelLegend), 
+      formatFunc: formatNumCompactShort({locale: language.locale}),
+      colorRange: colorScales.range.yellowGreen,
+      colorUnknown: colorScales.unknown,
+    },
+  ];
+  return Inputs.radio(options.sort((a,b) => b.key.localeCompare(a.key)), {
+    width: 300,
+    label: _lang(nbText.sections.futureWorkforce.map.mapLayer.title),
+    format: (x) => x.label,
+    value: options.find((t) => t.key === "ag_workforce_data_2")
+  });
+}
+```
+
+```{ojs}
+plotChoroplethGeoImpact = {
+  const data = mapDataGeoImpact;
+  const selector = selectGeoDataType;
+
+  const allValues = data.features.flatMap((d) =>
+    d.properties.data && d.properties.data[selector.dataColumn] !== undefined
+      ? [Math.abs(d.properties.data[selector.dataColumn])]
+      : []
+  );
+
+  const caption = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.futureWorkforce.map.caption),
+    [{ name: "selector", value: selector.label }]
+  );
+
+  // return plot
+  return Plot.plot({
+    width: mapWidth,
+    height: 600,
+    caption,
+    projection: {
+      type: "azimuthal-equal-area",
+      domain: data
+    },
+    color: {
+      legend: true,
+      label: selector.labelLegend,
+      range: selector.colorRange,
+      unknown: selector.colorUnknown,
+      tickFormat: (d) => {
+        // Check if dataColumn is one of the specified types
+        if (
+          selector.dataColumn === "corrected_ag_pop" ||
+          selector.dataColumn === "agw_total_mid_abs" ||
+          selector.dataColumn === "agw_total_abs"
+        ) {
+          // Use the provided formatFunc and append a "%" symbol for these types
+          return selector.formatFunc(d);
+        } else {
+          // For other types, just use the formatFunc without appending a "%" symbol
+          return `${selector.formatFunc(d)}`;
+        }
+      },
+      domain:
+        selector.dataColumn === "corrected_ag_pop" ||
+        selector.dataColumn === "agw_total_mid_abs" ||
+        selector.dataColumn === "agw_total_abs"
+          ? [0, Math.max(...allValues)]
+          : [-Math.max(...allValues), Math.max(...allValues)]
+    },
+    marks: [
+      // geo data
+      Plot.geo(data.features, {
+        fill: (d) => {
+          const dataColumn = selector.dataColumn;
+          const fillValue = d.properties.data
+            ? d.properties.data[dataColumn]
+            : null; // handle missing data
+          return fillValue;
+        },
+        stroke: "#fff",
+        strokeWidth: 0.5
+      }),
+      // admin2 highlight
+      // if Admin selection includes admin2, highlight section
+      Plot.geo(
+        adminSelections.selectAdmin2.value
+          ? data.features.filter(
+              (d) => d.properties.admin2_name == adminSelections.selectAdmin2.value
+            )
+          : [],
+        {
+          fill: null,
+          stroke: "#333",
+          strokeWidth: 1.5
+        }
+      ),
+      // geo pointer
+      Plot.geo(
+        data,
+        Plot.pointer(
+          Plot.centroid({
+            stroke: "#333",
+            strokeWidth: 1.5
+          })
+        )
+      ),
+      // tooltip
+      Plot.tip(
+        data.features,
+        Plot.pointer(
+          Plot.centroid({
+            channels: {
+              name: {
+                // region label, based on selection
+                label: Lang.toTitleCase(getLowerLevelAdminLabel()), // plot-level so inputs don't reload
+                value: (d) => _lang(td.admin0_name.values?.[d.properties.admin_name]) ?? d.properties.admin_name
+              },
+              data: {
+                label: selector.labelTip,
+                value: (d) => {
+                  const dataColumn = selector.dataColumn;
+                  const data = d.properties.data
+                    ? d.properties.data[dataColumn]
+                    : undefined;
+                  return data;
+                }
+              }
+            },
+            format: {
+              name: true,
+              data: (d) => `${selector.formatFunc(d)}`
+            }
+          })
+        )
+      )
+    ]
+  });
+}
+```
+
+```{ojs}
+buildInlineDownloadButton(
+  dataGeoImpact,
+  _lang(download_translation),
+  `agWorkforce_${selectAdmin0.label.replace(/\s/g, "")}`,
+);
+```
+
+```{ojs}
+headerQuickInsightsGeoImpact = {
+  const adminArticle = _lang(getAdminSelection()?.data?.article1);
+  const adminSelection = adminArticle ?? getAdminSelection().label;
+  const text = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.quickInsightsGeneral.header),
+    [{ name: "selection", value: adminSelection }]
+  );
+
+  return md`### ${text}`;
+}
+```
+
+```{ojs}
+// text insights for geo impact
+textDynamicInsights_geoImpact = {
+  const adminSelection = getAdmin0WithAdminSubParens({articleField: "article2"});
+  const i = dynamicInsights_geoImpact.insight;
+
+  const currentAgPop = i.totalAgPop_noformat;
+  // totalVop is the projected change in agricultural population by 2050
+  const projectedChange2050 = i.totalAgPop_2_50_noformat;
+  const projectedChange2030 = i.totalAgPop_2_30_noformat;
+
+  // string for percent change
+  const percChangeType = (d) =>
+    d >= 0
+      ? _lang(nbText.sections.futureWorkforce.quickInsights.direction.inc)
+      : _lang(nbText.sections.futureWorkforce.quickInsights.direction.dec);
+
+  // Calculate the new total agricultural population for 2050
+  const newTotalAgPop2050 = currentAgPop + projectedChange2050;
+
+  // Calculate the percentage change
+  let percentChange50 =
+    ((projectedChange2050 - currentAgPop) / currentAgPop) * 100;
+  let changeType50 = percChangeType(percentChange50);
+  percentChange50 = Math.abs(percentChange50).toFixed(1); // Keeping two decimals for readability
+
+  let percentChange30 =
+    ((projectedChange2030 - currentAgPop) / currentAgPop) * 100;
+  let changeType30 = percChangeType(percentChange30);
+  percentChange30 = Math.abs(percentChange30).toFixed(1); // Keeping two decimals for readability
+
+  let percentChange_5 =
+    ((i.totalAgPop_5_50_noformat - currentAgPop) / currentAgPop) * 100;
+  let changeType_5 = percChangeType(percentChange_5);
+  percentChange_5 = Math.abs(percentChange_5).toFixed(1); // Keeping two decimals for readability
+
+  let percentChange30_5 =
+    ((i.totalAgPop_5_30_noformat - currentAgPop) / currentAgPop) * 100;
+  let changeType30_5 = percChangeType(percentChange30_5);
+  percentChange30_5 = Math.abs(percentChange30_5).toFixed(1); // Keeping two decimals for readability
+
+  const selectedCountry = getAdminSelection0().value; // Function to get the selected country
+  const countriesWithoutData = [
+    "Burundi",
+    "Rwanda",
+    "Lesotho",
+    "Gabon",
+    "Eswatini",
+    "Equatorial Guinea"
+  ];
+
+  const insightBase = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.futureWorkforce.quickInsights.basePop),
+    [
+      { name: "geo", value: adminSelection },
+      { name: "total", value: i.totalAgPop }
+    ]
+  );
+  const insightPopChange = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.futureWorkforce.quickInsights.popChange),
+    [
+      { name: "change2030", value: i.totalAgPop_2_30 },
+      { name: "change2050", value: i.totalAgPop_2_50 },
+      { name: "direction2030", value: changeType30 },
+      { name: "direction2050", value: changeType50 },
+      { name: "perc2030", value: percentChange30 },
+      { name: "perc2050", value: percentChange50 }
+    ]
+  );
+  const insightPopScenario = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.futureWorkforce.quickInsights.popScenario),
+    [
+      { name: "pop2030", value: i.totalAgPop_5_30 },
+      { name: "pop2050", value: i.totalAgPop_5_50 },
+      { name: "direction", value: changeType30_5 },
+      { name: "perc2030", value: percentChange30_5 },
+      { name: "perc2050", value: percentChange_5 }
+    ]
+  )
+
+  // Check if the selected country is in the list of countries without data
+  if (countriesWithoutData.includes(selectedCountry)) {
+    return md`${_lang(nbText.sections.quickInsightsGeneral.noDataBlurb)}`;
+  } else {
+    return md`${styling}${insightBase}
+
+${insightPopChange}
+
+${insightPopScenario}`;
+  }
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.sections.heatStress.title)}`;
+```
+
+```{ojs}
+md`${_lang(nbText.sections.heatStress.intro)}`;
+```
+
+```{ojs}
+// format admin selections
+// bind to appendix inputs, add template to format
+Inputs.form(
+  [
+    Inputs.bind(
+      Inputs.select(dataAdmin0, { label: adminRegions.labels.admin0, format: x => x.label }),
+      viewof selectAdmin0
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin1, { label: adminRegions.labels.admin1, format: x => x.label }),
+      viewof selectAdmin1
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin2, { label: adminRegions.labels.admin2, format: x => x.label }),
+      viewof selectAdmin2
+    )
+  ],
+  {
+    template: adminFormTemplate
+  }
+)
+```
+
+```{ojs}
+viewof selectScenarioAndTimeframe = {
+  // scenario and timeframe
+
+  const data = [
+    {label: 'SSP245: 2030', scenario: 'SSP2', timeframe: '2030'},
+    {label: 'SSP245: 2050', scenario: 'SSP2', timeframe: '2050'},
+    {label: 'SSP585: 2030', scenario: 'SSP5', timeframe: '2030'},
+    {label: 'SSP585: 2050', scenario: 'SSP5', timeframe: '2050'},
+  ]
+  
+  return Inputs.select(data, {
+    label: _lang(nbText.legends.scenario),
+    format: x => x.label,
+    value: data.find(d => d.label === 'SSP245: 2050')
+  });
+}
+```
+
+```{ojs}
+viewof selectThreshold = {
+  // scenario and timeframe
+
+  const data = [
+    {label: '28°C', threshold: '28'},
+    {label: '30°C', threshold: '30'},
+  ]
+  
+  return Inputs.select(data, {
+    label: _lang(nbText.legends.threshold),
+    format: x => x.label,
+    value: data.find(d => d.label === '28')
+  });
+}
+```
+
+```{ojs}
+{
+  const _anyData = T.tidy(
+    data_hazardVoP,
+    T.groupBy(
+      [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "threshold",
+        "crop"
+      ],
+      [
+        T.summarize({
+          vop_any: T.sum("vop")
+        })
+      ]
+    )
+  );
+
+  const _dataWithAnyColumn = T.tidy(
+    data_hazardVoP,
+    T.leftJoin(_anyData, {
+      by: [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "crop",
+        "threshold"
+      ]
+    })
+  );
+
+  const data = _dataWithAnyColumn;
+  const dataAny = data.filter((d) => d.hazard == "any"); // combined
+  const dataBars = [
+    ...data.filter((d) => d.hazard !== "any" && d.vop !== 0) // remove the combined hazard
+  ];
+  const _formatNumber = formatNumCompactShort({locale: language.locale});
+  const xDomain = cropNames
+  .filter(d => {
+    const availableCrops = _.uniq(dataBars.map(d => d.crop));
+    return availableCrops.includes(d.crop);
+  })
+  .map(d => {
+    const upperBound = parseInt(d.cropName, 10); // Assuming cropName is the upper bound
+    const lowerBound = Math.max(0, upperBound - 5);
+    return `${lowerBound}-${upperBound}%`;
+  });
+
+  const maxValue = d3.max(dataBars, (d) => d.vop) * 1.5; // adding 10% buffer
+
+  return Plot.plot({
+    // caption: `To ensure that the details across all bins are visible without being dominated by the initial range, the 0-5% bin has been intentionally excluded from this visualization.`,
+    caption: _lang(nbText.sections.heatStress.barChart.caption),
+    width,
+    height: 600,
+    marginLeft: 40,
+    marginRight: 40,
+    marginBottom: 40,
+    color: {
+      domain: hazardPlotLookup.color.domain,
+      range: hazardPlotLookup.color.range,
+      legend: true
+    },
+    x: {
+      domain: xDomain,
+      label: _lang(nbText.sections.heatStress.barChart.xLabel),
+      labelStyle: { fontSize: '36px' }, // Hypothetical API
+    },
+    y: {
+      nice: true,
+      grid: true,
+      label: _lang(nbText.sections.heatStress.barChart.yLabel),
+      tickFormat: d => _formatNumber(d),
+    },
+    marks: [
+      // main x-axis
+      Plot.axisX({
+        tickSize: 0,
+        // lineWidth: 3,
+      }),
+      // pointer white-out
+      Plot.axisX(
+        Plot.pointerX({
+          label: null,
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 1,
+          tickSize: 0
+        })
+      ),
+      // bold pointer
+      Plot.axisX(
+        Plot.pointerX({
+          fontWeight: "bold",
+          label: null,
+          tickSize: 0
+        })
+      ),
+      // hazard component bars
+      Plot.barY(
+        dataBars,
+        Plot.stackY(
+          { order: hazardPlotLookup.color.domain },
+          {
+            y: (d) => d.vop,
+            x: d => {
+      const upperBound = parseInt(hazardPlotLookup.crops[d.crop], 10); // Assuming this gives the upper bound as before
+      const lowerBound = Math.max(0, upperBound - 5);
+      return `${lowerBound}-${upperBound}%`;
+    },
+            fill: (d) => hazardPlotLookup.names[d.hazard],
+            stroke: "#fff",
+            strokeWidth: 0.25
+          }
+        )
+      ),
+      // tooltip
+      Plot.tip(
+        dataBars,
+        Plot.pointerX(
+          Plot.stackY(
+            { order: hazardPlotLookup.color.domain },
+            {
+              y: (d) => d.vop,
+              x: d => {
+      const upperBound = parseInt(hazardPlotLookup.crops[d.crop], 10); // Assuming this gives the upper bound as before
+      const lowerBound = Math.max(0, upperBound - 5);
+      return `${lowerBound}-${upperBound}%`;
+    },
+              fill: (d) => hazardPlotLookup.names[d.hazard],
+              channels: {
+                hazard: {
+                  label: _lang(nbText.sections.heatStress.barChart.tooltip.period),
+                  value: (d) => hazardPlotLookup.names[d.hazard]
+                },
+                vop: {
+                  label: _lang(nbText.sections.heatStress.barChart.tooltip.exposed),
+                  value: (d) => {
+                    const vop = d.vop;
+                    return `(${vop})`;
+                  },
+                  value:  (d) =>  _formatNumber(d.vop)
+                }
+              },
+              format: {
+                x: false,
+                y: false,
+                fill: false,
+                vop: true,
+                hazard: true,
+                perc: true
+              }
+            }
+          )
+        )
+      ),
+      // total VoP, sidebar highlight
+      Plot.textY(
+        dataAny,
+        Plot.pointer({
+          y: maxValue,
+          x: d => {
+      const upperBound = parseInt(hazardPlotLookup.crops[d.crop], 10); // Assuming this gives the upper bound as before
+      const lowerBound = Math.max(0, upperBound - 5);
+      return `${lowerBound}-${upperBound}%`;
+    },
+          text: (d) => {
+            const value = d.vop_total;
+            return `${value}`;
+          },
+          textAnchor: "start",
+          dx: 6
+        })
+      )
+    ]
+  });
+}
+```
+
+```{ojs}
+{
+  const _anyData = T.tidy(
+    data_hazardVoP,
+    T.groupBy(
+      [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "threshold",
+        "crop"
+      ],
+      [
+        T.summarize({
+          vop_any: T.sum("vop")
+        })
+      ]
+    )
+  );
+
+  const _dataWithAnyColumn = T.tidy(
+    data_hazardVoP,
+    T.leftJoin(_anyData, {
+      by: [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "crop",
+        "threshold"
+      ]
+    })
+  );
+
+  const data = _dataWithAnyColumn;
+  return buildInlineDownloadButton(data, _lang(download_translation), `daysUnsafeHeatStress_${selectAdmin0.label.replace(/\s/g, "")}`)
+}
+```
+
+```{ojs}
+md`${_lang(nbText.sections.heatStress.figureBody)}`;
+```
+
+```{ojs}
+headerQuickInsightsBars = {
+  const adminArticle = _lang(getAdminSelection()?.data?.article1);
+  const adminSelection = adminArticle ?? getAdminSelection().label;
+  const text = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.quickInsightsGeneral.header),
+    [{ name: "selection", value: adminSelection }]
+  );
+
+  return md`### ${text}`;
+}
+```
+
+```{ojs}
+{
+  const crop = insight_totalExposedVop.filter(
+    (d) => d.totalExposedVop !== 0 && d.cropType == "crop"
+  )?.[0]?.["totalExposedVop"];
+
+  const totalExposedVopBaseline =
+    insight_totalExposedVop.find(
+      (d) => d.cropType === "crop" && d.hazard === "baseline"
+    )?.totalExposedVop || "no data";
+  const totalExposedVopProjection =
+    insight_totalExposedVop.find(
+      (d) => d.cropType === "crop" && d.hazard === "projection"
+    )?.totalExposedVop || "no data";
+  const totalExposedVopOver30 =
+    insight_totalExposedVop.find((d) => d.hazard === "projection")
+      ?.totalExposedVopOver30 || 0;
+  const totalExposedVopOver50 =
+    insight_totalExposedVop.find((d) => d.hazard === "projection")
+      ?.totalExposedVopOver50 || 0;
+  const totalExposedVopOver30_b =
+    insight_totalExposedVop.find((d) => d.hazard === "baseline")
+      ?.totalExposedVopOver30 || 0;
+  const totalExposedVopOver50_b =
+    insight_totalExposedVop.find((d) => d.hazard === "baseline")
+      ?.totalExposedVopOver50 || 0;
+
+  const formatVop = (vop) =>
+    vop === "no data"
+      ? vop
+      : formatNumCompactShort({ locale: language.locale })(vop);
+
+  function findTopCropByHazard(hazardType) {
+    const filteredCrops = T.tidy(
+      data_selectedHazardCropType,
+      T.select(["cropType", "crop", "vop", "hazard"]),
+      T.filter((d) => d.cropType == "crop" && d.hazard == hazardType),
+      T.sliceMax(1, "vop")
+    );
+
+    return filteredCrops[0]; // Assuming there's at least one entry after filtering
+  }
+
+  // Calculate topCrop_b and topCrop_p using the adjusted function
+  const topCrop_b = findTopCropByHazard("baseline");
+  const topCrop_p = findTopCropByHazard("projection");
+
+  const lowerBound_b = hazardPlotLookup.crops[topCrop_b?.["crop"]] - 5;
+  const upperBound_b = hazardPlotLookup.crops[topCrop_b?.["crop"]];
+
+  const lowerBound_p = hazardPlotLookup.crops[topCrop_p?.["crop"]] - 5;
+  const upperBound_p = hazardPlotLookup.crops[topCrop_p?.["crop"]];
+
+  const missingValue = "--- no data for that bin ---";
+
+  function showResult(value, format) {
+    if (value === null || value === undefined) return missingValue;
+    return format(value);
+  }
+
+  function findMedianCropWithVop(data) {
+    const sortedData = [...data]
+      .filter((d) => !isNaN(d.vop))
+      .sort((a, b) => a.vop - b.vop);
+    const medianIndex = Math.floor(sortedData.length / 2);
+
+    if (sortedData.length === 0) return { crop: undefined, vop: undefined };
+
+    return sortedData.length % 2 !== 0
+      ? sortedData[medianIndex]
+      : sortedData[medianIndex];
+  }
+  const baselineData = data_selectedHazardCropType.filter(
+    (d) => d.hazard === "baseline" && d.cropType == "crop"
+  );
+  const projectionData = data_selectedHazardCropType.filter(
+    (d) => d.hazard === "projection"
+  );
+
+  const medianCropInfoBaseline = findMedianCropWithVop(baselineData);
+  const medianCropInfoProjection = findMedianCropWithVop(projectionData);
+
+  const getBinBounds = (cropValue) => {
+    // Assuming cropValue directly relates to the bin, adjust as necessary for your logic
+    const lowerBound = cropValue - (cropValue % 5); // Adjust based on how bins are defined
+    const upperBound = lowerBound + 5;
+    return { lowerBound, upperBound };
+  };
+
+  const medianCropBaselineBounds = getBinBounds(medianCropInfoBaseline.crop);
+  const medianCropProjectionBounds = getBinBounds(
+    medianCropInfoProjection.crop
+  );
+
+  // Example function to convert percentages to months
+  function percentToMonths(percent) {
+    return (percent * 12) / 100;
+  }
+
+  // Calculate months for baseline and projection median bins
+  const baselineMonthsLower = percentToMonths(
+    medianCropBaselineBounds.lowerBound
+  );
+  const baselineMonthsUpper = percentToMonths(
+    medianCropBaselineBounds.upperBound
+  );
+  const projectionMonthsLower = percentToMonths(
+    medianCropProjectionBounds.lowerBound
+  );
+  const projectionMonthsUpper = percentToMonths(
+    medianCropProjectionBounds.upperBound
+  );
+
+  let percentChange =
+    ((totalExposedVopOver50 - totalExposedVopOver50_b) /
+      totalExposedVopOver50_b) *
+    100;
+  percentChange = Math.abs(percentChange).toFixed(1);
+  let changeType = percentChange >= 0 ? "an increase" : "a decrease";
+
+  let percentChange2 =
+    ((totalExposedVopOver30 - totalExposedVopOver30_b) /
+      totalExposedVopOver30_b) *
+    100;
+  percentChange2 = Math.abs(percentChange2).toFixed(1);
+  let changeType2 = percentChange >= 0 ? "an increase" : "a decrease";
+
+  const scenarioLabel =
+    selectScenarioAndTimeframe.scenario === "SSP2" ? "SSP2 4.5" : "SSP5 8.5";
+
+  // const over30Insight = `For the baseline period, **${formatVop(
+  //   totalExposedVopOver50_b
+  // )}** people experienced unsafe working conditions for at least **half of the days** in the year. Under the scenario **${scenarioLabel}** and year **${
+  //   selectScenarioAndTimeframe.timeframe
+  // }**, it's expected to rise to **${formatVop(
+  //   totalExposedVopOver50
+  // )}** people.`;
+
+  const insightOver30 = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.heatStress.quickInsights.overview),
+    [
+      { name: "baseRisk", value: formatVop(totalExposedVopOver30_b) },
+      { name: "scenario", value: scenarioLabel },
+      { name: "year", value: selectScenarioAndTimeframe.timeframe },
+      { name: "projectionRisk", value: formatVop(totalExposedVopOver30) }
+    ]
+  );
+
+  const insightOver50 = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.heatStress.quickInsights.half),
+    [
+      { name: "baseline", value: formatVop(totalExposedVopOver50_b) },
+      { name: "scenario", value: scenarioLabel },
+      { name: "year", value: selectScenarioAndTimeframe.timeframe },
+      { name: "projection", value: formatVop(totalExposedVopOver50) }
+    ]
+  );
+
+  // const over50Insight = `For over **100 days** in a year, the people at risk for the baseline were **${formatVop(
+  //   totalExposedVopOver30_b
+  // )}**; under the scenario **${scenarioLabel}** and year **${
+  //   selectScenarioAndTimeframe.timeframe
+  // }**, it ascends to **${formatVop(totalExposedVopOver30)}**.`;
+
+  const medianExplanation = `When we say we're 'looking at the median', we mean focusing on the group in the exact middle when arranging everyone from the least to the most exposed to heat stress over the year. It's like finding the middle point in a line of people sorted by how long they're exposed to high heat.`;
+
+  const selectedCountry = getAdminSelection0().value; // Function to get the selected country
+  const countriesWithoutData = [
+    "Burundi",
+    "Rwanda",
+    "Lesotho",
+    "Gabon",
+    "Eswatini",
+    "Equatorial Guinea"
+  ];
+
+  // Check if the selected country is in the list of countries without data
+  if (countriesWithoutData.includes(selectedCountry)) {
+    return md`${_lang(nbText.sections.quickInsightsGeneral.noDataBlurb)}`;
+  } else {
+    return md`${insightOver30}
+
+${insightOver50}`;
+  }
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.sections.workingHours.title)}
+
+${_lang(nbText.sections.workingHours.intro)}`;
+```
+
+```{ojs}
+viewBindAdminSelectors = // format admin selections
+// bind to appendix inputs, add template to format
+Inputs.form(
+  [
+    Inputs.bind(
+      Inputs.select(dataAdmin0, { label: adminRegions.labels.admin0, format: x => x.label }),
+      viewof selectAdmin0
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin1, { label: adminRegions.labels.admin1, format: x => x.label }),
+      viewof selectAdmin1
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin2, { label: adminRegions.labels.admin2, format: x => x.label }),
+      viewof selectAdmin2
+    )
+  ],
+  {
+    template: adminFormTemplate
+  }
+)
+```
+
+```{ojs}
+viewof selectScenarioAndTimeframe2 = {
+  // scenario and timeframe
+
+  const data = [
+    // {label: 'SSP245: 2030', scenario: 'SSP2', timeframe: '2030'},
+    {label: 'SSP245: 2050', scenario: 'SSP245', timeframe: '2050'},
+    // {label: 'SSP585: 2030', scenario: 'SSP5', timeframe: '2030'},
+    {label: 'SSP585: 2050', scenario: 'SSP585', timeframe: '2050'},
+  ]
+  
+  return Inputs.select(data, {
+    label: _lang(nbText.legends.scenario),
+    format: x => x.label,
+    value: data.find(d => d.label === 'SSP245: 2050')
+  });
+}
+```
+
+```{ojs}
+viewof selectThreshold2 = {
+  // threshold
+
+  const data = [
+    {label: '28°C', threshold: '28'},
+    {label: '30°C', threshold: '30'},
+    {label: '32°C', threshold: '32'},
+  ]
+  
+  return Inputs.select(data, {
+    label: _lang(nbText.legends.threshold),
+    format: x => x.label,
+    value: data.find(d => d.label === '30')
+  });
+}
+```
+
+```{ojs}
+viewof radios = {
+  const data = [
+    {
+      label: Lang.toTitleCase(_lang(nbText.legends.seasonTypes.planting)),
+      value: "planting"
+    },
+    {
+      label: Lang.toTitleCase(_lang(nbText.legends.seasonTypes.harvesting)),
+      value: "harvesting"
+    }
+  ];
+  return Inputs.radio(data, {
+    label: _lang(nbText.legends.season),
+    format: (x) => x.label,
+    value: data.find((x) => x.value == "planting")
+  });
+}
+```
+
+```{ojs}
+plotHourSeasonLoss = {
+  const _anyData = T.tidy(
+    data_hourlyStress,
+    T.groupBy(
+      [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "threshold",
+        "hour_day"
+      ],
+      [
+        T.summarize({
+          vop_any: T.mean("delta")
+        })
+      ]
+    )
+  );
+
+  const _dataWithAnyColumn = T.tidy(
+    data_hourlyStress,
+    T.leftJoin(_anyData, {
+      by: [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "hour_day",
+        "threshold"
+      ]
+    })
+  );
+
+  const data = _dataWithAnyColumn.filter(d => d.hazard == radios.value);
+  const dataAny = data.filter((d) => d.hazard == "any"); // combined
+  const dataBars = [
+    ...data.filter((d) => d.hazard !== "any" && d.delta !== 0) // remove the combined hazard
+  ];
+
+  const _formatPercent = (num) => {
+  return `${num.toFixed(1)}%`;
+};
+  const xDomain = hourlyNames.map(d => d.hourlyName);
+
+  const maxValue = d3.max(dataBars, (d) => d.delta) * 1.75; // adding 10% buffer
+
+  return Plot.plot({
+    // caption: `The data on the plot above is stacked for visualization purposes, but percentages are based on different parts of the year, depending on the season.`,
+    width: 800,
+    height: 500,
+    marginLeft: 40,
+    marginRight: 5,
+    marginBottom: 35,
+    color: {
+      domain: hourlyPlotLookup.color.domain,
+      range: hourlyPlotLookup.color.range,
+      legend: false
+    },
+    x: {
+      domain: xDomain,
+      label: _lang(nbText.sections.workingHours.barChart.xLabel)
+    },
+    y: {
+      domain: [0, maxValue],
+      grid: true,
+      label: _lang(nbText.sections.workingHours.barChart.yLabel),
+      // tickSize: 0, // Set tick size to 0 to hide the ticks
+      // tickFormat: () => "", // Return an empty string to hide tick labels
+    },
+    marks: [
+      // main y-axis
+      Plot.axisX({
+        tickSize: 0,
+      }),
+      // pointer white-out
+      Plot.axisX(
+        Plot.pointerX({
+          label: null,
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0
+        })
+      ),
+      // bold pointer
+      Plot.axisX(
+        Plot.pointerX({
+          label: null,
+          fontWeight: "bold",
+          tickSize: 0
+        })
+      ),
+      // hazard component bars
+      Plot.barY(
+        dataBars,
+        Plot.stackY(
+          { order: hourlyPlotLookup.color.domain },
+          {
+            y: (d) => d.delta,
+            x: (d) => hourlyPlotLookup.hours[d.hour_day],
+            fill: (d) => hourlyPlotLookup.names[d.hazard],
+            stroke: "#fff",
+            strokeWidth: 0.1,
+            width: 1 // Adjust this value to control the thickness of the bars
+          }
+        )
+      ),
+      // tooltip
+      Plot.tip(
+        dataBars,
+        Plot.pointerX(
+          Plot.stackY(
+            { order: hourlyPlotLookup.color.domain },
+            {
+              y: (d) => d.delta,
+              x: (d) => hourlyPlotLookup.hours[d.hour_day],
+              fill: (d) => hourlyPlotLookup.names[d.hazard],
+              channels: {
+                hazard: {
+                  label: _lang(nbText.sections.workingHours.barChart.tooltip.period),
+                  value: (d) => hourlyPlotLookup.names[d.hazard]
+                },
+                delta: {
+                  label: _lang(nbText.sections.workingHours.barChart.tooltip.perc),
+                  value: (d) => {
+                    const delta_num = d.delta;
+                    return `(${delta_num})`;
+                  },
+                  value:  (d) =>  _formatPercent(d.delta)
+                }
+              },
+              format: {
+                x: false,
+                y: false,
+                fill: false,
+                delta: true,
+                hazard: true,
+                perc: true
+              }
+            }
+          )
+        )
+      ),
+      // total VoP, sidebar highlight
+      Plot.textY(
+        dataAny,
+        Plot.pointerX({
+          y: maxValue,
+          x: (d) => hourlyPlotLookup.hours[d.hour_day],
+          text: (d) => {
+            const value = d.delta_total;
+            return `${value}`;
+          },
+          textAnchor: "start",
+          dx: 5
+        })
+      )
+    ]
+  });
+}
+```
+
+```{ojs}
+{
+  let data = T.tidy(
+    data_hourlyStress,
+    T.groupBy(
+      [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "threshold",
+        "hour_day"
+      ],
+      [
+        T.summarize({
+          vop_any: T.mean("delta")
+        })
+      ]
+    )
+  );
+  return buildInlineDownloadButton(data, _lang(download_translation), `hourlyHumanHeatStress_${selectAdmin0.label.replace(/\s/g, "")}`)
+  }
+```
+
+```{ojs}
+headerQuickInsightsHourly = {
+  const adminArticle = _lang(getAdminSelection()?.data?.article1);
+  const adminSelection = adminArticle ?? getAdminSelection().label;
+  const text = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.quickInsightsGeneral.header),
+    [{ name: "selection", value: adminSelection }]
+  );
+
+  return md`### ${text}
+${styling}`;
+}
+```
+
+```{ojs}
+insightsHourSeasonLoss = {
+  const i = dynamicInsights_geoImpact.insight;
+
+  const currentAgPop = i.totalAgPop_noformat;
+  // totalVop is the projected change in agricultural population by 2050
+
+  const projectedChange2050 = i.totalAgPop_5_50_noformat;
+  const projectedChange2030 = i.totalVopMid_noformat;
+  const pop_2050 = currentAgPop + projectedChange2050;
+  const crop = insight_totalExposedHourly.filter(
+    (d) => d.totalExposedHourly !== 0 && d.hour_dayType == "hour_day"
+  )?.[0]?.["totalExposedHourly"];
+
+  const pop_sum2 = insight_totalExposedHourly.filter(
+    (d) => d.corrected_pop_sum !== 0 && d.hour_dayType == "hour_day"
+  )?.[0]?.["corrected_pop_sum"];
+
+  const totalPercentHarvesting =
+    insight_totalExposedHourly.find(
+      (d) => d.hour_dayType === "hour_day" && d.hazard === "harvesting"
+    )?.totalExposedHourly || "no data";
+  const totalPercentPlanting =
+    insight_totalExposedHourly.find(
+      (d) => d.hour_dayType === "hour_day" && d.hazard === "planting"
+    )?.totalExposedHourly || "no data";
+
+  const formatVop = (vop) =>
+    vop === "no data"
+      ? vop
+      : formatNumCompactShort({ locale: language.locale })(vop);
+
+  const topHour_day = insight_topHourly.filter(
+    (d) => d.delta !== 0 && d.hour_dayType == "hour_day"
+  )?.[0];
+
+  const missingValue = "--- no data for that bin ---";
+
+  function showResult(value, format) {
+    if (value === null || value === undefined) return missingValue;
+    return format(value);
+  }
+
+  // Find a row for each hazard type to get period and total_days
+  const harvestingInsight = insight_totalExposedHourly.find(
+    (d) => d.hazard === "harvesting"
+  );
+  const plantingInsight = insight_totalExposedHourly.find(
+    (d) => d.hazard === "planting"
+  );
+
+  const periodHarvesting =
+    insight_totalExposedHourly.find(
+      (d) => d.hour_dayType === "hour_day" && d.hazard === "harvesting"
+    )?.period || "no data";
+  const totalDaysHarvesting = harvestingInsight
+    ? harvestingInsight.days_period
+    : "no data";
+  const periodPlanting = plantingInsight ? plantingInsight.period : "no data";
+  const totalDaysPlanting = plantingInsight
+    ? plantingInsight.days_period
+    : "no data";
+
+  const pop_sum = harvestingInsight
+    ? harvestingInsight.corrected_pop_sum
+    : "no data";
+  const delta_mean = harvestingInsight
+    ? harvestingInsight.delta_pop_mean
+    : "no data";
+
+  const totalPercentHarvestingNumeric =
+    totalPercentHarvesting !== "no data"
+      ? parseFloat(totalPercentHarvesting)
+      : 0;
+  const totalDaysHarvestingNumeric =
+    totalDaysHarvesting !== "no data" ? parseFloat(totalDaysHarvesting) : 0;
+  const totalPercentPlantingNumeric =
+    totalPercentPlanting !== "no data" ? parseFloat(totalPercentPlanting) : 0;
+  const totalDaysPlantingNumeric =
+    totalDaysPlanting !== "no data" ? parseFloat(totalDaysPlanting) : 0;
+
+  const pop_sumNumeric = pop_2050 !== "no data" ? parseFloat(pop_2050) : 0;
+
+  const totalHoursLostHarvest =
+    (totalPercentHarvestingNumeric / 100) *
+    totalDaysHarvestingNumeric *
+    pop_sumNumeric;
+  const totalHoursLostPlanting =
+    (totalPercentPlantingNumeric / 100) *
+    totalDaysPlantingNumeric *
+    pop_sumNumeric;
+
+  const totalWorkingDaysLostHarvest = totalHoursLostHarvest / 8; // assuming 8h working day
+  const totalWorkingDaysLostPlanting = totalHoursLostPlanting / 8; // assuming 8h working day
+
+  const totalWorkingDaysLostHarvestFormatted = formatVop(
+    totalWorkingDaysLostHarvest.toFixed(1)
+  ); // formatting
+  const totalWorkingDaysLostPlantingFormatted = formatVop(
+    totalWorkingDaysLostPlanting.toFixed(1)
+  ); // formatting
+
+
+  const insightIntro = _lang(nbText.sections.workingHours.quickInsights.intro);
+  const insightBody = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.workingHours.quickInsights.body),
+    [
+      { name: "scenario", value: selectScenarioAndTimeframe2.scenario },
+      { name: "year", value: selectScenarioAndTimeframe2.timeframe },
+      { name: "totalHours", value: formatVop(totalHoursLostHarvest) },
+      { name: "daysHarvest", value: formatVop(totalDaysHarvesting) },
+      { name: "wholeWorkingDays", value: totalWorkingDaysLostHarvestFormatted }
+    ]
+  );
+  const insightLostDays = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.sections.workingHours.quickInsights.lostDays),
+    [
+      { name: "period", value: formatVop(totalDaysPlanting) },
+      { name: "geo", value: getAdmin0WithAdminSubParens({articleField: "article1"}) },
+      { name: "lostDays", value: totalWorkingDaysLostPlantingFormatted }
+    ]
+  );
+
+  const selectedCountry = getAdminSelection0().value; // Function to get the selected country
+  const countriesWithoutData = [
+    "Burundi",
+    "Rwanda",
+    "Lesotho",
+    "Gabon",
+    "Eswatini",
+    "Equatorial Guinea"
+  ];
+
+  // Check if the selected country is in the list of countries without data
+  if (countriesWithoutData.includes(selectedCountry)) {
+    return md`${_lang(nbText.sections.quickInsightsGeneral.noDataBlurb)}`;
+  } else {
+    return md` ${insightIntro} 
+
+${insightBody}
+
+${insightLostDays}
+
+`;
+  }
+}
+```
+
+```{ojs}
+md`# ${_lang(nbText.sections.summary.title)}
+
+${_lang(nbText.sections.summary.intro)}`;
+```
+
+```{ojs}
+md`# ${_lang(nbText.sections.methods.title)}
+
+## ${_lang(nbText.sections.methods.agWorkforce.title)}
+${_lang(nbText.sections.methods.agWorkforce.body)}
+
+## ${_lang(nbText.sections.methods.heatStress.title)}
+${_lang(nbText.sections.methods.heatStress.body)}
+
+## ${_lang(nbText.sections.methods.hourlyExposure.title)}
+${_lang(nbText.sections.methods.hourlyExposure.body)}
+
+# ${_lang(nbText.sections.methods.additionalMethods.title)}
+${_lang(nbText.sections.methods.additionalMethods.body)}
+
+${_lang(nbText.sections.methods.additionalMethods.linkNote)}
+
+## ${_lang(nbText.sections.methods.citation.title)}
+${_lang(nbText.sections.methods.citation.body)}`;
+```
+
+# Appendix {.hidden}
+
+```{ojs}
+md`---
+### Support notebook
+[Support Notebook](https://observablehq.com/@periscopic/ab-atlas-spotlight-support): used for imports across spotlights.`;
+```
+
+```{ojs}
+md`---
+### Translation
+_Notebook language handling and main text_`;
+```
+
+```{ojs}
+import { Lang } from "7d46679f7d0d917e";
+```
+
+```{ojs}
+languages = [
+  { key: "en", label: "English", locale: "en-US" },
+  { key: "fr", label: "Français", locale: "fr-FR" },
+];
+```
+
+```{ojs}
+// get the default language key from parameter, or use default
+defaultLangKey = {
+  const name = "lang";
+  const list = languages.map((d) => d.key);
+  const defaultKey = "en";
+
+  const queryParam = await Lang.getParamFromList({ name, list });
+
+  return queryParam ?? defaultKey;
+}
+```
+
+```{ojs}
+// helper shorthand for Lang text-getting
+_lang = Lang.lg(language.key);
+```
+
+```{ojs}
+// main toggle of language key
+viewof language = Inputs.radio(languages, {
+  label: "Main language toggle",
+  format: (d) => d.key,
+  value: languages.find((x) => x.key === defaultLangKey),
+})
+```
+
+```{ojs}
+nbText = {
+  return {
+    legends: {
+      language: {
+        en: "language",
+        fr: "langue"
+      },
+      toc: {
+        en: "in this notebook",
+        fr: "dans ce notebook"
+      },
+      adminSelections: {
+        country: {
+          en: "country",
+          fr: "pays"
+        },
+        region: {
+          en: "region",
+          fr: "région"
+        },
+        subregion: {
+          en: "subregion",
+          fr: "sous-région"
+        }
+      },
+      scenario: {
+        en: "scenario",
+        fr: "scénario"
+      },
+      threshold: {
+        en: "threshold",
+        fr: "seuil"
+      },
+      season: {
+        en: "season",
+        fr: "saison"
+      },
+      seasonTypes: {
+        planting: {
+          en: "planting",
+          fr: "plantation"
+        },
+        harvesting: {
+          en: "harvesting",
+          fr: "récolte"
+        }
+      }
+    },
+    sections: {
+      quickInsightsGeneral: {
+        header: {
+          en: "Quick Insights for :::selection:::",
+          fr: "Aperçu Rapide pour :::selection:::"
+        },
+        noDataBlurb: {
+          en: "Currently, there is no available data for this country. Please, select another country.",
+          fr: "Actuellement, aucune donnée n’est disponible pour ce pays. Veuillez sélectionner un autre pays."
+        }
+      },
+      overview: {
+        title: {
+          en: "Overview",
+          fr: "Vue d’Ensemble"
+        },
+        intro: {
+          en: "African food systems depend on manual labour for production, distribution, and processing. Economic development is leading to changes in the structure and size of the labour force. This change, in the number and size of the agricultural workforce, is happening in parallel to climate change. The intersection of these two drivers together pose a range of risks to the African continent's food systems. This notebook aims to communicate the size of the agricultural workforce at risk to extreme heat today, and in the future. It presents a new insight into this risk leveraging a range of new datasets and highlights how the workday for different labourers will be disrupted by climate change in the future. You can follow the narrative for the continent as a whole, or select individual countries for geography-specific statistics.",
+          fr: "Les systèmes alimentaires africains dépendent du travail manuel pour la production, la distribution et la transformation. Le développement économique entraîne des changements dans la structure et la taille de la population active. Ce changement, dans le nombre et la taille de la main-d’œuvre agricole, se produit parallèlement au changement climatique. L’intersection de ces deux facteurs présente une série de risques pour les systèmes alimentaires du continent africain. Ce carnet vise à communiquer la taille de la main d’œuvre agricole exposée aujourd’hui et à l’avenir à la chaleur extrême. Il présente un nouvel aperçu de ce risque en exploitant une série de nouveaux ensembles de données et souligne comment la journée de travail des différents travailleurs sera perturbée par le changement climatique à l'avenir. Vous pouvez suivre le récit du continent dans son ensemble ou sélectionner des pays individuels pour obtenir des statistiques spécifiques à la géographie."
+        }
+      },
+      futureWorkforce: {
+        title: {
+          en: "The Future of the Agricultural Workforce",
+          fr: "L’avenir de la Main-d’Œuvre Agricole"
+        },
+        intro: {
+          en: "The agricultural workforce covers the entire employed portion of the employable population involved in the agriculture sector. In the African continent, the vast majority of these are farmers. However, the number of farmers and the size of the workforce is not static, and depends on structural factors which drive rural population growth, push or pull the rural population towards urban areas over time.  Here, you can explore how the size of the agricultural workforce today and how it will change as a result of these factors in the future.",
+          fr: "La main d’œuvre agricole couvre l’ensemble de la part occupée de la population employable impliquée dans le secteur agricole. Sur le continent africain, la grande majorité d’entre eux sont des agriculteurs. Cependant, le nombre d’agriculteurs et la taille de la main d’œuvre ne sont pas statiques et dépendent de facteurs structurels qui stimulent la croissance de la population rurale, poussent ou attirent la population rurale vers les zones urbaines au fil du temps. Ici, vous pouvez découvrir comment la taille de la main-d’œuvre agricole aujourd’hui et comment elle évoluera en raison de ces facteurs à l’avenir."
+        },
+        map: {
+          caption: {
+            en: `Grey regions signal lack of :::selector::: data`,
+            fr: `Les régions grises signalent un manque de données sur la :::selector:::`
+          },
+          mapLayer: {
+            title: {
+              en: "Map Layer",
+              fr: "Couche de Carte"
+            },
+            values: {
+              ag_workforce_data_2: {
+                label: {
+                  en: "Ag population baseline (circa 2005)",
+                  fr: "Référence de la population agricole (vers 2005)"
+                },
+                labelTip: {
+                  en: "Ag population",
+                  fr: "Population agricole"
+                },
+                labelLegend: {
+                  en: "Ag population",
+                  fr: "Population agricole"
+                }
+              },
+              ag_workforce_data_1: {
+                label: {
+                  en: "Percentage change by 2030",
+                  fr: "Pourcentage de changement d’ici 2030"
+                },
+                labelTip: {
+                  en: "Population change by 2030",
+                  fr: "Changement en population d’ici 2030"
+                },
+                labelLegend: {
+                  en: "Population change by 2030 (%)",
+                  fr: "Changement en population d’ici 2030 (%)"
+                }
+              },
+              ag_workforce_data: {
+                label: {
+                  en: "Percentage change by 2050",
+                  fr: "Pourcentage de changement d’ici 2050"
+                },
+                labelTip: {
+                  en: "Population change by 2050",
+                  fr: "Changement en population d’ici 2050"
+                },
+                labelLegend: {
+                  en: "Population change by 2050 (%)",
+                  fr: "Changement en population d’ici 2050 (%)"
+                }
+              },
+              ag_workforce_data_15: {
+                label: {
+                  en: "Ag population in 2030",
+                  fr: "Population agricole en 2030"
+                },
+                labelTip: {
+                  en: "Ag population in 2030",
+                  fr: "Population agricole en 2030"
+                },
+                labelLegend: {
+                  en: "Ag population in 2030",
+                  fr: "Population agricole en 2030"
+                }
+              },
+              ag_workforce_data_10: {
+                label: {
+                  en: "Ag population in 2050",
+                  fr: "Population agricole en 2050"
+                },
+                labelTip: {
+                  en: "Ag population in 2050",
+                  fr: "Population agricole en 2050"
+                },
+                labelLegend: {
+                  en: "Ag population in 2050",
+                  fr: "Population agricole en 2050"
+                }
+              }
+            }
+          }
+        },
+        quickInsights: {
+          direction: {
+            inc: {
+              en: "an increase",
+              fr: "une augmentation"
+            },
+            dec: {
+              en: "a decrease",
+              fr: "une diminution"
+            }
+          },
+          basePop: {
+            en: `**:::geo:::**’s total agricultural population is **:::total:::** for the baseline year, circa 2005.`,
+            fr: `La population agricole totale **:::geo:::** est de **:::total:::** pour l’année de référence, vers 2005.`
+          }, 
+          popChange: {
+            en: `The total agricultural population is expected to change to **:::change2030:::** by 2030, and to **:::change2050:::** by 2050, under SSP245. These represent **:::direction2030:::** of **:::perc2030:::%** and **:::direction2050:::** of **:::perc2050:::%**, respectively.`,
+            fr: `La population agricole totale devrait passer à **:::change2030:::** d’ici 2030 et à **:::change2050:::** d’ici 2050, dans le cadre du SSP245. Cela représente **:::direction2030:::** de **:::perc2030:::%** et **:::direction2050:::** de **:::perc2050:::%**, respectivement.`
+          },
+          popScenario: {
+            en: `Under SSP585, the total agricultural population will be **:::pop2030:::** by 2030 and **:::pop2050:::** by 2050. These represent **:::direction:::** of **:::perc2030:::%** and **:::perc2050:::%**, respectively.`,
+            fr: `Dans le cadre du SSP585, la population agricole totale sera de **:::pop2030:::** d'ici 2030 et de **:::pop2050:::** d'ici 2050. Cela représente **:::direction:::** de **:::perc2030:::%** et **:::perc2050:::%**, respectivement.`
+          }
+        }
+      },
+      heatStress: {
+        title: {
+          en: "Heat Stress in Numbers",
+          fr: "Le Stress Thermique en Chiffres"
+        },
+        intro: {
+          en: "An important question is how the increases in agricultural workforce on the African continent will be affected by climate change. A key indicator of climate change impacts on human well being is heat stress. The level of heat stress experienced by a person depends not only on temperature but also on humidity, which are together often represented in terms of Wet Bulb Globe Temperature, where thresholds exceeding 28°C are considered harmful, and those exceeding 32°C extremely harmful. Use the dropdowns below to explore how many days in the year the agricultural workforce will be exposed to harmful heat stress for specific geographies, temperature thresholds and climate change scenarios.",
+          fr: "Une question importante est de savoir comment les augmentations de la main-d'œuvre agricole sur le continent africain seront affectées par le changement climatique. Un indicateur clé des impacts du changement climatique sur le bien-être humain est le stress thermique. Le niveau de stress thermique ressenti par une personne dépend non seulement de la température mais aussi de l'humidité, qui sont souvent représentés conjointement en termes de température du globe humide, où des seuils dépassant 28°C sont considérés comme nuisibles, et ceux dépassant 32°C extrêmement nuisibles. Utilisez les menus déroulants ci-dessous pour explorer combien de jours dans l'année la main-d'œuvre agricole sera exposée à un stress thermique nuisible pour des géographies spécifiques, des seuils de température et des scénarios de changement climatique."
+        },
+        barChart: {
+          caption: {
+            en: "To ensure that the details across all bins are visible without being dominated by the initial range, the 0-5% bin has been intentionally excluded from this visualization.",
+            fr: "Pour garantir que les détails dans tous les groupes sont visibles sans être dominés par la plage initiale, le groupe 0-5 % a été intentionnellement exclu de cette visualisation."
+          },
+          group: {
+            baseline: {
+              en: "Baseline",
+              fr: "Référence"
+            },
+            projection: {
+              en: "Projection",
+              fr: "Projection"
+            }
+          },
+          xLabel: {
+            en: "Percent of Year Exceeding Safe Working Conditions",
+            fr: "Pourcentage de l'année dépassant les conditions de travail sécuritaires"
+          },
+          yLabel: {
+            en: "People Exposed",
+            fr: "Personnes Exposées"
+          },
+          tooltip: {
+            exposed: {
+              en: "Ag pop exposed",
+              fr: "Population agricole exposée"
+            },
+            period: {
+              en: "Period",
+              fr: "Période"
+            }
+          }
+        },
+        figureBody: {
+          en: "The figure presents the count of agricultural workers subject to unsafe Wet Bulb Globe Temperature (WBGT) levels across the year, based on both baseline data and projections. For instance, if a projection displays 16 million people within the 45%-50% bin, it means that these individuals are exposed to unsafe working conditions for a portion of their day, 45% to 50% of the days in the year.",
+          fr: "La figure présente le nombre de travailleurs agricoles soumis à des niveaux dangereux de température du globe humide (WBGT) tout au long de l’année, sur la base à la fois de données de base et de projections. Par exemple, si une projection affiche 16 millions de personnes dans la tranche 45 à 50 %, cela signifie que ces personnes sont exposées à des conditions de travail dangereuses pendant une partie de leur journée, soit 45 à 50 % des jours de l’année."
+        },
+        quickInsights: {
+          overview: {
+            en: `For over **100 days** in a year, the people at risk for the baseline were **:::baseRisk:::**; under the scenario **:::scenario:::** and year **:::year:::**, it ascends to **:::projectionRisk:::**.`,
+            fr: `Pendant plus de **100 jours** par an, les personnes à risque étaient de **:::baseRisk:::**; dans le scénario **:::scenario:::** et l'année **:::year:::**, il monte à **:::projectionRisk::: de personnes**.`
+          },
+          half: {
+            en: `For the baseline period, **:::baseline:::** people experienced unsafe working conditions for at least **half of the days** in the year. Under the scenario **:::scenario:::** and year **:::year:::**, it's expected to rise to **:::projection:::** people.`,
+            fr: `Pour la période de référence, **:::baseline:::** personnes ont connu des conditions de travail dangereuses pendant au moins la **moitié des jours** de l'année. Dans le scénario **:::scenario:::** et l'année **:::year:::**, on s'attend à ce qu'il s'élève à **:::projection:::** personnes.`
+          }
+        }
+      },
+      workingHours: {
+        title: {
+          en: "Loss of Safe Working Hours",
+          fr: "Perte d'Heures de Travail Sécurisées"
+        },
+        intro: {
+          en: "Importantly, it is not just the days of climate disruptions to the agricultural workforce that matter. The hours during the day and the time in the growing season, whether planting, or harvesting, all influence  how these disruptions will take place and impact on the sector. Use the figure below to explore how these safe working hours will be disrupted for different populations under different climate scenarios, temperature thresholds, and different geographies on the African continent.",
+          fr: "Il est important de noter que ce ne sont pas seulement les jours de perturbations climatiques qui affectent la main-d'œuvre agricole qui comptent. Les heures pendant la journée et le moment dans la saison de croissance, que ce soit lors de la plantation ou de la récolte, influencent toutes la manière dont ces perturbations se produiront et auront un impact sur le secteur. Utilisez la figure ci-dessous pour explorer comment ces heures de travail sécurisées seront perturbées pour différentes populations sous différents scénarios climatiques, seuils de température et différentes géographies sur le continent africain."
+        },
+        barChart: {
+          xLabel: {
+            en: "Hour of Day",
+            fr: "Heure de la Journée"
+          },
+          yLabel: {
+            en: "Percent Loss of Season due to Extreme Heat",
+            fr: "Pourcentage de Perte de Saison due à une Chaleur Extrême"
+          },
+          tooltip: {
+            perc: {
+              en: "Percent loss",
+              fr: "Pourcentage de perte"
+            },
+            period: {
+              en: "Period",
+              fr: "Période"
+            }
+          }
+        },
+        quickInsights: {
+          intro: {
+            en: `The figure illustrates the percentage of the harvesting and planting seasons during which the Wet Bulb Globe Temperature (WBGT) surpasses safe working limits, as per the selected threshold, relative to the baseline. This highlights the projected changes for the future. For example, a **15%** figure for the harvesting season at 11am indicates that, under the specified scenario and year, there will be **15% fewer days** out of the total season where the population can work safely at that time.`,
+            fr: `La figure illustre le pourcentage des saisons de récolte et de plantation au cours desquelles la température du globe humide (WBGT) dépasse les limites de travail sécuritaire, selon le seuil sélectionné, par rapport à la référence. Cela met en évidence les changements projetés pour l’avenir. Par exemple, un chiffre de **15%** pour la saison de récolte à 11 heures du matin indique que, selon le scénario et l'année spécifiés, il y aura **15% de jours en moins** sur la saison totale où la population pourra travailler en toute sécurité à ce moment-là.`
+          },
+          body: {
+            en: `Under scenario **:::scenario:::** and year **:::year:::**, a policy of avoiding unsafe working hours would translate into **:::totalHours:::** working hours lost during the harvesting season, spanning **:::daysHarvest:::** days; if we consider a common working day to have 8 hours, this translates into **:::wholeWorkingDays:::** total working days lost in harvesting in a year.`,
+            fr: `Dans le scénario **:::scenario:::** et l’année **:::year:::**, une politique visant à éviter les heures de travail dangereuses se traduirait par **:::totalHours:::** heures de travail perdues pendant la saison des récoltes, s’étalant sur **:::daysHarvest:::** jours; si l’on considère qu’une journée de travail commune compte 8 heures, cela se traduit par **:::wholeWorkingDays:::** jours de travail perdus au total pour la récolte au cours d’une année.`
+          },
+          lostDays: {
+            en: `For the planting period, spanning **:::period:::** days, **:::geo:::** would lose **:::lostDays:::** whole working days.`,
+            fr: `Pour la période de plantation, qui s'étend sur **:::period:::** jours, **:::geo:::** perdrait **:::lostDays:::** jours de travail entiers.`
+          }
+        }
+      },
+      summary: {
+        title: {
+          en: "Summary",
+          fr: "Résumé"
+        },
+        intro: {
+          en: "Climate change will drive disruptions to the African agricultural labour force. This has important implications for economic development, human health, gender equity, as well as food security. The size of the expected disruptions depend not only on climate stressors, such as increasing heat stress, but also on the expected change in the size of the agricultural workforce. There are a number of locations where these two factors will collide, driving increased risks, loss of safe working hours, agricultural productivity, and ultimately the right to work in a safe climate for millions. A number of solutions have been proposed to deal with this stress, including shifting working hours shifting in working hours, increased shade on farms, increased mechanisation, improved worker safety protocols, improved hydration and other heat stress coping mechanisms. Ultimately however, solutions on the scale of adaptation required have yet to be developed, and based on the size of this risk need to be addressed urgently to maintain human health and environmental rights, agricultural productivity, and food security, now and in the future.",
+          fr: "Le changement climatique entraînera des perturbations dans la main-d’œuvre agricole africaine. Cela a des implications importantes pour le développement économique, la santé humaine, l’équité entre les sexes ainsi que la sécurité alimentaire. L’ampleur des perturbations attendues dépend non seulement des facteurs de stress climatiques, tels que l’augmentation du stress thermique, mais également de l’évolution attendue de la taille de la main d’œuvre agricole. Il existe un certain nombre d’endroits où ces deux facteurs entreront en collision, entraînant une augmentation des risques, une perte d’heures de travail sûres, une perte de productivité agricole et, en fin de compte, le droit de travailler dans un climat sûr pour des millions de personnes. Un certain nombre de solutions ont été proposées pour faire face à ce stress, notamment le décalage des horaires de travail, l'augmentation de l'ombre dans les fermes, l'augmentation de la mécanisation, l'amélioration des protocoles de sécurité des travailleurs, l'amélioration de l'hydratation et d'autres mécanismes d'adaptation au stress thermique. Toutefois, en fin de compte, les solutions à l’échelle d’adaptation requise doivent encore être développées et, compte tenu de l’ampleur de ce risque, il convient d’y remédier de toute urgence afin de préserver la santé humaine et les droits environnementaux, la productivité agricole et la sécurité alimentaire, aujourd’hui et à l’avenir."
+        }
+      },
+      methods: {
+        title: {
+          en: "Methods",
+          fr: "Méthodologie"
+        },
+        agWorkforce: {
+          title: {
+            en: "Agricultural workforce",
+            fr: "Main d'œuvre agricole"
+          },
+          body: {
+            en: `We generated gridded predictions for the agricultural workforce by first harmonising subnational data from census statistics from a range of government sources, with national data from the [International Labour Organisation (ILO)](https://rshiny.ilo.org/dataexplorer36/?lang=en&segment=indicator&id=EAP_2WAP_SEX_AGE_RT_A) on the proportion of the population employed in agriculture. Then, using a geospatial version of the predictive framework introduced by [Mehrabi, Z (2023) Nat Sust](https://doi.org/10.1038/s41893-023-01110-y), we fit functions relating workforce size to [population statistics from Jones and O’Neill (2016)](https://www.cgd.ucar.edu/sections/iam/modeling/spatial-population), [gridded gdp from Wang and Sun (2022)](https://www.nature.com/articles/s41597-022-01300-x), and [agricultural land area by Ramankutty et al. (2008)](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2007GB002952). We employed stacked machine learning models (boosted regression trees, random forests) for the fitting process. Using these models and current and future gridded data we generated baseline-period (circa 2005) and future (2030, 2050) estimates of the agricultural workforce at 0.083 degrees resolution for the African continent.`,
+            fr: `Nous avons généré des prévisions en grille pour la main-d'œuvre agricole en harmonisant d'abord les données subnationales issues des statistiques de recensement provenant de diverses sources gouvernementales, avec les données nationales de [l'Organisation internationale du travail](https://rshiny.ilo.org/dataexplorer36/?lang=en&segment=indicator&id=EAP_2WAP_SEX_AGE_RT_A) (OIT) sur la proportion de la population employée dans l'agriculture. Ensuite, en utilisant une version géospatiale du cadre prédictif introduit par [Mehrabi, Z (2023) Nat Sust](https://doi.org/10.1038/s41893-023-01110-y), nous ajustons les fonctions reliant la taille de la main-d'œuvre aux [statistiques démographiques de Jones et O'Neill (2016)](https://www.cgd.ucar.edu/sections/iam/modeling/spatial-population), [le PIB maillé de Wang et Sun (2022)](https://www.nature.com/articles/s41597-022-01300-x), et la [superficie des terres agricoles par Ramankutty et al. (2008)](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2007GB002952). Nous avons utilisé des modèles d'apprentissage automatique empilés (arbres de régression améliorés, random forests) pour le processus d'ajustement. À l’aide de ces modèles et des données en grille actuelles et futures, nous avons généré des estimations pour la période de référence (vers 2005) et future (2030, 2050) de la main-d’œuvre agricole avec une résolution de 0,083 degrés pour le continent africain.`
+          }
+        },
+        heatStress: {
+          title: {
+            en: "Heat stress",
+            fr: "Stress thermique"
+          },
+          body: {
+            en: `We use high-resolution, daily gridded data from the Climate Hazards Center Coupled Model Intercomparison Project Phase 6 (CHC-CMIP6) dataset [Williams et al. (2024)](https://www.nature.com/articles/s41597-024-03074-w). The CHC-CMIP6 dataset provides future estimates for 2030 and 2050, whose delta fields are based on the CMIP6 multi-model ensemble forecasts for the SSP 245 and SSP 585 scenarios. As inputs to compute WBGT values, we take from the dataset three main variables: the daily maximum and minimum temperatures (Tmax and Tmin), as well as the maximum daily relative humidity (RHx) that occurs at the time of Tmax, for both, the observation period (circa 2005, average taken across 10 years), and the future projections under SSP 2.45 and 5.85 (years 2030 and 2050, average taken across 10 years).`,
+            fr: `Nous utilisons des données en grille quotidiennes à haute résolution provenant de l'ensemble de données de la phase 6 du projet de comparaison de modèles couplés du Climate Hazards Center (CHC-CMIP6) [Williams et al. (2024)](https://www.nature.com/articles/s41597-024-03074-w). L'ensemble de données CHC-CMIP6 fournit des estimations futures pour 2030 et 2050, dont les champs delta sont basés sur les prévisions d'ensemble multimodèles CMIP6 pour les scénarios SSP 245 et SSP 585. Comme entrées pour calculer les valeurs WBGT, nous prenons à partir de l'ensemble de données trois variables principales : les températures quotidiennes maximales et minimales (Tmax et Tmin), ainsi que l'humidité relative quotidienne maximale (RHx) qui se produit au moment de Tmax, pour les deux, la période d’observation (vers 2005, moyenne sur 10 ans) et les projections futures dans le cadre des PAS 2,45 et 5,85 (années 2030 et 2050, moyenne sur 10 ans).`
+          }
+        },
+        hourlyExposure: {
+          title: {
+            en: "Hourly exposure",
+            fr: "Exposition horaire"
+          },
+          body: {
+            en: `We examine agricultural workers' hourly exposure to heat stress during the harvesting and planting seasons, crucial periods in the agricultural calendar, where agricultural labourers are exposed to prolonged labour-intense outdoor activity, making them more susceptible to the impacts of heat stress. We use the crop calendars from [GGCMI Phase 3](https://zenodo.org/records/5062513), which provide the planting and harvesting dates for eighteen distinct crops and show exposure histograms during these periods. The histograms quantify the percentage of days within the harvesting or planting periods that surpass WBGT safety standards for each hour of the day. Here we compute and rely on hourly WBGT exceedances in present and future, for different SSPs and years. The calculations for the hourly temperature rely on Linvill’s (1990) method for predicting hourly temperatures from daily minimum and maximum measurements. To compute such temperature profiles, we rely on daylength values, mainly taken from [Spencer (1971)](https://www.mail-archive.com/sundial@uni-koeln.de/msg01050.html). This approach was used to create hourly temperature profiles; then, hourly heat index values relying on relative humidity values and following the [NOAA guidelines](https://www.wpc.ncep.noaa.gov/html/heatindex_equation.shtml); and, finally, hourly WBGT, which was evaluated at three different thresholds – 28, 30 and 32 degrees Celsius.`,
+            fr: `Nous examinons l'exposition horaire des travailleurs agricoles au stress thermique pendant les saisons de récolte et de plantation, périodes cruciales du calendrier agricole, où les travailleurs agricoles sont exposés à une activité extérieure prolongée et intense, les rendant plus sensibles aux impacts du stress thermique. Nous utilisons les calendriers de cultures de la [phase 3 du GGCMI](https://zenodo.org/records/5062513), qui fournissent les dates de plantation et de récolte de dix-huit cultures distinctes et affichent des histogrammes d'exposition pendant ces périodes. Les histogrammes quantifient le pourcentage de jours au cours des périodes de récolte ou de plantation qui dépassent les normes de sécurité du WBGT pour chaque heure de la journée. Ici, nous calculons et nous appuyons sur les dépassements horaires du WBGT dans le présent et le futur, pour différents SSP et années. Les calculs de température horaire s’appuient sur la méthode de Linvill (1990) pour prédire les températures horaires à partir de mesures quotidiennes minimales et maximales. Pour calculer de tels profils de température, nous nous appuyons sur les valeurs de longueur du jour, principalement tirées de [Spencer (1971)](https://www.mail-archive.com/sundial@uni-koeln.de/msg01050.html). Cette approche a été utilisée pour créer des profils de température horaires ; puis, les valeurs horaires de l'indice de chaleur basées sur les valeurs d'humidité relative et suivant les [directives de la NOAA](https://www.wpc.ncep.noaa.gov/html/heatindex_equation.shtml); et enfin le WBGT horaire, qui a été évalué à trois seuils différents – 28, 30 et 32 degrés Celsius.`
+          }
+        },
+        additionalMethods: {
+          title: {
+            en: "Additional methods",
+            fr: "Méthodologie supplémentaire"
+          },
+          body: {
+            en: `Full methodological details are contained in two forthcoming background papers:
+- Ormaza-Zulueta, N and Mehrabi, Z. *Mapping global agricultural workforce*
+- Ormaza-Zulueta, N and Mehrabi, Z. *Reductions in the agricultural workday in future due to climate change*`,
+            fr: `Les détails méthodologiques complets sont contenus dans deux documents de référence à venir:
+- Ormaza-Zulueta, N et Mehrabi, Z. *Cartographie de la main-d'œuvre agricole mondiale*
+- Ormaza-Zulueta, N et Mehrabi, Z. *Réductions de la journée de travail agricole à l'avenir en raison du changement climatique*`
+          },
+          linkNote: {
+            en: "Links will be updated when published.",
+            fr: "Les liens seront mis à jour une fois publiés."
+          }
+        },
+        citation: {
+          title: {
+            en: "Citation",
+            fr: "Citation"
+          },
+          body: {
+            en: "If the above links to background papers are not live, please use the following citation for this analysis: Ormaza-Zulueta, N and Mehrabi, Z. 2024. Widespread Workforce Disruptions. Africa Agriculture Adaptation Atlas. CGIAR.",
+            fr: "Si les liens ci-dessus vers les documents de référence ne sont pas actifs, veuillez utiliser la citation suivante pour cette analyse: Ormaza-Zulueta, N et Mehrabi, Z. 2024. Disruptions généralisées de la main-d'œuvre. Atlas de l’adaptation de l’agriculture en Afrique. GCRAI."
+          }
+        }
+      }
+    }
+  };
+}
+```
+
+```{ojs}
+// data translation values
+td = {
+  let data = await FileAttachment("abAtlas-td-translation-data-v1.json").json()
+
+  // update SSA default
+  data.admin0_name.values.SSA.en = "Sub-Saharan Africa"
+  // cote d'ivoire, comma version duplicate
+  data.admin0_name.values["Côte d’Ivoire"] = data.admin0_name.values["Côte d'Ivoire"]
+  
+  return data
+}
+```
+
+```{ojs}
+md`---
+### Notebook Variables
+_Main variables across notebook_`;
+```
+
+```{ojs}
+// main title of the notebook
+notebookTitle = _lang({
+  en: "Understand Heat Stress on Producers",
+  fr: "Comprendre le stress thermique sur les producteurs",
+});
+```
+
+```{ojs}
+// info for the admin selectors
+adminRegions = {
+  return {
+    labels: {
+      admin0: _lang(nbText.legends.adminSelections.country),
+      admin1: _lang(nbText.legends.adminSelections.region),
+      admin2: _lang(nbText.legends.adminSelections.subregion)
+    }
+  };
+}
+```
+
+```{ojs}
+function getLowerLevelAdminLabel(selections = adminSelections) {
+  // based on admin selection, get the lower level label
+  if (selections.selectAdmin2.value) return adminRegions.labels.admin2;
+  if (selections.selectAdmin1.value) return adminRegions.labels.admin2;
+  if (selections.selectAdmin0.value) return adminRegions.labels.admin1;
+  else return adminRegions.labels.admin0;
+}
+```
+
+```{ojs}
+monetaryVoPNote = `Monetary VoP values are represented in 2005 international dollars.`; // note about VoP source
+```
+
+```{ojs}
+// width of the maps
+mapWidth = 625;
+```
+
+```{ojs}
+md`---
+### Notebook Styling
+*styling helpers*
+Stylesheet is a named cell, which is necessary to include for embeds.`;
+```
+
+```{ojs}
+md`**CSS styling**`;
+```
+
+```{ojs}
+md`**Color Scales**`;
+```
+
+```{ojs}
+// color scale info
+colorScales = {
+  return {
+    range: {
+      green: ['#E4F5D0', '#015023'],
+      blue: ['#E8F2FF', '#003E6B'],
+      brown: ['#FFFDE5', '#A87B00'],
+      yellowGreen: ['#F7D732', '#216729'],
+      orangeRed: ['#F4BB21', '#EC5A47'],
+      blueWhiteRed: ['#003E6B', '#FFFFFF', '#EC5A47'],
+      redYellowGreen: ["#EC5A47", "#F4BB21", '#216729']
+    },
+    unknown: "#ccc"
+  }
+}
+```
+
+```{ojs}
+import {
+  buildInlineDownloadButton,
+  downloadButtonCSS,
+  download_translation,
+} from "1bda5f9b60c64223";
+```
+
+```{ojs}
+downloadButtonCSS;
+```
+
+```{ojs}
+md`---
+### Admin Selection
+*Global admin selector using dropdowns*
+
+This is the global selector for the selected region
+- The completed data is contained within adminSelections to be used in queries
+- Dropdowns are defined below then bound for each section
+  - Defined as separate cells since they dynamically respond to different values
+    - In narrative, they are simply views of the data  
+  - Dropdowns are dynamic based on higher-level choices
+  - Options are defined from the geographic data
+  - null value means unselected region
+- Dropdowns are added to each section, using Inputs.bind to create synchronized inputs (see viewof for input definitions). A form input is used to consolidate and apply a template to format.`;
+```
+
+```{ojs}
+// get admin0 options from geo
+dataAdmin0 = {
+  const data = boundaries.admin0.features.map((d) => d.properties);
+  // add a blank value
+  return [null, ...data.map((d) => d.admin_name)].map((d) => {
+    return {
+      label:
+        d == null
+          ? globalSelection.label
+          : _lang(td.admin0_name.values?.[d].general),
+      value: d,
+      data: d == null ? globalSelection.data : td.admin0_name.values?.[d],
+    };
+  });
+}
+```
+
+```{ojs}
+// get admin1 options based on admin0 selection
+// (the admin1 regions within selected admin0)
+dataAdmin1 = {
+  // admin 1, filter by 0 
+  const data = boundaries.admin1.features.map(d => d.properties)
+  .filter(d => d.admin0_name == selectAdmin0.value)
+  // add blank value
+  return [null, ...data.map(d => d.admin1_name)].map(d => {
+    return {label: d, value: d}
+  })
+}
+```
+
+```{ojs}
+// get admin2 options based on admin1 selection
+// (the admin2 regions within selected admin1)
+dataAdmin2 = {
+  const data = boundaries.admin2.features.map(d => d.properties)
+  .filter(d => d.admin0_name == selectAdmin0.value && d.admin1_name == selectAdmin1.value)
+  // add blank value
+  return [null, ...data.map(d => d.admin2_name)].map(d => {
+    return {label: d, value: d}
+  })
+}
+```
+
+```{ojs}
+viewof selectAdmin0 = Inputs.select(dataAdmin0, {label: adminRegions.labels.admin0, format: x => x.label})
+```
+
+```{ojs}
+viewof selectAdmin1 = Inputs.select(dataAdmin1, {label: adminRegions.labels.admin1, format: x => x.label})
+```
+
+```{ojs}
+viewof selectAdmin2 = Inputs.select(dataAdmin2, {label: adminRegions.labels.admin2, format: x => x.label})
+```
+
+```{ojs}
+// selected admin regions from dropdowns
+adminSelections = new Object({
+  selectAdmin0: selectAdmin0,
+  selectAdmin1: selectAdmin1,
+  selectAdmin2: selectAdmin2,
+});
+```
+
+```{ojs}
+// template to format admin selection form
+adminFormTemplate = (inputs) =>
+  htl.html`<div style="display: flex; gap: 3em">${inputs}</div>`;
+```
+
+```{ojs}
+md`---
+### Admin Selection - Display
+*Showing admin selections*`;
+```
+
+```{ojs}
+// options for the global admin selection
+// used when no admin selection is made
+globalSelection = {
+  return {
+    label: _lang(td.admin0_name.values.SSA.general),
+    value: null,
+    data: td.admin0_name.values.SSA
+  }
+}
+```
+
+```{ojs}
+function getAdminSelection(selections = adminSelections) {
+  // get the most granular admin selection made
+  const a0 = selections.selectAdmin0;
+  const a1 = selections.selectAdmin1;
+  const a2 = selections.selectAdmin2;
+  const global = globalSelection;
+
+  return a2.value ? a2 : a1.value ? a1 : a0.value ? a0 : global;
+}
+```
+
+```{ojs}
+function getAdminSelection0(selections = adminSelections) {
+  // get the most granular admin selection made
+  const a0 = selections.selectAdmin0;
+
+  return a0;
+}
+```
+
+```{ojs}
+function getAdminSelectionAdmin0(selections = adminSelections) {
+  // get the selected admin0 or global value
+  const a0 = selections.selectAdmin0;
+  const global = globalSelection;
+
+  return a0.value ? a0 : global;
+}
+```
+
+```{ojs}
+function getAdminSelectionMarkdownPath(selections = adminSelections) {
+  // function to show selected admin region
+  // return path showing nested admin selection
+
+  const delim = " → ";
+  const path = [
+    selections.selectAdmin0.label,
+    selections.selectAdmin1.label,
+    selections.selectAdmin2.label,
+  ].filter((d) => d);
+
+  const formatted = path
+    .filter((d) => d)
+    .map((d, i) => {
+      return i == path.length - 1 ? `**${d}**` : `*${d}*`;
+    });
+
+  return formatted.length == 0
+    ? `**${globalSelection.label}**` // no selection, all of Africa
+    : `${formatted.join(delim)}`;
+}
+```
+
+```{ojs}
+getAdmin0WithAdminSubParens = ({
+  articleField = "general",
+  showParens = true,
+} = {}) => {
+  // getting admin0, with admin1 in parens
+  // can specify admin0article lookup
+  const a0 = adminSelections.selectAdmin0;
+  const a1 = adminSelections.selectAdmin1;
+  const a2 = adminSelections.selectAdmin2;
+
+  const a0WithArticle =
+    a0.value == null
+      ? _lang(td.admin0_name.values?.["SSA"]?.[articleField])
+      : _lang(td.admin0_name.values?.[a0.value]?.[articleField]);
+  if (a1.value == null) return a0WithArticle;
+  if (!showParens) return a0WithArticle;
+  const subLabel = a2.value == null ? a1.label : a2.label;
+  return `${a0WithArticle} (${subLabel})`;
+};
+```
+
+```{ojs}
+md`---
+### Choropleth map - Geographic Impact
+*Showing context for admin selection*
+
+There is some hoop-jumping to get the right data based on the Admin Selection. The tabular data is then bound to the applicable geojson, and visualized with Plot.`;
+```
+
+```{ojs}
+// population data
+dataPopulation = db.query(`
+select * 
+from ag_workforce_data
+`);
+```
+
+```{ojs}
+// total VoP data
+dataTotalAgW = db.query(`
+select admin0_name
+  , admin1_name
+  , admin2_name
+  , MEAN(percentage_change_SSP2_2050_ag) as agw_total
+  from ag_workforce_data
+  group by 1, 2, 3
+  order by 1, 2, 3
+`);
+```
+
+```{ojs}
+// total VoP data
+dataTotalAgW_abs = db.query(`
+select admin0_name
+  , admin1_name
+  , admin2_name
+  , SUM(corrected_index_ag_pop_SSP2_2050) as agw_total_abs
+  from ag_workforce_data
+  group by 1, 2, 3
+  order by 1, 2, 3
+`);
+```
+
+```{ojs}
+// total Ag_SSP2_2030 data
+dataTotalAgWMid = db.query(`
+select admin0_name
+  , admin1_name
+  , admin2_name
+  , MEAN(percentage_change_SSP2_2030_ag) as agw_total_mid
+  from ag_workforce_data
+  group by 1, 2, 3
+  order by 1, 2, 3
+`);
+```
+
+```{ojs}
+// total VoP data
+dataTotalAgWMid_abs = db.query(`
+select admin0_name
+  , admin1_name
+  , admin2_name
+  , SUM(corrected_index_ag_pop_SSP2_2030) as agw_total_mid_abs
+  from ag_workforce_data
+  group by 1, 2, 3
+  order by 1, 2, 3
+`);
+```
+
+```{ojs}
+// grab tabular data for choropleth
+dataGeoImpact = {
+  // get data for choropleth map based on choice
+  let dataSource;
+
+  if (selectGeoDataType.key == "ag_workforce_data_2") {
+    dataSource = dataPopulation;
+  } else if (selectGeoDataType.key == "ag_workforce_data") {
+    dataSource = dataTotalAgW;
+  } else  if (selectGeoDataType.key == "ag_workforce_data_15") {
+    dataSource = dataTotalAgWMid_abs;
+  } else  if (selectGeoDataType.key == "ag_workforce_data_10") {
+    dataSource = dataTotalAgW_abs;
+  } else {
+    dataSource = dataTotalAgWMid;
+  }
+
+  // select different data based on admin selections
+  if (adminSelections.selectAdmin1.value) {
+    // admin1 or 2 is selected, show all admin2's for selected admin1
+    return T.tidy(
+      dataSource,
+      T.filter((d) => {
+        return d.admin0_name == adminSelections.selectAdmin0.value &&
+          d.admin1_name == adminSelections.selectAdmin1.value
+          && d.admin2_name // always non-null
+      })
+    );
+  } else if (adminSelections.selectAdmin0.value) {
+    // admin0 is selected, with no admin1
+    // get all admin1 data for selected admin0
+    return T.tidy(
+      dataSource,
+      T.filter((d) => {
+        return d.admin0_name == adminSelections.selectAdmin0.value
+        && d.admin1_name // always non-null 
+        && !d.admin2_name // always null
+      })
+    )
+  } else {
+    // end case: admin0 is not selected
+    // get all admin0 data
+    return T.tidy(
+      dataSource,
+      T.filter((d) => {
+        return !d.admin1_name // always null 
+        && !d.admin2_name // always null
+      })
+    )
+  }
+}
+```
+
+```{ojs}
+// bind geojson to tabular data
+mapDataGeoImpact = {
+  // no selections
+  if (!adminSelections.selectAdmin0.value) {
+    return bindTabularToGeo({
+      data: dataGeoImpact,
+      dataBindColumn: "admin0_name",
+      geoData: boundaries.admin0,
+      geoDataBindColumn: "admin0_name"
+    });
+  }
+  // admin0 selected only
+  else if (!adminSelections.selectAdmin1.value) {
+    const data = T.tidy(
+      dataGeoImpact,
+      T.mutate({ a1_a0: (d) => [d.admin1_name, d.admin0_name].join("_") })
+    );
+    const geoData = {
+      ...boundaries.admin1,
+      features: boundaries.admin1.features.filter(
+        (d) => d.properties.admin0_name == adminSelections.selectAdmin0.value
+      )
+    };
+
+    return bindTabularToGeo({
+      data: data,
+      dataBindColumn: "a1_a0",
+      geoData: geoData,
+      geoDataBindColumn: "a1_a0"
+    });
+  }
+
+  // admin1 is selected
+  // show all admin2 regions within admin1
+  else {
+    const data = T.tidy(
+      dataGeoImpact,
+      T.mutate({
+        a2_a1_a0: (d) => [d.admin2_name, d.admin1_name, d.admin0_name].join("_")
+      })
+    );
+    const geoData = {
+      ...boundaries.admin2,
+      features: boundaries.admin2.features.filter(
+        (d) => d.properties.admin1_name == adminSelections.selectAdmin1.value && d.properties.admin0_name == adminSelections.selectAdmin0.value
+      )
+    };
+
+    return bindTabularToGeo({
+      data: data,
+      dataBindColumn: "a2_a1_a0",
+      geoData: geoData,
+      geoDataBindColumn: "a2_a1_a0"
+    });
+  }
+}
+```
+
+```{ojs}
+md`---
+### Dynamic Insights - Geographic Impact
+*quick insights for given admin selection*
+
+- Sql cells add a row that is the combined value for all admin regions, where all admin names are null.`;
+```
+
+```{ojs}
+md`Here are the combined data and insights for creating the dynamic narrative. Data tables are below.`;
+```
+
+```{ojs}
+// dynamic insights for an Admin Selection
+dynamicInsights_geoImpact = {
+  // define data
+  const totalVop = filterByAdminNames(dynInsightGeo_vopTotals);
+  const population = filterByAdminNames(dynInsightGeo_population);
+  const perc30 = filterByAdminNames(dynInsightGeo_percentTotals_mid);
+  const perc50 = filterByAdminNames(dynInsightGeo_percentTotals);
+
+  // format functions
+  const _formatTopNVop = formatUSD;
+  const _formatNumber = formatNumCompactLong({locale: language.locale});
+
+  function getTopValue({ d, i } = {}) {
+    return {
+      data: d?.[i]?.agw_total,
+      value: formatWithDefault({
+        value: d?.[i]?.agw_total,
+        format: _formatNumber
+      }),
+      label: formatWithDefault({
+        value: d?.[i]?.crop
+      })
+    };
+  }
+
+  // make insights ------------------------------------
+  return {
+    data: {
+      totalVop,
+      population
+    },
+    insight: {
+      totalVop: formatWithDefault({
+        value: totalVop?.[0]?.agw_total,
+        format: _formatNumber
+      }),
+      totalPop: formatWithDefault({
+        value: population?.[0]?.total_pop,
+        format: _formatNumber
+      }),
+      totalRuralPop: formatWithDefault({
+        value: population?.[0]?.rural_pop,
+        format: _formatNumber
+      }),
+      totalAgPop: formatWithDefault({
+        value: population?.[0]?.ag_pop,
+        format: _formatNumber
+      }),
+      totalAgPop_noformat: formatWithDefault({
+        value: population?.[0]?.ag_pop
+      }),
+      totalAgPop_2_30: formatWithDefault({
+        value: population?.[0]?.ag_pop_2_30,
+        format: _formatNumber
+      }),
+      totalAgPop_2_30_noformat: formatWithDefault({
+        value: population?.[0]?.ag_pop_2_30
+      }),
+      totalAgPop_2_50: formatWithDefault({
+        value: population?.[0]?.ag_pop_2_50,
+        format: _formatNumber
+      }),
+      totalAgPop_2_50_noformat: formatWithDefault({
+        value: population?.[0]?.ag_pop_2_50
+      }),
+      totalAgPop_5_30: formatWithDefault({
+        value: population?.[0]?.ag_pop_5_30,
+        format: _formatNumber
+      }),
+      totalAgPop_5_30_noformat: formatWithDefault({
+        value: population?.[0]?.ag_pop_5_30
+      }),
+      totalAgPop_5_50: formatWithDefault({
+        value: population?.[0]?.ag_pop_5_50,
+        format: _formatNumber
+      }),
+      totalAgPop_5_50_noformat: formatWithDefault({
+        value: population?.[0]?.ag_pop_5_50
+      }),
+    }
+  };
+}
+```
+
+```{ojs}
+md`---
+#### Data cells for insights`;
+```
+
+```{ojs}
+// total harvested area
+dynInsightGeo_percentTotals_mid = db.query(`
+with tbl as (
+  -- total percentages
+  SELECT admin0_name, admin1_name, admin2_name, MEAN(percentage_change_SSP2_2030_ag) AS percent_change_30
+    FROM ag_workforce_data
+    GROUP BY 1, 2, 3
+    ORDER BY 1, 2, 3
+)
+
+-- QUERY ------------------------------------------
+(
+  -- total for all regions
+  select null as admin0_name
+    , null as admin1_name
+    , null as admin2_name
+    , percent_change_30
+    from (
+      select mean(percent_change_30) as percent_change_30
+        from tbl
+        where admin1_name is null
+    )
+  
+  union
+  
+  select * 
+    from tbl
+  
+  order by 1, 2, 3
+)
+`);
+```
+
+```{ojs}
+// total harvested area
+dynInsightGeo_percentTotals = db.query(`
+with tbl as (
+  -- total percentages
+  SELECT admin0_name, admin1_name, admin2_name, MEAN(percentage_change_SSP2_2050_ag) AS percent_change_50
+    FROM ag_workforce_data
+    GROUP BY 1, 2, 3
+    ORDER BY 1, 2, 3
+)
+
+-- QUERY ------------------------------------------
+(
+  -- total for all regions
+  select null as admin0_name
+    , null as admin1_name
+    , null as admin2_name
+    , percent_change_50
+    from (
+      select mean(percent_change_50) as percent_change_50
+        from tbl
+        where admin1_name is null
+    )
+  
+  union
+  
+  select * 
+    from tbl
+  
+  order by 1, 2, 3
+)
+`);
+```
+
+```{ojs}
+dynInsightGeo_vopTotals = db.query(`
+-- total ag workforce
+with tbl as (
+  -- total VoP and harvested area
+  SELECT admin0_name, admin1_name, admin2_name, sum(corrected_index_ag_pop_SSP2_2050) AS agw_total
+    FROM ag_workforce_data
+    GROUP BY 1, 2, 3
+    ORDER BY 1, 2, 3
+)
+
+-- QUERY ------------------------------------------
+(
+  -- total for all regions
+  select null as admin0_name
+    , null as admin1_name
+    , null as admin2_name
+    , agw_total
+    from (
+      select mean(agw_total) as agw_total
+        from tbl
+        where admin1_name is null
+    )
+  
+  union
+  
+  select * 
+    from tbl
+  
+  order by 1, 2, 3
+)
+`);
+```
+
+```{ojs}
+dynInsightGeo_population = db.query(`
+with tbl as (
+  -- ag workforce population data
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , total
+    , rural
+    , corrected_ag_pop
+    , corrected_index_ag_pop_SSP2_2050
+    , corrected_index_ag_pop_SSP2_2030
+    , corrected_index_ag_pop_SSP5_2050
+    , corrected_index_ag_pop_SSP5_2030
+    from ag_workforce_data
+    order by admin0_name
+    , admin1_name
+    , admin2_name
+)
+
+-- QUERY ------------------------------------------
+(
+  -- total for all regions
+  select null as admin0_name
+    , null as admin1_name
+    , null as admin2_name
+    , *
+    from (
+      select sum(total) as total_pop
+        , sum(rural) as rural_pop
+        , sum(corrected_ag_pop) as ag_pop
+        , sum(corrected_index_ag_pop_SSP2_2030) as ag_pop_2_30
+        , sum(corrected_index_ag_pop_SSP2_2050) as ag_pop_2_50
+        , sum(corrected_index_ag_pop_SSP5_2050) as ag_pop_5_50
+        , sum(corrected_index_ag_pop_SSP5_2030) as ag_pop_5_30
+        from tbl
+        where admin1_name is null
+    )
+  
+  union
+  
+  select *
+    from tbl
+  
+  order by 1, 2, 3
+)
+`);
+```
+
+```{ojs}
+md`---
+### Bar Charts - Hazards and Exposures
+*getting data based on admin selection and hazard options*`;
+```
+
+```{ojs}
+md`#### Plot Function
+Making the top VoP bar charts`;
+```
+
+```{ojs}
+// make the bar chart for top crops
+// approach is passing in data for selected hazard and crop type
+function makeTopCropBarChart(data) {
+  // if no data is available for selected hazard, show a message
+  if (data.length == 0) {
+    return md`*No VoP exposure*`;
+  }
+  const topN = 10;
+
+  return Plot.plot({
+    width,
+    marginLeft: 100,
+    caption: monetaryVoPNote,
+    x: {
+      tickFormat: formatUSD,
+      label: "VoP at risk ($)",
+      grid: true,
+    },
+    y: {
+      label: null,
+      tickSize: 0,
+    },
+    color: {
+      domain: hazardPlotLookup.color.domain,
+      range: hazardPlotLookup.color.range,
+    },
+    marks: [
+      Plot.barX(data, {
+        x: "vop",
+        y: (d) => hazardPlotLookup.crops[d.crop],
+        fill: (d) => hazardPlotLookup.names[d.hazard],
+        sort: { y: "x", reverse: true, limit: 10 },
+        channels: {
+          vop: {
+            label: "VoP at risk",
+            value: "vop",
+          },
+        },
+        tip: {
+          format: {
+            x: false,
+            y: false,
+            fill: false,
+            vop: (d) => formatUSD(d),
+          },
+        },
+      }),
+    ],
+  });
+}
+```
+
+```{ojs}
+md`#### Hazard Data`;
+```
+
+```{ojs}
+data_hazardVoP = T.tidy(
+  // data for selected hazard scenario, with total vop
+  dataHazardSelected,
+  T.leftJoin(dataHazardVoPTotalSelected, {
+    by: ["admin0_name", "admin1_name", "admin2_name", "crop"],
+  }),
+);
+```
+
+```{ojs}
+dataHazardVoPTotalSelected = T.tidy(
+  dataHazardSelected,
+  T.groupBy(
+    [
+      "admin0_name",
+      "admin1_name",
+      "admin2_name",
+      "threshold",
+      "scenario",
+      "timeframe",
+      "crop",
+    ],
+    [
+      T.summarize({
+        vop_total: T.sum("vop"),
+      }),
+    ],
+  ),
+);
+```
+
+```{ojs}
+// unique crops in the hazard data
+hazardCrops = {
+  const query = await db.query(`select crop
+  , count(*) as count
+  from heat_stress_data
+  group by 1
+  order by 1`);
+
+  return query
+ }
+```
+
+```{ojs}
+// formatting crop names
+cropNames = T.tidy(
+  hazardCrops,
+  T.distinct("crop"),
+  T.select("crop"),
+  T.mutate({
+    // Convert crop to number for sorting
+    cropNum: (d) => parseInt(d.crop, 10),
+    // Determine the type based on the original string format (adjust as needed)
+    type: (d) => (/_/.test(d.crop) ? "livestock" : "crop"),
+    // Format the crop name
+    cropName: (d) => {
+      let cropName = d.crop.charAt(0).toUpperCase() + d.crop.slice(1);
+      if (/_/.test(d.crop)) cropName = cropName.replace("_", " (") + ")";
+      return cropName;
+    },
+  }),
+  // Use the numeric version of crop for sorting, then remove it from the final result as it's no longer needed
+  T.arrange(["type", "cropNum"]),
+  T.select(["type", "crop", "cropName"]), // Assuming you want to keep these fields in the final output
+);
+```
+
+```{ojs}
+// lookups for hazard plot
+hazardPlotLookup = {
+  return {
+    names: {
+      baseline: _lang(nbText.sections.heatStress.barChart.group.baseline),
+      projection: _lang(nbText.sections.heatStress.barChart.group.projection)
+    },
+    color: {
+      domain: [
+        _lang(nbText.sections.heatStress.barChart.group.baseline),
+        _lang(nbText.sections.heatStress.barChart.group.projection)
+      ],
+      range: ["#B1B1B1", "#EC5A47"]
+    },
+    crops: cropNames.reduce((acc, obj) => {
+      acc[obj.crop] = obj.cropName;
+      return acc;
+    }, {})
+  };
+}
+```
+
+```{ojs}
+md`#### Selecting Heat Stress data by scenario
+- The data is queried as separate components for each admin region to reduce query size and allow for dynamic null handling. A table is chosen based on the selected admin region.`;
+```
+
+```{ojs}
+// pick the admin dataset based on admin selection
+dataHazardSelected = {
+  if (adminSelections.selectAdmin2.value) return dataHazardAdmin2
+  else if (adminSelections.selectAdmin1.value) return dataHazardAdmin1
+  else if (adminSelections.selectAdmin0.value) return dataHazardAdmin0
+  else return dataHazardAdminAll
+}
+```
+
+```{ojs}
+dataHazardAdminAll = await db.query(`
+-- admin0, combine for Sub-Saharan Africa
+with data_tbl as (
+  with tbl as (
+    -- total for all admin0 regions
+    with base as (
+      -- chosen scenario and timeframe, VoP
+      select admin0_name
+        , admin1_name
+        , admin2_name
+        , scenario
+        , timeframe
+        , crop
+        , threshold
+        , hazard
+        , value as vop
+        from heat_stress_data
+        where timeframe = '${selectScenarioAndTimeframe.timeframe}'
+        and scenario = '${selectScenarioAndTimeframe.scenario}'
+        and threshold = '${selectThreshold.threshold}'
+    )
+    
+    select *
+      from base
+      where admin1_name is null
+  )
+
+  -- total VoP for each crop
+  select threshold
+    , scenario
+    , timeframe
+    , hazard
+    , crop
+    , SUM(vop) as vop
+    from tbl
+    group by threshold
+    , scenario
+    , timeframe
+    , hazard
+    , crop
+)
+
+select null as admin0_name -- add admin values as nulls
+  , null as admin1_name
+  , null as admin2_name
+  , *
+  from data_tbl
+`);
+```
+
+```{ojs}
+dataHazardAdmin0 = await db.query(`
+-- admin0 level hazard data
+with base as (
+  -- chosen scenario and timeframe VoP
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    , crop
+    , threshold
+    , hazard
+    , value as vop
+    from heat_stress_data
+    where timeframe = '${selectScenarioAndTimeframe.timeframe}'
+    and scenario = '${selectScenarioAndTimeframe.scenario}'
+    and threshold = '${selectThreshold.threshold}'
+)
+
+select *
+  from base
+  where admin1_name is null
+  and admin0_name = '${adminSelections.selectAdmin0.value}'
+`);
+```
+
+```{ojs}
+dataHazardAdmin1 = await db.query(`
+-- admin1 level hazard data
+with base as (
+  -- chosen scenario and timeframe VoP
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    , crop
+    , threshold
+    , hazard
+    , value as vop
+    from heat_stress_data
+    where timeframe = '${selectScenarioAndTimeframe.timeframe}'
+    and scenario = '${selectScenarioAndTimeframe.scenario}'
+    and threshold = '${selectThreshold.threshold}'
+)
+
+select *
+  from base
+  where admin0_name =' ${adminSelections.selectAdmin0.value}'
+  and admin1_name = '${adminSelections.selectAdmin1.value}'
+  and admin2_name is null
+`);
+```
+
+```{ojs}
+dataHazardAdmin2 = await db.query(`
+-- admin2 level hazard data
+with base as (
+  -- chosen scenario and timeframe VoP
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    , crop
+    , threshold
+    , hazard
+    , value as vop
+    from heat_stress_data
+    where timeframe = '${selectScenarioAndTimeframe.timeframe}'
+    and scenario = '${selectScenarioAndTimeframe.scenario}'
+    and threshold = '${selectThreshold.threshold}'
+)
+
+select *
+  from base
+  where admin0_name = '${adminSelections.selectAdmin0.value}'
+  and admin1_name = '${adminSelections.selectAdmin1.value}'
+  and admin2_name = '${adminSelections.selectAdmin2.value}'
+`);
+```
+
+```{ojs}
+md`---
+#### Helpers`;
+```
+
+```{ojs}
+helpersHazard = {
+  return {
+    colorDomain: ['crop', 'livestock'],
+    colorRange: ['seagreen', 'sienna']
+  }
+}
+```
+
+```{ojs}
+md`---
+### Dynamic Insights - Heat Stress in Numbers`;
+```
+
+```{ojs}
+data_selectedHazardCropType = T.tidy(
+  data_hazardVoP,
+  T.filter(
+    (d) =>
+      d.scenario === selectScenarioAndTimeframe.scenario &&
+      d.timeframe === selectScenarioAndTimeframe.timeframe &&
+      d.threshold == selectThreshold.threshold,
+  ),
+  T.mutate({
+    cropType: (d) => {
+      if (riskDataTypes.crop.crop.includes(d.crop)) return "crop";
+      return "other";
+    },
+    cropValue: (d) => parseFloat(d.crop), // Ensure cropValue is numeric
+  }),
+  T.arrange(["cropType", T.desc("vop")]),
+);
+```
+
+```{ojs}
+// combined crop and livestock exposed for selection
+insight_totalExposedVop = T.tidy(
+  data_selectedHazardCropType,
+  T.filter((d) => d.cropType === "crop"),
+  T.groupBy(
+    ["cropType", "hazard"],
+    [
+      T.summarize({
+        totalExposedVop: T.sum("vop"),
+        totalExposedVopOver30: T.sum((d) => (d.cropValue >= 30 ? d.vop : 0)), // Sum for crops over 30%
+        totalExposedVopOver50: T.sum((d) => (d.cropValue >= 55 ? d.vop : 0)), // Sum for crops over 50%
+      }),
+    ],
+  ),
+);
+```
+
+```{ojs}
+insight_topExp = {
+  const cropsByVop = T.tidy(
+    data_selectedHazardCropType,
+    T.select(["cropType", "crop", "vop", "hazard"]),
+    T.filter(d => d.cropType == "crop")
+  );
+  
+  // Find the top crop by vop
+  const topCrop = T.tidy(
+    cropsByVop,
+    T.sliceMax(1, "vop")
+  )[0];
+  
+  // Return the combination, including topCrop only if it's not '30' or '50'
+  return [topCrop].filter(d => d !== undefined);
+};
+```
+
+```{ojs}
+// total vop exposed by each hazard
+insight_rankedHazardVopTotals = T.tidy(
+  data_hazardVoP,
+  T.groupBy(
+    ["hazard"],
+    [
+      T.summarize({
+        totalVop: T.sum("vop"),
+      }),
+    ],
+  ),
+  T.filter((d) => d.hazard !== "any"), // remove combined hazard
+  T.arrange(T.desc("totalVop")),
+);
+```
+
+```{ojs}
+md`---
+## BarChart - Loss of Safe Working Hours`;
+```
+
+```{ojs}
+// make the bar chart for top crops
+// approach is passing in data for selected hazard and crop type
+function makeHourlyBarChart(data) {
+  // if no data is available for selected hazard, show a message
+  if (data.length == 0) {
+    return md`*No VoP exposure*`;
+  }
+  const topN = 10;
+
+  return Plot.plot({
+    width,
+    marginLeft: 100,
+    caption: monetaryVoPNote,
+    x: {
+      tickFormat: formatUSD,
+      label: "VoP at risk ($)",
+      grid: true,
+    },
+    y: {
+      label: null,
+      tickSize: 0,
+    },
+    color: {
+      domain: hourlyPlotLookup.color.domain,
+      range: hourlyPlotLookup.color.range,
+    },
+    marks: [
+      Plot.barX(data, {
+        x: "delta",
+        y: (d) => hourlyPlotLookup.hours[d.hour_day],
+        fill: (d) => hourlyPlotLookup.names[d.hazard],
+        sort: { y: "x", reverse: true, limit: 10 },
+        channels: {
+          delta: {
+            label: "VoP at risk",
+            value: "delta",
+          },
+        },
+        tip: {
+          format: {
+            x: false,
+            y: false,
+            fill: false,
+            delta: (d) => formatUSD(d),
+          },
+        },
+      }),
+    ],
+  });
+}
+```
+
+```{ojs}
+// data for selected hazard scenario, with total vop
+data_hourlyStress = T.tidy(
+  dataHourlySelected,
+  T.leftJoin(dataHazardHourlyTotalSelected, {
+    by: ["admin0_name", "admin1_name", "admin2_name", "hour_day"],
+  }),
+);
+```
+
+```{ojs}
+dataHazardHourlyTotalSelected = T.tidy(
+  dataHourlySelected,
+  T.groupBy(
+    [
+      "admin0_name",
+      "admin1_name",
+      "admin2_name",
+      "threshold",
+      "scenario",
+      "timeframe",
+      "hour_day",
+    ],
+    [
+      T.summarize({
+        delta_total: T.mean("delta"),
+      }),
+    ],
+  ),
+);
+```
+
+```{ojs}
+// pick the admin dataset based on admin selection
+dataHourlySelected = {
+  if (adminSelections.selectAdmin2.value) return dataHourlyAdmin2
+  else if (adminSelections.selectAdmin1.value) return dataHourlyAdmin1
+  else if (adminSelections.selectAdmin0.value) return dataHourlyAdmin0
+  else return dataHourlyAdminAll
+}
+```
+
+```{ojs}
+dataHourlyAdmin0 = await db.query(`
+-- admin0 level hazard data
+with base as (
+  -- chosen scenario and timeframe VoP
+  select admin0_name
+        , admin1_name
+        , admin2_name
+        , scenario
+        , timeframe
+        , hour_day
+        , threshold
+        , hazard
+        , period
+        , corrected_pop as corrected_pop_sum
+        , delta_pop as delta_pop_mean
+        , total_days as days_period
+        , avg_count as delta
+        from hourly_data
+        where timeframe = '${selectScenarioAndTimeframe2.timeframe}'
+        and scenario = '${selectScenarioAndTimeframe2.scenario}'
+        and threshold = '${selectThreshold2.threshold}'
+)
+
+select *
+  from base
+  where admin1_name is null
+  and admin0_name = '${adminSelections.selectAdmin0.value}'
+`);
+```
+
+```{ojs}
+dataHourlyAdmin1 = await db.query(`
+-- admin1 level hazard data
+with base as (
+  -- chosen scenario and timeframe VoP
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    , hour_day
+    , threshold
+    , hazard
+    , period
+    , corrected_pop as corrected_pop_sum
+    , delta_pop as delta_pop_mean
+    , total_days as days_period
+    , avg_count as delta
+    from hourly_data
+    where timeframe = '${selectScenarioAndTimeframe2.timeframe}'
+    and scenario = '${selectScenarioAndTimeframe2.scenario}'
+    and threshold = '${selectThreshold2.threshold}'
+)
+
+select *
+  from base
+  where admin0_name = '${adminSelections.selectAdmin0.value}'
+  and admin1_name = '${adminSelections.selectAdmin1.value}'
+  and admin2_name is null
+`);
+```
+
+```{ojs}
+dataHourlyAdmin2 = await db.query(`
+-- admin2 level hazard data
+with base as (
+  -- chosen scenario and timeframe VoP
+  select admin0_name
+        , admin1_name
+        , admin2_name
+        , scenario
+        , timeframe
+        , hour_day
+        , threshold
+        , hazard
+        , period
+        , corrected_pop as corrected_pop_sum
+        , delta_pop as delta_pop_mean
+        , total_days as days_period
+        , avg_count as delta
+    from hourly_data
+        where timeframe = '${selectScenarioAndTimeframe2.timeframe}'
+        and scenario = '${selectScenarioAndTimeframe2.scenario}'
+        and threshold = '${selectThreshold2.threshold}'
+)
+
+select *
+  from base
+  where admin0_name = '${adminSelections.selectAdmin0.value}'
+  and admin1_name = '${adminSelections.selectAdmin1.value}'
+  and admin2_name = '${adminSelections.selectAdmin2.value}'
+`);
+```
+
+```{ojs}
+dataHourlyAdminAll = await db.query(`
+-- admin0, combine for Sub-Saharan Africa
+with data_tbl as (
+  with tbl as (
+    -- total for all admin0 regions
+    with base as (
+      -- chosen scenario and timeframe, VoP
+      select admin0_name
+        , admin1_name
+        , admin2_name
+        , scenario
+        , timeframe
+        , hour_day
+        , threshold
+        , hazard
+        , corrected_pop as corrected_pop_sum
+        , delta_pop as delta_pop_mean
+        , total_days as days_period
+        , avg_count as delta
+        from hourly_data
+        where timeframe = '${selectScenarioAndTimeframe2.timeframe}'
+        and scenario = '${selectScenarioAndTimeframe2.scenario}'
+        and threshold = '${selectThreshold2.threshold}'
+    )
+    
+    select *
+      from base
+      where admin1_name is null
+  )
+
+  -- total VoP for each crop
+  select threshold
+    , scenario
+    , timeframe
+    , hour_day
+    , hazard
+    , SUM(corrected_pop_sum) as corrected_pop_sum
+    , MEAN(delta_pop_mean) as delta_pop_mean
+    , MEAN(delta) as delta
+    , MEAN(days_period) as days_period
+    from tbl
+    group by scenario
+    , timeframe
+    , threshold
+    , hazard
+    , hour_day
+)
+
+select null as admin0_name -- add admin values as nulls
+  , null as admin1_name
+  , null as admin2_name
+  , *
+  from data_tbl
+`);
+```
+
+```{ojs}
+// lookups for hazard plot
+hourlyPlotLookup = {
+  return {
+    names: {
+      planting: Lang.toTitleCase(_lang(nbText.legends.seasonTypes.planting)),
+      harvesting: Lang.toTitleCase(_lang(nbText.legends.seasonTypes.harvesting))
+    },
+    color: {
+      domain: [
+        Lang.toTitleCase(_lang(nbText.legends.seasonTypes.planting)),
+        Lang.toTitleCase(_lang(nbText.legends.seasonTypes.harvesting)),
+      ],
+      range: [
+        // red for both
+        "#4FB5B7", 
+        "#FCC42C",
+      ],
+      // range: [
+      //   "#808000", // Olive Green
+      //   "#B5651D", // Light Brown
+      // ],
+    },
+    hours: hourlyNames.reduce((acc, obj) => {
+      acc[obj.hour_day] = obj.hourlyName;
+      return acc;
+    }, {})
+  };
+}
+```
+
+```{ojs}
+// unique crops in the hazard data
+hazardHours = {
+  const query = await db.query(`select hour_day
+  , count(*) as count
+  from hourly_data
+  group by 1
+  order by 1`);
+
+  return query
+ }
+```
+
+```{ojs}
+// formatting crop names
+hourlyNames = T.tidy(
+  hazardHours,
+  T.distinct("hour_day"),
+  T.select("hour_day"),
+  T.mutate({
+    // Convert to number for sorting
+    hourlyNum: (d) => parseInt(d.hour_day, 10),
+    // Determine the type based on the original string format (adjust as needed)
+    type: (d) => (/_/.test(d.hour_day) ? "livestock" : "hour_day"),
+    // Format the name
+    hourlyName: (d) => {
+      let hourlyName = d.hour_day;
+      if (/_/.test(d.hour_day))
+        hourlyName = hourlyName.replace("_", " (") + ")";
+      return hourlyName;
+    },
+  }),
+  // Use the numeric version of hour for sorting, then remove it from the final result as it's no longer needed
+  T.arrange(["type", "hourlyNum"]),
+  T.select(["type", "hour_day", "hourlyName"]),
+);
+```
+
+```{ojs}
+md`### Dynamic Insights - Loss of Safe Working Hours`;
+```
+
+```{ojs}
+data_selectedHourly = T.tidy(
+  data_hourlyStress,
+  T.filter(
+    (d) =>
+      d.scenario === selectScenarioAndTimeframe2.scenario &&
+      d.timeframe === selectScenarioAndTimeframe2.timeframe,
+  ),
+  T.mutate({
+    hour_dayType: (d) => {
+      if (hourlyDataTypes.hour_day.hour_day.includes(d.hour_day))
+        return "hour_day";
+      return "other";
+    },
+    hour_dayValue: (d) => parseFloat(d.hour_day), // Ensure hour_dayValue is numeric
+  }),
+  T.select([
+    "hour_dayType",
+    "hazard",
+    "hour_day",
+    "delta",
+    "period",
+    "days_period",
+    "corrected_pop_sum",
+    "delta_pop_sum",
+  ]),
+  T.arrange(["hour_dayType", T.desc("delta")]),
+);
+```
+
+```{ojs}
+// hourly exposition data
+insight_totalExposedHourly = T.tidy(
+  data_selectedHourly,
+  T.filter((d) => d.hour_dayType === "hour_day"),
+  T.groupBy(
+    ["hour_dayType", "hazard"],
+    [
+      T.summarize({
+        totalExposedHourly: T.sum("delta"),
+        period: T.first("period"),
+        days_period: T.first("days_period"),
+        corrected_pop_sum: T.sum("corrected_pop_sum"),
+        delta_pop_sum: T.mean("delta_pop_sum"),
+      }),
+    ],
+  ),
+);
+```
+
+```{ojs}
+insight_topHourly = {
+  const hoursByDelta = T.tidy(
+    data_selectedHourly,
+    T.select(["hour_dayType", "hour_day", "delta"]),
+    T.filter(d => d.hour_dayType == "hour_day")
+  );
+  
+  // Find the top hour by delta
+  const topHour_day = T.tidy(
+    hoursByDelta,
+    T.sliceMax(1, "delta")
+  )[0];
+  
+  // Return the combination, including topCrop only if it's not '30' or '50'
+  return [topHour_day].filter(d => d !== undefined);
+};
+```
+
+```{ojs}
+md`#### Helpers`;
+```
+
+```{ojs}
+icicle_alias = {
+  const nameMap = {
+    population: "Total Population",
+    poverty0: "Low Poverty",
+    poverty1: "Moderate Poverty",
+    poverty2: "High Poverty",
+    education0: "0-1 Years of Education",
+    education1: "1-5 Years of Education",
+    education2: "5+ Years of Education",
+    gender0: "Low Female Empowerment",
+    gender1: "Moderate Female Empowerment",
+    gender2: "High Female Empowerment"
+  };
+  return nameMap;
+}
+```
+
+```{ojs}
+partition = (data) =>
+  d3
+    .partition()
+    .padding(1)
+    .size(narrow ? [height, width] : [width, height])(
+    d3
+      .hierarchy(data)
+      .sum((d) => d.value)
+      .sort((a, b) => b.value - a.value),
+  );
+```
+
+```{ojs}
+icicle_color = d3
+  .scaleOrdinal()
+  .domain([
+    "population",
+    "poverty2",
+    "poverty1",
+    "poverty0",
+    "education2",
+    "education1",
+    "education0",
+    "gender2",
+    "gender1",
+    "gender0",
+  ])
+  .range([
+    "#efefef",
+    "#ec5a47",
+    "#fc8a34",
+    "#f4bb21",
+    "#f4bb21",
+    "#fc8a34",
+    "#ec5a47",
+    "#f4bb21",
+    "#fc8a34",
+    "#ec5a47",
+  ]);
+```
+
+```{ojs}
+targetHeight = 350;
+```
+
+```{ojs}
+narrowHeight = 600;
+```
+
+```{ojs}
+height = narrow ? narrowHeight : targetHeight;
+```
+
+```{ojs}
+narrow = width <= 0;
+```
+
+```{ojs}
+segmentX = (d) => (narrow ? d.y0 : d.x0);
+```
+
+```{ojs}
+segmentY = (d) => (narrow ? d.x0 : d.y0);
+```
+
+```{ojs}
+segmentWidth = (d) => (narrow ? d.y1 - d.y0 : d.x1 - d.x0);
+```
+
+```{ojs}
+segmentHeight = (d) => (narrow ? d.x1 - d.x0 : d.y1 - d.y0);
+```
+
+```{ojs}
+function buildHierarchy(csv) {
+  // Helper function that transforms the given CSV into a hierarchical format.
+  const root = { name: "root", children: [] };
+  for (let i = 0; i < csv.length; i++) {
+    const sequence = csv[i][0];
+    const size = +csv[i][1];
+    if (isNaN(size)) {
+      // e.g. if this is a header row
+      continue;
+    }
+    const parts = sequence.split("_");
+    let currentNode = root;
+    for (let j = 0; j < parts.length; j++) {
+      const children = currentNode["children"];
+      const nodeName = parts[j];
+      let childNode = null;
+      let foundChild = false;
+      // Search for existing child with the same name
+      for (let k = 0; k < children.length; k++) {
+        if (children[k]["name"] === nodeName) {
+          childNode = children[k];
+          foundChild = true;
+          break;
+        }
+      }
+      // If not found, create a new child node
+      if (!foundChild) {
+        childNode = { name: nodeName, children: [] };
+        children.push(childNode);
+      }
+      currentNode = childNode;
+      // If it's the last part of the sequence, create a leaf node
+      if (j === parts.length - 1) {
+        childNode.value = size;
+      }
+    }
+  }
+  return root;
+}
+```
+
+```{ojs}
+breadcrumbWidth = 200;
+```
+
+```{ojs}
+breadcrumbHeight = 35;
+```
+
+```{ojs}
+// Generate a string that describes the points of a breadcrumb SVG polygon.
+function breadcrumbPoints(d, i) {
+  const tipWidth = 10;
+  const points = [];
+  points.push("0,0");
+  points.push(`${breadcrumbWidth},0`);
+  points.push(`${breadcrumbWidth + tipWidth},${breadcrumbHeight / 2}`);
+  points.push(`${breadcrumbWidth},${breadcrumbHeight}`);
+  points.push(`0,${breadcrumbHeight}`);
+  if (i > 0) {
+    // Leftmost breadcrumb; don't include 6th vertex.
+    points.push(`${tipWidth},${breadcrumbHeight / 2}`);
+  }
+  return points.join(" ");
+}
+```
+
+```{ojs}
+md`### Tabular data
+- **ag_workforce_data**: ag workforce data showing current and projected ag populations under different scenarios and for different years. File: baseline_df_data.parquet.
+- **heat_stress_data**: number of ag workders facing different sums of days on a year where WBGT values exceed 30 degrees. File: heat_stress_data.parquet.
+- **hourly_data**: percent of hours across seasons (harvesting, planting) that exceed safe WBGT thresholds. File: hourly_data.parquet.
+- **population**: population data by admin levels
+  - population/population_long.parquet`;
+```
+
+```{ojs}
+db = {
+  return DuckDBClient.of({
+    population: FileAttachment("population_long.parquet"),
+    vop_ha: FileAttachment("exposure_adm_sum.parquet"),
+    ag_workforce_data: FileAttachment("baseline_df_data@16.parquet"),
+    heat_stress_data: FileAttachment("heat_stress_data@7.parquet"),
+    hourly_data: FileAttachment("hourly_data@20.parquet"),
+  });
+}
+```
+
+```{ojs}
+md`### Geographic data
+Geo files were converted to TopoJSON and reduced in complexity before uploading to the notebook, see [Simplify large spatial files](https://observablehq.com/d/258c68ee969e8ed5?collection=@periscopic/ab-atlas) notebook for method.
+- **admin0**: broadest level, country boundaries
+  - boundaries/atlas-region_admin0_harmonized.geojson
+- **admin1**: one level down from admin0, regions within each admin0 region
+  - boundaries/atlas-region_admin1_harmonized.geojson
+- **admin2**: lowest level, subregions of every admin1 region
+  - boundaries/atlas-region_admin2_harmonized.geojson`;
+```
+
+```{ojs}
+boundaries = {
+  const input0 = await FileAttachment("atlas-region_admin0_harmonized.json").json()
+  const input1 = await FileAttachment("atlas-region_admin1_harmonizedV2@1.json").json()
+  const input2 = await FileAttachment("atlas-region_admin2_harmonizedV2.json").json()
+
+  const geo = {
+    admin0: topojson.feature(input0, input0.objects["atlas-region_admin0_harmonized"]),
+    admin1: topojson.feature(input1, input1.objects["atlas-region_admin1_harmonizedV2"]),
+    admin2: topojson.feature(input2, input2.objects["atlas-region_admin2_harmonizedV2"]),
+  }
+  return geo
+}
+```
+
+```{ojs}
+md`---
+### Risk data grouping
+*Lookups for risk data binning, such as hazards and crop types*`;
+```
+
+```{ojs}
+// lookup for risk data type groupings
+// used by inputs and for grouping up data
+riskDataTypes = new Object({
+  crop: {
+    crop: [
+      "10",
+      "15",
+      "20",
+      "25",
+      "30",
+      "35",
+      "40",
+      "45",
+      "50",
+      "55",
+      "60",
+      "65",
+      "70",
+      "75",
+      "80",
+      "85",
+      "90",
+      "95",
+    ],
+    livestock: [
+      "cattle_highland",
+      "cattle_tropical",
+      "goats_highland",
+      "goats_tropical",
+      "pigs_highland",
+      "pigs_tropical",
+      "poultry_highland",
+      "poultry_tropical",
+      "sheep_highland",
+      "sheep_tropical",
+    ],
+  },
+});
+```
+
+```{ojs}
+// lookup for hourly data type groupings
+// used by inputs and for grouping up data
+hourlyDataTypes = new Object({
+  hour_day: {
+    hour_day: [
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+      21, 22, 23,
+    ],
+  },
+});
+```
+
+```{ojs}
+md`---
+### Dynamic insights
+*functions for formatting results*`;
+```
+
+```{ojs}
+function filterByAdminNames(data) {
+  // filter down data by combined selected admin0/admin1/admin2 Admin Selections
+  // pass data from query, use tidyjs to filter by admin selection
+  const result = T.tidy(
+    data,
+    T.filter((d) => {
+      return (
+        d.admin0_name == adminSelections.selectAdmin0.value &&
+        d.admin1_name == adminSelections.selectAdmin1.value &&
+        d.admin2_name == adminSelections.selectAdmin2.value
+      );
+    }),
+  );
+  return result;
+}
+```
+
+```{ojs}
+// wrapper for format functions, show chosen default
+function formatWithDefault({
+  value = 1000,
+  format = (d) => d,
+  defaultValue = "---",
+  debug = false,
+} = {}) {
+  // apply a formatting function to a value
+  // return default value if undefined or null
+  if (!(value === null || value === undefined)) {
+    return format(value);
+  } else {
+    return defaultValue;
+  }
+}
+```
+
+```{ojs}
+md`---
+### Data functions: format and transform
+*apply formatting to/transform a value*
+
+- Reference: [Intl.NumberFormat()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat)`;
+```
+
+```{ojs}
+md`**Transforms**`;
+```
+
+```{ojs}
+// transform non-number to percent value
+transformPercent = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d * 100;
+};
+```
+
+```{ojs}
+md`**Formatting**`;
+```
+
+```{ojs}
+// format non-number as percent
+formatPercentTenth = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d3.format(".1%")(d);
+};
+```
+
+```{ojs}
+// format non-number as percent
+formatPercentWhole = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d3.format(".0%")(d);
+};
+```
+
+```{ojs}
+// format US currency
+formatUSD = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  compactDisplay: "short",
+  style: "currency",
+  currency: "usd",
+}).format;
+```
+
+```{ojs}
+// format number, long notation
+formatNumCompactLong = ({ locale = "en-US" } = {}) =>
+  new Intl.NumberFormat(locale, {
+    notation: "compact",
+    compactDisplay: "long",
+    unitDisplay: "long",
+  }).format;
+```
+
+```{ojs}
+// format number, short notation
+formatNumCompactShort = ({ locale = "en-US" } = {}) =>
+  new Intl.NumberFormat(locale, {
+    notation: "compact",
+    compactDisplay: "short",
+  }).format;
+```
+
+```{ojs}
+md`---
+### Querying data
+*functions for querying data*`;
+```
+
+```{ojs}
+function getUniqueValues(col, tbl, db) {
+  // return unique values of from db tbl as a list
+  return db
+    .query(`select distinct ${col} from ${tbl}`)
+    .then((x) => x.map((d) => d[col]));
+}
+```
+
+```{ojs}
+function bindTabularToGeo({
+  data = [],
+  dataBindColumn = "dataBindColumn",
+  geoData = [],
+  geoDataBindColumn = "geoDataBindColumn",
+}) {
+  // bind data to geojson
+  const index = new Map(data.map((d) => [d[dataBindColumn], d])); // map data by dataBindColumn
+  const geojson = JSON.parse(JSON.stringify(geoData)); // do a copy, rather than mutate
+  // join up data to geojson
+  for (const f of geojson.features) {
+    f.properties.data = index.get(f.properties[geoDataBindColumn]);
+  }
+  return geojson;
+}
+```
+
+```{ojs}
+md`***
+## Imports
+*External imports*`;
+```
+
+```{ojs}
+import { T } from "@pbeshai/tidyjs";
+```
+
+```{ojs}
+selectGeoDataType;
+```

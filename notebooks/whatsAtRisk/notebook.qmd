@@ -1,0 +1,4902 @@
+---
+nb-title: "Evaluate Climate Risks"
+nb-author:
+  - Zach Bogart
+---
+
+```{ojs}
+import { heroImage } from "/helpers/hero.js";
+hero_url = "./../../images/atRisk.webp";
+
+hero = heroImage(notebookTitle, hero_url);
+html`${hero}`;
+```
+
+```{ojs}
+import { atlasTOC } from '/helpers/toc.ojs' 
+{
+  await nbText // force wait/reload with nbText to load so headings have correct labels/languages
+  return atlasTOC({
+      heading: `<b>${_lang({en:"In this notebook", fr:"Dans ce notebook"})}</b>`,
+      skip: [notebookTitle, "notebook-title", "Appendix", "source-code"]
+      })
+}
+```
+
+
+```{ojs}
+// pretty view of language toggle
+viewof prettyLanguageView = {
+  return Inputs.bind(
+    Inputs.radio(languages, {
+      label: _lang(nbText.supportNbText.labels.language),
+      format: (d) => d.label
+    }),
+    viewof language
+  );
+}
+```
+
+```{ojs}
+{
+  const title = _lang(nbText.overview.header)
+  return md`# ${title}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.overview.blocks.opener)
+  return md`${text}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.africaMap.blocks.h1)
+  return md`# ${text}`
+}
+```
+
+```{ojs}
+{
+  const template = _lang(nbText.africaMap.blocks.opener)
+  const items = [
+    {name: 'vop_blurb', value: _lang(nbText.vopNoteMd.blurb)}
+  ]
+  const format = Lang.reduceReplaceTemplateItems(template, items)
+  return md`${format}`
+}
+```
+
+```{ojs}
+// format admin selections
+// bind to appendix inputs, add template to format
+geoImpactAdminSelectors = {
+  const labelCountry = _lang(nbText.supportNbText.words.country.singular)
+  const labelRegion = _lang(nbText.supportNbText.words.region.singular)
+  const labelSubregion = _lang(nbText.supportNbText.words.subregion.singular)
+  
+  return Inputs.form(
+    [
+      Inputs.bind(
+        Inputs.select(dataAdmin0, {
+          label: labelCountry,
+          format: (x) => x.label
+        }),
+        viewof selectAdmin0
+      ),
+      Inputs.bind(
+        Inputs.select(dataAdmin1, {
+          label: labelRegion,
+          format: (x) => x.label
+        }),
+        viewof selectAdmin1
+      ),
+      Inputs.bind(
+        Inputs.select(dataAdmin2, {
+          label: labelSubregion,
+          format: (x) => x.label
+        }),
+        viewof selectAdmin2
+      )
+    ],
+    {
+      template: adminFormTemplate
+    }
+  );
+}
+```
+
+```{ojs}
+// define choices for the data value
+viewof selectGeoDataType = {
+  const options = [
+    {
+      key: "population", // lookup id for data option
+      dataColumn: "rural_pop", // data column
+      label: _lang(nbText.africaMap.inputs.mapLayer.options.ruralPop.label), // label
+      labelTip: _lang(
+        nbText.africaMap.inputs.mapLayer.options.ruralPop.labelTip
+      ), // label for tooltip
+      labelLegend: _lang(
+        nbText.africaMap.inputs.mapLayer.options.ruralPop.labelLegend
+      ), // label for legend
+      formatFunc: formatNumCompactShort({locale: language.locale}), // formatting function for raw data value
+      formatFuncLegend: formatNumCompactShort({locale: language.locale}), // formatting function for legend
+      colorRange: colorScales.range.yellowGreen, // color range
+      colorUnknown: colorScales.unknown // unknown fill color
+    },
+    {
+      key: "vop",
+      dataColumn: "vop_total",
+      label: _lang(nbText.africaMap.inputs.mapLayer.options.vop.label),
+      labelTip: _lang(nbText.africaMap.inputs.mapLayer.options.vop.labelTip),
+      labelLegend: Lang.reduceReplaceTemplateItems(
+        _lang(nbText.africaMap.inputs.mapLayer.options.vop.labelLegend),
+        [{ name: "unit", value: intDollarUnit }]
+      ),
+      formatFunc: formatIntDollar({locale: language.locale}),
+      formatFuncLegend: formatUSD({locale: language.locale}),
+      colorRange: colorScales.range.yellowGreen,
+      colorUnknown: colorScales.unknown
+    }
+  ];
+  return Inputs.radio(
+    options.sort((a, b) => b.key.localeCompare(a.key)),
+    {
+      width: 300,
+      label: _lang(nbText.africaMap.inputs.mapLayer.label),
+      format: (x) => x.label,
+      value: options.find((t) => t.key === "vop")
+    }
+  );
+}
+```
+
+```{ojs}
+plotChoroplethGeoImpact = {
+  const data = mapDataGeoImpact
+  const selector = selectGeoDataType
+  const vopCaption = _lang(nbText.vopNoteMd.caption);
+  const missingDataLabel = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.missingMapDataBlurb),
+    [{name: "data_label", value: selector.label}]
+  )
+  
+  const plot = Plot.plot({
+    width: mapWidth,
+    height: 550,
+    caption: `${missingDataLabel} ${vopCaption}`,
+    projection: {
+      type: "azimuthal-equal-area",
+      domain: data
+    },
+    color: {
+      legend: true,
+      label: selector.labelLegend,
+      range: selector.colorRange,
+      unknown: selector.colorUnknown,
+      tickFormat: selector.formatFuncLegend,
+    },
+    marks: [
+      // geo data
+      Plot.geo(data.features, {
+        fill: (d) => {
+          const dataColumn = selector.dataColumn
+          const fillValue = d.properties.data ? d.properties.data[dataColumn] : null; // handle missing data
+          return fillValue
+        },
+        stroke: "#fff",
+        strokeWidth: 0.5
+      }),
+      // admin2 highlight 
+      // if Admin selection includes admin2, highlight section
+      Plot.geo(adminSelections.selectAdmin2.value 
+               ? data.features.filter(d => d.properties.admin2_name == adminSelections.selectAdmin2.value)
+               : [], {
+        fill: null,
+        stroke: "#333",
+        strokeWidth: 1.5
+      }),
+      // geo pointer
+      Plot.geo(data, Plot.pointer(
+        Plot.centroid({
+        stroke: "#333",
+        strokeWidth: 1.5,
+      }))),
+      // tooltip
+      Plot.tip(
+        data.features,
+        Plot.pointer(
+          Plot.centroid({
+            channels: {
+              name: {
+                // region label, based on selection
+                label: getLowerLevelAdminLabel(), // plot-level so inputs don't reload
+                value: (d) => {
+                  const translated = _lang(td.admin0_name.values?.[d.properties.admin_name]);
+                  return translated ?? d.properties.admin_name
+                }
+              },
+              data: {
+                label: selector.labelTip,
+                value: (d) => {
+                const dataColumn = selector.dataColumn
+                const data = d.properties.data ? d.properties.data[dataColumn] : undefined
+                return data
+              },
+              }
+            },
+            format: {
+              name: true,
+              data: (d) => selector.formatFunc(d)
+            }
+          })
+        )
+      )
+    ]
+  });
+
+  return plot
+}
+```
+
+```{ojs}
+buildInlineDownloadButton(
+  mapDataGeoImpact.features.map((d) => d.properties),
+  _lang(download_translation),
+  `${selectGeoDataType.key}`,
+);
+```
+
+```{ojs}
+headerQuickInsightsGeoImpact = {
+  const template = _lang(nbText.africaMap.insights.title)
+  const items = [
+    {name: "insight_string", value: _lang(nbText.supportNbText.labels.quickInsights)},
+    {name: "admin_selection", value: getAdminSelection().label},
+  ]
+  const format = Lang.reduceReplaceTemplateItems(template, items)
+  return md`### ${format}`
+}
+```
+
+```{ojs}
+// text insights for geo impact
+textDynamicInsights_geoImpact = {
+  const adminSelection = getAdminSelectionLabelWithParen({
+    admin0Label: _lang(
+      td.admin0_name.values?.[getAdminSelectionAdmin0().value ?? "SSA"]["article3"]
+    ),
+    adminSublabel: getAdminSelection().label
+  });
+  const i = dynamicInsights_geoImpact.insight;
+
+  const translateCrop = (crop) => _lang(td.crop.values?.[crop]);
+  const topCommoditiesFiltered = i.topCommodities.filter((d) => d.data !== 0);
+  const topCommoditiesList = topCommoditiesFiltered.map(
+    (d, i) =>
+      `${
+        i == topCommoditiesFiltered.length - 1
+          ? `${_lang(nbText.supportNbText.words.and)} `
+          : ""
+      }**${translateCrop(d.label)}** (**${d.value}**)`
+  );
+  const topLivestockFiltered = i.topLivestock.filter((d) => d.data !== 0);
+  const topLivestockList = topLivestockFiltered.map(
+    (d, i) =>
+      `${
+        i == topLivestockFiltered.length - 1
+          ? `${_lang(nbText.supportNbText.words.and)} `
+          : ""
+      }**${translateCrop(d.label)}** (**${d.value}**)`
+  );
+
+  // new code
+  const langBasePath = nbText.africaMap.insights;
+  const langOverview = Lang.reduceReplaceTemplateItems(
+    _lang(langBasePath.insightOverview),
+    [
+      { name: "admin_selection", value: adminSelection },
+      { name: "total_vop", value: i.totalVop }
+    ]
+  );
+
+  const langAreaAndPop = Lang.reduceReplaceTemplateItems(
+    _lang(langBasePath.insightAreaAndPop),
+    [
+      { name: "area", value: i.totalHa },
+      { name: "population", value: i.totalPop }
+    ]
+  );
+
+  const langTopCommodity = Lang.reduceReplaceTemplateItems(
+    _lang(langBasePath.insightTopCommodity),
+    [
+      { name: "commodity_word", value: "commodities" },
+      {
+        name: "verb",
+        value:
+          topCommoditiesFiltered.length == 1
+            ? _lang(nbText.supportNbText.words.toBe.singular)
+            : _lang(nbText.supportNbText.words.toBe.plural)
+      },
+      { name: "list_string", value: topCommoditiesList.join(", ") }
+    ]
+  );
+
+  const langTopLivestock = Lang.reduceReplaceTemplateItems(
+    _lang(langBasePath.insightTopLivestock),
+    [
+      {
+        name: "verb",
+        value:
+          topLivestockFiltered.length == 1
+            ? _lang(nbText.supportNbText.words.toBe.singular)
+            : _lang(nbText.supportNbText.words.toBe.plural)
+      },
+      { name: "list_string", value: topLivestockList.join(", ") }
+    ]
+  );
+
+  return md`${langOverview}
+
+${langAreaAndPop}
+
+${langTopCommodity}
+
+${langTopLivestock}`;
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.climateRisks.intro.h1)
+  return md`# ${text}`
+}
+```
+
+```{ojs}
+{
+  const adminSelection = getAdminSelectionLabelWithParen({
+    admin0Label: Lang.toSentenceCase(
+      _lang(
+        td.admin0_name.values?.[getAdminSelectionAdmin0().value ?? "SSA"]["article2"]
+      )
+    ),
+    adminSublabel: getAdminSelection().label
+  });
+  const format = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.climateRisks.intro.opener),
+    [{ name: "admin_selection", value: adminSelection }]
+  );
+  return md`${format}`;
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.climateRisks.compoundHazards.h2)
+  return md`## ${text}`
+}
+```
+
+```{ojs}
+{
+  const text = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.climateRisks.compoundHazards.opener),
+    [
+      {name: "vop_note", value: _lang(nbText.vopNoteMd.blurb)},
+      {name: "admin_selection", value: getAdminSelection().label}
+    ]
+  )
+  return md`${text}`
+}
+```
+
+```{ojs}
+// format admin selections
+// bind to appendix inputs, add template to format
+Inputs.form(
+  [
+    Inputs.bind(
+      Inputs.select(dataAdmin0, { label: adminRegions.labels.admin0, format: x => x.label }),
+      viewof selectAdmin0
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin1, { label: adminRegions.labels.admin1, format: x => x.label }),
+      viewof selectAdmin1
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin2, { label: adminRegions.labels.admin2, format: x => x.label }),
+      viewof selectAdmin2
+    )
+  ],
+  {
+    template: adminFormTemplate
+  }
+)
+```
+
+```{ojs}
+viewof selectScenarioAndTimeframe = {
+  // scenario and timeframe
+
+  const historicLabel = `${_lang(nbText.climateRisks.compoundHazards.inputs.dropdownScenario.historic)}: 1995-2014`
+
+  const data = [
+    {label: historicLabel, scenario: 'historic', timeframe: 'historic'},
+    {label: 'SSP245: 2021-2040', scenario: 'ssp245', timeframe: '2021_2040'},
+    {label: 'SSP245: 2041-2060', scenario: 'ssp245', timeframe: '2041_2060'},
+    {label: 'SSP585: 2021-2040', scenario: 'ssp585', timeframe: '2021_2040'},
+    {label: 'SSP585: 2041-2060', scenario: 'ssp585', timeframe: '2041_2060'},
+  ]
+  
+  return Inputs.select(data, {
+    label: _lang(nbText.climateRisks.compoundHazards.inputs.dropdownScenario.label),
+    format: x => x.label,
+    value: data.find(d => d.timeframe === 'historic')
+  });
+}
+```
+
+```{ojs}
+{
+  const labelPerc = _lang(nbText.climateRisks.compoundHazards.stackedBar.tooltipLabels.totalVop)
+  const labelHazard = _lang(nbText.climateRisks.compoundHazards.stackedBar.tooltipLabels.hazard)
+  const labelVop = _lang(nbText.climateRisks.compoundHazards.stackedBar.tooltipLabels.vopRisk)
+  const xLabel = _lang(nbText.climateRisks.compoundHazards.stackedBar.xLabel)
+  const marginLeft = _lang({en: 110, fr: 150});
+  
+  const _anyData = T.tidy(
+    data_hazardVoP,
+    T.filter((d) => !["any", "no hazard"].includes(d.hazard)), // only hazard components
+    T.groupBy(
+      [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "severity",
+        "crop"
+      ],
+      [
+        T.summarize({
+          vop_any: T.sum("vop")
+        })
+      ]
+    )
+  );
+
+  const _dataWithAnyColumn = T.tidy(
+    data_hazardVoP,
+    T.leftJoin(_anyData, {
+      by: [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "crop",
+        "severity"
+      ]
+    })
+  );
+
+  const data = _dataWithAnyColumn;
+  const dataAny = data.filter((d) => d.hazard == "any"); // combined
+  const dataBars = [
+    ...data.filter((d) => d.hazard !== "any" && d.vop !== 0) // remove the combined hazard
+  ];
+  const yDomain = cropNames
+    .filter((d) => {
+      const availableCrops = _.uniq(dataBars.map((d) => d.crop));
+      return availableCrops.includes(d.crop);
+    })
+    .sort((a,b) => {
+      // sort by type, then name
+      if (a.type < b.type) return -1
+      if (a.type > b.type) return 1
+
+      if (a.cropName < b.cropName) return -1
+      if (a.cropName > b.cropName) return 1
+
+      return 0
+    })
+    .map((d) => d.cropName);
+  const vopCaption = _lang(nbText.vopNoteMd.caption);
+
+  return Plot.plot({
+    width: 1200,
+    height: 850,
+    marginLeft,
+    marginRight: 85,
+    caption: vopCaption,
+    color: {
+      domain: hazardPlotLookup.color.domain,
+      range: hazardPlotLookup.color.range,
+      legend: true
+    },
+    x: {
+      ticks: 1,
+      axis: "top",
+      domain: [0, 100],
+      grid: true,
+      label: xLabel
+    },
+    y: {
+      domain: yDomain,
+      label: null
+    },
+    marks: [
+      // main y-axis
+      Plot.axisY({
+        tickSize: 0
+      }),
+      // pointer white-out
+      Plot.axisY(
+        Plot.pointerY({
+          fill: "white",
+          textStroke: "white",
+          textStrokeWidth: 2,
+          tickSize: 0
+        })
+      ),
+      // bold pointer
+      Plot.axisY(
+        Plot.pointerY({
+          fontWeight: "bold",
+          tickSize: 0
+        })
+      ),
+      // hazard component bars
+      Plot.barX(
+        dataBars,
+        Plot.stackX(
+          { order: hazardPlotLookup.color.domain },
+          {
+            x: (d) => (d.vop / d.vop_total) * 100,
+            y: (d) => hazardPlotLookup.crops[d.crop],
+            fill: (d) => hazardPlotLookup.names[d.hazard],
+            stroke: "#fff",
+            strokeWidth: 0.25
+          }
+        )
+      ),
+      // tooltip
+      Plot.tip(
+        dataBars,
+        Plot.pointerY(
+          Plot.stackX(
+            { order: hazardPlotLookup.color.domain },
+            {
+              x: (d) => (d.vop / d.vop_total) * 100,
+              y: (d) => hazardPlotLookup.crops[d.crop],
+              fill: (d) => hazardPlotLookup.names[d.hazard],
+              channels: {
+                perc: {
+                  label: labelPerc,
+                  value: (d) => {
+                    const percent = formatPercentWhole(d.vop_any / d.vop_total);
+                    const vop = formatIntDollar({locale: language.locale})(d.vop_any);
+                    return `${percent} (${vop})`;
+                  }
+                  // value: (d) => formatUSD(d.vop_any)
+                },
+                hazard: {
+                  label: labelHazard,
+                  value: (d) => hazardPlotLookup.names[d.hazard]
+                },
+                vop: {
+                  label: labelVop,
+                  value: (d) => {
+                    const percent = formatPercentWhole(d.vop / d.vop_total);
+                    const vop = formatIntDollar({locale: language.locale})(d.vop);
+                    return `${percent} (${vop})`;
+                  }
+                }
+              },
+              format: {
+                x: false,
+                y: false,
+                fill: false,
+                vop: true,
+                hazard: true,
+                perc: true
+              },
+              lineWidth: 50
+            }
+          )
+        )
+      ),
+      // total VoP, sidebar highlight
+      Plot.textX(
+        dataAny,
+        Plot.pointerY({
+          x: 100,
+          y: (d) => hazardPlotLookup.crops[d.crop],
+          text: (d) => {
+            const value = formatIntDollar({locale: language.locale})(d.vop_total);
+            return `${value}`;
+          },
+          textAnchor: "start",
+          dx: 5
+        })
+      )
+    ]
+  });
+}
+```
+
+```{ojs}
+buildInlineDownloadButton(
+  data_hazardVoP,
+  _lang(download_translation),
+  `CropClimateExposure_${selectScenarioAndTimeframe.label.replace(/\s/g, "")}`,
+);
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.climateRisks.hazardImpact.h1)
+  return md`## ${text}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.climateRisks.hazardImpact.intro)
+  return md`${text}`
+}
+```
+
+```{ojs}
+// picking hazard
+viewof selectHazard = {
+  const data = new Map(
+    Object.keys(hazardPlotLookup.names)
+    .filter(d => d !== 'no hazard') // remove no hazard option
+    .map(d => [hazardPlotLookup.names[d], d])
+  );
+  return Inputs.select(data, {
+    value: 'dry',
+    label: _lang(nbText.climateRisks.hazardImpact.inputs.dropdownHazard.label)
+  });
+}
+```
+
+```{ojs}
+{
+  const template = _lang(nbText.climateRisks.hazardImpact.plots.crops.header)
+  const items = [{name: "hazard_string", value: hazardPlotLookup.names[selectHazard].toLowerCase()}]
+  const format = Lang.reduceReplaceTemplateItems(template, items)
+  return md`### ${format}`
+}
+```
+
+```{ojs}
+{
+  const data = data_hazardVoP.filter((d) => {
+    return (
+      d.hazard == selectHazard &&
+      d.vop !== 0 &&
+      riskDataTypes.crop.crop.includes(d.crop)
+    ); // lookup crop type
+  });
+  const marginLeft = _lang({en: 110, fr: 120});
+  return makeTopCropBarChart(data, {marginLeft});
+}
+```
+
+```{ojs}
+buildInlineDownloadButton(
+  data_hazardVoP.filter((d) => {
+    return (
+      d.hazard == selectHazard &&
+      d.vop !== 0 &&
+      riskDataTypes.crop.crop.includes(d.crop)
+    );
+  }),
+  _lang(download_translation),
+  `CropRisk_${selectHazard}`,
+);
+```
+
+```{ojs}
+{
+  const template = _lang(nbText.climateRisks.hazardImpact.plots.livestock.header)
+  const items = [{name: "hazard_string", value: hazardPlotLookup.names[selectHazard].toLowerCase()}]
+  const format = Lang.reduceReplaceTemplateItems(template, items)
+  return md`### ${format}`
+}
+```
+
+```{ojs}
+{
+  const data = data_hazardVoP.filter((d) => {
+    return (
+      d.hazard == selectHazard &&
+      d.vop !== 0 &&
+      riskDataTypes.crop.livestock.includes(d.crop)
+    ); // lookup crop type
+  });
+  const marginLeft = _lang({en: 110, fr: 150});
+  return makeTopCropBarChart(data, {marginLeft});
+}
+```
+
+```{ojs}
+buildInlineDownloadButton(
+  data_hazardVoP.filter((d) => {
+    return (
+      d.hazard == selectHazard &&
+      d.vop !== 0 &&
+      riskDataTypes.crop.livestock.includes(d.crop)
+    );
+  }),
+  _lang(download_translation),
+  `LivestockRisk_${selectHazard}`,
+);
+```
+
+```{ojs}
+{
+  const format = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.climateRisks.hazardImpact.insights.title),
+    [
+      { name: "insight_string", value: _lang(nbText.supportNbText.labels.quickInsights) },
+      { name: "admin_selection", value: getAdminSelection().label },
+      { name: "scenario", value: selectScenarioAndTimeframe.label }
+    ]
+  );
+  return md`### ${format}`
+}
+```
+
+```{ojs}
+{
+  const selectedHazard = hazardPlotLookup.names[selectHazard]
+  const langLookup = {
+    hazard: selectedHazard,
+    hazardBlurb: Lang.reduceReplaceTemplateItems(
+      _lang(nbText.climateRisks.hazardImpact.insights.hazardBlurb),
+      [{name: "hazard_string", value: selectedHazard}]
+    ),
+    labels: {
+      totalVopCrop: _lang(
+        nbText.climateRisks.hazardImpact.insights.labels.totalVopCrop
+      ),
+      totalVopLivestock: _lang(
+        nbText.climateRisks.hazardImpact.insights.labels.totalVopLivestock
+      ),
+      exposureCrop: _lang(
+        nbText.climateRisks.hazardImpact.insights.labels.exposureCrop
+      ),
+      exposureLivestock: _lang(
+        nbText.climateRisks.hazardImpact.insights.labels.exposureLivestock
+      )
+    }
+  };
+
+  const crop = insight_totalExposedVop.filter(
+    (d) => d.totalExposedVop !== 0 && d.cropType == "crop"
+  )?.[0]?.["totalExposedVop"];
+  const livestock = insight_totalExposedVop.filter(
+    (d) => d.totalExposedVop !== 0 && d.cropType == "livestock"
+  )?.[0]?.["totalExposedVop"];
+
+  const topCrop = insight_topCrops.filter(
+    (d) => d.vop !== 0 && d.cropType == "crop"
+  )?.[0];
+  const topLivestock = insight_topCrops.filter(
+    (d) => d.vop !== 0 && d.cropType == "livestock"
+  )?.[0];
+
+  const missingValue = "---";
+
+  function showResult(value, format) {
+    if (value === null || value === undefined) return missingValue;
+    return format(value);
+  }
+
+  const topCropString =
+    topCrop !== undefined
+      ? `**${hazardPlotLookup.crops[topCrop?.["crop"]]}** (**${formatIntDollar({locale: language.locale})(
+          topCrop?.["vop"]
+        )}**)`
+      : `**${missingValue}**`;
+  const topLivestockString =
+    topLivestock !== undefined
+      ? `**${
+          hazardPlotLookup.crops[topLivestock?.["crop"]]
+        }** (**${formatIntDollar({locale: language.locale})(topLivestock?.["vop"])}**)`
+      : `**${missingValue}**`;
+
+  return md`${langLookup.hazardBlurb}
+
+- ${langLookup.labels.totalVopCrop}: **${showResult(crop, formatIntDollar({locale: language.locale}))}**
+- ${langLookup.labels.totalVopLivestock}: **${showResult(
+    livestock,
+    formatIntDollar({locale: language.locale})
+  )}**
+- ${langLookup.labels.exposureCrop}: ${topCropString}
+- ${langLookup.labels.exposureLivestock}: ${topLivestockString}
+`;
+}
+```
+
+```{ojs}
+{
+  const intro = _lang(nbText.climateRisks.hazardImpact.insights.blurbBiggestHazard)
+  return md`${intro}
+- **${hazardPlotLookup.names[insight_rankedHazardVopTotals?.[0]?.['hazard']]}**: **${formatIntDollar({locale: language.locale})(insight_rankedHazardVopTotals?.[0]?.['totalVop'])}**
+- **${hazardPlotLookup.names[insight_rankedHazardVopTotals?.[1]?.['hazard']]}**: **${formatIntDollar({locale: language.locale})(insight_rankedHazardVopTotals?.[1]?.['totalVop'])}**`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.adaptiveCapacities.h1)
+  return md`# ${text}`
+}
+```
+
+```{ojs}
+{
+  const adminSelection = getAdminSelectionLabelWithParen({
+    admin0Label: _lang(
+      td.admin0_name.values?.[getAdminSelectionAdmin0().value ?? "SSA"]["article3"]
+    ),
+    adminSublabel: getAdminSelection().label
+  });
+  const format = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.adaptiveCapacities.intro),
+    [{name: "admin_selection", value: adminSelection}]
+  )
+  return md`${format}`
+}
+```
+
+```{ojs}
+// format admin selections
+// bind to appendix inputs, add template to format
+Inputs.form(
+  [
+    Inputs.bind(
+      Inputs.select(dataAdmin0, { label: adminRegions.labels.admin0, format: x => x.label }),
+      viewof selectAdmin0
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin1, { label: adminRegions.labels.admin1, format: x => x.label }),
+      viewof selectAdmin1
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin2, { label: adminRegions.labels.admin2, format: x => x.label }),
+      viewof selectAdmin2
+    )
+  ],
+  {
+    template: adminFormTemplate
+  }
+)
+```
+
+```{ojs}
+// define choices for the data value
+viewof selectAcDataTypeNew = {
+  const options = dataLayerOptionsAdaptiveCapacities;
+  
+  return Inputs.radio(options, {
+    width: 300,
+    label: _lang(nbText.adaptiveCapacities.inputs.mapLayer.label),
+    format: (x) => x.label,
+    value: options.find((t) => t.key === "pov"),
+    sort: true
+  });
+}
+```
+
+```{ojs}
+plotChoroplethAdaptiveCapacity1 = {
+  const data = mapFeaturesAdaptiveCapacity; // geo, with bound data
+  const selector = selectAcDataTypeNew;
+  const options = dataLayerOptionsAdaptiveCapacities;
+
+  const filler = selectAcDataTypeNew.key === "edu" ? (c) => c : transformPercent
+
+  function _getOption(key, data = options) {
+    return data.find((x) => x.key == key);
+  }
+
+  const missingDataLabel = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.missingMapDataBlurb),
+    [{ name: "data_label", value: selector.label }]
+  );
+
+  return Plot.plot({
+    caption: missingDataLabel,
+    marginBottom: 20,
+    width: mapWidth,
+    height: 550,
+    projection: {
+      type: "azimuthal-equal-area",
+      domain: {
+        type: "FeatureCollection",
+        features: data
+      }
+    },
+    color: {
+      // scheme: 'Cividis',
+      legend: true,
+      // domain: [0, 100],
+      range:
+        selector.key === "pov"
+          ? selector.colorDomain
+          : selector.colorDomain.slice().reverse(),
+      unknown: selector.colorUnknown,
+      label: selector.labelLegend
+    },
+    marks: [
+      // geo data
+      Plot.geo(data, {
+        // convert non-null to percent
+        fill: (d) => filler(d.properties.data[selector.dataColumn]),
+        stroke: "#fff",
+        strokeWidth: 0.5
+      }),
+      // admin2 highlight
+      // if Admin selection includes admin2, highlight section
+      Plot.geo(
+        adminSelections.selectAdmin2.value
+          ? data.filter(
+              (d) => d.properties.admin2_name == adminSelections.selectAdmin2.value
+            )
+          : [],
+        {
+          fill: null,
+          stroke: "#333",
+          strokeWidth: 1.5
+        }
+      ),
+      // geo pointer
+      Plot.geo(
+        data,
+        Plot.pointer(
+          Plot.centroid({
+            stroke: "#333",
+            strokeWidth: 1.5
+          })
+        )
+      ),
+      // tooltip
+      Plot.tip(
+        data,
+        Plot.pointer(
+          Plot.centroid({
+            lineWidth: Infinity,
+            channels: {
+              name: {
+                label:
+                  // label for region, by admin selection
+                  // plot-level so inputs don't reload
+                  adminSelections.selectAdmin0.value
+                    ? adminRegions.labels.admin2
+                    : adminRegions.labels.admin0,
+                value: (d) => {
+                  const translated = _lang(td.admin0_name.values?.[d.properties.admin_name]);
+                  return translated ?? d.properties.admin_name
+                }
+              },
+              percent: {
+                // specific selected value
+                label: selector.label,
+                value: (d) => {
+                  const dataColumn = selector.dataColumn;
+                  // const data = d.properties.data[dataColumn]
+                  const data = formatPercentNoSymbol(
+                    transformPercent(d.properties.data[dataColumn])
+                  );
+                  return data;
+                }
+              },
+              totalPopulation: {
+                label: selector.labelPop,
+                value: (d) =>
+                  formatNumCompactShort({locale: language.locale})(d.properties.data[selector.popColumn])
+              },
+              ac_pov: {
+                label: _getOption("pov").label,
+                value: (d) => {
+                  const dataColumn = _getOption("pov").dataColumn;
+                  const pov_rate = formatPercentNoSymbol(
+                    transformPercent(d.properties.data[dataColumn])
+                  );
+                  return `${pov_rate}%`
+                }
+              },
+              ac_edu: {
+                label: _getOption("edu").label,
+                value: (d) => {
+                  const dataColumn = _getOption("edu").dataColumn;
+                  return `${d.properties.data[dataColumn].toFixed(2)} Yrs`
+                  // return formatPercentNoSymbol(
+                  //   transformPercent(d.properties.data[dataColumn])
+                  // );
+                }
+              },
+              ac_fem: {
+                label: _getOption("fem").label,
+                value: (d) => {
+                  const dataColumn = _getOption("fem").dataColumn;
+                  return formatPercentNoSymbol(
+                    transformPercent(d.properties.data[dataColumn])
+                  );
+                }
+              }
+            },
+            format: {
+              name: true,
+              totalPopulation: true,
+              ac_pov: true,
+              ac_edu: true,
+              ac_fem: true
+              // percent: true
+            }
+          })
+        )
+      )
+    ]
+  });
+}
+```
+
+```{ojs}
+buildInlineDownloadButton(
+  dataAdaptiveCapacity,
+  _lang(download_translation),
+  "AdaptiveCapacityMap",
+);
+```
+
+```{ojs}
+{
+  const format = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.adaptiveCapacities.insights.title),
+    [
+      { name: "insight_string", value: _lang(nbText.supportNbText.labels.quickInsights) },
+      { name: "admin_selection", value: getAdminSelection().label },
+    ]
+  );
+  return md`## ${format}`
+}
+```
+
+```{ojs}
+textDynamicInsights_adaptiveCapacities2 = {
+  // return md`TODO: based on icicle data`
+
+  // dynamic insight based on selected region
+
+  const admin2 = adminSelections.selectAdmin2.value;
+  const admin2MadLib = adaptiveCapacityInsightMadLib2(
+    dynamicInsights_adaptiveCapacity.insights.admin2,
+    admin2
+  );
+  const admin1 = adminSelections.selectAdmin1.value;
+  const admin1MadLib = adaptiveCapacityInsightMadLib2(
+    dynamicInsights_adaptiveCapacity.insights.admin1,
+    admin1
+  );
+  const admin0 = adminSelections.selectAdmin0.label ?? globalSelection.label;
+  const admin0Insights = dynamicInsights_adaptiveCapacity.insights.admin0;
+  const admin0MadLib = adaptiveCapacityInsightMadLib2(
+    admin0Insights,
+    admin0
+  );
+
+  const langWithinAdmin1 = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.adaptiveCapacities.insights.nestedLocationBlurb),
+    [
+      { name: "admin_inner", value: admin2 },
+      { name: "admin_outer", value: admin1 }
+    ]
+  );
+  const withinAdmin1 = admin2
+    ? `${langWithinAdmin1}`
+    : ``;
+
+  const langWithinAdmin0 = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.adaptiveCapacities.insights.nestedLocationBlurb),
+    [
+      { name: "admin_inner", value: admin1 },
+      { name: "admin_outer", value: admin0 }
+    ]
+  );
+  const withinAdmin0 = admin1
+    ? `${langWithinAdmin0}`
+    : ``;
+
+  // Text sections ------------------------------
+  const admin2Text = md`${admin2MadLib}`;
+
+  const admin1Text = md`${withinAdmin1} ${admin1MadLib}`;
+
+  const admin0Text = md`${withinAdmin0} ${admin0MadLib}`;
+
+  // Final text ------------------------------
+  return md`${admin2 ? admin2Text : ""}
+${admin1 ? admin1Text : ""}
+${admin0Insights ? admin0Text : ""}
+`;
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.adaptiveCapacities.delvingDeeper.h2)
+  return md`## ${text}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.adaptiveCapacities.delvingDeeper.intro)
+  return md`${text}`
+}
+```
+
+```{ojs}
+// format admin selections
+// bind to appendix inputs, add template to format
+Inputs.form(
+  [
+    Inputs.bind(
+      Inputs.select(dataAdmin0, { label: adminRegions.labels.admin0, format: x => x.label }),
+      viewof selectAdmin0
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin1, { label: adminRegions.labels.admin1, format: x => x.label }),
+      viewof selectAdmin1
+    ),
+    Inputs.bind(
+      Inputs.select(dataAdmin2, { label: adminRegions.labels.admin2, format: x => x.label }),
+      viewof selectAdmin2
+    )
+  ],
+  {
+    template: adminFormTemplate
+  }
+)
+```
+
+```{ojs}
+breadcrumb = {
+  const svg = d3
+    .create("svg")
+    .attr("viewBox", `0 0 ${breadcrumbWidth * 4.75} ${breadcrumbHeight}`)
+    .style("font", "11px sans-serif")
+    .style("margin", "2px");
+
+  const g = svg
+    .selectAll("g")
+    .data(icicle.sequence)
+    .join("g")
+    .attr("transform", (d, i) => `translate(${i * breadcrumbWidth}, 0)`);
+
+  g.append("polygon")
+    .attr("points", breadcrumbPoints)
+    .attr("fill", (d) => icicle_color(d.data.name))
+    .attr("stroke", "white");
+
+  g.append("text")
+    .attr("x", (breadcrumbWidth + 10) / 2)
+    .attr("y", 15)
+    .attr("dy", "0.35em")
+    .attr("text-anchor", "middle")
+    .attr("fill", "white")
+    .text((d) => icicle_alias[d.data.name]);
+
+  if (icicle.sequence.length > 1) {
+    svg
+      .append("text")
+      .text(icicle.percentage > 0 ? icicle.percentage + "%" : "")
+      .attr("x", (icicle.sequence.length + 0.25) * breadcrumbWidth)
+      .attr("y", breadcrumbHeight / 2)
+      .attr("dy", "0.35em")
+      .attr("text-anchor", "middle");
+  }
+
+  return svg.node();
+}
+```
+
+```{ojs}
+viewof icicle = {
+  const root = partition(icicle_data);
+  let frozen = false;
+  let frozenSequence = [];
+  // const padding = 10;
+  const svg = d3.create("svg");
+  // Make this into a view, so that the currently hovered sequence is available to the breadcrumb
+  const element = svg.node();
+  element.value = { sequence: [], percentage: 0.0 };
+
+  svg
+    .attr("viewBox", `0 0 ${width} ${height}`)
+    .style("font", "12px sans-serif");
+
+  svg
+    .append("rect")
+    .attr("width", width)
+    .attr("height", height)
+    .attr("fill", "none");
+
+  const segment = svg
+    .append("g")
+    .attr("transform", (d) =>
+      narrow ? `translate(${-root.y1}, 40)` : `translate(0, ${-root.y1 + 40})`
+    )
+    .selectAll("rect")
+    .data(
+      root.descendants().filter((d) => {
+        return d.depth;
+      })
+    )
+    .join("rect")
+    .attr("fill", (d) => icicle_color(d.data.name))
+    .attr("x", segmentX)
+    .attr("y", segmentY)
+    .attr("width", segmentWidth)
+    .attr("height", segmentHeight)
+    .on("mouseenter", (event, d) => {
+      if (frozen) return;
+      // Get the ancestors of the current segment, minus the root
+      const sequence = d.ancestors().reverse().slice(1);
+      // Highlight the ancestors
+      segment.attr("fill-opacity", (node) =>
+        sequence.indexOf(node) >= 0 ? 1.0 : 0.3
+      );
+      const percentage = (100 * (d.value / root.value)).toPrecision(3);
+      element.value = { sequence, percentage };
+      element.dispatchEvent(new CustomEvent("input"));
+    })
+    .on("click", (event, d) => {
+      if (frozen) {
+        frozen = false;
+        return;
+      } else {
+        frozen = true;
+        frozenSequence = d.ancestors().reverse().slice(1);
+        segment.attr("fill-opacity", (node) =>
+          frozenSequence.indexOf(node) >= 0 ? 1.0 : 0.3
+        );
+        const percentage = (100 * (d.value / root.value)).toPrecision(3);
+        element.value = { sequence: frozenSequence, percentage };
+        element.dispatchEvent(new CustomEvent("input"));
+        event.stopPropagation(); // prevent svg click from firing
+      }
+    });
+
+  svg.on("mouseleave", () => {
+    if (frozen) return;
+    segment.attr("fill-opacity", 1);
+    // Update the value of this view
+    element.value = { sequence: [], percentage: 0.0 };
+    element.dispatchEvent(new CustomEvent("input"));
+  });
+
+  svg.on("click", () => {
+    if (frozen) {
+      frozen = false;
+      frozenSequence = [];
+      segment.attr("fill-opacity", 1);
+      element.value = { sequence: [], percentage: 0.0 };
+      element.dispatchEvent(new CustomEvent("input"));
+    }
+  });
+
+  // add legend
+  const colorScale = d3
+    .scaleOrdinal()
+    .domain(["Better", "Moderate", "Worse"])
+    .range(["#F4BB21", "#FC8A34", "#EC5A47"]);
+
+  svg
+    .append("rect")
+    .attr("x", 1)
+    .attr("y", 5)
+    .attr("rx", 10) // Add rounded corners
+    .attr("ry", 10) // Add rounded corners
+    .attr("width", 300) // Adjust the width to fit the legend
+    .attr("height", 30) // Adjust the height to fit the legend
+    .attr("fill", "#fff");
+  // .attr("stroke", "black");
+
+  const legend = svg
+    .selectAll(".legend")
+    .data(colorScale.domain())
+    .enter()
+    .append("g")
+    .attr("class", "legend")
+    .attr("transform", function (d, i) {
+      return "translate(" + (i * 100 + 25) + ",11)";
+    });
+
+  legend
+    .append("rect")
+    .attr("x", 0)
+    .attr("width", 18)
+    .attr("height", 18)
+    .style("fill", colorScale);
+
+  legend
+    .append("text")
+    .attr("x", 24)
+    .attr("y", 9)
+    .attr("dy", ".35em")
+    .text(function (d) {
+      return d;
+    });
+
+  return element;
+}
+```
+
+```{ojs}
+icicle_pct_table = {
+  // A little function to basically calcualte the same thing as the breadcrumb but for all the admin region.
+  // This is what users should see if going to a tabular view and also what they should download. It is much easier to understand and work with.
+  const summarize_icicle = (csv, icicle_keys = null) => {
+    const rows = csv.map(row => ({
+      parts: row.path.split("_").slice(1),
+      value: +row.value
+    }));
+    const total = d3.sum(rows, (d) => d.value);
+
+    const maxDepth = Math.max(...rows.map((r) => r.parts.length));
+    const levelNames = icicle_keys
+      ? Object.keys(icicle_keys)
+      : [...Array(maxDepth).keys()].map((i) => `level${i + 1}`);
+
+    const lookupName = (dim, key) => {
+      if (!icicle_keys) return key;
+      return icicle_keys[dim]?.[key]?.[0] ?? key;
+    };
+
+    const genderTotals = {};
+    rows.forEach((r) => {
+      const gender = r.parts[0];
+      genderTotals[gender] = (genderTotals[gender] || 0) + r.value;
+    });
+
+    // Recursive helper
+    const recurse = (rows, depth = 0, prefix = []) => {
+      if (!rows.length) return [];
+      if (depth >= maxDepth) return [];
+
+      return d3
+        .rollups(
+          rows,
+          (v) => d3.sum(v, (d) => d.value),
+          (d) => d.parts[depth]
+        )
+        .flatMap(([k, sum]) => {
+          const current = [...prefix, k];
+          const rowObj = {};
+          levelNames.forEach((col, i) => {
+            rowObj[col] = current[i] ? lookupName(col, current[i]) : null;
+          });
+          rowObj.pct_total = (100 * sum) / total;
+          // pct relative to gender
+          const genderKey = prefix[0];
+          if (genderKey && genderTotals[genderKey]) {
+            rowObj.pct_of_gender = (100 * sum) / genderTotals[genderKey];
+          }
+          return [
+            rowObj,
+            ...recurse(
+              rows.filter((r) => r.parts[depth] === k),
+              depth + 1,
+              current
+            )
+          ];
+        });
+    };
+
+    return recurse(rows);
+  };
+
+  return buildInlineDownloadButton(
+    summarize_icicle(icicle_raw, icicle_keys),
+    _lang(download_translation),
+    `AdaptiveCapacityIcicle_${selectAdmin0.label.replace(/\s/g, "")}`
+  )
+  
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.summary.h1)
+  return md`# ${text}`
+}
+```
+
+```{ojs}
+dynamicSummaryCell = {
+  let dynamicSummary = "";
+  // add filter to do nothing in case where no admin0 is selected
+  if (adminSelections.selectAdmin0.value !== null) {
+    dynamicSummary = Lang.reduceReplaceTemplateItems(
+      _lang(nbText.summary.dynamicSummarylist),
+      [{ name: "markdownList", value: dynamicSummaryMarkdown }]
+    );
+  }
+  const admin0 = _lang(
+    td.admin0_name.values?.[getAdminSelectionAdmin0().value ?? 'SSA']["article3"]
+  );
+  const intro = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.summary.blocks.dynamicSummary.intro),
+    [{ name: "admin0", value: admin0 }]
+  );
+
+  return md`${intro} ${dynamicSummary}`;
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.summary.blocks.closer)
+  return md`${text}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.methods.h1)
+  return md`# ${text}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.methods.section1)
+  return md`## ${text}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.methods.section1.subsections);
+  return md`${text}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.methods.section2)
+  return md`## ${text}`
+}
+```
+
+```{ojs}
+{
+  const text = _lang(nbText.methods.section2.subsections)
+  return md`${text}`
+}
+```
+
+# Appendix {.hidden}
+
+```{ojs}
+md`---
+## Work by Topic
+*Cells that power different sections*`;
+```
+
+```{ojs}
+md`---
+### Support notebook
+[Support Notebook](https://observablehq.com/@periscopic/ab-atlas-spotlight-support): used for imports across spotlights.`;
+```
+
+```{ojs}
+md`---
+### Notebook Variables
+_Main variables across notebook_`;
+```
+
+```{ojs}
+// main title of the notebook
+notebookTitle = _lang({
+  en: "Evaluate Climate Risks",
+  fr: "Evaluer les risques climatiques",
+});
+```
+
+```{ojs}
+// info for the admin selectors
+adminRegions = {
+  return {
+    labels: {
+      admin0: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.country.singular)
+      ),
+      admin1: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.region.singular)
+      ),
+      admin2: Lang.toSentenceCase(
+        _lang(nbText.supportNbText.words.subregion.singular)
+      )
+    },
+    allLabels: {
+      admin1: _lang(nbText.supportNbText.labels.allRegions),
+      admin2: _lang(nbText.supportNbText.labels.allSubregions),
+    }
+  };
+}
+```
+
+```{ojs}
+function getLowerLevelAdminLabel(selections = adminSelections) {
+  // based on admin selection, get the lower level label
+  if (selections.selectAdmin2.value) return adminRegions.labels.admin2;
+  if (selections.selectAdmin1.value) return adminRegions.labels.admin2;
+  if (selections.selectAdmin0.value) return adminRegions.labels.admin1;
+  else return adminRegions.labels.admin0;
+}
+```
+
+```{ojs}
+// width of the maps
+mapWidth = 625;
+```
+
+```{ojs}
+md`**Language and notebook text**`;
+```
+
+```{ojs}
+import { Lang } from "7d46679f7d0d917e";
+```
+
+```{ojs}
+languages = [
+  { key: "en", label: "English", locale: "en-US" },
+  { key: "fr", label: "Français", locale: "fr-FR" },
+];
+```
+
+```{ojs}
+// get the default language key from parameter, or use default
+defaultLangKey = {
+  const name = "lang";
+  const list = languages.map((d) => d.key);
+  const defaultKey = "en";
+
+  const queryParam = await Lang.getParamFromList({ name, list });
+
+  return queryParam ?? defaultKey;
+}
+```
+
+```{ojs}
+// helper shorthand for Lang text-getting
+_lang = Lang.lg(language.key);
+```
+
+```{ojs}
+// main toggle of language key
+viewof language = Inputs.radio(languages, {
+  label: "Main language toggle",
+  format: (d) => d.key,
+  value: languages.find((x) => x.key === defaultLangKey),
+})
+```
+
+```{ojs}
+nbText = {
+  // text in the notebook
+  // recommendation: only use objects for better tab-completion
+  return {
+    supportNbText: {
+      labels: {
+        allRegions: {
+          en: "All regions",
+          fr: "Toutes les régions"
+        },
+        allSubregions: {
+          en: "All subregions",
+          fr: "Toutes les sous-régions"
+        },
+        quickInsights: {
+          en: "Quick Insights",
+          fr: "Aperçu Rapide"
+        },
+        language: {
+          en: "Language",
+          fr: "Langue"
+        },
+        tocTitle: {
+          en: "In this notebook",
+          fr: "Dans ce notebook"
+        },
+        crop: {
+          en: "Crop",
+          fr: "Récolte"
+        },
+        sort: {
+          en: "Sort",
+          fr: "Trier"
+        },
+        sortTotals: {
+          en: "Sort totals",
+          fr: "Trier les totaux"
+        },
+        sortBars: {
+          en: "Sort bars",
+          fr: "Trier les barres"
+        },
+        confidenceIntervals: {
+          en: "Confidence intervals",
+          fr: "Intervalles de confiance"
+        },
+        highlightAez: {
+          en: "Highlight AEZ",
+          fr: "Surligner AEZ"
+        },
+        highlightPractice: {
+          en: "Highlight a practice",
+          fr: "Surligner une pratique"
+        }
+      },
+      phrases: {
+        inTotal: {
+          en: "In total, there are",
+          fr: "Au total, il y a"
+        },
+        specificHas: {
+          en: `**:::item:::** has`,
+          fr: `**:::item:::** a`
+        }
+      },
+      words: {
+        toBe: {
+          singular: {
+            en: "is",
+            fr: "est"
+          },
+          plural: {
+            en: "are",
+            fr: "sont"
+          }
+        },
+        and: {
+          en: "and",
+          fr: "et"
+        },
+        percentage: {
+          singular: {
+            en: "percentage",
+            fr: "pourcentage"
+          },
+          plural: {
+            en: "percentages",
+            fr: "pourcentages"
+          }
+        },
+        crop: {
+          singular: {
+            en: "crop",
+            fr: "récolte"
+          },
+          plural: {
+            en: "crops",
+            fr: "récoltes"
+          }
+        },
+        country: {
+          singular: {
+            en: "country",
+            fr: "pays"
+          },
+          plural: {
+            en: "countries",
+            fr: "des pays"
+          }
+        },
+        region: {
+          singular: {
+            en: "region",
+            fr: "région"
+          },
+          plural: {
+            en: "regions",
+            fr: "régions"
+          }
+        },
+        subregion: {
+          singular: {
+            en: "subregion",
+            fr: "sous-région"
+          },
+          plural: {
+            en: "subregions",
+            fr: "sous-régions"
+          }
+        },
+        commodity: {
+          singular: {
+            en: "commodity",
+            fr: "produits de base"
+          },
+          plural: {
+            en: "commodities",
+            fr: "produits"
+          }
+        },
+        overview: {
+          en: "overview",
+          fr: "vue d’ensemble"
+        },
+        practice: {
+          singular: {
+            en: "practice",
+            fr: "pratique"
+          },
+          plural: {
+            en: "practices",
+            fr: "pratiques"
+          }
+        },
+        observation: {
+          singular: {
+            en: "observation",
+            fr: "observation"
+          },
+          plural: {
+            en: "observations",
+            fr: "observations"
+          }
+        },
+        increase: {
+          en: "increase",
+          fr: "augmentation"
+        },
+        decrease: {
+          en: "decrease",
+          fr: "diminution"
+        }
+      }
+    },
+    frontMatter: {
+      heroImage: {
+        url: {
+          en: await FileAttachment(
+            "Evaluate-climate-risks.webp"
+          ).url(),
+          fr: await FileAttachment(
+            "Evaluate-climate-risks-fr.webp"
+          ).url()
+        }
+      }
+    },
+    missingMapDataBlurb: {
+      en: `Grey regions signal lack of :::data_label::: data.`,
+      fr: `Les zones grisées désignent un manque de données reliées à :::data_label:::.`
+    },
+    vopNoteMd: {
+      // note about VoP source for captions
+      caption: {
+        en: `Monetary VoP values are represented in 2005 international dollars.`,
+        fr: `Les valeurs monétaires de la VDP sont représentées en dollars internationaux de 2005.`
+      },
+      // narrative info, with link to wiki
+      blurb: {
+        en: `VoP, 2005 [international dollars](https://en.wikipedia.org/wiki/International_dollar)`,
+        fr: `VDP, en [dollars internationaux](https://en.wikipedia.org/wiki/International_dollar) de 2005`
+      }
+    },
+    overview: {
+      header: {
+        en: "Overview",
+        fr: "Vue d’Ensemble"
+      },
+      blocks: {
+        opener: {
+          en: "African agriculture will be tested by climate change. Rising temperatures, unpredictable rainfall, and flooding will disrupt the growth and production of crops and livestock, jeopardizing food security and livelihoods for millions. This notebook aims to empower users to understand the climate risks facing African agriculture, as well as identify the adaptation barriers in terms of education, women's empowerment, and poverty. You can follow the narrative for the continent as a whole, or select individual countries for geography-specific statistics.",
+          fr: "L'agriculture africaine sera mise à l'épreuve par le changement climatique. La hausse des températures, l'imprévisibilité des précipitations et les inondations perturberont la croissance et la production des cultures et du bétail, mettant en péril la sécurité alimentaire et les moyens de subsistance de millions de personnes. Ce notebook vise à permettre aux utilisateurs de comprendre les risques climatiques auxquels est confrontée l'agriculture africaine, ainsi que d'identifier les obstacles à l'adaptation en termes d'éducation, d'autonomisation des femmes et de pauvreté. Vous pouvez suivre le récit pour l'ensemble du continent ou sélectionner des pays individuels pour obtenir des statistiques spécifiques à la géographie."
+        }
+      }
+    },
+    africaMap: {
+      blocks: {
+        h1: {
+          en: "What Does Africa Have to Lose?",
+          fr: "Qu'est-ce que l'Afrique a à perdre?"
+        },
+        opener: {
+          en: `African agriculture is valuable, both in terms of food production and farmers. Here you can explore how the value of production (:::vop_blurb:::) and size of the rural population differ between specific countries and regions. This context is important for understanding the unique vulnerabilities facing the agricultural sector on the continent, or for specific geographies of interest.`,
+          fr: `L'agriculture africaine est de valeur, tant en termes de production alimentaire que d'agriculteurs. Ici, vous pouvez explorer comment la valeur de la production (:::vop_blurb:::) et la taille de la population rurale diffèrent entre des pays et des régions spécifiques. Ce contexte est important pour comprendre les vulnérabilités uniques auxquelles est confronté le secteur agricole sur le continent, ou pour des zones géographiques spécifiques.`
+        }
+      },
+      inputs: {
+        mapLayer: {
+          label: {
+            en: "Map layer",
+            fr: "Couche cartographique"
+          },
+          options: {
+            ruralPop: {
+              label: {
+                en: "Rural population",
+                fr: "Population rurale"
+              },
+              labelTip: {
+                en: "Rural population",
+                fr: "Population rurale"
+              },
+              labelLegend: {
+                en: "Rural population",
+                fr: "Population rurale"
+              }
+            },
+            vop: {
+              label: {
+                en: "Total Value of Production (VoP)",
+                fr: "Valeur totale de la production (VDP)"
+              },
+              labelTip: {
+                en: "VoP",
+                fr: "VDP"
+              },
+              labelLegend: {
+                en: `Value of Production (:::unit:::)`,
+                fr: `Valeur de la production (:::unit:::)`
+              }
+            }
+          }
+        }
+      },
+      insights: {
+        title: {
+          en: `:::insight_string::: for :::admin_selection:::`,
+          fr: `:::insight_string::: pour :::admin_selection:::`
+        },
+        insightOverview: {
+          en: `**:::admin_selection:::**'s total value of crop and livestock production is **:::total_vop:::**.`,
+          fr: `La valeur totale de production végétale et animale **:::admin_selection:::** est de **:::total_vop:::**.`
+        },
+        insightAreaAndPop: {
+          en: `Its crops are produced over an area of **:::area:::** hectares, with rural areas encompassing a population of **:::population:::** people.`,
+          fr: `Ses cultures sont produites sur une superficie de **:::area:::** hectares, avec ses zones rurales abritant une population de **:::population:::** personnes.`
+        },
+        insightTopCommodity: {
+          en: `The top :::commodity_word::: by value: :::list_string:::.`,
+          fr: `Les principaux produits de base, en termes de valeur: :::list_string:::.`
+        },
+        insightTopLivestock: {
+          en: `The top livestock species in terms of population: :::list_string:::.`,
+          fr: `Les principales espèces animales en termes de population: :::list_string:::.`
+        }
+      }
+    },
+    climateRisks: {
+      intro: {
+        h1: {
+          en: "Climate Risks",
+          fr: "Risques Climatiques"
+        },
+        opener: {
+          en: `In **:::admin_selection:::**, climate change can impact crops and livestock in diverse ways. The specific risks can vary not only by region but also by the type of crop or livestock. Use the interactive features below to select specific locations and climate change scenarios. This will help you understand the unique hazards each faces and identify the most economically important crops and livestock that are exposed to hazards.`,
+          fr: `**:::admin_selection:::**, le changement climatique peut avoir des répercussions diverses sur les cultures et le bétail. Les risques spécifiques peuvent varier non seulement en fonction de la région, mais aussi du type de culture ou d'élevage. Utilisez les fonctions interactives ci-dessous pour sélectionner des lieux spécifiques et des scénarios de changement climatique. Cela vous aidera à comprendre les aléas spécifiques auxquels chacun est confronté et à identifier les cultures et les élevages les plus importants sur le plan économique qui sont exposés à ces aléas.`
+        }
+      },
+      compoundHazards: {
+        h2: {
+          en: "Compound Hazards",
+          fr: "Risques Exacerbés"
+        },
+        opener: {
+          en: `Understand the value of production (:::vop_note:::) at risk from across different hazards alone and in combination. Hover over the bars in the chart below to explore the proportions of agricultural value in **:::admin_selection:::** that will be exposed to different hazard combinations.`,
+          fr: `Comprenez la valeur de la production (:::vop_note:::) menacée par les différents aléas, seuls ou combinés. Survolez les barres du graphique ci-dessous pour découvrir la proportion de la valeur agricole en **:::admin_selection:::** qui sera exposée à différentes combinaisons de risques.`
+        },
+        inputs: {
+          dropdownScenario: {
+            label: {
+              en: "Scenario",
+              fr: "Scénario"
+            },
+            historic: {
+              en: "Historic",
+              fr: "Historique"
+            }
+          }
+        },
+        stackedBar: {
+          xLabel: {
+            en: "Total VoP (%)",
+            fr: "VDP Total (%)"
+          },
+          tooltipLabels: {
+            vopRisk: {
+              en: "VoP at risk from hazard",
+              fr: "VDP en danger à cause d’un risque"
+            },
+            hazard: {
+              en: "Hazard",
+              fr: "Danger"
+            },
+            totalVop: {
+              en: "Total VoP at risk",
+              fr: "VDP Total en danger"
+            }
+          }
+        }
+      },
+      hazardImpact: {
+        // define by data field values
+        hazards: {
+          wet: { en: "Wet alone", fr: "Humide" },
+          dry: { en: "Dry alone", fr: "Sec" },
+          heat: { en: "Heat alone", fr: "Chaud" },
+          dry_heat: { en: "Dry and heat", fr: "Sec et Chaud" },
+          dry_wet: { en: "Dry and wet", fr: "Sec et Humide" },
+          heat_wet: { en: "Heat and wet", fr: "Chaud et Humide" },
+          dry_heat_wet: {
+            en: "Heat, wet, and dry",
+            fr: "Chaud, Humide, et Sec"
+          },
+          no_hazard: { en: "No hazard", fr: "Aucun danger" }
+        },
+        h1: {
+          en: "Hazards with the Most Exposure",
+          fr: "Aléas présentant la plus forte exposition"
+        },
+        intro: {
+          en: "Select different hazard combinations and see which crops and livestock have the most VoP at risk.",
+          fr: "Sélectionnez différentes combinaisons de risques et voyez quelles cultures et quels animaux sont les plus menacés."
+        },
+        inputs: {
+          dropdownHazard: {
+            label: {
+              en: "Hazard",
+              fr: "Danger"
+            }
+          }
+        },
+        plots: {
+          general: {
+            noPlotMessage: {
+              en: "No VoP exposure",
+              fr: "Aucune exposition VoP"
+            },
+            vopLabel: {
+              en: "VoP at risk",
+              fr: "VDP à risque"
+            }
+          },
+          crops: {
+            header: {
+              en: `Crops most at exposed under :::hazard_string:::`,
+              fr: `Les cultures les plus exposés à :::hazard_string:::`
+            }
+          },
+          livestock: {
+            header: {
+              en: `Livestock most at exposed under :::hazard_string:::`,
+              fr: `Les bétails le plus exposés à :::hazard_string:::`
+            }
+          }
+        },
+        insights: {
+          title: {
+            en: `:::insight_string::: for :::admin_selection::: (:::scenario:::)`,
+            fr: `:::insight_string::: pour :::admin_selection::: (:::scenario:::)`
+          },
+          hazardBlurb: {
+            en: `For hazard: **:::hazard_string:::**`,
+            fr: `Pour le risque: **:::hazard_string:::**`
+          },
+          labels: {
+            totalVopCrop: {
+              en: "Total Exposed VoP, Crop",
+              fr: "Valeur Totale de la Production À Risque, Culture"
+            },
+            totalVopLivestock: {
+              en: "Total Exposed VoP, Livestock",
+              fr: "Valeur Totale de la Production À Risque, Bétail"
+            },
+            exposureCrop: {
+              en: "Crop, greatest exposure",
+              fr: "Culture, plus à risque"
+            },
+            exposureLivestock: {
+              en: "Livestock, greatest exposure",
+              fr: "Bétail, plus à risque:"
+            }
+          },
+          blurbBiggestHazard: {
+            en: "The biggest hazards for selection and scenario/timeframe are:",
+            fr: "Les risques les plus importants pour la sélection et scénario/période sont les suivants:"
+          }
+        }
+      }
+    },
+    adaptiveCapacities: {
+      h1: {
+        en: "Adaptive Capacities",
+        fr: "Capacités Adaptatives"
+      },
+      intro: {
+        en: `Farmers ability to adapt to climate change in **:::admin_selection:::** hinges on several key socio-economic factors. These include poverty, education, and gender inequality, which significantly influence their vulnerability and their capacity to respond effectively. Explore the map and indexes below to gain a deeper understanding of the geographic distribution of these variables across the region. Each of the three indexes are scored between 0 and 100. For the poverty index, lower values indicate lower levels of poverty. For Education and Female Empowerment, a higher score indicates increased levels of educational attainment and female decision making power.`,
+        fr: `La capacité des agriculteurs **:::admin_selection:::** à s'adapter au changement climatique dépend de plusieurs facteurs socio-économiques clés. Il s'agit notamment de la pauvreté, de l'éducation et de l'inégalité entre les genres, qui influencent considérablement leur vulnérabilité et leur capacité à réagir efficacement. La carte et les indices ci-dessous permettent de mieux comprendre la répartition géographique de ces variables dans la région. Chacun des trois indices est noté entre 0 et 100. Pour l'indice de pauvreté, des valeurs plus faibles indiquent des niveaux de pauvreté moins élevés. Pour l'indice d'éducation et d'autonomisation des femmes, un score plus élevé indique des niveaux d'éducation plus élevés et un pouvoir de décision plus important pour les femmes.`
+      },
+      inputs: {
+        mapLayer: {
+          label: {
+            en: "Map layer",
+            fr: "Couche de carte"
+          },
+          options: {
+            general: {
+              labels: {
+                population: {
+                  en: "Population",
+                  fr: "Population"
+                }
+              }
+            },
+            pov: {
+              label: {
+                en: "Poverty Rate",
+                fr: "Taux de pauvreté"
+              },
+              labelLegend: {
+                en: "Poverty Rate (% of population under $3.65 per day)",
+                fr: "Taux de pauvreté (% de la population vivant avec moins de 3,65 $ par jour)"
+              }
+            },
+            edu: {
+              label: {
+                en: "Education Attainment",
+                fr: "Niveau d'éducation"
+              },
+              labelLegend: {
+                en: "Education Attainment (Years of schooling)",
+                fr: "Niveau d'éducation (années de scolarité)"
+              }
+            },
+            fem: {
+              label: {
+                en: "Female empowerment index",
+                fr: "Indicateur d’autonomisation des femmes"
+              },
+              labelLegend: {
+                en: "Female empowerment index (higher is better)",
+                fr: "Indicateur d’autonomisation des femmes (plus c’est élevé, mieux c’est)"
+              }
+            }
+          }
+        }
+      },
+      insights: {
+        title: {
+          en: `:::insight_string::: for :::admin_selection:::`,
+          fr: `:::insight_string::: pour :::admin_selection:::`
+        },
+        madLib: {
+          en: `**:::admin:::**: the education index is **:::index_edu:::**, the female empowerment index is **:::index_fem:::**, and the poverty index is **:::index_pov:::**.`,
+          fr: `**:::admin:::**: l’indice d'éducation est de **:::index_edu:::**,  l’index d’autonomisation des femmes et de **:::index_fem:::** et l’indice de pauvreté est de **:::index_pov:::**.`
+        },
+        nestedLocationBlurb: {
+          en: `**:::admin_inner:::** is located within **:::admin_outer:::**.`,
+          fr: `**:::admin_inner:::** est situé dans **:::admin_outer:::**.`
+        }
+      },
+      delvingDeeper: {
+        h2: {
+          en: "Delving Deeper",
+          fr: "Approfondir"
+        },
+        intro: {
+          en: "By analyzing overlays of poverty levels, education attainment, and female empowerment, you can gain additional insights into the diverse challenges and opportunities faced by communities. This deeper understanding of barriers to adaptation can help you to identify the localized context in which climate risk needs to be addressed.",
+          fr: "En analysant les superpositions des niveaux de pauvreté, du niveau d'éducation et de l'autonomisation des femmes, vous pouvez obtenir des informations supplémentaires sur les divers défis et opportunités auxquels sont confrontées les communautés. Cette meilleure compréhension des obstacles à l'adaptation peut vous aider à identifier le contexte local dans lequel les risques climatiques doivent être abordés."
+        },
+        plot: {
+          legend: {
+            domain: {
+              en: ["Better", "Moderate", "Worse"],
+              fr: ["Meilleur", "Moyen", "Pire"]
+            }
+          },
+          nameMap: {
+            population: {
+              en: "Total Population",
+              fr: "Population Totale"
+            },
+            poverty0: {
+              en: "Low Poverty",
+              fr: "Faible Niveau de Pauvreté"
+            },
+            poverty1: {
+              en: "Moderate Poverty",
+              fr: "Moyen Niveau de Pauvreté"
+            },
+            poverty2: {
+              en: "High Poverty",
+              fr: "Haut Niveau de Pauvreté"
+            },
+            education0: {
+              en: "0-1 Years of Education",
+              fr: "0-1 ans d'éducation"
+            },
+            education1: {
+              en: "1-5 Years of Education",
+              fr: "1-5 ans d'éducation"
+            },
+            education2: {
+              en: "5+ Years of Education",
+              fr: "5+ ans d'éducation"
+            },
+            gender0: {
+              en: "Low Female Empowerment",
+              fr: "Faible Autonomisation des Femmes"
+            },
+            gender1: {
+              en: "Moderate Female Empowerment",
+              fr: "Moyenne Autonomisation des Femmes"
+            },
+            gender2: {
+              en: "High Female Empowerment",
+              fr: "Haute Autonomisation des Femmes"
+            }
+          }
+        }
+      }
+    },
+    summary: {
+      h1: {
+        en: "Summary",
+        fr: "Résumé"
+      },
+      blocks: {
+        dynamicSummary: {
+          intro: {
+            en: `The people of **:::admin0:::** need to be ready with strategies to make crops and livestock more resilient to combat the changing climate.`,
+            fr: `Les habitants **:::admin0:::** doivent être prêts à mettre en place des stratégies visant à rendre les cultures et le bétail plus résistants pour lutter contre le changement climatique.`
+          }
+        },
+        closer: {
+          en: "This work aims to enhance crop variety and livestocks breed, reduce emissions, promote sustainable land management, and educate and train populations on climate-smart agriculture practices.",
+          fr: "Ces travaux visent à améliorer la variété des cultures et la race des animaux, à réduire les émissions, à promouvoir la gestion durable des terres et à éduquer et former les populations aux pratiques agricoles intelligentes face au climat."
+        }
+      },
+      dynamicSummarylist: {
+        en: `A range of strategies and policies can be implemented in support of researching and addressing the impact of climate change on agriculture, including:
+
+:::markdownList:::`,
+        fr: `Une série de stratégies et de politiques peuvent être mises en œuvre pour soutenir la recherche et la prise en compte de l'impact du changement climatique sur l'agriculture:
+
+:::markdownList:::`
+      }
+    },
+    methods: {
+      h1: {
+        en: "Methods & Sources",
+        fr: "Méthodes & Sources"
+      },
+      section1: {
+        en: "Datasets",
+        fr: "Ensembles de Données",
+        subsections: {
+          en: `### Exposure (Value of Production)
+- **[Crop value of production](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/exposure_catalog/mapspam2017/mapspam2017_vop_parquet/mapspam2017_vop_parquet.json)** data comes from  MapSPAM 2017 V2r3 (Spatial Production Allocation Model) where production values are multiplied by country specific FAOstat international crop prices in (2005 International Dollars).
+An [international dollar](https://en.wikipedia.org/wiki/International_dollar) (2005) is a hypothetical unit of currency that has the same purchasing power parity as the U.S. dollar had in the United States in 2005, allowing for comparison of what consumers can buy in different countries with the same amount of money.
+This dataset is an updated version of MapSPAM specifically tailored for this project. It includes bug fixes and incorporates country-specific values of production instead of global averages.
+- **[Livestock value of production](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/exposure_catalog/GLW3_livestock/GLW3_livestock_vopPQ/GLW3_livestock_vopPQ.json)** in 2005 International Dollars were provided by the authors of [Herrero et al. (2013)](https://www.pnas.org/doi/full/10.1073/pnas.1308149110/).
+
+### Adaptive Capacities
+- **[Population](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/population/worldpop_2020/pop_2020_parquet/pop_2020_parquet.json)** data is from the [WorldPop Unconstrained Global Mosaic](https://hub.worldpop.org/geodata/listing?id=64) for 2020.
+- **[Poverty](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/adaptive-capacity/poverty/grdi/grdi_historical_2010-2020/grdi_historical_2010-2020.json)** data is from the [Global Gridded Deprivation Index](https://sedac.ciesin.columbia.edu/data/set/povmap-grdi-v1).
+-  **[Education](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/adaptive-capacity/education_catalog/catalog.json)** data for the icicle plot is the mean male and female educational attainment from the [2005-2015 IHME Estimates for ages 15-49](https://ghdx.healthdata.org/record/ihme-data/africa-educational-attainment-geospatial-estimates-2000-2015). The education rate combines educational attainment with expected years of schooling in a [composite index as part of the Sub-national HDI](https://globaldatalab.org/shdi/metadata/edindex/).
+- **[Female Empowerment](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/adaptive-capacity/women-and-gender/female-empowerment/GenderEquity_1995-2015/GenderEquity_1995-2015.json)** is a composite index of  domestic violence, employment, reproductive healthcare, decision making power, and family planning. The index is from [Rettig, Erica (2022)](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/8GJKYW) and based on input data from the [DHS Program](https://dhsprogram.com).
+
+### Boundaries
+[Administrative areas](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/boundary_catalog/geoBoundaries_SSA/collection.json) used in this notebook come from [geoBoundaries 6.0.0](https://github.com/wmgeolab/geoBoundaries). The gbHumanitarian boundaries are used and if not available then the gbOpen boundaries are substituted.
+
+### Climate Hazards & Risk
+[Climate hazards](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/hazard_catalog/catalog.json) were calculated using five datasets [CHIRPS](https://www.chc.ucsb.edu/data/chirps)/[CHIRTS](https://www.chc.ucsb.edu/data/chirtsdaily), [AgERA5](https://doi.org/10.24381/cds.6c68c9bb), [CMIP6 projections](https://github.com/SantanderMetGroup/ATLAS), and [crop calendars](https://zenodo.org/records/5062513). Using the R workflows mentioned below, raw hazard data were converted to risk, intersected with exposure and extracted by administrative boundaries to generate tabular data in parquet form, for example [severe_adm_int.parquet](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/hazard_catalog/hazard_risk_vop_annual/annual_digital-atlas/hazards/hazard_risk_vop/annual/severe_adm_int.parquet/annual_digital-atlas/hazards/hazard_risk_vop/annual/severe_adm_int.parquet.json).`,
+
+          fr: `### Exposition au Risques (Valeur de Production)
+- **[Les données sur la valeur de la production des cultures](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/exposure_catalog/mapspam2017/mapspam2017_vop_parquet/mapspam2017_vop_parquet.json)** proviennent de MapSPAM 2017 V2r3 (Modèle d'Allocation de Production Spatiale) où les valeurs de production sont multipliées par les prix internationaux des cultures de la FAOstat spécifiques à chaque pays en (dollars internationaux de 2005). Un [dollar international](https://en.wikipedia.org/wiki/International_dollar) (2005) est une unité monétaire hypothétique qui a la même parité de pouvoir d'achat que le dollar américain aux États-Unis en 2005, ce qui permet de comparer ce que les consommateurs peuvent acheter dans différents pays avec la même somme d'argent. Cet ensemble de données est une version mise à jour de MapSPAM spécialement conçue pour ce projet. Il comprend des corrections de bogues et incorpore des valeurs de production spécifiques à chaque pays au lieu de moyennes mondiales.
+- **[La valeur de la production animale](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/exposure_catalog/GLW3_livestock/GLW3_livestock_vopPQ/GLW3_livestock_vopPQ.json)** en dollars internationaux de 2005 a été fournie par les auteurs de [Herrero et al. (2013)](https://www.pnas.org/doi/full/10.1073/pnas.1308149110/).
+
+### Capacités Adaptatives
+- **[Les données démographiques proviennent](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/population/worldpop_2020/pop_2020_parquet/pop_2020_parquet.json)** [WorldPop Unconstrained Global Mosaic](https://hub.worldpop.org/geodata/listing?id=64) pour 2020.
+- **[Les données de pauvreté](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/adaptive-capacity/poverty/grdi/grdi_historical_2010-2020/grdi_historical_2010-2020.json)** proviennent du [Global Gridded Deprivation Index](https://sedac.ciesin.columbia.edu/data/set/povmap-grdi-v1).
+- **[Les données sur l'éducation](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/adaptive-capacity/education_catalog/catalog.json)** pour le dendrogramme sont le niveau d'éducation moyen des hommes et des femmes selon les [estimations de l'IHME 2005-2015 pour les 15-49 ans](https://ghdx.healthdata.org/record/ihme-data/africa-educational-attainment-geospatial-estimates-2000-2015). Le taux d'éducation combine le niveau d'éducation et le nombre d'années de scolarisation prévues dans [un indice composite dans le cadre de l'IDH sous-national.](https://globaldatalab.org/shdi/metadata/edindex/).
+- **[L'autonomisation des femmes](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/adaptive-capacity/women-and-gender/female-empowerment/GenderEquity_1995-2015/GenderEquity_1995-2015.json)** est un indice composite de la violence domestique, de l'emploi, des soins de santé reproductive, du pouvoir de décision et de la planification familiale. L'indice est tiré de [Rettig, Erica (2022)](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/8GJKYW) et basé sur les données du [programme DHS](https://dhsprogram.com).
+
+### Délimitations
+Les [zones administratives](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/boundary_catalog/geoBoundaries_SSA/collection.json) utilisées dans ce notebook proviennent de [geoBoundaries 6.0.0](https://github.com/wmgeolab/geoBoundaries). Les frontières gbHumanitarian sont utilisées et, si elles ne sont pas disponibles, les frontières gbOpen sont substituées.
+
+### Risques & Dangers Climatiques
+Les [risques climatiques](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/hazard_catalog/catalog.json) ont été calculés à l'aide de cinq ensembles de données: [CHIRPS](https://www.chc.ucsb.edu/data/chirps)/[CHIRTS](https://www.chc.ucsb.edu/data/chirtsdaily), [AgERA5](https://doi.org/10.24381/cds.6c68c9bb), [projections CMIP6](https://github.com/SantanderMetGroup/ATLAS), et [calendriers des cultures](https://zenodo.org/records/5062513). À l'aide des flux de travail R mentionnés ci-dessous, les données brutes sur les aléas ont été converties en risques, recoupées avec l'exposition et extraites par les limites administratives pour générer des données tabulaires sous forme de parquet, par exemple [severe_adm_int.parquet](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/hazard_catalog/hazard_risk_vop_annual/annual_digital-atlas/hazards/hazard_risk_vop/annual/severe_adm_int.parquet/annual_digital-atlas/hazards/hazard_risk_vop/annual/severe_adm_int.parquet.json).`
+        }
+      },
+      section2: {
+        en: "Methods",
+        fr: "Méthodologie",
+        subsections: {
+          en: `### Climate Hazard Risk
+
+A detailed and replicable R workflow for generating raw climate hazards data is available at the [AdaptationAtlas/Hazards](https://github.com/AdaptationAtlas/hazards).
+
+The transformation of raw climate hazards into generic and crop-specific hazard risks was achieved using a separate, but equally replicable, R workflow, which can be found in the GitHub project [atlas/hazards_prototype](https://github.com/AdaptationAtlas/hazards_prototype). 
+
+The process for calculating risk comprises several critical steps:
+
+1. **Annual or Seasonal Summarization**: Raw hazard data is aligned with the [GGCMI Phase 3 crop calendar for maize](https://zenodo.org/records/5062513), then climate hazards are summarized at either annual or seasonal timescales. Future updates of the Atlas will incorporate crop-specific calendars.
+
+2. **Occurrence**: For each season or year in a time series, we classify the risk of hazard occurrence (present/absent) across three severity levels (moderate, severe, extreme). Note, hazard severity is fixed to “severe” in this notebook.
+   
+  The specific hazards used in this analysis are: 
+  
+  - **Dry** = number of soil water stress days [NDWS](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions). Severe risk = NDWS > 20 days (same across all crops and livestock).
+  - **Heat (crops)** = days where maximum temperature > 35ºC [NTx35](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions). Severe risk = NTx35 > 20 days (same across all crops).
+  - **Heat (livestock)** = thermal humidity index [THI](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions). Severe risk is livestock class specific, see Table 2 of [Thorton et al. 2021](https://doi.org/10.1111/gcb.15825).
+  - **Wet** = number of waterlogging days [NDWL0](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions).  Severe risk = NDWL0 > 5 days (same across all crops and livestock).
+    
+  More details on hazard definitions and thresholds for severity classes can found in the atlas/hazards wiki. Future 2024 updates of the Atlas will add crop specific maximum temperature thresholds and a notebook will be created to allow users to explore hazard risks in more detail.
+
+3. **Risk**: We average the classified hazards over the years or seasons encompassed by the time-series to obtain an estimation of occurrence risk. 
+
+4. **Compound Risks**: To assess the risk of compound hazards, we multiply the risks associated with dry, heat, and wet conditions. This multiplication highlights areas where multiple hazards may coincide, posing greater risk to agricultural outputs.
+
+5. **Integration with Economic Data**: Finally, we multiply the compound crop hazard risk data with crop value of production data. For example, if a crop is exposed to a hazard in 50% of growing seasons and the value of production is $2M/year then, on average, $1M of production is exposed to the hazard.  The exposed value of production is then extracted by administrative areas to indicate potential economic impacts on crop production.
+
+### Adaptive Capacity
+To calculate the population distribution according to adaptive capacity variables, we followed these steps:
+
+1. **Data Classification**: We categorized the variables—poverty rates, Female Empowerment Index, and educational attainment—into three classes each. The classification of the Female Empowerment Index and poverty was based on the tertile distribution of the dataset. For educational attainment, we grouped the data into three categories: 0-1 years of education, 1-5 years of education, and over 5 years of education.
+
+2. **Spatial Intersection**: Next, we spatially overlaid these classified variables with population data. This step identified the specific combination of variable classes for each population segment.
+
+3. **Spatial Extraction**: We then extracted this overlaid data by administrative boundaries. This allowed us to quantify the population within each area, falling into each adaptive capacity category.
+
+Through this methodology, we generated a comprehensive dataset illustrating the distribution of the population by the three elements, encompassing every combination within each administrative region.`,
+
+          fr: `### Risques Climatiques
+
+Un flux de travail R détaillé et reproductible pour générer des données brutes sur les aléas climatiques est disponible sur [AdaptationAtlas/Hazards](https://github.com/AdaptationAtlas/hazards).
+
+La transformation des aléas climatiques bruts en risques génériques et spécifiques aux cultures a été réalisée à l'aide d'un flux de travail R distinct, mais également reproductible, qui peut être trouvé dans le projet GitHub [atlas/hazards_prototype](https://github.com/AdaptationAtlas/hazards_prototype). 
+
+Le processus de calcul des risques comprend plusieurs étapes critiques:
+
+1. **Synthèse annuelle ou saisonnière**: Les données brutes sur les risques sont alignées sur le [calendrier des cultures de la phase 3 de GGCMI pour le maïs](https://zenodo.org/records/5062513), puis les risques climatiques sont résumés à l'échelle annuelle ou saisonnière. Les futures mises à jour de l'atlas intégreront des calendriers spécifiques aux cultures.
+
+2. **Occurrence**: Pour chaque saison ou année d'une série temporelle, nous classons le risque d'occurrence de l'aléa (présent/absent) selon trois niveaux de gravité (modéré, grave, extrême). Dans ce *notebook*, la gravité des aléas est fixée à "grave".
+   
+  Les risques spécifiques utilisés dans cette analyse sont les suivants: 
+  
+  - **Sec** = nombre de jours de stress hydrique du sol [NDWS](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions). Risque grave = NDWS > 20 jours (identique pour toutes les cultures et le bétail).
+  - **Chaleur (cultures)** = jours où la température maximale est > 35ºC [NTx35](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions). Risque grave = NTx35 > 20 jours (identique pour toutes les cultures).
+  - **Chaleur (bétail)** = indice d'humidité thermique [THI](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions). Le risque grave est spécifique à la classe de bétail, voir le tableau 2 de [Thorton et al. 2021](https://doi.org/10.1111/gcb.15825).
+  - **Humidité** = nombre de jours d'engorgement [NDWL0](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions).  Risque grave = NDWL0 > 5 jours (identique pour toutes les cultures et le bétail).
+    
+  Pour plus de détails sur les définitions des risques et les seuils des classes de gravité, voir le wiki atlas/risques. Les futures mises à jour de l'atlas en 2024 ajouteront des seuils de température maximale spécifiques aux cultures et un *notebook* sera créé pour permettre aux utilisateurs d'explorer les risques de manière plus détaillée.
+
+3. **Risque**: Nous faisons la moyenne des aléas classés sur les années ou les saisons concernées par la série chronologique afin d'obtenir une estimation du risque d'occurrence. 
+
+4. **Risques Composés**: Pour évaluer les risques composés, nous multiplions les risques associés aux conditions de sécheresse, de chaleur et d'humidité. Cette multiplication met en évidence les zones où des risques multiples peuvent coïncider, ce qui représente un risque plus important pour la production agricole.
+
+5. **Intégration avec les Données Économiques**: Enfin, nous multiplions les données sur les risques composés pour les cultures par les données sur la valeur de la production des cultures. Par exemple, si une culture est exposée à un danger pendant 50 % des saisons de croissance et que la valeur de la production est de 2 millions de dollars par an, alors, en moyenne, 1 million de dollars de la production est exposée au danger. La valeur de la production exposée est ensuite extraite par zone administrative pour indiquer les impacts économiques potentiels sur la production agricole.
+
+### Capacité d’Adaptation
+Pour calculer la répartition de la population en fonction des variables de la capacité d'adaptation, nous avons suivi les étapes suivantes:
+
+1. **Classification des Données**: Nous avons classé les variables - taux de pauvreté, indice d'autonomisation des femmes et niveau d'instruction - en trois classes chacune. La classification de l'indice d'émancipation des femmes et de la pauvreté était basée sur la distribution par tertile de l'ensemble des données. Pour le niveau d'éducation, nous avons regroupé les données en trois catégories : 0-1 année d'éducation, 1-5 années d'éducation et plus de 5 années d'éducation.
+
+2. **Intersection Spatiale**: Ensuite, nous avons superposé dans l'espace ces variables classées avec les données démographiques. Cette étape a permis d'identifier la combinaison spécifique de classes de variables pour chaque segment de population.
+
+3. **Extraction Spatiale**: Nous avons ensuite extrait ces données superposées en fonction des limites administratives. Cela nous a permis de quantifier la population dans chaque zone, tombant dans chaque catégorie de capacité d'adaptation.
+
+Grâce à cette méthodologie, nous avons généré un ensemble de données complet illustrant la répartition de la population en fonction des trois éléments, englobant toutes les combinaisons au sein de chaque région administrative.`
+        }
+      }
+    }
+  };
+}
+```
+
+```{ojs}
+// data translation values
+td = {
+  let data = await FileAttachment("abAtlas-td-translation-data-v3.json").json()
+
+  // // update SSA default
+  // data.admin0_name.values.SSA.en = "Sub-Saharan Africa"
+  // // cote d'ivoire, comma version duplicate
+  // data.admin0_name.values["Côte d’Ivoire"] = data.admin0_name.values["Côte d'Ivoire"]
+  
+  return data
+}
+```
+
+```{ojs}
+md`---
+### Notebook Styling
+*styling helpers*
+Stylesheet is a named cell, which is necessary to include for embeds.`;
+```
+
+```{ojs}
+md`**Color Scales**`;
+```
+
+```{ojs}
+// color scale info
+colorScales = {
+  return {
+    range: {
+      green: ['#E4F5D0', '#015023'],
+      blue: ['#E8F2FF', '#003E6B'],
+      brown: ['#FFFDE5', '#A87B00'],
+      yellowGreen: ['#F7D732', '#216729'],
+      orangeRed: ['#F4BB21', '#EC5A47'],
+    },
+    unknown: "#ccc"
+  }
+}
+```
+
+```{ojs}
+md`---
+### Admin Selection
+*Global admin selector using dropdowns*
+
+This is the global selector for the selected region
+- The completed data is contained within adminSelections to be used in queries
+- Dropdowns are defined below then bound for each section
+  - Defined as separate cells since they dynamically respond to different values
+    - In narrative, they are simply views of the data  
+  - Dropdowns are dynamic based on higher-level choices
+  - Options are defined from the geographic data
+  - null value means unselected region
+- Dropdowns are added to each section, using Inputs.bind to create synchronized inputs (see viewof for input definitions). A form input is used to consolidate and apply a template to format.`;
+```
+
+```{ojs}
+// get admin0 options from geo
+dataAdmin0 = {
+  const data = admin0.features.map((d) => d.properties);
+  // add a blank value
+  return [null, ...data.map((d) => d.admin_name)].map((d) => {
+    return {
+      label:
+        d == null ? globalSelection.label : _lang(td.admin0_name.values?.[d].general),
+      value: d
+    };
+  });
+}
+```
+
+```{ojs}
+// get admin1 options based on admin0 selection
+// (the admin1 regions within selected admin0)
+dataAdmin1 = {
+  // admin 1, filter by 0 
+  // const data = boundaries.admin1.features.map(d => d.properties)
+  // .filter(d => d.admin0_name == selectAdmin0.value)
+  const data = await geo_db.query(`SELECT DISTINCT admin1_name FROM admin1_geom WHERE admin0_name = '${selectAdmin0.value}'`)
+  // add blank value
+  const allLabel = {
+    label: adminRegions.allLabels.admin1,
+    value: null
+  }
+  return [allLabel, ...data.map(d => {
+    return {
+      label: d.admin1_name,
+      value: d.admin1_name,
+    }
+  })].map(d => {
+    return {label: d.label, value: d.value}
+  })
+}
+```
+
+```{ojs}
+// get admin2 options based on admin1 selection
+// (the admin2 regions within selected admin1)
+dataAdmin2 = {
+  // const data = boundaries.admin2.features.map(d => d.properties)
+  // .filter(d => d.admin0_name == selectAdmin0.value && d.admin1_name == selectAdmin1.value)
+  const data = await geo_db.query(`SELECT DISTINCT admin2_name FROM admin2_geom WHERE admin0_name = '${selectAdmin0.value}' AND admin1_name = '${cleanAdminInput_SQL(selectAdmin1.value)}'`)
+  // add blank value
+  const allLabel = {
+    label: adminRegions.allLabels.admin2,
+    value: null
+  }
+  return [allLabel, ...data.map(d => {
+    return {
+      label: d.admin2_name,
+      value: d.admin2_name,
+    }
+  })].map(d => {
+    return {label: d.label, value: d.value}
+  })
+}
+```
+
+```{ojs}
+viewof selectAdmin0 = Inputs.select(dataAdmin0, {label: adminRegions.labels.admin0, format: x => x.label})
+```
+
+```{ojs}
+viewof selectAdmin1 = Inputs.select(dataAdmin1, {label: adminRegions.labels.admin1, format: x => x.label})
+```
+
+```{ojs}
+viewof selectAdmin2 = Inputs.select(dataAdmin2, {label: adminRegions.labels.admin2, format: x => x.label})
+```
+
+```{ojs}
+// selected admin regions from dropdowns
+adminSelections = new Object({
+  selectAdmin0: selectAdmin0,
+  selectAdmin1: selectAdmin1,
+  selectAdmin2: selectAdmin2,
+});
+```
+
+```{ojs}
+// template to format admin selection form
+adminFormTemplate = (inputs) =>
+  htl.html`<div style="display: flex; gap: 3em">${inputs}</div>`;
+```
+
+```{ojs}
+getAdminSelectionLabelWithParen = ({
+  selections = adminSelections,
+  admin0Label,
+  adminSublabel,
+} = {}) => {
+  // return admin0 selection and admin1/admin2 selection if chosen (in parentheses)
+  if (selections.selectAdmin1.value === null) {
+    return admin0Label;
+  } else {
+    return `${admin0Label} (${adminSublabel})`;
+  }
+};
+```
+
+```{ojs}
+md`---
+### Admin Selection - Display
+*Showing admin selections*`;
+```
+
+```{ojs}
+// options for the global admin selection
+// used when no admin selection is made
+globalSelection = {
+  return {
+    label: _lang(td.admin0_name.values.SSA.general),
+    value: null
+  }
+}
+```
+
+```{ojs}
+function getAdminSelection(selections = adminSelections) {
+  // get the most granular admin selection made
+  const a0 = selections.selectAdmin0;
+  const a1 = selections.selectAdmin1;
+  const a2 = selections.selectAdmin2;
+  const global = globalSelection;
+
+  return a2.value ? a2 : a1.value ? a1 : a0.value ? a0 : global;
+}
+```
+
+```{ojs}
+function getAdminSelectionAdmin0(selections = adminSelections) {
+  // get the selected admin0 or global value
+  const a0 = selections.selectAdmin0;
+  const global = globalSelection.label;
+
+  return a0 ? a0 : global;
+}
+```
+
+```{ojs}
+function getAdminSelectionMarkdownPath(selections = adminSelections) {
+  // function to show selected admin region
+  // return path showing nested admin selection
+
+  const delim = " → ";
+  const path = [
+    selections.selectAdmin0,
+    selections.selectAdmin1,
+    selections.selectAdmin2,
+  ].filter((d) => d);
+
+  const formatted = path
+    .filter((d) => d)
+    .map((d, i) => {
+      return i == path.length - 1 ? `**${d}**` : `*${d}*`;
+    });
+
+  return formatted.length == 0
+    ? `**${globalSelection.label}**` // no selection, all of Africa
+    : `${formatted.join(delim)}`;
+}
+```
+
+```{ojs}
+md`---
+### Choropleth map - Geographic Impact
+*Showing context for admin selection*
+
+There is some hoop-jumping to get the right data based on the Admin Selection. The tabular data is then bound to the applicable geojson, and visualized with Plot.`;
+```
+
+```{ojs}
+dataPopulation = async (admin_query) => {
+  return await db.query(`
+select * 
+from population
+${admin_query}
+`);
+};
+```
+
+```{ojs}
+// // total VoP data
+dataTotalVoP = async (admin_query) => {
+  return await db.query(`
+select admin0_name
+  , admin1_name
+  , admin2_name
+  , SUM(value) as vop_total
+  from vop
+  ${admin_query}
+  group by admin0_name, admin1_name, admin2_name
+  order by admin0_name, admin1_name, admin2_name
+`);
+};
+```
+
+```{ojs}
+// grab tabular data for choropleth
+dataGeoImpact = {
+ let admin_query
+  if (adminSelections.selectAdmin1.value) {
+    admin_query = `WHERE admin0_name = '${adminSelections.selectAdmin0.value}' AND admin1_name = '${cleanAdminInput_SQL(adminSelections.selectAdmin1.value)}' AND admin2_name IS NOT NULL`
+  } else if (adminSelections.selectAdmin0.value) {
+    admin_query = `WHERE admin0_name = '${adminSelections.selectAdmin0.value}' AND admin1_name IS NOT NULL AND admin2_name IS NULL`
+  } else {
+    admin_query = `WHERE admin1_name IS NULL`
+  }
+  // get data for choropleth map based on choice
+  const dataSource = selectGeoDataType.key == "population"
+    ? await dataPopulation(admin_query)
+    : await dataTotalVoP(admin_query)
+  return dataSource 
+}
+```
+
+```{ojs}
+// bind geojson to tabular data
+mapDataGeoImpact = {
+  // no selections
+  if (!adminSelections.selectAdmin0.value) {
+    return bindTabularToGeo({
+      data: dataGeoImpact,
+      dataBindColumn: "admin0_name",
+      geoData: boundaries.admin0,
+      geoDataBindColumn: "admin0_name"
+    });
+  }
+  // admin0 selected only
+  else if (!adminSelections.selectAdmin1.value) {
+    const data = T.tidy(
+      dataGeoImpact,
+      T.mutate({ a1_a0: (d) => [d.admin1_name, d.admin0_name].join("_") })
+    );
+    const geoData = {
+      ...boundaries.admin1,
+      features: boundaries.admin1.features.filter(
+        (d) => d.properties.admin0_name == adminSelections.selectAdmin0.value
+      )
+    };
+
+    return bindTabularToGeo({
+      data: data,
+      dataBindColumn: "a1_a0",
+      geoData: geoData,
+      geoDataBindColumn: "a1_a0"
+    });
+  }
+
+  // admin1 is selected
+  // show all admin2 regions within admin1
+  else {
+    const data = T.tidy(
+      dataGeoImpact,
+      T.mutate({
+        a2_a1_a0: (d) => [d.admin2_name, d.admin1_name, d.admin0_name].join("_")
+      })
+    );
+    const geoData = {
+      ...boundaries.admin2,
+      features: boundaries.admin2.features.filter((d) => {
+        return d.properties.admin1_name == adminSelections.selectAdmin1.value
+          && d.properties.admin0_name == adminSelections.selectAdmin0.value
+      })
+    };
+
+    return bindTabularToGeo({
+      data: data,
+      dataBindColumn: "a2_a1_a0",
+      geoData: geoData,
+      geoDataBindColumn: "a2_a1_a0"
+    });
+  }
+}
+```
+
+```{ojs}
+md`---
+### Dynamic Insights - Geographic Impact
+*quick insights for given admin selection*
+
+- Sql cells add a row that is the combined value for all admin regions, where all admin names are null.`;
+```
+
+```{ojs}
+md`Here are the combined data and insights for creating the dynamic narrative. Data tables are below.`;
+```
+
+```{ojs}
+// dynamic insights for an Admin Selection
+dynamicInsights_geoImpact = {
+  let admin2_null = !selectAdmin2.value
+  // define data
+  const totalVop = admin2_null ? dynInsightGeo_vopTotals : filterByAdminNames(dynInsightGeo_vopTotals);
+  const totalHa = admin2_null ? dynInsightGeo_haTotals: filterByAdminNames(dynInsightGeo_haTotals); 
+  const population = admin2_null ? dynInsightGeo_population : filterByAdminNames(dynInsightGeo_population);
+  const topCommodities = admin2_null ? dynInsightGeo_rankedNonAnimals: filterByAdminNames(dynInsightGeo_rankedNonAnimals);
+  const topLivestock = admin2_null ? dynInsightGeo_rankedAnimals : filterByAdminNames(dynInsightGeo_rankedAnimals);
+
+  // format functions
+  const locale = language.locale;
+  const _formatTopNVop = formatIntDollar({locale: locale});
+  const _formatNumber = formatNumCompactLong({locale: locale});
+
+  function getTopValue({ d, i } = {}) {
+    return {
+      data: d?.[i]?.vop_total,
+      value: formatWithDefault({
+        value: d?.[i]?.vop_total,
+        format: _formatTopNVop
+      }),
+      label: formatWithDefault({
+        value: d?.[i]?.crop
+      })
+    };
+  }
+
+  // make insights ------------------------------------
+  return {
+    data: {
+      totalVop,
+      totalHa,
+      population,
+      topCommodities,
+      topLivestock
+    },
+    insight: {
+      totalVop: formatWithDefault({
+        value: totalVop?.[0]?.vop_total,
+        format: _formatTopNVop
+      }),
+      totalHa: formatWithDefault({
+        value: totalHa?.[0]?.ha_total,
+        format: _formatNumber
+      }),
+      totalPop: formatWithDefault({
+        value: population?.[0]?.rural_pop,
+        format: _formatNumber
+      }),
+      topCommodities: [0, 1, 2].map((x) =>
+        getTopValue({ d: topCommodities, i: x })
+      ),
+      topLivestock: [0, 1, 2].map((x) =>
+        getTopValue({ d: topLivestock, i: x })
+      ),
+    }
+  };
+}
+```
+
+```{ojs}
+md`---
+#### Data cells for insights`;
+```
+
+```{ojs}
+insight_adminQuery = {
+  let admin_query
+if (adminSelections.selectAdmin1.value) {
+  admin_query = `WHERE admin0_name = '${adminSelections.selectAdmin0.value}' AND admin1_name = '${cleanAdminInput_SQL(adminSelections.selectAdmin1.value)}' AND admin2_name IS NOT NULL`
+} else if (adminSelections.selectAdmin0.value) {
+  admin_query = `WHERE admin0_name = '${adminSelections.selectAdmin0.value}' AND admin1_name IS NOT NULL AND admin2_name IS NULL`
+} else {
+  admin_query = `WHERE admin1_name IS NULL`
+}
+  return admin_query
+}
+```
+
+```{ojs}
+// total harvested area
+dynInsightGeo_haTotals = {
+  let admin_query = insight_adminQuery
+  
+  return await db.query(`
+with tblHA as (
+  -- total VoP and harvested area
+  SELECT admin0_name, admin1_name, admin2_name, SUM(value) AS ha_total
+    FROM ha
+    ${admin_query}
+    AND exposure = 'ha'
+    GROUP BY 1, 2, 3
+)
+
+-- QUERY ------------------------------------------
+(
+  -- total for all regions
+  select null as admin0_name
+    , null as admin1_name
+    , null as admin2_name
+    , ha_total
+    from (
+      select sum(ha_total) as ha_total
+        from tblHA
+    )
+  
+  union
+  
+  select * 
+    from tblHA
+  
+  order by 1, 2, 3
+)
+`)
+}
+```
+
+```{ojs}
+dynInsightGeo_vopTotals = {
+  let admin_query = insight_adminQuery
+
+  
+  return db.query(`
+-- total value of production
+with tbl as (
+  -- total VoP and harvested area
+  SELECT admin0_name, admin1_name, admin2_name, SUM(value) AS vop_total
+    FROM vop
+    ${admin_query}
+    GROUP BY 1, 2, 3
+    ORDER BY 1, 2, 3
+)
+
+-- QUERY ------------------------------------------
+(
+  -- total for all regions
+  select null as admin0_name
+    , null as admin1_name
+    , null as admin2_name
+    , vop_total
+    from (
+      select sum(vop_total) as vop_total
+        from tbl
+    )
+  
+  union
+  
+  select * 
+    from tbl
+  
+  order by 1, 2, 3
+)
+`)
+}
+```
+
+```{ojs}
+dynInsightGeo_population = {
+      let admin_query = insight_adminQuery
+return await db.query(`
+with tbl as (
+  -- population data
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , total_pop
+    , rural_pop
+    from population
+    ${admin_query}
+    order by admin0_name
+    , admin1_name
+    , admin2_name
+)
+
+-- QUERY ------------------------------------------
+(
+  -- total for all regions
+  select null as admin0_name
+    , null as admin1_name
+    , null as admin2_name
+    , *
+    from (
+      select sum(total_pop) as total_pop
+        , sum(rural_pop) as rural_pop
+        from tbl
+    )
+  
+  union
+  
+  select *
+    from tbl
+  
+  order by 1, 2, 3
+)
+`)
+}
+```
+
+```{ojs}
+dynInsightGeo_rankedNonAnimals = {
+let admin_query = insight_adminQuery
+
+  let data = await db.query(`
+  -- Combine global totals with regional data
+  WITH tbl_vop AS (
+    -- Fetch the base data for NON-animals
+    SELECT admin0_name,
+           admin1_name,
+           admin2_name,
+           crop,
+           value AS vop_total
+    FROM vop_crop
+    ${admin_query}
+  ),
+  
+  -- Calculate global totals (where admin names are null)
+  global_total_crop AS (
+    SELECT NULL AS admin0_name,
+           NULL AS admin1_name,
+           NULL AS admin2_name,
+           crop,
+           SUM(vop_total) AS vop_total
+    FROM tbl_vop
+    GROUP BY crop
+  )
+  
+  -- Combine global totals with regional data
+  SELECT * FROM global_total_crop
+  UNION ALL
+  SELECT * FROM tbl_vop
+  ORDER BY admin0_name, admin1_name, admin2_name, vop_total DESC
+`)
+  
+  const groupedData = data.reduce((acc, item) => {
+  const key = `${item.admin0_name}-${item.admin1_name}-${item.admin2_name}`;
+  if (!acc[key]) acc[key] = [];
+  acc[key].push(item);
+  return acc;
+}, {});
+
+// Rank within each group
+const rankedData = Object.values(groupedData).flatMap(group => {
+  return group.sort((a, b) => b.vop_total - a.vop_total).slice(0, 3).map((item, index) => ({
+    ...item,
+    rank: index + 1
+  }));
+});
+  return rankedData
+}
+```
+
+```{ojs}
+dynInsightGeo_rankedAnimals = {
+  let admin_query = insight_adminQuery
+  
+  let data = await db.query(`
+  -- Simplified SQL query to fetch animal data, including global totals
+  WITH tbl_base AS (
+    -- Base animal data grouped by crop type
+    SELECT admin0_name,
+           admin1_name,
+           admin2_name,
+           CASE 
+             WHEN crop LIKE 'cattle\_%' ESCAPE '\\' THEN 'cattle'
+             WHEN crop LIKE 'goats\_%' ESCAPE '\\' THEN 'goats'
+             WHEN crop LIKE 'pigs\_%' ESCAPE '\\' THEN 'pigs'
+             WHEN crop LIKE 'poultry\_%' ESCAPE '\\' THEN 'poultry'
+             WHEN crop LIKE 'sheep\_%' ESCAPE '\\' THEN 'sheep'
+             ELSE 'other'
+           END AS crop,
+           SUM(value) AS vop_total
+    FROM vop_animal
+    ${admin_query}
+    GROUP BY admin0_name, admin1_name, admin2_name, crop
+  ),
+  
+  -- Global totals where admin names are null
+  global_total_animal AS (
+    SELECT NULL AS admin0_name,
+           NULL AS admin1_name,
+           NULL AS admin2_name,
+           crop,
+           SUM(vop_total) AS vop_total
+    FROM tbl_base
+    GROUP BY crop
+  )
+  
+  -- Combine global totals with the base data
+  SELECT * FROM global_total_animal
+  UNION ALL
+  SELECT * FROM tbl_base
+  ORDER BY admin0_name, admin1_name, admin2_name, vop_total DESC
+`);
+  const groupedData = data.reduce((acc, item) => {
+  const key = `${item.admin0_name || 'TOTAL'}-${item.admin1_name || 'TOTAL'}-${item.admin2_name || 'TOTAL'}`;
+  if (!acc[key]) acc[key] = [];
+  acc[key].push(item);
+  return acc;
+}, {});
+
+// Rank within each group
+const rankedData = Object.entries(groupedData).flatMap(([key, group]) => {
+  // Sort by value within the group
+  const sortedGroup = group.sort((a, b) => b.value - a.value);
+  
+  // Take the top 3 crops for each region
+  const top3 = sortedGroup.slice(0, 3).map((item, index) => ({
+    ...item,
+    rank: index + 1
+  }));
+
+  return top3;
+});
+  return rankedData
+}
+```
+
+```{ojs}
+md`---
+### Bar Charts - Hazards and Exposures
+*getting data based on admin selection and hazard options*`;
+```
+
+```{ojs}
+md`#### Plot Function
+Making the top VoP bar charts`;
+```
+
+```{ojs}
+// make the bar chart for top crops
+// approach is passing in data for selected hazard and crop type
+function makeTopCropBarChart(data, { marginLeft = 100 } = {}) {
+  const vopCaption = _lang(nbText.vopNoteMd.caption);
+  const vopLabel = _lang(
+    nbText.climateRisks.hazardImpact.plots.general.vopLabel,
+  );
+  const noDataMessage = _lang(
+    nbText.climateRisks.hazardImpact.plots.general.noPlotMessage,
+  );
+
+  // if no data is available for selected hazard, show a message
+  if (data.length == 0) {
+    return md`*${noDataMessage}*`;
+  }
+  const topN = 10;
+
+  return Plot.plot({
+    width: 1200,
+    height: 350,
+    marginLeft,
+    caption: vopCaption,
+    x: {
+      tickFormat: formatUSD({ locale: language.locale }),
+      label: `${vopLabel} (${intDollarUnit})`,
+      grid: true,
+    },
+    y: {
+      label: null,
+      tickSize: 0,
+    },
+    color: {
+      domain: hazardPlotLookup.color.domain,
+      range: hazardPlotLookup.color.range,
+    },
+    marks: [
+      Plot.barX(data, {
+        x: "vop",
+        y: (d) => hazardPlotLookup.crops[d.crop],
+        fill: (d) => hazardPlotLookup.names[d.hazard],
+        sort: { y: "x", reverse: true, limit: 10 },
+        channels: {
+          vop: {
+            label: vopLabel,
+            value: "vop",
+          },
+        },
+        tip: {
+          format: {
+            x: false,
+            y: false,
+            fill: false,
+            vop: (d) => formatIntDollar({ locale: language.locale })(d),
+          },
+        },
+      }),
+    ],
+  });
+}
+```
+
+```{ojs}
+md`#### Hazard Data`;
+```
+
+```{ojs}
+md`The hazard data includes a 'generic' crop, which is a large value that dwarfs other crop values. We exclude this from the chart.`;
+```
+
+```{ojs}
+md`Below is a table of the explanations of every hazard component. The 'any' hazard is the combination of all of the below hazards.
+
+| hazard | description |
+| --- | --- |
+| dry | risk of dry hazard occurring alone |
+| heat | risk of heat hazard occurring alone |
+| wet | risk of wet hazard occurring alone |
+| dry+heat | risk of dry and heat hazard occurring together |
+| dry+wet | risk of dry and wet hazard occurring together |
+| heat+wet | risk of heat and wet hazard occurring together |
+| dry+heat+wet | risk of dry and heat and wet hazard occurring together |
+| No hazard | no hazard applied
+
+*If there are zeros for individual hazards then it means it always occurs in combination with another hazard and does not occur alone.*`;
+```
+
+```{ojs}
+// data for selected hazard scenario, with total vop
+data_hazardVoP = T.tidy(
+  dataHazardSelected,
+  T.leftJoin(dataHazardVoPTotalSelected, {
+    by: ["admin0_name", "admin1_name", "admin2_name", "crop"],
+  }),
+  T.filter((d) => d.crop !== "generic"), // remove generic
+);
+```
+
+```{ojs}
+dataHazardVoPTotalSelected = T.tidy(
+  dataHazardSelected,
+  T.filter((d) => d.hazard !== "any"),
+  T.groupBy(
+    [
+      "admin0_name",
+      "admin1_name",
+      "admin2_name",
+      "severity",
+      "scenario",
+      "timeframe",
+      "crop",
+    ],
+    [
+      T.summarize({
+        vop_total: T.sum("vop"),
+      }),
+    ],
+  ),
+);
+```
+
+```{ojs}
+md`#### Lookups`;
+```
+
+```{ojs}
+// unique crops in the hazard data
+hazardCrops = {
+  const query = await db.query(`select crop
+  , count(*) as count
+  from haz_risk_vop_int
+  group by 1
+  order by 1`);
+
+  return query
+ }
+```
+
+```{ojs}
+// formatting crop names
+cropNames = {
+  const raw = T.tidy(
+    hazardCrops,
+    T.distinct("crop"),
+    T.select("crop"),
+    T.mutate({
+      type: (d) => (/_/.test(d.crop) ? "livestock" : "crop")
+    }),
+    T.arrange(["type", "cropName"])
+  );
+  let data = raw;
+
+  // translation
+
+  const translateCrop = (crop) => td.crop.values?.[crop];
+  data = data.map((d) => {
+    const arr = Lang.toSentenceCase(_lang(translateCrop(d.crop))).split("_");
+    const mainHalf = arr.slice(0, 1);
+    const backHalf = arr
+      .slice(1)
+      .filter((d) => d !== "de")
+      .join(" ");
+    const paren = backHalf.length > 0 ? `(${backHalf})` : "";
+    const formatted = [...mainHalf, paren].join(" ").trimEnd();
+    return {
+      ...d,
+      cropName: formatted
+    };
+  });
+
+  return data;
+}
+```
+
+```{ojs}
+// lookups for hazard plot
+hazardPlotLookup = {
+  const hazards = {
+    wet: _lang(nbText.climateRisks.hazardImpact.hazards.wet),
+    dry: _lang(nbText.climateRisks.hazardImpact.hazards.dry),
+    heat: _lang(nbText.climateRisks.hazardImpact.hazards.heat),
+    dry_heat: _lang(nbText.climateRisks.hazardImpact.hazards.dry_heat),
+    dry_wet: _lang(nbText.climateRisks.hazardImpact.hazards.dry_wet),
+    heat_wet: _lang(nbText.climateRisks.hazardImpact.hazards.heat_wet),
+    dry_heat_wet: _lang(nbText.climateRisks.hazardImpact.hazards.dry_heat_wet),
+    no_hazard: _lang(nbText.climateRisks.hazardImpact.hazards.no_hazard)
+  };
+  return {
+    names: {
+      wet: hazards.wet,
+      dry: hazards.dry,
+      heat: hazards.heat,
+      "dry+heat": hazards.dry_heat,
+      "dry+wet": hazards.dry_wet,
+      "heat+wet": hazards.heat_wet,
+      "dry+heat+wet": hazards.dry_heat_wet,
+      "no hazard": hazards.no_hazard
+    },
+    color: {
+      domain: [
+      hazards.wet,
+      hazards.dry,
+      hazards.heat,
+      hazards.dry_heat,
+      hazards.dry_wet,
+      hazards.heat_wet,
+      hazards.dry_heat_wet,
+      hazards.no_hazard
+      ],
+      range: [
+        "#4FB5B7",
+        "#FCC42C",
+        "#FC8A34",
+        "#EE624F",
+        "#B34E65",
+        "#8C3E5F",
+        "#523D4E",
+        "#EFEFEF"
+      ]
+    },
+    crops: cropNames.reduce((acc, obj) => {
+      acc[obj.crop] = obj.cropName;
+      return acc;
+    }, {})
+  };
+}
+```
+
+```{ojs}
+md`#### Selecting VoP data by scenario
+- The data is queried as separate components for each admin region to reduce query size and allow for dynamic null handling. A table is chosen based on the selected admin region.`;
+```
+
+```{ojs}
+// pick the admin dataset based on admin selection
+dataHazardSelected = {
+  if (adminSelections.selectAdmin2.value) return dataHazardAdmin2
+  else if (adminSelections.selectAdmin1.value) return dataHazardAdmin1
+  else if (adminSelections.selectAdmin0.value) return dataHazardAdmin0
+  else return dataHazardAdminAll
+}
+```
+
+```{ojs}
+dataHazardAdminAll = await db.query(`
+  -- Admin0 total for Sub-Saharan Africa (SSA) regions
+  WITH HazardRiskBase AS (
+    -- Filter by chosen scenario and timeframe, focusing on severe hazards
+    SELECT admin0_name,
+           admin1_name,
+           admin2_name,
+           scenario,
+           timeframe,
+           crop,
+           severity,
+           hazard,
+           value AS vop
+    FROM haz_risk_vop_int
+    WHERE severity = 'severe'
+    and timeframe = '${selectScenarioAndTimeframe.timeframe}'
+    and scenario = '${selectScenarioAndTimeframe.scenario}'
+  ),
+
+  -- Data for SSA regions only, where admin1_name is NULL (Admin0 level)
+  Admin0SSAData AS (
+    SELECT *
+    FROM HazardRiskBase
+    WHERE admin1_name IS NULL
+  ),
+
+  -- Aggregate VoP for each crop by hazard type across Admin0 regions
+  AggregatedCropData AS (
+    SELECT severity,
+           scenario,
+           timeframe,
+           hazard,
+           crop,
+           SUM(vop) AS vop
+    FROM Admin0SSAData
+    GROUP BY severity, scenario, timeframe, hazard, crop
+  )
+
+  -- Output: Admin0 level crop data with null admin names for SSA
+  SELECT NULL AS admin0_name, 
+         NULL AS admin1_name, 
+         NULL AS admin2_name,
+         severity, 
+         scenario, 
+         timeframe, 
+         hazard, 
+         crop, 
+         vop
+  FROM AggregatedCropData
+`);
+```
+
+```{ojs}
+dataHazardAdmin0 = db.query(`
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    , crop
+    , severity
+    , hazard
+    , value as vop
+    from haz_risk_vop_int
+    where severity = 'severe' -- hard-coded
+    -- and hazard in ('heat', 'wet', 'dry') -- single hazards alone
+    and timeframe = '${selectScenarioAndTimeframe.timeframe}'
+    and scenario = '${selectScenarioAndTimeframe.scenario}'
+    and admin1_name is null
+  and admin0_name = '${adminSelections.selectAdmin0.value}'`);
+```
+
+```{ojs}
+dataHazardAdmin1 = db.query(`-- admin1 level hazard data
+  -- chosen scenario and timeframe VoP
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    , crop
+    , severity
+    , hazard
+    , value as vop
+    from haz_risk_vop_int
+    where severity = 'severe' -- hard-coded
+    -- and hazard in ('heat', 'wet', 'dry') -- single hazards alone
+    and timeframe = '${selectScenarioAndTimeframe.timeframe}'
+    and scenario = '${selectScenarioAndTimeframe.scenario}'
+    and admin0_name = '${adminSelections.selectAdmin0.value}'
+    and admin1_name = '${cleanAdminInput_SQL(adminSelections.selectAdmin1.value)}'
+    and admin2_name is null
+`);
+```
+
+```{ojs}
+dataHazardAdmin2 = db.query(`-- admin2 level hazard data
+  -- chosen scenario and timeframe VoP
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    , crop
+    , severity
+    , hazard
+    , value as vop
+    from haz_risk_vop_int
+    where severity = 'severe' -- hard-coded
+    -- and hazard in ('heat', 'wet', 'dry') -- single hazards alone
+    and timeframe = '${selectScenarioAndTimeframe.timeframe}'
+    and scenario = '${selectScenarioAndTimeframe.scenario}'
+    and admin0_name = '${adminSelections.selectAdmin0.value}'
+    and admin1_name = '${cleanAdminInput_SQL(adminSelections.selectAdmin1.value)}'
+    and admin2_name = '${cleanAdminInput_SQL(adminSelections.selectAdmin2.value)}'
+`);
+```
+
+```{ojs}
+md`---
+### Dynamic Insights - Hazards and exposures`;
+```
+
+```{ojs}
+// get selected hazard for insights, define crop type
+data_selectedHazardCropType = T.tidy(
+  data_hazardVoP,
+  T.filter((d) => d.hazard == selectHazard),
+  T.mutate({
+    cropType: (d) => {
+      if (riskDataTypes.crop.crop.includes(d.crop)) return "crop";
+      if (riskDataTypes.crop.livestock.includes(d.crop)) return "livestock";
+      return "other";
+    },
+  }),
+  T.arrange(["cropType", T.desc("vop")]),
+);
+```
+
+```{ojs}
+// combined crop and livestock exposed for selection
+insight_totalExposedVop = T.tidy(
+  data_selectedHazardCropType,
+  T.groupBy(
+    ["cropType"],
+    [
+      T.summarize({
+        totalExposedVop: T.sum("vop"),
+      }),
+    ],
+  ),
+);
+```
+
+```{ojs}
+// top crop and livestock for selection
+insight_topCrops = {
+  const topCrop = T.tidy(
+    data_selectedHazardCropType,
+    T.select(["cropType", "crop", "vop"]),
+    T.filter((d) => d.cropType == "crop"),
+    T.sliceMax(1, "vop")
+  );
+  const topLivestock = T.tidy(
+    data_selectedHazardCropType,
+    T.select(["cropType", "crop", "vop"]),
+    T.filter((d) => d.cropType == "livestock"),
+    T.sliceMax(1, "vop")
+  );
+  return [
+    ...topCrop,
+    ...topLivestock
+  ]
+}
+```
+
+```{ojs}
+// total vop exposed by each hazard
+insight_rankedHazardVopTotals = T.tidy(
+  data_hazardVoP,
+  T.groupBy(
+    ["hazard"],
+    [
+      T.summarize({
+        totalVop: T.sum("vop"),
+      }),
+    ],
+  ),
+  T.filter((d) => !["any", "no hazard"].includes(d.hazard)), // remove combined and no hazard
+  T.arrange(T.desc("totalVop")),
+);
+```
+
+```{ojs}
+md`---
+### Choropleth map - Adaptive Capacities
+*Population affected by admin region*
+- Fetch the data separately for the different admin levels and generate map data for each
+- Serve different data based on admin selection`;
+```
+
+```{ojs}
+// map layer options
+dataLayerOptionsAdaptiveCapacities = [
+  {
+    key: "pov", // lookup id for data option
+    dataColumn: "ac_pov", // data column (decimal of AC)
+    label: _lang(nbText.adaptiveCapacities.inputs.mapLayer.options.pov.label), // label
+    labelLegend: _lang(
+      nbText.adaptiveCapacities.inputs.mapLayer.options.pov.labelLegend,
+    ), // label for color legend
+  },
+  {
+    key: "edu",
+    dataColumn: "ac_edu",
+    label: _lang(nbText.adaptiveCapacities.inputs.mapLayer.options.edu.label),
+    labelLegend: _lang(
+      nbText.adaptiveCapacities.inputs.mapLayer.options.edu.labelLegend,
+    ),
+  },
+  {
+    key: "fem",
+    dataColumn: "ac_fem",
+    label: _lang(nbText.adaptiveCapacities.inputs.mapLayer.options.fem.label),
+    labelLegend: _lang(
+      nbText.adaptiveCapacities.inputs.mapLayer.options.fem.labelLegend,
+    ),
+  },
+].map((d) => ({
+  // apply common values across all options
+  ...d,
+  labelPop: "Population", // tooltip label for population affected
+  popColumn: "total_pop", // population column
+  colorDomain: colorScales.range.orangeRed, // color domain
+  colorUnknown: colorScales.unknown, // unknown fill color
+}));
+```
+
+```{ojs}
+// filter adaptive capacity data, get relevant features
+mapFeaturesAdaptiveCapacity = {
+  // if null selection for all admins, return admin0 level
+  if (!adminSelections.selectAdmin0.value) return mapDataAdaptiveCapacityAdmin0.features
+  // return admin2 level
+  else {
+    return mapDataAdaptiveCapacityAdmin2.features.filter((d) => {
+      return (
+        d.properties.admin0_name ===
+          (adminSelections.selectAdmin0.value || d.properties.admin0_name) &&
+        d.properties.admin1_name ===
+          (adminSelections.selectAdmin1.value || d.properties.admin1_name)
+      );
+    });
+  }
+}
+```
+
+```{ojs}
+mapDataAdaptiveCapacityAdmin2 = {
+  const data = T.tidy(
+    dataAdaptiveCapacity,
+    // add data join for geo data
+    T.mutate({
+      a2_a1_a0: (d) => [d.admin2_name, d.admin1_name, d.admin0_name].join("_")
+    })
+  );
+  const geoData = boundaries.admin2;
+
+  return bindTabularToGeo({
+    data: data,
+    dataBindColumn: "a2_a1_a0",
+    geoData: geoData,
+    geoDataBindColumn: "a2_a1_a0"
+  });
+}
+```
+
+```{ojs}
+mapDataAdaptiveCapacityAdmin0 = {
+  const data = dataAdaptiveCapacity
+  const geoData = boundaries.admin0;
+
+  return bindTabularToGeo({
+    data: data,
+    dataBindColumn: "admin0_name",
+    geoData: geoData,
+    geoDataBindColumn: "admin0_name"
+  });
+}
+```
+
+```{ojs}
+dataAdaptiveCapacity = {
+  const country = adminSelections.selectAdmin0.value;
+  const admin1 = adminSelections.selectAdmin1.value || null;
+  const admin2 = adminSelections.selectAdmin2.value || null;
+
+  let adminQuery = `WHERE admin0_name ${country ? `= '${country}'` : 'IS NOT NULL'}`
+  adminQuery += !country ? ` AND admin1_name IS NULL` :  `AND admin2_name IS NOT NULL`
+
+  
+  // const adminQuery = `
+  //   WHERE admin0_name ${country ? `= '${country}'` : 'IS NOT NULL'}
+  //   AND admin1_name ${admin1 ? `= '${admin1}'` : 'IS NULL'}
+  //   AND admin2_name ${admin2 ? `= '${admin2}'` : 'IS NULL'}`
+  
+  return await db.query(`
+    WITH filtered_ac AS (
+        SELECT 
+            admin0_name,
+            admin1_name,
+            admin2_name,
+            "GenderEquity_1995.2015" AS ac_fem,
+            "IHME_edu.years_2014" AS ac_edu,
+            "GASP_poor365_2017" AS ac_pov
+        FROM vul_ac2
+        ${adminQuery}
+    ),
+    filtered_pop AS (
+        SELECT 
+            admin0_name,
+            admin1_name,
+            admin2_name,
+            total_pop,
+            rural_pop
+        FROM population
+        ${adminQuery}
+    )
+    
+    SELECT v.*, p.total_pop, p.rural_pop
+    FROM filtered_ac v
+    JOIN filtered_pop p
+    ON v.admin0_name = p.admin0_name
+    AND (v.admin1_name = p.admin1_name OR (v.admin1_name IS NULL AND p.admin1_name IS NULL))
+    AND (v.admin2_name = p.admin2_name OR (v.admin2_name IS NULL AND p.admin2_name IS NULL));
+`)
+      // ${admin1 ? `AND v.admin1_name = p.admin1_name`: ''}
+    // ${admin2 ? `AND v.admin2_name = p.admin1_name`: ''}
+}
+```
+
+```{ojs}
+md`---
+### Dynamic Insights - Adapative Capacities
+*insights and helpers*`;
+```
+
+```{ojs}
+// data and insights for
+dynamicInsights_adaptiveCapacity = {
+  const data = dataAdaptiveCapacity;
+
+  // format functions
+  const _formatNumber = formatNumCompactLong;
+
+  // source data -------------------------------
+
+  let exportData = {
+    admin0: data,
+    admin1: undefined,
+    admin2: undefined
+  };
+
+  if (!Object.values(adminSelections).every((d) => d.value === null)) {
+    // selected admin0 data
+    const filteredData0 = adminSelections.selectAdmin0.value
+      ? data.filter((d) => {
+          return (
+            d.admin0_name === (adminSelections.selectAdmin0.value || d.admin0_name)
+          );
+        })
+      : undefined;
+
+    // selected admin1 data
+    const filteredData1 = adminSelections.selectAdmin1.value
+      ? data.filter((d) => {
+          return (
+            d.admin0_name === (adminSelections.selectAdmin0.value || d.admin0_name) &&
+            d.admin1_name === (adminSelections.selectAdmin1.value || d.admin1_name)
+          );
+        })
+      : undefined;
+
+    // selected admin2 data
+    const filteredData2 = adminSelections.selectAdmin2.value
+      ? data.filter((d) => {
+          return (
+            d.admin0_name === (adminSelections.selectAdmin0.value || d.admin0_name) &&
+            d.admin1_name === (adminSelections.selectAdmin1.value || d.admin1_name) &&
+            d.admin2_name === (adminSelections.selectAdmin2.value || d.admin2_name)
+          );
+        })
+      : undefined;
+
+    exportData = {
+      admin0: filteredData0,
+      admin1: filteredData1,
+      admin2: filteredData2
+    };
+  }
+
+  // insights from source -------------------------------
+  function findAdmin2ACStats(data) {
+    // admin2 stats
+    // - find the counts for each AC
+    // - find majorities
+    // - find regions that have all and none for binary ACs
+    return T.tidy(
+      data,
+      T.mutate({
+        ac_edu_pop: (d) => (d.ac_edu === null ? null : d.ac_edu * d.total_pop),
+        ac_fem_pop: (d) => (d.ac_fem === null ? null : d.ac_fem * d.total_pop),
+        ac_pov_pop: (d) => (d.ac_pov === null ? null : d.ac_pov * d.total_pop)
+      }),
+      T.summarize({
+        total_pop: T.sum("total_pop"),
+        ac_edu_pop: T.sum("ac_edu_pop"),
+        ac_fem_pop: T.sum("ac_fem_pop"),
+        ac_pov_pop: T.sum("ac_pov_pop")
+      }),
+      T.mutate({
+        ac_edu_maj: (d) => d.ac_edu_pop > (0.5 * d.total_pop),
+        ac_fem_maj: (d) => d.ac_fem_pop > (0.5 * d.total_pop),
+        ac_pov_maj: (d) => d.ac_pov_pop > (0.5 * d.total_pop),
+      }),
+      T.mutate({
+        ac_edu_perc: (d) => d.ac_edu_pop / d.total_pop,
+        ac_fem_perc: (d) => d.ac_fem_pop / d.total_pop,
+        ac_pov_perc: (d) => d.ac_pov_pop / d.total_pop,
+      })
+    );
+  }
+
+  const insights0 = exportData.admin0
+    ? findAdmin2ACStats(exportData.admin0)
+    : null;
+  const insights1 = exportData.admin1
+    ? findAdmin2ACStats(exportData.admin1)
+    : null;
+  const insights2 = exportData.admin2
+    ? findAdmin2ACStats(exportData.admin2)
+    : null;
+
+  const insights = {
+    admin0: insights0?.[0],
+    admin1: insights1?.[0],
+    admin2: insights2?.[0]
+  };
+
+  // admin selection total ---------------------------------
+  // - sum the admin2 population values for given admin selection
+  function sumPopulations(data) {
+    return T.tidy(
+      data,
+      T.summarize({
+        total_pop: T.sum("total_pop"),
+        rural_pop: T.sum("rural_pop")
+      })
+    );
+  }
+
+  // get total based on admin selection
+  // overwrite total if more granular data is non-null
+  let totalPopulations;
+  totalPopulations = exportData.admin0
+    ? sumPopulations(exportData.admin0)
+    : totalPopulations;
+  totalPopulations = exportData.admin1
+    ? sumPopulations(exportData.admin1)
+    : totalPopulations;
+  totalPopulations = exportData.admin2
+    ? sumPopulations(exportData.admin2)
+    : totalPopulations;
+  totalPopulations = totalPopulations?.[0];
+  totalPopulations["total_pop_format"] = _formatNumber(
+    totalPopulations["total_pop"]
+  );
+  totalPopulations["rural_pop_format"] = _formatNumber(
+    totalPopulations["rural_pop"]
+  );
+
+  // all/none admin2's within admin0 ---------------------------------
+  // the admin2's within the selected admin0 that are all/none AC
+  function findAdmin2ACStatsAdmin0(data) {
+    // admin2 stats
+    // - find regions that have all and none for binary ACs
+    return T.tidy(
+      data,
+      // all or none of ACs
+      T.mutate({
+        admin0_ac_all: (d) =>
+          // include all admin2's if showing all regions
+          (adminSelections.selectAdmin0.value
+            ? d.admin0_name == adminSelections.selectAdmin0.value
+            : true) &&
+          d.ac_edu > 0.5 &&
+          d.ac_fem > 0.5 &&
+          d.ac_pov <= 0.5, // reversed
+        admin0_ac_none: (d) =>
+          (adminSelections.selectAdmin0.value
+            ? d.admin0_name == adminSelections.selectAdmin0.value
+            : true) &&
+          d.ac_edu <= 0.5 &&
+          d.ac_fem <= 0.5 &&
+          d.ac_pov > 0.5 
+      }),
+      T.summarize({
+        admin2_count: T.n(),
+        admin0_ac_all_count: T.sum("admin0_ac_all"),
+        admin0_ac_none_count: T.sum("admin0_ac_none")
+      })
+    );
+  }
+
+  const extremeAC2Stats = findAdmin2ACStatsAdmin0(exportData.admin0)?.[0];
+
+  return {
+    data: exportData,
+    insights: insights,
+    population_sums: totalPopulations,
+    admin0LevelA2AllNone: extremeAC2Stats
+  };
+}
+```
+
+```{ojs}
+md`#### Helpers`;
+```
+
+```{ojs}
+// define the mad lib for adaptive capacity admin1 and admin 0 levels
+function adaptiveCapacityInsightMadLib(data, adminName) {
+  const madLib = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.adaptiveCapacities.insights.madLib),
+    [
+      { name: "admin", value: adminName },
+      {
+        name: "index_edu",
+        value: formatPercentNoSymbol(transformPercent(data?.ac_edu_perc)),
+      },
+      {
+        name: "index_fem",
+        value: formatPercentNoSymbol(transformPercent(data?.ac_fem_perc)),
+      },
+      {
+        name: "index_pov",
+        value: formatPercentNoSymbol(transformPercent(data?.ac_pov_perc)),
+      },
+    ],
+  );
+
+  return `${madLib}`;
+}
+
+// // define the mad lib for adaptive capacity admin1 and admin 0 levels
+// function adaptiveCapacityInsightMadLib(data, adminName) {
+
+//   return `In **${adminName}**, the education index is **${formatPercentNoSymbol(transformPercent(data?.ac_edu_perc))}**, the female empowerment index is **${formatPercentNoSymbol(transformPercent(data?.ac_fem_perc))}**, and the poverty index is **${formatPercentNoSymbol(transformPercent(data?.ac_pov_perc))}**.`
+// }
+```
+
+```{ojs}
+// define the mad lib for adaptive capacity admin1 and admin 0 levels
+function adaptiveCapacityInsightMadLib2(data, adminName) {
+  const education_years = data?.ac_edu_perc.toFixed(2);
+  const female_empowerment = (data?.ac_fem_perc * 100).toFixed(0); //formatPercentWhole(data?.ac_fem_perc)
+  const poverty_rate = formatPercentWhole(data?.ac_pov_perc);
+
+  return `In **${adminName}**, the average educational attainment is **${education_years}** years, the female empowerment index is **${female_empowerment}**, and **${poverty_rate}** live in poverty.`;
+}
+```
+
+```{ojs}
+textDynamicInsights_adaptiveCapacities1 = {
+  // return md`TODO: based on icicle data`
+
+  // dynamic insight based on selected region
+
+  const admin2 = adminSelections.selectAdmin2.value;
+  const admin2MadLib = adaptiveCapacityInsightMadLib(
+    dynamicInsights_adaptiveCapacity.insights.admin2,
+    admin2
+  );
+  const admin1 = adminSelections.selectAdmin1.value;
+  const admin1MadLib = adaptiveCapacityInsightMadLib(
+    dynamicInsights_adaptiveCapacity.insights.admin1,
+    admin1
+  );
+  const admin0 = adminSelections.selectAdmin0.label ?? globalSelection.label;
+  const admin0Insights = dynamicInsights_adaptiveCapacity.insights.admin0;
+  const admin0MadLib = adaptiveCapacityInsightMadLib(
+    admin0Insights,
+    admin0
+  );
+
+  const langWithinAdmin1 = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.adaptiveCapacities.insights.nestedLocationBlurb),
+    [
+      { name: "admin_inner", value: admin2 },
+      { name: "admin_outer", value: admin1 }
+    ]
+  );
+  const withinAdmin1 = admin2
+    ? `${langWithinAdmin1}`
+    : ``;
+
+  const langWithinAdmin0 = Lang.reduceReplaceTemplateItems(
+    _lang(nbText.adaptiveCapacities.insights.nestedLocationBlurb),
+    [
+      { name: "admin_inner", value: admin1 },
+      { name: "admin_outer", value: admin0 }
+    ]
+  );
+  const withinAdmin0 = admin1
+    ? `${langWithinAdmin0}`
+    : ``;
+
+  // Text sections ------------------------------
+  const admin2Text = md`${admin2MadLib}`;
+
+  const admin1Text = md`${withinAdmin1} ${admin1MadLib}`;
+
+  const admin0Text = md`${withinAdmin0} ${admin0MadLib}`;
+
+  // Final text ------------------------------
+  return md`
+#### Old Insight:
+${admin2 ? admin2Text : ""}
+${admin1 ? admin1Text : ""}
+${admin0Insights ? admin0Text : ""}
+`;
+}
+```
+
+```{ojs}
+md`---
+### Adaptive Capacity Icicle - Adaptive Capacities
+Note: data uses SSA for combined admin region (see icicle_csv)`;
+```
+
+```{ojs}
+icicle_raw = {
+  const country = adminSelections.selectAdmin0.value || "SSA";
+  const admin1 = adminSelections.selectAdmin1.value || null;
+  const admin2 = adminSelections.selectAdmin2.value || null;
+  
+  let adminQuery = `WHERE admin0_name = '${country}' AND admin1_name`
+  adminQuery += !admin1 ? ` IS NULL` : ` = '${cleanAdminInput_SQL(admin1)}'`
+  adminQuery += ` AND admin2_name`
+  adminQuery += !admin2 ? ` IS NULL` : ` = '${cleanAdminInput_SQL(admin2)}'`
+  // let adminQuery = `WHERE admin0_name = 'Angola' AND admin1_name IS NULL`
+  // return adminQuery
+  return db.query(`SELECT path, value FROM icicle_data ${adminQuery}`)
+}
+```
+
+```{ojs}
+icicle_data = buildHierarchy(icicle_raw);
+```
+
+```{ojs}
+icicle_keys = new Object({
+  poverty: {
+    poverty0: ["Low Poverty"],
+    poverty1: ["Moderate Poverty"],
+    poverty1: ["High Poverty"],
+  },
+  education: {
+    education0: ["0-1 Years of Education"],
+    education1: ["1-5 Years of Education"],
+    education3: ["5+ Years of Education"],
+  },
+  gender: {
+    gender0: ["Low Female Empowerment"],
+    gender1: ["Moderate Female Empowerment"],
+    gender2: ["High Female Empowerment"],
+  },
+});
+```
+
+```{ojs}
+icicle_alias = {
+  const base = nbText.adaptiveCapacities.delvingDeeper.plot.nameMap
+  const nameMap = {
+    population: _lang(base.population),
+    poverty0: _lang(base.poverty0),
+    poverty1: _lang(base.poverty1),
+    poverty2: _lang(base.poverty2),
+    education0: _lang(base.education0),
+    education1: _lang(base.education1),
+    education2: _lang(base.education2),
+    gender0: _lang(base.gender0),
+    gender1: _lang(base.gender1),
+    gender2: _lang(base.gender2)
+  };
+  return nameMap;
+}
+```
+
+```{ojs}
+partition = (data) =>
+  d3
+    .partition()
+    .padding(1)
+    .size(narrow ? [height, width] : [width, height])(
+    d3
+      .hierarchy(data)
+      .sum((d) => d.value)
+      .sort((a, b) => b.value - a.value),
+  );
+```
+
+```{ojs}
+icicle_color = d3
+  .scaleOrdinal()
+  .domain([
+    "population",
+    "poverty2",
+    "poverty1",
+    "poverty0",
+    "education2",
+    "education1",
+    "education0",
+    "gender2",
+    "gender1",
+    "gender0",
+  ])
+  .range([
+    "#a4a4a4",
+    "#ec5a47",
+    "#fc8a34",
+    "#f4bb21",
+    "#f4bb21",
+    "#fc8a34",
+    "#ec5a47",
+    "#f4bb21",
+    "#fc8a34",
+    "#ec5a47",
+  ]);
+```
+
+```{ojs}
+targetHeight = 350;
+```
+
+```{ojs}
+narrowHeight = 600;
+```
+
+```{ojs}
+height = narrow ? narrowHeight : targetHeight;
+```
+
+```{ojs}
+narrow = width <= 0;
+```
+
+```{ojs}
+segmentX = (d) => (narrow ? d.y0 : d.x0);
+```
+
+```{ojs}
+segmentY = (d) => (narrow ? d.x0 : d.y0);
+```
+
+```{ojs}
+segmentWidth = (d) => (narrow ? d.y1 - d.y0 : d.x1 - d.x0);
+```
+
+```{ojs}
+segmentHeight = (d) => (narrow ? d.x1 - d.x0 : d.y1 - d.y0);
+```
+
+```{ojs}
+function buildHierarchy(csv) {
+  // Helper function that transforms the given CSV into a hierarchical format.
+  const root = { name: "root", children: [] };
+  for (let i = 0; i < csv.length; i++) {
+    const sequence = csv[i]["path"];
+    const size = +csv[i]["value"];
+    if (isNaN(size)) {
+      // e.g. if this is a header row
+      continue;
+    }
+    const parts = sequence.split("_");
+    let currentNode = root;
+    for (let j = 0; j < parts.length; j++) {
+      const children = currentNode["children"];
+      const nodeName = parts[j];
+      let childNode = null;
+      let foundChild = false;
+      // Search for existing child with the same name
+      for (let k = 0; k < children.length; k++) {
+        if (children[k]["name"] === nodeName) {
+          childNode = children[k];
+          foundChild = true;
+          break;
+        }
+      }
+      // If not found, create a new child node
+      if (!foundChild) {
+        childNode = { name: nodeName, children: [] };
+        children.push(childNode);
+      }
+      currentNode = childNode;
+      // If it's the last part of the sequence, create a leaf node
+      if (j === parts.length - 1) {
+        childNode.value = size;
+      }
+    }
+  }
+  return root;
+}
+```
+
+```{ojs}
+breadcrumbWidth = 200;
+```
+
+```{ojs}
+breadcrumbHeight = 35;
+```
+
+```{ojs}
+// Generate a string that describes the points of a breadcrumb SVG polygon.
+function breadcrumbPoints(d, i) {
+  const tipWidth = 10;
+  const points = [];
+  points.push("0,0");
+  points.push(`${breadcrumbWidth},0`);
+  points.push(`${breadcrumbWidth + tipWidth},${breadcrumbHeight / 2}`);
+  points.push(`${breadcrumbWidth},${breadcrumbHeight}`);
+  points.push(`0,${breadcrumbHeight}`);
+  if (i > 0) {
+    // Leftmost breadcrumb; don't include 6th vertex.
+    points.push(`${tipWidth},${breadcrumbHeight / 2}`);
+  }
+  return points.join(" ");
+}
+```
+
+```{ojs}
+md`This notebook reuses much of the 'buildHierarchy' function from the original [Sequences sunburst](https://gist.github.com/kerryrodden/7090426) gist, which was published with the following [license](https://gist.github.com/kerryrodden/7090426#file-license):
+
+> Copyright 2013 Google Inc. All Rights Reserved.
+> 
+> Licensed under the Apache License, Version 2.0 (the "License");
+> you may not use this file except in compliance with the License.
+> You may obtain a copy of the License at
+> 
+>    http://www.apache.org/licenses/LICENSE-2.0
+> 
+> Unless required by applicable law or agreed to in writing, software
+> distributed under the License is distributed on an "AS IS" BASIS,
+> WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+> See the License for the specific language governing permissions and
+> limitations under the License.`;
+```
+
+```{ojs}
+md`---
+## Data
+*Data sources*
+- Data is from local files downloaded from S3, uploaded as a file attachments
+- Data is then wrapped as a duckDB database table (separate tables for each parquet file)
+- We are using some simplified data sources, suffixed with reduced.parquet in the S3 bucket`;
+```
+
+```{ojs}
+md`### Tabular data
+- **haz_risk_vop_int**: risk data showing effect hazards have on crops. Interactions are independent.
+  - risk_prototype/data/hazard_risk_vop_ac/annual/haz_risk_vop_int_ac_reduced.parquet  
+- **population**: population data by admin levels
+  - population/population_long.parquet
+- **vop_ha**: Value of Production (VoP) and hectare data (Ha) exposures by admin level. No hazards applied.
+  - risk_prototype/data/exposure/exposure_adm_sum.parquet
+- **vul_ac**: adaptive capacity data (update)
+  - vulnerability/vulnerability_RawIndex_adminALL.parquet`;
+```
+
+```{ojs}
+db = {
+ document.body.style.cursor = "wait";
+ let db = await DuckDBClient.of({
+    haz_risk_vop_int: FileAttachment("haz_risk_vop_int_gzip.parquet"),
+    population: FileAttachment("population_long.parquet"),
+    vop_ha: FileAttachment("exposure_adm_sum_sorted.parquet"),
+    vul_ac: FileAttachment("vulnerability_RawIndex_adminALL.parquet"),
+    vul_ac2: FileAttachment("AC_adminALL.parquet"),
+    icicle_data: FileAttachment("All-adm_ssa_icicle_data_3class.parquet")
+  });
+  await db.query(`CREATE TABLE vop AS SELECT * FROM vop_ha WHERE "exposure" = 'vop'`)
+  await db.query(`CREATE TABLE ha AS SELECT * FROM vop_ha WHERE "exposure" = 'ha'`)
+  await db.query(`
+        CREATE TABLE vop_crop AS 
+        SELECT * 
+        FROM vop_ha 
+        WHERE NOT (
+          crop LIKE 'cattle\_%' ESCAPE '\\'
+          OR crop LIKE 'goats\_%' ESCAPE '\\'
+          OR crop LIKE 'pigs\_%' ESCAPE '\\'
+          OR crop LIKE 'poultry\_%' ESCAPE '\\'
+          OR crop LIKE 'sheep\_%' ESCAPE '\\'
+        )
+        AND crop NOT LIKE 'total_%' ESCAPE '\\'
+        AND exposure = 'vop'`)
+  await db.query(`
+        CREATE TABLE vop_animal AS
+        SELECT *
+        FROM vop_ha
+        WHERE (
+          crop LIKE 'cattle\_%' ESCAPE '\\'
+          OR crop LIKE 'goats\_%' ESCAPE '\\'
+          OR crop LIKE 'pigs\_%' ESCAPE '\\'
+          OR crop LIKE 'poultry\_%' ESCAPE '\\'
+          OR crop LIKE 'sheep\_%' ESCAPE '\\'
+        )
+        AND crop NOT LIKE 'total_%' ESCAPE '\\' -- remove total lines
+        AND exposure = 'vop'`)
+  document.body.style.cursor = "default";
+  return db
+}
+```
+
+```{ojs}
+md`### Geographic data
+Geo files were converted to TopoJSON and reduced in complexity before uploading to the notebook, see [Simplify large spatial files](https://observablehq.com/d/258c68ee969e8ed5?collection=@periscopic/ab-atlas) notebook for method.
+- **admin0**: broadest level, country boundaries
+  - boundaries/atlas-region_admin0_harmonized.geojson
+- **admin1**: one level down from admin0, regions within each admin0 region
+  - boundaries/atlas-region_admin1_harmonized.geojson
+- **admin2**: lowest level, subregions of every admin1 region
+  - boundaries/atlas-region_admin2_harmonized.geojson`;
+```
+
+```{ojs}
+boundaries = {
+  return {
+    admin0: admin0,
+    admin1: await get_admin1(),
+    admin2: await get_admin2()
+  }
+}
+```
+
+```{ojs}
+geo_db = {
+  let db = await DuckDBClient.of({
+    // admin0_geom: FileAttachment("atlas-region_admin0_simplified.parquet"),
+    admin1_geom: FileAttachment("atlas-region_admin1_simplified.parquet")
+  });
+  await db.query(`
+    CREATE VIEW admin2_geom AS
+    SELECT *
+    FROM read_parquet("${resolveWindowsCacheIssue(
+      "https://digital-atlas.s3.amazonaws.com/boundaries/atlas-region_admin2_simplified.parquet"
+    )}")`);
+  return db;
+}
+```
+
+```{ojs}
+partitioned_boundries =
+  "https://digital-atlas.s3.amazonaws.com/boundaries/subnational-boundaries_simplified";
+```
+
+```{ojs}
+iso3_list = new Object({
+  Nigeria: "NGA",
+  Sudan: "SDN",
+  Cameroon: "CMR",
+  Ethiopia: "ETH",
+  Mauritania: "MRT",
+  "Côte d’Ivoire": "CIV",
+  Ghana: "GHA",
+  Madagascar: "MDG",
+  Djibouti: "DJI",
+  Benin: "BEN",
+  "Equatorial Guinea": "GNQ",
+  Eritrea: "ERI",
+  Tanzania: "TZA",
+  Somalia: "SOM",
+  "Guinea-Bissau": "GNB",
+  Mali: "MLI",
+  "Central African Republic": "CAF",
+  Gambia: "GMB",
+  Chad: "TCD",
+  Kenya: "KEN",
+  "Congo - Kinshasa": "COD",
+  Angola: "AGO",
+  Lesotho: "LSO",
+  Guinea: "GIN",
+  Liberia: "LBR",
+  "Burkina Faso": "BFA",
+  "Congo - Brazzaville": "COG",
+  Burundi: "BDI",
+  Zimbabwe: "ZWE",
+  Mozambique: "MOZ",
+  Botswana: "BWA",
+  Malawi: "MWI",
+  Uganda: "UGA",
+  Zambia: "ZMB",
+  "South Sudan": "SSD",
+  Togo: "TGO",
+  Senegal: "SEN",
+  Niger: "NER",
+  "Sierra Leone": "SLE",
+  "South Africa": "ZAF",
+  Rwanda: "RWA",
+  Namibia: "NAM",
+  Gabon: "GAB",
+  Eswatini: "SWZ",
+});
+```
+
+```{ojs}
+admin_iso = iso3_list[selectAdmin0.value];
+```
+
+```{ojs}
+admin0 = {
+  let admin0 = await FileAttachment("atlas-region_admin0_harmonized.json").json()
+ return topojson.feature(admin0, admin0.objects["atlas-region_admin0_harmonized"])
+}
+```
+
+```{ojs}
+get_admin1 = async () => {
+  let country = adminSelections.selectAdmin0.value;
+  let admin1 = adminSelections.selectAdmin1.value;
+  if (country) {
+    document.body.style.cursor = "wait";
+    let admin1_query = `WHERE admin0_name = '${country}'`;
+    // let response = await geo_db.query(`
+    //   SELECT *
+    //   FROM admin1_geom
+    //   ${admin1_query}`)
+
+    let response = await geo_db.query(`
+        SELECT *
+        FROM "${resolveWindowsCacheIssue(
+          partitioned_boundries +
+            "/admin0=" +
+            admin_iso +
+            "/admin_level=1/" +
+            admin_iso +
+            ".parquet",
+        )}"
+    `);
+    let wkb_list = response.map((d) => d.geometry);
+    let data = await response.map(({ geometry, ...rest }) => rest);
+    const features = [];
+    for (let i = 0; i < wkb_list.length; i++) {
+      const pointer = GEOS.geosGeomFromWKB(wkb_list[i]);
+      let geojson = await GEOS.geosGeomToGeojson(pointer, GEOS.geos);
+      geojson = turfRewind(geojson, { reverse: true });
+      const feature = {
+        type: "Feature",
+        geometry: geojson,
+        properties: data[i],
+      };
+      features.push(feature);
+      GEOS.geos.GEOSGeom_destroy(pointer);
+    }
+    const geojson = {
+      type: "FeatureCollection",
+      features: features,
+    };
+    // return { names: ["Full Country"].concat(a1_names), GEOJSON: geojson };
+    document.body.style.cursor = "default";
+    return geojson;
+  }
+};
+```
+
+```{ojs}
+get_admin2 = async () => {
+  let country = adminSelections.selectAdmin0.value;
+  let admin1 = adminSelections.selectAdmin1.value;
+  if (country) {
+    document.body.style.cursor = "wait";
+    // let admin2_query = `WHERE admin0_name = '${country}'`
+    // admin2_query += !admin1? "":` AND admin1_name = '${cleanAdminInput_SQL(admin1)}'`
+    // let response = await geo_db.query(`
+    //   SELECT *
+    //   FROM admin2_geom
+    //   ${admin2_query}`)
+    // let response = await geo_db.query(`
+    //     SELECT *
+    //     FROM "${partitioned_boundries}/admin0=${admin_iso}/admin_level=2/${admin_iso}.parquet"
+    // `)
+    console.log(
+      "a2_path:",
+      resolveWindowsCacheIssue(
+        partitioned_boundries +
+          "/admin0=" +
+          admin_iso +
+          "/admin_level=2/" +
+          admin_iso +
+          ".parquet",
+      ),
+    );
+    let response = await geo_db.query(`
+        SELECT *
+        FROM "${resolveWindowsCacheIssue(partitioned_boundries + "/admin0=" + admin_iso + "/admin_level=2/" + admin_iso + ".parquet")}"
+    `);
+    let wkb_list = response.map((d) => d.geometry);
+    let data = await response.map(({ geometry, ...rest }) => rest);
+    const features = [];
+    for (let i = 0; i < wkb_list.length; i++) {
+      const pointer = GEOS.geosGeomFromWKB(wkb_list[i]);
+      let geojson = await GEOS.geosGeomToGeojson(pointer, GEOS.geos);
+      geojson = turfRewind(geojson, { reverse: true });
+      const feature = {
+        type: "Feature",
+        geometry: geojson,
+        properties: data[i],
+      };
+      features.push(feature);
+      GEOS.geos.GEOSGeom_destroy(pointer);
+    }
+    const geojson = {
+      type: "FeatureCollection",
+      features: features,
+    };
+    document.body.style.cursor = "default";
+    return geojson;
+  }
+};
+```
+
+```{ojs}
+md`### Dynamic summary links
+CSV of links to include for different admin0 selections
+- Local Drive Google Sheet`;
+```
+
+```{ojs}
+// dynamic bulleted list data
+dynamicSummaryData = {
+  const raw = await FileAttachment("dynamic-summary-links.csv").csv()
+
+  return raw.filter((d) => d.admin0_name.length > 0)
+}
+```
+
+```{ojs}
+dynamicSummarySelectedLinks = {
+  // filter and check link number
+  const data = dynamicSummaryData
+  const admin0Selection = adminSelections.selectAdmin0.value ?? "DEFAULT"
+  
+  const numLinks = data.filter(d => d.admin0_name == admin0Selection).length
+  return numLinks == 0
+    ? data.filter(d => d.admin0_name == 'DEFAULT')
+    : data.filter(d => d.admin0_name == admin0Selection)
+
+  
+}
+```
+
+```{ojs}
+dynamicSummaryMarkdown = {
+  const linkArr = dynamicSummarySelectedLinks.map(d => `- [${d.link_text}](${d.link_url})${d.description.length > 0 ? `: ${d.description}`: ""}`)
+  return linkArr.join("\n")
+}
+```
+
+```{ojs}
+md`***
+## Helpers
+*Functions and other good stuff*`;
+```
+
+```{ojs}
+md`---
+### Risk data grouping
+*Lookups for risk data binning, such as hazards and crop types*`;
+```
+
+```{ojs}
+// lookup for risk data type groupings
+// used by inputs and for grouping up data
+riskDataTypes = new Object({
+  crop: {
+    crop: [
+      "arabica coffee",
+      "banana",
+      "barley",
+      "bean",
+      "cassava",
+      "chickpea",
+      "cocoa",
+      "coconut",
+      "cotton",
+      "cowpea",
+      "generic",
+      "groundnut",
+      "lentil",
+      "maize",
+      "oilpalm",
+      "pearl millet",
+      "pigeonpea",
+      "plantain",
+      "potato",
+      "rice",
+      "robusta coffee",
+      "sesameseed",
+      "small millet",
+      "sorghum",
+      "soybean",
+      "sugarcane",
+      "sunflower",
+      "sweet potato",
+      "tea",
+      "tobacco",
+      "wheat",
+      "yams",
+    ],
+    livestock: [
+      "cattle_highland",
+      "cattle_tropical",
+      "goats_highland",
+      "goats_tropical",
+      "pigs_highland",
+      "pigs_tropical",
+      "poultry_highland",
+      "poultry_tropical",
+      "sheep_highland",
+      "sheep_tropical",
+    ],
+  },
+});
+```
+
+```{ojs}
+md`---
+### Dynamic insights
+*functions for formatting results*`;
+```
+
+```{ojs}
+function filterByAdminNames(data) {
+  // filter down data by combined selected admin0/admin1/admin2 Admin Selections
+  // pass data from query, use tidyjs to filter by admin selection
+  const result = T.tidy(
+    data,
+    T.filter((d) => {
+      return (
+        d.admin0_name == adminSelections.selectAdmin0.value &&
+        d.admin1_name == adminSelections.selectAdmin1.value &&
+        d.admin2_name == adminSelections.selectAdmin2.value
+      );
+    }),
+  );
+  return result;
+}
+```
+
+```{ojs}
+// wrapper for format functions, show chosen default
+function formatWithDefault({
+  value = 1000,
+  format = (d) => d,
+  defaultValue = "---",
+  debug = false,
+} = {}) {
+  // apply a formatting function to a value
+  // return default value if undefined or null
+  if (!(value === null || value === undefined)) {
+    return format(value);
+  } else {
+    return defaultValue;
+  }
+}
+```
+
+```{ojs}
+md`---
+### Data functions: format and transform
+*apply formatting to/transform a value*
+
+- Reference: [Intl.NumberFormat()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat)`;
+```
+
+```{ojs}
+md`**Transforms**`;
+```
+
+```{ojs}
+// transform non-number to percent value
+transformPercent = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d * 100;
+};
+```
+
+```{ojs}
+md`**Formatting**`;
+```
+
+```{ojs}
+// format non-number as percent
+formatPercentTenth = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d3.format(".1%")(d);
+};
+```
+
+```{ojs}
+// format non-number as percent
+formatPercentWhole = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d3.format(".0%")(d);
+};
+```
+
+```{ojs}
+// format non-number with no floating point
+// for index values
+formatPercentNoSymbol = (d) => {
+  if (d === undefined || d === null) return d;
+  else return d3.format(".0f")(d);
+};
+```
+
+```{ojs}
+function formatUSD({ locale = "en-US" } = {}) {
+  const formatter = formatNumCompactShort({ locale });
+
+  return (number) => {
+    const formattedNum = formatter(number);
+    return "$" + formattedNum;
+  };
+}
+```
+
+```{ojs}
+intDollarYear = 2005; // year of international year data
+```
+
+```{ojs}
+intDollarUnit = `${intDollarYear} Int$`; // full unit for international dollars
+```
+
+```{ojs}
+// format US currency
+function formatIntDollar({ locale = "en-US" } = {}) {
+  return (number, unit = intDollarUnit.replace("$", "")) => {
+    let formattedNumber = formatUSD({ locale })(number);
+    let intDollar = unit + formattedNumber;
+    return intDollar;
+  };
+}
+```
+
+```{ojs}
+// format number, long notation
+formatNumCompactLong = function ({ locale = "en-US" } = {}) {
+  return function (number) {
+    return new Intl.NumberFormat(locale, {
+      notation: "compact",
+      compactDisplay: "long",
+      unitDisplay: "long",
+    }).format(number);
+  };
+};
+```
+
+```{ojs}
+// format number, short notation
+formatNumCompactShort = ({ locale = "en-US" } = {}) =>
+  new Intl.NumberFormat(locale, {
+    notation: "compact",
+    compactDisplay: "short",
+  }).format;
+```
+
+```{ojs}
+md`---
+### Querying data
+*functions for querying data*`;
+```
+
+```{ojs}
+function getUniqueValues(col, tbl, db) {
+  // return unique values of from db tbl as a list
+  return db
+    .query(`select distinct ${col} from ${tbl}`)
+    .then((x) => x.map((d) => d[col]));
+}
+```
+
+```{ojs}
+function bindTabularToGeo({
+  data = [],
+  dataBindColumn = "dataBindColumn",
+  geoData = [],
+  geoDataBindColumn = "geoDataBindColumn",
+}) {
+  if (!data.length || !geoData.features || !geoData.features.length) {
+    return {
+      type: "FeatureCollection",
+      features: [],
+    };
+  }
+  // bind data to geojson
+  const index = new Map(data.map((d) => [d[dataBindColumn], d])); // map data by dataBindColumn
+  const geojson = JSON.parse(JSON.stringify(geoData)); // do a copy, rather than mutate
+  // join up data to geojson
+  for (const f of geojson.features) {
+    f.properties.data = index.get(f.properties[geoDataBindColumn]);
+  }
+  return geojson;
+}
+```
+
+```{ojs}
+md`***
+## Testing Queries
+*Test queries of the tabular data*`;
+```
+
+```{ojs}
+{
+  const debugString = md`**Query hidden: Debug: non-zero hazard data counts**
+
+_(update boolean within this cell to run)_ 
+  - this checks the number of results for every combination of hazard data 
+  - ~3% of choices have no data across all crops`
+  
+  const hideQuery = true;
+
+  return hideQuery
+    ? debugString
+    : db.query(`
+with tbl as (
+  select admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    , count(*) as total_count
+    , count(case when value <> 0 then 1 end) as non_zero_count
+    from haz_risk_vop_int
+    -- where admin0_name = 'Angola'
+    where severity = 'moderate' -- hard-coded
+    and hazard != 'any'
+    group by admin0_name
+    , admin1_name
+    , admin2_name
+    , scenario
+    , timeframe
+    order by non_zero_count
+)
+
+select * 
+  from tbl
+  -- where non_zero_count = 0
+`);
+}
+```
+
+```{ojs}
+md`***
+## Imports
+*External imports*`;
+```
+
+```{ojs}
+import { toc } from "@nebrius/indented-toc";
+```
+
+```{ojs}
+import { T } from "@pbeshai/tidyjs";
+```
+
+```{ojs}
+import {
+  cleanAdminInput_SQL,
+  resolveWindowsCacheIssue,
+} from "cbd32f92c155bf5b";
+```
+
+```{ojs}
+GEOS = {
+  const initgeosJs = (await import("https://cdn.skypack.dev/geos-wasm@2.0.0"))
+    .default;
+  const geos = await initgeosJs();
+
+  function geosGeomFromWKB(wkb) {
+    const wkbPtr = geos.Module._malloc(wkb.length); //Allocate memory for the geom
+    geos.Module.HEAPU8.set(wkb, wkbPtr);
+    const geomPtr = geos.GEOSGeomFromWKB_buf(wkbPtr, wkb.length);
+    geos.Module._free(wkbPtr);
+    return geomPtr;
+  }
+  
+  const geosGeomToGeojson = (
+    await import("https://cdn.skypack.dev/geos-wasm/helpers")
+  ).geosGeomToGeojson;
+
+  return { geosGeomToGeojson, geosGeomFromWKB, geos };
+}
+```
+
+```{ojs}
+turfRewind = require("@turf/turf").then((t) => t.rewind);
+```
+
+```{ojs}
+import { buildInlineDownloadButton } from "1bda5f9b60c64223";
+```
+
+```{ojs}
+download_translation = new Object({
+  en: "Download Data",
+  fr: "Télécharger les Données",
+});
+```
+
+```{ojs}
+md`---
+
+## Other`;
+```
+
+```{ojs}
+function makeDevNotes({
+  // adding dev notes as a html summary (collapsible)
+  title = "Plot dev notes",
+  emojis = "👆🛠",
+  text = md`Update this text using the \`text\` field.`,
+} = {}) {
+  return htl.html`<details>
+<summary>${title} ${emojis}</summary>${text}</details>`;
+}
+```
+
+```{ojs}
+{
+  const text = `### v1.2.0: adding language conversion
+- language toggle 
+
+### v1.1.2: Adaptive capacity formatting
+- Update adaptive capacity data
+  - AC data for map are indices and should be describes as such, not as rates
+  - Update insights to be about selected indexes rather than population affected
+
+### v1.1.1 Map fix (2024-03-26)
+Looking at map with multiple regions shown for choropleth
+- Fix binding when you've selected admin1:
+  - Bind data by BOTH admin1 and admin0, not just admin1
+
+### v1.1 Data Update (2024-03-19)
+- Hazard field is now 'no hazard' (all lowercase)
+- VoP values are the total across all severities, not just hard-coded to 'moderate'
+
+### v1.0.1 (2024-03-15)
+- Adding cover image
+
+### v1.0 (2024-03-15)
+- Updating hazard data
+  - Included 'No hazard' as option, so updated how data is extracted (no longer joining up totals)
+    - Using new option as definition of distribution
+    - Update removal from component bar charts
+  - Not using the explicit 'any' column, instead defining using sum of component values (to avoid any rounding errors)
+- Cleanup
+  - Remove unused hazard helpers
+  - Clean up documentation for data sources
+
+### v0.6 (2024-03-11)
+
+- Collapse y-axis for percent chart when crop hazards are zero (preserve order for crops and livestock)
+- Remove 'no hazard' from hazard bar chart dropdown
+- Update perc chart tooltip
+  - Total VoP at risk is now in terms of colored bars only (using any hazard data)
+  - Format to match percent and money with hazard exposure
+  - Fix bar ordering
+- Update adaptive capacity icicle
+  - includes SSA and updated colors
+- Update adaptive capacity map data
+`;
+
+  const newestVersion = text.split('###')
+    .filter(d => d)
+    .map(d => d.trim())
+    ?.[0]
+    .split('\n')
+    ?.[0]
+
+  return makeDevNotes({
+    text: md`${text}`,
+    title: newestVersion ?? "Dev notes",
+    emojis: "🪵✏️"
+  })
+}
+```
+
+```{ojs}
+convertToCSV = (data) => {
+  if (!data?.length) return "";
+
+  const headers = Object.keys(data[0]);
+  const escapeValue = (val) => {
+    if (val == null) return "";
+    const str = String(val);
+    return str.includes(",") || str.includes('"') || str.includes("\n")
+      ? `"${str.replace(/"/g, '""')}"`
+      : str;
+  };
+
+  return [
+    headers.map(escapeValue).join(","),
+    ...data.map((row) => headers.map((key) => escapeValue(row[key])).join(",")),
+  ].join("\n");
+};
+```
+
+```{ojs}
+{ const _anyData = T.tidy(
+    data_hazardVoP,
+    T.filter((d) => !["any", "no hazard"].includes(d.hazard)), // only hazard components
+    T.groupBy(
+      [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "severity",
+        "crop"
+      ],
+      [
+        T.summarize({
+          vop_any: T.sum("vop")
+        })
+      ]
+    )
+  );
+
+  const _dataWithAnyColumn = T.tidy(
+    data_hazardVoP,
+    T.leftJoin(_anyData, {
+      by: [
+        "admin0_name",
+        "admin1_name",
+        "admin2_name",
+        "scenario",
+        "timeframe",
+        "crop",
+        "severity"
+      ]
+    })
+  );
+
+  const data = _dataWithAnyColumn;
+  const dataAny = data.filter((d) => d.hazard == "any"); // combined
+  const dataBars = [
+    ...data.filter((d) => d.hazard !== "any" && d.vop !== 0) // remove the combined hazard
+  ];
+ return dataBars
+}
+```
