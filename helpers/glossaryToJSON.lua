@@ -117,20 +117,37 @@ local function csv_to_table(csv)
 end
 
 -- Hardcoded paths
-local input_path = "./../data/shared/glossary.csv"
-local output_path = "./../data/shared/glossary.json"
+local glossary_input = "./../data/docs/glossary.csv"
+local glossary_output = "./../data/docs/glossary.json"
+
+local faq_input = "./../data/docs/FAQ.csv"
+local faq_output = "./../data/docs/FAQ.json"
 
 -- Main
 local ok, result = pcall(function()
-	local csv_data = read_file(input_path)
+	local csv_data = read_file(glossary_input)
 	-- print("Csv data: " .. csv_data)
 	local lua_table = csv_to_table(csv_data)
 	local json = quarto.json.encode(lua_table)
-	write_file(output_path, json)
+	write_file(glossary_output, json)
 end)
 
 if not ok then
 	io.stderr:write("Error: " .. tostring(result) .. "\n")
 else
-	print("Glossary JSON written to " .. output_path)
+	print("Glossary JSON written to " .. glossary_output)
+end
+
+local ok, result = pcall(function()
+	local csv_data = read_file(faq_input)
+	-- print("Csv data: " .. csv_data)
+	local lua_table = csv_to_table(csv_data)
+	local json = quarto.json.encode(lua_table)
+	write_file(faq_output, json)
+end)
+
+if not ok then
+	io.stderr:write("Error: " .. tostring(result) .. "\n")
+else
+	print("Glossary JSON written to " .. faq_output)
 end
