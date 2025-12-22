@@ -104,10 +104,14 @@ renderS2_insight();
 To estimate the potential loss and lost revenue by farm size both historically
 and in the future for African farms, we need to determine the occurrence and
 frequency of extreme events. To determine these events we use the Standardized
-Precipitation-Evapotranspiration Index (SPEI), which is an multi-scalar drought
-index which can be used to determine very dry and very wet conditions. *match to
-emdat sentence Five models from the 6th Coupled Model Intercomparison Project
-(CMPI6) which have been
+Precipitation-Evapotranspiration Index (SPEI), which is a multi-scalar drought
+index which can be used to determine very dry and very wet conditions. Extreme
+events were defined as years when SPEI values exceeded ±1, corresponding to very
+wet or very dry conditions. These modeled events were validated against the
+EM-DAT disaster database to confirm that the SPEI-based approach captured the
+timing and spatial distribution of major historical droughts and floods. Five
+models from the 6th Coupled Model Intercomparison Project (CMIP6) which have
+been
 [identified](https://link.springer.com/article/10.1007/s40808-025-02560-3#Sec5)
 as having high performance for simulating climate in Africa were used to develop
 an ensemble average for the historical period (1995-2014) as well as two
@@ -571,7 +575,17 @@ renderS2_plot = () => {
         y: "predicted",
         // stroke: pal,
         strokeWidth: 2,
-        tip: true,
+        // channels: {
+        //   x: {
+        //     value: "x",
+        //     label: "X label",
+        //   },
+        // },
+        tip: {
+          format: {
+            y: (d) => `${Math.round(d * 100)}%`,
+          },
+        },
       }),
     ],
   });
@@ -602,8 +616,7 @@ renderS3_plot = () => {
     width,
     height: 500,
 
-    marginLeft: 70,
-    marginRight: 125,
+    marginLeft: 90,
 
     x: {
       label: "Number of Events",
@@ -615,7 +628,9 @@ renderS3_plot = () => {
 
     fy: {
       label: null,
-      // axis: "left",
+      axis: "left",
+      tickRotate: -90,
+      tickPadding: 80,
     },
 
     color: {
@@ -629,7 +644,26 @@ renderS3_plot = () => {
         fy: "model",
         y: "variable",
         fill: (d) => (d.variable === "Very Dry" ? "#F6A8A8" : "#A8D0F6"),
-        tip: true,
+        channels: {
+          scenario: {
+            value: (d) => d.model,
+            label: "Scenario",
+          },
+          hazard: {
+            value: (d) => d.variable,
+            label: "Hazard",
+          },
+        },
+        tip: {
+          format: {
+            fy: false,
+            x: true,
+            y: true,
+            scenario: true,
+            fill: false,
+            hazard: true,
+          },
+        },
       }),
 
       // Individual GCM points (geom_point)
@@ -640,7 +674,26 @@ renderS3_plot = () => {
         stroke: "gcm",
         r: 4,
         strokeOpacity: 0.7,
-        tip: true,
+        channels: {
+          scenario: {
+            value: (d) => d.model,
+            label: "Scenario",
+          },
+          hazard: {
+            value: (d) => d.variable,
+            label: "Hazard",
+          },
+        },
+        tip: {
+          format: {
+            fy: false,
+            x: true,
+            y: true,
+            scenario: true,
+            stroke: true,
+            hazard: true,
+          },
+        },
       }),
     ],
   });
@@ -773,9 +826,14 @@ fig4b_filtered = await hypq.parquetQuery({
 
 ```{ojs}
 renderS4b_plot = () => {
+  const domainOrder =
+    fig4_inputs.event === "Very Dry"
+      ? ["Farms Likely Impacted", "40% lost revenue", "50% lost revenue"]
+      : ["Farms Likely Impacted", "30% lost revenue", "40% lost revenue"];
   return Plot.plot({
     width,
     height: 420,
+    marginLeft: 50,
 
     x: {
       label: "Year",
@@ -785,12 +843,17 @@ renderS4b_plot = () => {
     y: {
       label: "Number of Farms",
       grid: true,
+      tickFormat: (d) => numFormat.format(d),
+    },
+
+    fx: {
+      label: null,
     },
 
     color: {
       legend: true,
       label: "Threshold",
-      domain: ["Farms Likely Impacted", "40% lost revenue", "50% lost revenue"],
+      domain: domainOrder,
       // domain: ["baseline", "SSP245", "SSP585"],
       range: ["#4E79A7", "#F28E2C", "#E15759"],
     },
@@ -805,7 +868,21 @@ renderS4b_plot = () => {
         // stroke: "model",
         strokeWidth: 2,
         opacity: 0.85,
-        tip: true,
+        channels: {
+          type: {
+            value: "losstype",
+            label: "Loss Type",
+          },
+        },
+        tip: {
+          format: {
+            x: "d",
+            y: (d) => (d !== 0 ? numFormat.format(d) : "No Extreme Events"),
+            type: true,
+            stroke: false, //HACK: Keep false for now while additional "threshold", field keeps appearing
+            fx: false,
+          },
+        },
       }),
     ],
   });
@@ -838,7 +915,7 @@ renders4b_insight = () => {
   const _ssp = fig4_inputs.time;
 
   return md`
-#### Quick Insights for ${_country}
+### Quick Insights for ${_country}
 
 Between ${minyear} and ${maxyear}, an estimated
 **${fmtVal(maxLoss.cum_sum)}**
@@ -867,6 +944,15 @@ conditions in
 under the ${_ssp} model.
 `;
 };
+```
+
+### Helpers
+
+```{ojs}
+numFormat = new Intl.NumberFormat(undefined, {
+  notation: "compact",
+  compactDisplay: "short",
+});
 ```
 
 ### Geo helpers
@@ -899,7 +985,6 @@ turfRewind = require("@turf/turf").then((t) => t.rewind);
 function plotMap(
   geojson,
   fillColumn,
-  tooltipColumns = [],
   { height = 500, scheme = "YlGnBu" } = {},
 ) {
   return Plot.plot({
@@ -912,6 +997,8 @@ function plotMap(
     color: {
       scheme,
       legend: true,
+      tickFormat: (d) => numFormat.format(d),
+      label: "Number of Farms",
     },
     marks: [
       Plot.geo(geojson, {
@@ -933,13 +1020,35 @@ function plotMap(
         Plot.pointer(
           Plot.centroid({
             channels: {
-              value: (d) => d.properties[fillColumn],
-              ...Object.fromEntries(
-                tooltipColumns.map((col) => [col, (d) => d.properties[col]]),
-              ),
+              value: {
+                value: (d) => d.properties[fillColumn],
+                label: "Number of Farms",
+              },
+              gid_0: {
+                value: (d) => d.properties.GID_0,
+                label: "iso3",
+              },
+              country: {
+                value: (d) =>
+                  d.properties.nm_slc0 === "Sub-Saharan Africa"
+                    ? d.properties.NAME_0
+                    : d.properties.nm_slc0,
+                label: "Country",
+              },
+              region: {
+                value: (d) =>
+                  d.properties.nm_slc0 === "Sub-Saharan Africa"
+                    ? null
+                    : d.properties.NAME_0,
+                label: "Region",
+              },
             },
             format: {
-              value: true,
+              value: (d) =>
+                d !== 0 ? numFormat.format(d) : "No Extreme Events",
+              country: true,
+              region: true,
+              gid_0: true,
             },
           }),
         ),
