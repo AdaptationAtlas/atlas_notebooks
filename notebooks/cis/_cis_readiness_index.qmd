@@ -189,25 +189,14 @@ selectedAdmin0Value = selectedAdmin0
 ```{ojs}
 admin1Options = uniqueAdmin1(selectedAdmin0)
 
-// Track admin0 changes - when this changes, admin1 cell recreates and resets
-admin0Key = selectedAdmin0Value.join(',')
-
-viewof selectedAdmin1 = {
-  // Make reactive to admin0Key - cell recreates when admin0 changes
-  // When cell recreates, selector is recreated with empty selection (reset behavior)
-  admin0Key;
-  
-  const selector = multiSelect({
-    inputLabel: _lang(cis.admin1Label),
-    inputId: "admin1Select",
-    placeholderText: _lang(cis.admin1Placeholder),
-    options: admin1Options.map(d => ({ value: d, label: d })),
-    selected: [], // Reset when admin0 changes (cell recreates)
-    maxSelections: 10
-  });
-  
-  return selector;
-}
+viewof selectedAdmin1 = multiSelect({
+  inputLabel: _lang(cis.admin1Label),
+  inputId: "admin1Select",
+  placeholderText: _lang(cis.admin1Placeholder),
+  options: admin1Options.map(d => ({ value: d, label: d })),
+  selected: [],
+  maxSelections: 10
+})
 
 // Reactive value that all selectors sync to
 selectedAdmin1Value = selectedAdmin1
@@ -216,30 +205,57 @@ selectedAdmin1Value = selectedAdmin1
 ```{ojs}
 admin2Options = uniqueAdmin2(selectedAdmin0, selectedAdmin1)
 
-// Track admin0 and admin1 changes - when this changes, admin2 cell recreates and resets
-admin0Admin1Key = `${selectedAdmin0Value.join(',')}|${selectedAdmin1Value.join(',')}`
-
-viewof selectedAdmin2 = {
-  // Make reactive to admin0Admin1Key - cell recreates when admin0 or admin1 changes
-  // When cell recreates, selector is recreated with empty selection (reset behavior)
-  admin0Admin1Key;
-  
-  const selector = multiSelect({
-    inputLabel: _lang(cis.admin2Label),
-    inputId: "admin2Select",
-    placeholderText: _lang(cis.admin2Placeholder),
-    options: admin2Options.map(d => ({ value: d, label: d })),
-    selected: [], // Reset when admin0 or admin1 changes (cell recreates)
-    maxSelections: 10
-  });
-  
-  return selector;
-}
+viewof selectedAdmin2 = multiSelect({
+  inputLabel: _lang(cis.admin2Label),
+  inputId: "admin2Select",
+  placeholderText: _lang(cis.admin2Placeholder),
+  options: admin2Options.map(d => ({ value: d, label: d })),
+  selected: [],
+  maxSelections: 10
+})
 
 // Reactive value that all selectors sync to
 selectedAdmin2Value = selectedAdmin2
 ```
 
+```{ojs}
+// Helper function to create synchronized admin selectors
+function createSyncedAdminSelector(level, masterView, masterValue, options, uniqueId, labelKey, placeholderKey) {
+  const selector = multiSelect({
+    inputLabel: _lang(cis[labelKey]),
+    inputId: `admin${level}Select-${uniqueId}`,
+    placeholderText: _lang(cis[placeholderKey]),
+    options: options,
+    selected: masterValue.slice(),
+    maxSelections: 10
+  });
+  
+  // When this selector changes, update the master
+  selector.addEventListener('input', () => {
+    masterView.value = selector.value;
+  });
+  
+  // Watch master value and update selector when it changes
+  // This makes the cell reactive to masterValue changes
+  masterValue; // Reference to make reactive
+  
+  // Update selector if master changed
+  const currentValue = selector.value.join(',');
+  const masterValueStr = masterValue.join(',');
+  if (currentValue !== masterValueStr) {
+    selector.value = masterValue.slice();
+    // Find the hidden select input and update it
+    const selectInput = selector.querySelector('.dropdown-select');
+    if (selectInput) {
+      selectInput.value = masterValue;
+      // Trigger update to refresh placeholder
+      selector.dispatchEvent(new CustomEvent("input", { bubbles: true }));
+    }
+  }
+  
+  return selector;
+}
+```
 
 ```{ojs}
 // Determine current admin level based on selections
@@ -718,45 +734,18 @@ section12Content = _lang(cis.section12Content)
 ```{ojs}
 //| echo: false
 
-// Synchronized admin selectors for Section 1.2
-// Make reactive to master value - createSyncedAdminSelector handles updates
-viewof s12Admin0 = {
-  // Make reactive to master value
-  selectedAdmin0Value;
-  return createSyncedAdminSelector(
-    0, viewof selectedAdmin0, selectedAdmin0Value, 
-    uniqueAdmin0.map(d => ({ value: d, label: d })), 
-    "s12", "admin0Label", "admin0Placeholder"
-  );
-}
+// Synchronized admin selectors for Section 1.2 - these sync with the master selectors
+viewof s12Admin0 = createSyncedAdminSelector(0, viewof selectedAdmin0, selectedAdmin0Value, uniqueAdmin0.map(d => ({ value: d, label: d })), "s12", "admin0Label", "admin0Placeholder")
 
-viewof s12Admin1 = {
-  // Make reactive to master value and options
-  selectedAdmin1Value;
-  admin1Options;
-  return createSyncedAdminSelector(
-    1, viewof selectedAdmin1, selectedAdmin1Value, 
-    admin1Options.map(d => ({ value: d, label: d })), 
-    "s12", "admin1Label", "admin1Placeholder"
-  );
-}
+viewof s12Admin1 = createSyncedAdminSelector(1, viewof selectedAdmin1, selectedAdmin1Value, admin1Options.map(d => ({ value: d, label: d })), "s12", "admin1Label", "admin1Placeholder")
 
-viewof s12Admin2 = {
-  // Make reactive to master value and options
-  selectedAdmin2Value;
-  admin2Options;
-  return createSyncedAdminSelector(
-    2, viewof selectedAdmin2, selectedAdmin2Value, 
-    admin2Options.map(d => ({ value: d, label: d })), 
-    "s12", "admin2Label", "admin2Placeholder"
-  );
-}
+viewof s12Admin2 = createSyncedAdminSelector(2, viewof selectedAdmin2, selectedAdmin2Value, admin2Options.map(d => ({ value: d, label: d })), "s12", "admin2Label", "admin2Placeholder")
 ```
 
 ```{ojs}
 //| echo: false
 
-// Inline admin level selectors for this section
+// Inline admin level selectors for this section - Region Selection
 htl.html`
 <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
   <div style="flex: 1; min-width: 200px;">
@@ -1011,41 +1000,18 @@ section13Content = _lang(cis.section13Content)
 ```{ojs}
 //| echo: false
 
-// Synchronized admin selectors for Section 1.3
-viewof s13Admin0 = {
-  selectedAdmin0Value;
-  return createSyncedAdminSelector(
-    0, viewof selectedAdmin0, selectedAdmin0Value, 
-    uniqueAdmin0.map(d => ({ value: d, label: d })), 
-    "s13", "admin0Label", "admin0Placeholder"
-  );
-}
+// Synchronized admin selectors for Section 1.3 - these sync with the master selectors
+viewof s13Admin0 = createSyncedAdminSelector(0, viewof selectedAdmin0, selectedAdmin0Value, uniqueAdmin0.map(d => ({ value: d, label: d })), "s13", "admin0Label", "admin0Placeholder")
 
-viewof s13Admin1 = {
-  selectedAdmin1Value;
-  admin1Options;
-  return createSyncedAdminSelector(
-    1, viewof selectedAdmin1, selectedAdmin1Value, 
-    admin1Options.map(d => ({ value: d, label: d })), 
-    "s13", "admin1Label", "admin1Placeholder"
-  );
-}
+viewof s13Admin1 = createSyncedAdminSelector(1, viewof selectedAdmin1, selectedAdmin1Value, admin1Options.map(d => ({ value: d, label: d })), "s13", "admin1Label", "admin1Placeholder")
 
-viewof s13Admin2 = {
-  selectedAdmin2Value;
-  admin2Options;
-  return createSyncedAdminSelector(
-    2, viewof selectedAdmin2, selectedAdmin2Value, 
-    admin2Options.map(d => ({ value: d, label: d })), 
-    "s13", "admin2Label", "admin2Placeholder"
-  );
-}
+viewof s13Admin2 = createSyncedAdminSelector(2, viewof selectedAdmin2, selectedAdmin2Value, admin2Options.map(d => ({ value: d, label: d })), "s13", "admin2Label", "admin2Placeholder")
 ```
 
 ```{ojs}
 //| echo: false
 
-// Inline admin level selectors for this section
+// Inline admin level selectors for this section - Region Selection
 htl.html`
 <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
   <div style="flex: 1; min-width: 200px;">
@@ -1305,41 +1271,18 @@ section14Content = _lang(cis.section14Content)
 ```{ojs}
 //| echo: false
 
-// Synchronized admin selectors for Section 1.4
-viewof s14Admin0 = {
-  selectedAdmin0Value;
-  return createSyncedAdminSelector(
-    0, viewof selectedAdmin0, selectedAdmin0Value, 
-    uniqueAdmin0.map(d => ({ value: d, label: d })), 
-    "s14", "admin0Label", "admin0Placeholder"
-  );
-}
+// Synchronized admin selectors for Section 1.4 - these sync with the master selectors
+viewof s14Admin0 = createSyncedAdminSelector(0, viewof selectedAdmin0, selectedAdmin0Value, uniqueAdmin0.map(d => ({ value: d, label: d })), "s14", "admin0Label", "admin0Placeholder")
 
-viewof s14Admin1 = {
-  selectedAdmin1Value;
-  admin1Options;
-  return createSyncedAdminSelector(
-    1, viewof selectedAdmin1, selectedAdmin1Value, 
-    admin1Options.map(d => ({ value: d, label: d })), 
-    "s14", "admin1Label", "admin1Placeholder"
-  );
-}
+viewof s14Admin1 = createSyncedAdminSelector(1, viewof selectedAdmin1, selectedAdmin1Value, admin1Options.map(d => ({ value: d, label: d })), "s14", "admin1Label", "admin1Placeholder")
 
-viewof s14Admin2 = {
-  selectedAdmin2Value;
-  admin2Options;
-  return createSyncedAdminSelector(
-    2, viewof selectedAdmin2, selectedAdmin2Value, 
-    admin2Options.map(d => ({ value: d, label: d })), 
-    "s14", "admin2Label", "admin2Placeholder"
-  );
-}
+viewof s14Admin2 = createSyncedAdminSelector(2, viewof selectedAdmin2, selectedAdmin2Value, admin2Options.map(d => ({ value: d, label: d })), "s14", "admin2Label", "admin2Placeholder")
 ```
 
 ```{ojs}
 //| echo: false
 
-// Inline admin level selectors for this section
+// Inline admin level selectors for this section - Region Selection
 htl.html`
 <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
   <div style="flex: 1; min-width: 200px;">

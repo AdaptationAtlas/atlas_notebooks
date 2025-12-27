@@ -11,183 +11,16 @@ date-edited: today
 ---
 
 ```{ojs}
-// Load translations first
-cis = await FileAttachment("/data/cis/translations.json").json()
+cis = await FileAttachment(
+  "/data/cis/translations.json",
+).json();
 ```
 
 ```{ojs}
-// Import all UI components - these MUST be imported before any code that uses them
-import { atlasHero, downloadButton } from "/helpers/uiComponents.ojs"
-import { atlasTOC, tocStyle } from "/helpers/toc.ojs"
-import { dropdownInput as multiSelect, dropdownCSS } from "/helpers/multiSelect.ojs"
-```
-
-```{ojs}
-// Global registry to track all child selectors for each master
-// This is a plain object at module scope
-selectorRegistry = ({
-  admin0: {},
-  admin1: {},
-  admin2: {}
-})
-```
-
-```{ojs}
-// Helper function to update a selector's DOM to match a value
-updateSelectorDOM = function(selectorForm, newValue, optionsArray, placeholderKey) {
-  const selectInput = selectorForm.querySelector('select.dropdown-select');
-  const dropdownList = selectorForm.querySelector('ul.dropdown-list');
-  const dropdownButton = selectorForm.querySelector('.dropdown-button button');
-  
-  if (!selectInput) return;
-  
-  // Update the hidden select element
-  Array.from(selectInput.options).forEach(option => {
-    option.selected = newValue.includes(option.value);
-  });
-  
-  // Update the form value
-  selectorForm.value = newValue;
-  
-  // Update the visual dropdown list items
-  if (dropdownList) {
-    const listItems = dropdownList.querySelectorAll('li');
-    listItems.forEach(li => {
-      const value = li.id;
-      if (newValue.includes(value)) {
-        li.classList.add('selected');
-      } else {
-        li.classList.remove('selected');
-      }
-    });
-  }
-  
-  // Update placeholder text
-  if (dropdownButton) {
-    const filterSelected = dropdownButton.querySelector('.filter-selected');
-    if (filterSelected) {
-      if (newValue.length > 0) {
-        const labels = optionsArray
-          .filter(opt => newValue.includes(opt.value))
-          .map(opt => typeof opt.label === 'string' ? opt.label : (opt.label?.outerHTML || String(opt.label)));
-        filterSelected.innerHTML = labels.join(', ');
-      } else {
-        filterSelected.innerHTML = _lang(cis[placeholderKey]);
-      }
-    }
-  }
-}
-```
-
-```{ojs}
-// Helper function to create synchronized admin selectors
-createSyncedAdminSelector = function(level, masterView, masterValue, options, uniqueId, labelKey, placeholderKey) {
-  const levelKey = `admin${level}`;
-  const registry = selectorRegistry[levelKey];
-  
-  // Check if selector already exists for this uniqueId
-  if (registry[uniqueId]) {
-    const entry = registry[uniqueId];
-    // Update the selector's DOM to match current master value
-    updateSelectorDOM(entry.selector, masterValue, options, placeholderKey);
-    // Update options in registry
-    entry.options = options;
-    return entry.selector;
-  }
-  
-  // Create a new selector initialized with the current master value
-  const selector = multiSelect({
-    inputLabel: _lang(cis[labelKey]),
-    inputId: `admin${level}Select-${uniqueId}`,
-    placeholderText: _lang(cis[placeholderKey]),
-    options: options,
-    selected: masterValue.slice(), // Initialize with current master value
-    maxSelections: 10
-  });
-  
-  // Register this selector in the registry
-  registry[uniqueId] = { selector, options, placeholderKey };
-  
-  // Flag to prevent circular updates
-  let isUpdating = false;
-  
-  // When this selector changes, update the master selector and all other child selectors
-  selector.addEventListener('input', () => {
-    if (isUpdating) return;
-    isUpdating = true;
-    
-    const newValue = selector.value;
-    
-    // Update master view's value directly
-    masterView.value = newValue;
-    
-    // Update master selector's DOM
-    updateSelectorDOM(masterView, newValue, options, placeholderKey);
-    
-    // Update all other child selectors for this level (except this one)
-    Object.keys(registry).forEach(id => {
-      if (id !== uniqueId) {
-        const entry = registry[id];
-        updateSelectorDOM(entry.selector, newValue, entry.options, entry.placeholderKey);
-      }
-    });
-    
-    // Dispatch input event to trigger reactivity
-    masterView.dispatchEvent(new CustomEvent('input', { bubbles: true }));
-    
-    isUpdating = false;
-  });
-  
-  // Listen to master's input events to update this selector
-  const masterListener = () => {
-    if (isUpdating) return;
-    isUpdating = true;
-    
-    const newValue = masterView.value;
-    const currentValue = selector.value;
-    if (JSON.stringify(newValue) !== JSON.stringify(currentValue)) {
-      updateSelectorDOM(selector, newValue, options, placeholderKey);
-    }
-    
-    isUpdating = false;
-  };
-  
-  masterView.addEventListener('input', masterListener);
-  
-  // Store the listener so we can clean it up if needed
-  selector._masterListener = masterListener;
-  selector._uniqueId = uniqueId;
-  
-  return selector;
-}
-```
-
-```{ojs}
-// Language setup - MUST be defined before includes and any code that uses _lang
-import { lang as Lang } from "/helpers/lang.js"
-
-general_translations = await FileAttachment("/data/shared/generalTranslations.json").json()
-
-languages = [
-  { key: "en", label: "English", locale: 'en-US' },
-  { key: "fr", label: "Français", locale: 'fr-FR' }
-]
-
-defaultLangKey = {
-  const name = "lang";
-  const list = languages.map((d) => d.key);
-  const defaultKey = "en";
-  const queryParam = await Lang.getParamFromList({ name, list });
-  return queryParam ?? defaultKey;
-}
-
-viewof masterLanguage = Inputs.radio(languages, {
-  label: "Main language toggle",
-  format: (d) => d.key,
-  value: languages.find((x) => x.key === defaultLangKey),
-})
-
-_lang = Lang.lg(masterLanguage.key)
+// Import all UI components FIRST before any cells that use them
+import { atlasHero, downloadButton } from "/helpers/uiComponents.ojs";
+import { atlasTOC, tocStyle } from "/helpers/toc.ojs";
+import { dropdownInput as multiSelect, dropdownCSS } from "/helpers/multiSelect.ojs";
 ```
 
 ```{ojs}
@@ -195,10 +28,6 @@ _lang = Lang.lg(masterLanguage.key)
 
 // Hero section - nbTitle and hero_url are defined in source code section
 hero_url = "./../../images/default_crop.webp";
-nbTitle = _lang({
-  en: "Identifying Climate Information Readiness",
-  fr: "Identifiant la Readiness des informations climatiques",
-});
 atlasHero(nbTitle, hero_url);
 ```
 
@@ -249,8 +78,12 @@ actually appearing in the notebook.
 <!-- Text and Language Translations -->
 
 ```{ojs}
-// This cell is to contain headings used elsewhere
-// (nbTitle is now defined earlier before the includes)
+// This cell is to contain all the headings and the notebook title
+nbTitle = _lang({
+  en: "Identifying Climate Information Readiness",
+  fr: "Identifiant la Readiness des informations climatiques",
+});
+
 // key_insights = _lang({en: "Key Insights", fr: "Résumé"})
 heading1 = _lang({ en: "Heading 1", fr: "Titre 1" });
 heading2 = _lang({ en: "Heading 2", fr: "Titre 2" });
@@ -278,6 +111,32 @@ keyInsights = {
 }
 ```
 
+```{ojs}
+import { lang as Lang } from "/helpers/lang.js"
+
+general_translations = await FileAttachment("/data/shared/generalTranslations.json").json()
+
+languages = [
+  { key: "en", label: "English", locale: 'en-US' },
+  { key: "fr", label: "Français", locale: 'fr-FR' }
+]
+
+defaultLangKey = {
+  const name = "lang";
+  const list = languages.map((d) => d.key);
+  const defaultKey = "en";
+  const queryParam = await Lang.getParamFromList({ name, list });
+  return queryParam ?? defaultKey;
+}
+
+_lang = Lang.lg(masterLanguage.key)
+
+viewof masterLanguage = Inputs.radio(languages, {
+  label: "Main language toggle",
+  format: (d) => d.key,
+  value: languages.find((x) => x.key === defaultLangKey),
+})
+```
 
 ```{ojs}
 // import { NavbarLangSelector } from "/helpers/uiComponents.ojs"
