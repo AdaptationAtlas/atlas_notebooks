@@ -219,45 +219,9 @@ selectedAdmin2Value = selectedAdmin2
 ```
 
 ```{ojs}
-// Helper function to create synchronized admin selectors
-function createSyncedAdminSelector(level, masterView, masterValue, options, uniqueId, labelKey, placeholderKey) {
-  const selector = multiSelect({
-    inputLabel: _lang(cis[labelKey]),
-    inputId: `admin${level}Select-${uniqueId}`,
-    placeholderText: _lang(cis[placeholderKey]),
-    options: options,
-    selected: masterValue.slice(),
-    maxSelections: 10
-  });
-  
-  // When this selector changes, update the master
-  selector.addEventListener('input', () => {
-    masterView.value = selector.value;
-  });
-  
-  // Watch master value and update selector when it changes
-  // This makes the cell reactive to masterValue changes
-  masterValue; // Reference to make reactive
-  
-  // Update selector if master changed
-  const currentValue = selector.value.join(',');
-  const masterValueStr = masterValue.join(',');
-  if (currentValue !== masterValueStr) {
-    selector.value = masterValue.slice();
-    // Find the hidden select input and update it
-    const selectInput = selector.querySelector('.dropdown-select');
-    if (selectInput) {
-      selectInput.value = masterValue;
-      // Trigger update to refresh placeholder
-      selector.dispatchEvent(new CustomEvent("input", { bubbles: true }));
-    }
-  }
-  
-  return selector;
-}
-```
+// Note: createSyncedAdminSelector is now defined in the main cis_readiness.qmd file
+// before the includes to ensure it's available to all sections
 
-```{ojs}
 // Determine current admin level based on selections
 // Level 0: No admin0 selected OR "SSA" selected
 // Level 1: Admin0 selected but no admin1 selected
@@ -485,75 +449,7 @@ s11MapData = {
     
     const useRaw = s11MapMode === "Raw values";
     
-    return htl.html`<style>
-      /* Tooltip styling with much larger font sizes */
-      .plot-tip,
-      [class*="plot-tip"],
-      .observablehq .plot-tip,
-      .observablehq [class*="plot-tip"],
-      div[class*="plot-tip"],
-      body .plot-tip,
-      body [class*="plot-tip"] {
-        font-size: 28px !important;
-        padding: 30px 35px !important;
-        line-height: 2 !important;
-        min-width: 400px !important;
-        max-width: 600px !important;
-        box-sizing: border-box !important;
-        background: white !important;
-        border: 3px solid #333 !important;
-        border-radius: 8px !important;
-        box-shadow: 0 6px 16px rgba(0,0,0,0.4) !important;
-      }
-      .plot-tip table,
-      [class*="plot-tip"] table,
-      .observablehq .plot-tip table,
-      .observablehq [class*="plot-tip"] table,
-      div[class*="plot-tip"] table,
-      body .plot-tip table,
-      body [class*="plot-tip"] table {
-        font-size: 28px !important;
-        width: 100% !important;
-      }
-      .plot-tip th,
-      .plot-tip td,
-      [class*="plot-tip"] th,
-      [class*="plot-tip"] td,
-      .observablehq .plot-tip th,
-      .observablehq .plot-tip td,
-      .observablehq [class*="plot-tip"] th,
-      .observablehq [class*="plot-tip"] td,
-      div[class*="plot-tip"] th,
-      div[class*="plot-tip"] td,
-      body .plot-tip th,
-      body .plot-tip td,
-      body [class*="plot-tip"] th,
-      body [class*="plot-tip"] td {
-        padding: 15px 18px !important;
-        font-size: 28px !important;
-        line-height: 1.8 !important;
-      }
-      .plot-tip th,
-      [class*="plot-tip"] th,
-      .observablehq .plot-tip th,
-      .observablehq [class*="plot-tip"] th,
-      div[class*="plot-tip"] th,
-      body .plot-tip th,
-      body [class*="plot-tip"] th {
-        font-weight: 700 !important;
-        font-size: 28px !important;
-        text-align: left !important;
-      }
-      .plot-tip *,
-      [class*="plot-tip"] *,
-      .observablehq .plot-tip *,
-      .observablehq [class*="plot-tip"] *,
-      div[class*="plot-tip"] *,
-      body .plot-tip *,
-      body [class*="plot-tip"] * {
-        font-size: 28px !important;
-      }
-    </style>
+    return htl.html`
     <div style="display: flex; gap: 20px;">
       <div style="flex: 1;">
         <h4>${_lang(cis.weatherStationLabel)}</h4>
@@ -1070,6 +966,7 @@ s13Data = {
   } else if (s13SortBy === "Long-term skill") {
     data.sort((a, b) => (b.longTerm || 0) - (a.longTerm || 0));
   } else {
+    // Sort by delta - most positive to most negative
     data.sort((a, b) => (b.delta || 0) - (a.delta || 0));
   }
   
@@ -1094,8 +991,8 @@ s13Data = {
       } else if (s13SortBy === "Long-term skill") {
         sortValue = long || 0;
       } else {
-        // Sort by absolute delta
-        sortValue = Math.abs(delta || 0);
+        // Sort by delta (preserving sign)
+        sortValue = delta || 0;
       }
       
       return {
@@ -1114,10 +1011,8 @@ s13Data = {
       } else if (s13SortBy === "Long-term skill") {
         return (b.long || 0) - (a.long || 0);
       } else {
-        // Sort by absolute delta
-        const deltaA = Math.abs(a.delta || 0);
-        const deltaB = Math.abs(b.delta || 0);
-        return deltaB - deltaA;
+        // Sort by delta - most positive to most negative
+        return (b.delta || 0) - (a.delta || 0);
       }
     });
     
@@ -1523,7 +1418,7 @@ s14MapData = {
       rows: 20
     });
   } else {
-    // Heatmap
+    // Heatmap with custom tooltip
     // Apply threshold filter
     const thresholdFilteredData = filteredData.filter(d => 
       d["cis_readiness_index"] != null && d["cis_readiness_index"] >= s14Threshold
@@ -1539,12 +1434,12 @@ s14MapData = {
       
       return {
         country: adminName,
-      "Weather Stations": d["weather-station_density"],
-      "Cloud Cover": d["cloud-coverage_meanannual"],
-      "Precip Agreement": parseFloat(d["cv-precipitation_agreement"]) / 4, // Normalize to 0-1
-      "Short-term Forecast": d["short-term_frcst_skill"],
-      "Long-term Forecast": d["seasonal_frcst_skill"],
-      "CIS Readiness": d["cis_readiness_index"]
+        "Weather Stations": d["weather-station_density"],
+        "Cloud Cover": d["cloud-coverage_meanannual"],
+        "Precip Agreement": parseFloat(d["cv-precipitation_agreement"]) / 4, // Normalize to 0-1
+        "Short-term Forecast": d["short-term_frcst_skill"],
+        "Long-term Forecast": d["seasonal_frcst_skill"],
+        "CIS Readiness": d["cis_readiness_index"]
       };
     }).filter(d => d["CIS Readiness"] != null);
     
@@ -1552,8 +1447,70 @@ s14MapData = {
     heatmapData.sort((a, b) => (b["CIS Readiness"] || 0) - (a["CIS Readiness"] || 0));
     
     const sortedCountries = heatmapData.map(d => d.country);
-    
     const indicators = ["Weather Stations", "Cloud Cover", "Precip Agreement", "Short-term Forecast", "Long-term Forecast", "CIS Readiness"];
+    
+    // Calculate responsive dimensions
+    const geographyCount = heatmapData.length;
+    const cellHeight = 30;
+    const height = Math.max(500, geographyCount * cellHeight);
+    const width = 900;
+    const maxNameLength = Math.max(...sortedCountries.map(name => name.length), 0);
+    const marginLeft = Math.max(200, maxNameLength * 8);
+    const margin = { top: 40, right: 100, bottom: 60, left: marginLeft };
+    
+    // Create tooltip
+    d3.select(".plotTooltip-s14").remove();
+    
+    // Add CSS for consistent tooltip styling
+    if (!d3.select("style#plotTooltipStyles").node()) {
+      d3.select("head").append("style")
+        .attr("id", "plotTooltipStyles")
+        .text(`
+          .plotTooltip {
+            font-size: 14px !important;
+            padding: 10px 12px !important;
+            line-height: 1.5 !important;
+            background: rgba(255, 255, 255, 0.95) !important;
+            border: 1px solid #ccc !important;
+            border-radius: 4px !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
+            pointer-events: none !important;
+          }
+        `);
+    }
+    
+    const tooltip = d3
+      .select("body")
+      .append("div")
+      .attr("class", "plotTooltip plotTooltip-s14")
+      .style("position", "absolute")
+      .style("opacity", 0);
+    
+    // Create SVG
+    const svg = d3
+      .create("svg")
+      .attr("viewBox", [0, 0, width + margin.left + margin.right, height + margin.top + margin.bottom])
+      .attr("style", "max-width: 100%; height: auto;");
+    
+    const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+    
+    // Scales
+    const xScale = d3.scaleBand()
+      .domain(indicators)
+      .range([0, width - margin.right])
+      .padding(0.05);
+    
+    const yScale = d3.scaleBand()
+      .domain(sortedCountries)
+      .range([0, height - margin.bottom])
+      .padding(0.05);
+    
+    // Color scale
+    const allValues = heatmapData.flatMap(row => 
+      indicators.map(metric => row[metric]).filter(v => v != null)
+    );
+    const colorScale = d3.scaleSequential(d3.interpolateRdYlBu)
+      .domain(d3.extent(allValues).reverse()); // Reverse to have red=high, blue=low
     
     // Flatten data for heatmap
     const longData = heatmapData.flatMap(row => 
@@ -1564,34 +1521,105 @@ s14MapData = {
       }))
     ).filter(d => d.value != null);
     
-    // Calculate responsive height
-    const geographyCount = heatmapData.length;
-    const height = Math.max(500, geographyCount * 30);
+    // Draw cells
+    g.selectAll("rect")
+      .data(longData)
+      .join("rect")
+      .attr("x", d => xScale(d.metric))
+      .attr("y", d => yScale(d.country))
+      .attr("width", xScale.bandwidth())
+      .attr("height", yScale.bandwidth())
+      .attr("fill", d => d.value !== null ? colorScale(d.value) : "white")
+      .attr("stroke", "#fff")
+      .attr("stroke-width", 0.5)
+      .on("mousemove", (event, d) => {
+        // Format value based on metric type
+        let formattedValue = d.value !== null ? d.value.toFixed(3) : "N/A";
+        if (d.metric === "Weather Stations") {
+          formattedValue = d.value !== null ? d.value.toFixed(2) : "N/A";
+        } else if (d.metric === "Precip Agreement") {
+          formattedValue = d.value !== null ? (d.value * 100).toFixed(1) + "%" : "N/A";
+        } else if (d.metric === "CIS Readiness") {
+          formattedValue = d.value !== null ? d.value.toFixed(3) : "N/A";
+        }
+        
+        tooltip
+          .style("top", event.pageY - 10 + "px")
+          .style("left", event.pageX + 10 + "px")
+          .style("opacity", 1)
+          .html(`${d.country}<br>${d.metric}: ${formattedValue}`);
+      })
+      .on("mouseout", () => {
+        tooltip.style("opacity", 0);
+      });
     
-    // Calculate margin based on longest geography name
-    const maxNameLength = Math.max(...sortedCountries.map(name => name.length), 0);
-    const marginLeft = Math.max(200, maxNameLength * 8);
+    // X-axis (top)
+    g.append("g")
+      .attr("transform", `translate(0, 0)`)
+      .call(d3.axisTop(xScale))
+      .selectAll("text")
+      .style("font-size", "11px")
+      .attr("transform", "rotate(-45)")
+      .style("text-anchor", "end");
     
-    return Plot.plot({
-      marginLeft: marginLeft,
-      marginTop: 40,
-      marginBottom: 60,
-      width: 900,
-      height: height,
-      x: { axis: "top" },
-      y: { domain: sortedCountries },
-      color: { scheme: "buylrd", legend: true },
-      marks: [
-        // X-axis at bottom
-        Plot.axisX({ anchor: "bottom" }),
-        Plot.cell(longData, { 
-          x: "metric", 
-          y: "country", 
-          fill: "value",
-          tip: true
-        })
-      ]
-    });
+    // X-axis (bottom)
+    g.append("g")
+      .attr("transform", `translate(0, ${height - margin.bottom})`)
+      .call(d3.axisBottom(xScale))
+      .selectAll("text")
+      .style("font-size", "11px")
+      .attr("transform", "rotate(-45)")
+      .style("text-anchor", "end");
+    
+    // Y-axis
+    g.append("g")
+      .call(d3.axisLeft(yScale))
+      .selectAll("text")
+      .style("font-size", "10px");
+    
+    // Color legend (simple version)
+    const legendWidth = 200;
+    const legendHeight = 20;
+    const legendX = width - margin.right - legendWidth - 10;
+    const legendY = 10;
+    
+    const legendScale = d3.scaleLinear()
+      .domain(colorScale.domain())
+      .range([0, legendWidth]);
+    
+    const legendAxis = d3.axisBottom(legendScale)
+      .ticks(5)
+      .tickFormat(d3.format(".2f"));
+    
+    const legendG = svg.append("g")
+      .attr("transform", `translate(${margin.left + legendX},${margin.top + legendY})`);
+    
+    const legendGradient = legendG.append("defs")
+      .append("linearGradient")
+      .attr("id", "heatmap-gradient-s14")
+      .attr("x1", "0%")
+      .attr("x2", "100%");
+    
+    const numStops = 10;
+    for (let i = 0; i <= numStops; i++) {
+      const value = d3.interpolateNumber(colorScale.domain()[0], colorScale.domain()[1])(i / numStops);
+      legendGradient.append("stop")
+        .attr("offset", `${(i / numStops) * 100}%`)
+        .attr("stop-color", colorScale(value));
+    }
+    
+    legendG.append("rect")
+      .attr("width", legendWidth)
+      .attr("height", legendHeight)
+      .style("fill", "url(#heatmap-gradient-s14)");
+    
+    legendG.append("g")
+      .attr("transform", `translate(0, ${legendHeight})`)
+      .call(legendAxis)
+      .selectAll("text")
+      .style("font-size", "9px");
+    
+    return svg.node();
   }
 }
 ```

@@ -178,19 +178,34 @@ viewof s3AccessType = Inputs.radio(
 ```{ojs}
 //| echo: false
 
-// Sort By Selector
-viewof s3SortBy = Inputs.select(
-  ["readiness", "combined", "internet", "tv", "cellphone"],
-  {
-    label: _lang(cis.s3SortBy),
-    value: "readiness",
-    format: x => x === "readiness" ? _lang(cis.s3SortReadiness) :
-                 x === "combined" ? _lang(cis.s3AccessCombined) :
-                 x === "internet" ? _lang(cis.s3AccessInternet) :
-                 x === "tv" ? _lang(cis.s3AccessTV) :
-                 _lang(cis.s3AccessCellphone)
+// Sort By Selector - only shown when view type is not "map"
+viewof s3SortBy = {
+  if (s3ViewType === "map") {
+    // Return a hidden selector that maintains state but isn't displayed
+    const input = Inputs.select(
+      ["readiness", "combined", "internet", "tv", "cellphone"],
+      {
+        label: _lang(cis.s3SortBy),
+        value: "readiness"
+      }
+    );
+    input.style.display = "none";
+    return input;
   }
-)
+  
+  return Inputs.select(
+    ["readiness", "combined", "internet", "tv", "cellphone"],
+    {
+      label: _lang(cis.s3SortBy),
+      value: "readiness",
+      format: x => x === "readiness" ? _lang(cis.s3SortReadiness) :
+                   x === "combined" ? _lang(cis.s3AccessCombined) :
+                   x === "internet" ? _lang(cis.s3AccessInternet) :
+                   x === "tv" ? _lang(cis.s3AccessTV) :
+                   _lang(cis.s3AccessCellphone)
+    }
+  );
+}
 ```
 
 ```{ojs}
@@ -219,8 +234,16 @@ viewof s3FilteredCountries = {
 ```{ojs}
 //| echo: false
 
-// Highlight Countries Multi-select (for scatter plot)
+// Highlight Countries Multi-select (for scatter plot only)
 viewof s3HighlightedCountries = {
+  // Only show when view type is scatter
+  if (s3ViewType !== "scatter") {
+    const input = Inputs.select([], {label: _lang(cis.s3HighlightCountries)});
+    input.style.display = "none";
+    input.value = [];
+    return input;
+  }
+  
   if (!s3UniqueCountries || s3UniqueCountries.length === 0) {
     return Inputs.select([], {label: _lang(cis.s3HighlightCountries), disabled: true});
   }
@@ -411,28 +434,90 @@ s3SortedData = {
 ```{ojs}
 //| echo: false
 
-// Prepare geographic data for map
+// Prepare geographic data for map - dynamically show admin levels based on selection
 s3GeoData = {
-  if (!s3ProcessedData || s3ProcessedData.length === 0 || !admin0Boundaries) {
+  if (!s3ProcessedData || s3ProcessedData.length === 0) {
     return { type: "FeatureCollection", features: [] };
   }
   
-  const features = admin0Boundaries.features.map(feature => {
-    const countryData = s3ProcessedData.find(d => 
-      d.gaul0_code === feature.properties.gaul0_code ||
-      d.admin0_name === feature.properties.admin0_name
-    );
-    
-    if (!countryData) return null;
-    
-    return {
-      type: "Feature",
-      geometry: feature.geometry,
-      properties: {
-        ...feature.properties,
-        ...countryData
-      }
-    };
+  // Determine which admin level to show based on selections
+  const allCountries = Array.from(new Set(cisData.map(d => d.admin0_name))).sort();
+  const selectedCountries = s3Admin0 || [];
+  const selectedAdmin1s = s3Admin1 || [];
+  const selectedAdmin2s = s3Admin2 || [];
+  
+  let boundaries = null;
+  let levelKey = "admin0_name";
+  let gaul_key = "gaul0_code";
+  
+  // If specific admin2 regions are selected, show admin2 boundaries
+  if (selectedAdmin2s.length > 0 && selectedAdmin2s.length < admin2Options.length && admin2Boundaries) {
+    boundaries = admin2Boundaries;
+    levelKey = "admin2_name";
+    gaul_key = "gaul2_code";
+  }
+  // If specific admin1 regions are selected, show admin2 boundaries within those admin1s
+  else if (selectedAdmin1s.length > 0 && selectedAdmin1s.length < admin1Options.length && admin2Boundaries) {
+    boundaries = admin2Boundaries;
+    levelKey = "admin2_name";
+    gaul_key = "gaul2_code";
+  }
+  // If specific countries are selected (not all), show admin1 boundaries
+  else if (selectedCountries.length > 0 && selectedCountries.length < allCountries.length && admin1Boundaries) {
+    boundaries = admin1Boundaries;
+    levelKey = "admin1_name";
+    gaul_key = "gaul1_code";
+  }
+  // Default: show admin0 boundaries
+  else if (admin0Boundaries) {
+    boundaries = admin0Boundaries;
+    levelKey = "admin0_name";
+    gaul_key = "gaul0_code";
+  }
+  
+  if (!boundaries) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  
+  // Map data to boundaries
+  const features = boundaries.features.map(feature => {
+    // For admin0 level, match on admin0
+    if (gaul_key === "gaul0_code") {
+      const countryData = s3ProcessedData.find(d => 
+        d.gaul0_code === feature.properties.gaul0_code ||
+        d.admin0_name === feature.properties.admin0_name
+      );
+      
+      if (!countryData) return null;
+      
+      return {
+        type: "Feature",
+        geometry: feature.geometry,
+        properties: {
+          ...feature.properties,
+          ...countryData,
+          displayName: feature.properties.admin0_name
+        }
+      };
+    }
+    // For admin1/admin2 levels, aggregate data from admin0
+    else {
+      // Find the parent admin0 for this feature
+      const parentCountry = feature.properties.admin0_name;
+      const countryData = s3ProcessedData.find(d => d.admin0_name === parentCountry);
+      
+      if (!countryData) return null;
+      
+      return {
+        type: "Feature",
+        geometry: feature.geometry,
+        properties: {
+          ...feature.properties,
+          ...countryData,
+          displayName: feature.properties[levelKey] || feature.properties.admin0_name
+        }
+      };
+    }
   }).filter(f => f !== null);
   
   return {
@@ -458,6 +543,45 @@ s3BivariateMap = {
   // Remove existing tooltip
   d3.select(".s3BivariateTip").remove();
   
+  // Add CSS for consistent tooltip styling
+  if (!d3.select("style#s3BivariateTipStyles").node()) {
+    d3.select("head").append("style")
+      .attr("id", "s3BivariateTipStyles")
+      .text(`
+        .s3BivariateTip,
+        .s3BivariateLegendTip {
+          font-size: 14px !important;
+          padding: 10px 12px !important;
+          line-height: 1.5 !important;
+          background: rgba(255, 255, 255, 0.95) !important;
+          border: 1px solid #ccc !important;
+          border-radius: 4px !important;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
+        }
+        .s3BivariateTip table,
+        .s3BivariateLegendTip table {
+          font-size: 14px !important;
+        }
+        .s3BivariateTip th,
+        .s3BivariateTip td,
+        .s3BivariateLegendTip th,
+        .s3BivariateLegendTip td {
+          padding: 4px 8px !important;
+          font-size: 14px !important;
+          line-height: 1.4 !important;
+        }
+        .s3BivariateTip th,
+        .s3BivariateLegendTip th {
+          font-weight: 600 !important;
+          font-size: 14px !important;
+        }
+        .s3BivariateTip *,
+        .s3BivariateLegendTip * {
+          font-size: 14px !important;
+        }
+      `);
+  }
+  
   // Create tooltip matching Plot.tip style
   const tooltip = d3
     .select("body")
@@ -474,8 +598,8 @@ s3BivariateMap = {
     .domain(["Low × Low", "Low × Moderate", "Low × High", "Moderate × Low", "Moderate × Moderate", "Moderate × High", "High × Low", "High × Moderate", "High × High"])
     .range(Object.values(s3BivariateColors));
   
-  // Fit projection to features - leave extra space at bottom and left for legend
-  const bottomPadding = 200; // Extra space for rotated diamond legend
+  // Fit projection to features - leave space at bottom and left for legend
+  const bottomPadding = 140; // Space for rotated diamond legend (reduced for better integration)
   const leftPadding = 150; // Extra space for rotated diamond legend and labels
   projection.fitExtent(
     [
@@ -485,10 +609,10 @@ s3BivariateMap = {
     s3GeoData
   );
   
-  // Expand viewBox to accommodate rotated legend (negative X for labels, extra Y for bottom)
+  // Expand viewBox to accommodate rotated legend (negative X for labels, reduced height for tighter integration)
   const svg = d3
     .create("svg")
-    .attr("viewBox", [-50, 0, 950, 800])
+    .attr("viewBox", [-50, 0, 950, 720])
     .attr("style", "overflow: visible;")
     .attr("title", "Bivariate Map");
   
@@ -508,7 +632,7 @@ s3BivariateMap = {
   // Tooltip on mousemove
   paths
     .on("mousemove", (event, d) => {
-      const country = d.properties.admin0_name;
+      const regionName = d.properties.displayName || d.properties.admin0_name;
       const readiness = d.properties.cis_readiness_avg;
       const readinessClass = d.properties.readinessClass;
       const access = d.properties.accessValue;
@@ -516,10 +640,18 @@ s3BivariateMap = {
       const category = d.properties.bivariateClass;
       const optimal = d.properties.bivariateClass === "High × High";
       
+      // Determine label based on which boundaries are shown
+      let regionLabel = "Country";
+      if (d.properties.gaul2_code) {
+        regionLabel = "District";
+      } else if (d.properties.gaul1_code && !d.properties.gaul2_code) {
+        regionLabel = "Region";
+      }
+      
       // Format tooltip as table matching Plot.tip pattern
       const tooltipHtml = `
         <table>
-          <tr><th>Country</th><td>${country || "N/A"}</td></tr>
+          <tr><th>${regionLabel}</th><td>${regionName || "N/A"}</td></tr>
           <tr><th>${_lang(cis.s3ReadinessLabel)}</th><td>${readiness != null ? readiness.toFixed(2) : "N/A"}</td></tr>
           <tr><th>Readiness Class</th><td>${readinessClass || "N/A"}</td></tr>
           <tr><th>${s3CurrentAccessLabel}</th><td>${access != null ? (access * 100).toFixed(1) + '%' : "N/A"}</td></tr>
@@ -614,42 +746,38 @@ s3BivariateMap = {
     // Rotate the entire legend 45 degrees to make it a diamond
     legendContent.attr("transform", `rotate(45, ${centerX}, ${centerY})`);
     
-    // Diagonal axis labels (positioned outside the rotated grid)
-    // CIS Readiness label (diagonal from bottom-left towards top-right)
-    const readinessLabelX = -35;
-    const readinessLabelY = totalHeight + 25;
+    // Axis labels parallel to the diamond edges
+    // CIS Readiness label (horizontal, below the legend)
     selection
       .append("text")
-      .attr("x", readinessLabelX)
-      .attr("y", readinessLabelY)
+      .attr("x", centerX)
+      .attr("y", totalHeight + 40)
       .attr("font-size", "11")
       .attr("fill", "#333")
       .attr("font-weight", "600")
-      .attr("transform", `rotate(-45, ${readinessLabelX}, ${readinessLabelY})`)
+      .attr("text-anchor", "middle")
       .text(_lang(cis.s3ReadinessLabel));
     
-    // Access label (diagonal from bottom-right towards top-left)
-    const accessLabelX = totalWidth + 35;
-    const accessLabelY = totalHeight + 25;
+    // Access label (vertical, to the right of the legend)
     selection
       .append("text")
-      .attr("x", accessLabelX)
-      .attr("y", accessLabelY)
+      .attr("x", totalWidth + 40)
+      .attr("y", centerY)
       .attr("font-size", "11")
       .attr("fill", "#333")
       .attr("font-weight", "600")
-      .attr("text-anchor", "end")
-      .attr("transform", `rotate(45, ${accessLabelX}, ${accessLabelY})`)
+      .attr("text-anchor", "middle")
+      .attr("transform", `rotate(-90, ${totalWidth + 40}, ${centerY})`)
       .text(s3CurrentAccessLabel);
     
     return selection;
   }
   
-  // Add legend to SVG - positioned to avoid overflow
+  // Add legend to SVG - integrated with map
   // Position legend at bottom-left with enough space for rotated diamond and labels
   // Account for rotation: when rotated 45°, the diagonal extends sqrt(2)/2 * size in each direction
   const legendX = 50; // More space from left edge to accommodate labels
-  const legendY = 630; // Position below the map area
+  const legendY = 590; // Position integrated with map area (reduced from 630)
   const legendGroup = svg
     .append("g")
     .attr("transform", `translate(${legendX}, ${legendY})`);
@@ -787,122 +915,180 @@ s3BivariateMap = {
   </div>`;
 }
   } else if (s3ViewType === "scatter") {
-    // Scatter Plot - inline to prevent auto-display
-  if (!s3ProcessedData || s3ProcessedData.length === 0) {
+    // Faceted Scatter Plot - showing all access types
+    if (!s3ProcessedData || s3ProcessedData.length === 0) {
       yield html`<div style="padding: 20px; background: #f0f0f0; border-radius: 5px;">
-      <em>Scatter plot will appear once data is loaded...</em>
-    </div>`;
+        <em>Scatter plot will appear once data is loaded...</em>
+      </div>`;
     } else {
-      const scatterData = s3ProcessedData.filter(d => 
-        d.accessValue !== null && 
-        !isNaN(d.accessValue)
-      );
+      // Prepare data for faceting - create separate data points for each access type
+      const facetData = [];
+      s3ProcessedData.forEach(d => {
+        if (d.combined_norm != null && !isNaN(d.combined_norm)) {
+          facetData.push({
+            ...d,
+            accessType: _lang(cis.s3AccessCombined),
+            accessValue: d.combined_norm,
+            accessKey: "combined"
+          });
+        }
+        if (d.internet_norm != null && !isNaN(d.internet_norm)) {
+          facetData.push({
+            ...d,
+            accessType: _lang(cis.s3AccessInternet),
+            accessValue: d.internet_norm,
+            accessKey: "internet"
+          });
+        }
+        if (d.tv_norm != null && !isNaN(d.tv_norm)) {
+          facetData.push({
+            ...d,
+            accessType: _lang(cis.s3AccessTV),
+            accessValue: d.tv_norm,
+            accessKey: "tv"
+          });
+        }
+        if (d.cellphone_norm != null && !isNaN(d.cellphone_norm)) {
+          facetData.push({
+            ...d,
+            accessType: _lang(cis.s3AccessCellphone),
+            accessValue: d.cellphone_norm,
+            accessKey: "cellphone"
+          });
+        }
+      });
       
       yield html`<div style="width: 100%; overflow-x: auto;">
-    <div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
-      <div style="font-size: 12px;">
-        <strong>${_lang(cis.s3ParityLine)}:</strong> Points above the line indicate access exceeds readiness; points below indicate readiness exceeds access.
-      </div>
-    </div>
-    ${Plot.plot({
-      width: 1000,
-      height: 1000,
-      marginTop: 80,
-      marginBottom: 80,
-      x: {
-        domain: [0, 1],
-        label: _lang(cis.s3ReadinessLabel) + " →",
-        grid: true,
-        axis: "top"
-      },
-      y: {
-        domain: [0, 1],
-        label: s3CurrentAccessLabel + " →",
-        grid: true
-      },
-      marks: [
-        Plot.axisX({anchor: "bottom", label: _lang(cis.s3ReadinessLabel) + " →"}),
-        // Diagonal reference line (parity)
-        Plot.line([[0, 0], [1, 1]], {
-          stroke: "#999",
-          strokeWidth: 2,
-          strokeDasharray: "5,5"
-        }),
-        // All countries (not highlighted)
-        Plot.dot(
-            scatterData.filter(d => !s3HighlightedCountries.includes(d.admin0_name)),
-          {
-            x: "cis_readiness_avg",
-            y: "accessValue",
-                fill: d => s3BivariateColors[d.bivariateClass] || "#cccccc",
-            stroke: "#333",
-            strokeWidth: 1,
-              r: 6
-          }
-        ),
-        // Highlighted countries
-        Plot.dot(
-            scatterData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
-          {
-            x: "cis_readiness_avg",
-            y: "accessValue",
-                fill: "#0066cc",
-            stroke: "#000",
-            strokeWidth: 2,
-              r: 10
-            }
-          ),
-          Plot.tip(
-            scatterData,
-            Plot.pointer({
-              x: "cis_readiness_avg",
-              y: "accessValue",
-              channels: {
-                country: {
-                  label: "Country",
-                  value: (d) => d.admin0_name
+        <div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+          <div style="font-size: 12px;">
+            <strong>${_lang(cis.s3ParityLine)}:</strong> Points above the line indicate access exceeds readiness; points below indicate readiness exceeds access.
+          </div>
+        </div>
+        ${Plot.plot({
+          width: 1200,
+          height: 800,
+          marginTop: 40,
+          marginRight: 40,
+          marginBottom: 60,
+          marginLeft: 60,
+          grid: true,
+          x: {
+            domain: [0, 1],
+            label: _lang(cis.s3ReadinessLabel) + " →"
+          },
+          y: {
+            domain: [0, 1],
+            label: "Access →"
+          },
+          fx: {
+            label: null,
+            padding: 0.05
+          },
+          facet: {
+            data: facetData,
+            x: "accessType"
+          },
+          marks: [
+            // Diagonal reference line (parity) - one per facet
+            Plot.line([[0, 0], [1, 1]], {
+              stroke: "#999",
+              strokeWidth: 1.5,
+              strokeDasharray: "4,4",
+              fx: _lang(cis.s3AccessCombined)
+            }),
+            Plot.line([[0, 0], [1, 1]], {
+              stroke: "#999",
+              strokeWidth: 1.5,
+              strokeDasharray: "4,4",
+              fx: _lang(cis.s3AccessInternet)
+            }),
+            Plot.line([[0, 0], [1, 1]], {
+              stroke: "#999",
+              strokeWidth: 1.5,
+              strokeDasharray: "4,4",
+              fx: _lang(cis.s3AccessTV)
+            }),
+            Plot.line([[0, 0], [1, 1]], {
+              stroke: "#999",
+              strokeWidth: 1.5,
+              strokeDasharray: "4,4",
+              fx: _lang(cis.s3AccessCellphone)
+            }),
+            // All countries (not highlighted)
+            Plot.dot(
+              facetData.filter(d => !s3HighlightedCountries.includes(d.admin0_name)),
+              {
+                x: "cis_readiness_avg",
+                y: "accessValue",
+                fx: "accessType",
+                fill: d => {
+                  // Calculate bivariate class for this specific access type
+                  const readinessClass = d.cis_readiness_avg > 0.67 ? "High" : d.cis_readiness_avg > 0.33 ? "Moderate" : "Low";
+                  const accessClass = d.accessValue > 0.67 ? "High" : d.accessValue > 0.33 ? "Moderate" : "Low";
+                  return s3BivariateColors[`${readinessClass} × ${accessClass}`] || "#cccccc";
                 },
-                readiness: {
-                  label: _lang(cis.s3ReadinessLabel),
-                  value: (d) => d.cis_readiness_avg
-                },
-                access: {
-                  label: s3CurrentAccessLabel,
-                  value: (d) => d.accessValue
-                },
-                gap: {
-                  label: _lang(cis.s3GapLabel),
-                  value: (d) => d.gap
-                }
-              },
-              format: {
-                country: true,
-                readiness: (d) => d != null ? d.toFixed(3) : "N/A",
-                access: (d) => d != null ? (d * 100).toFixed(1) + '%' : "N/A",
-                gap: (d) => d != null ? d.toFixed(3) : "N/A"
+                stroke: "#333",
+                strokeWidth: 0.5,
+                r: 4
               }
-            })
-          ),
-        // Labels for highlighted countries
-        Plot.text(
-          scatterData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
-          {
-            x: "cis_readiness_avg",
-            y: "accessValue",
-            text: "admin0_name",
-            dy: -15,
-            fontSize: 11,
-            fontWeight: "bold"
-          }
-        )
-      ]
-    })}
-    <div style="margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
-      <div style="font-size: 12px;">
-        <strong>${_lang(cis.s3ParityLine)}:</strong> Points above the line indicate access exceeds readiness; points below indicate readiness exceeds access.
-      </div>
-    </div>
-  </div>`;
+            ),
+            // Highlighted countries
+            Plot.dot(
+              facetData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
+              {
+                x: "cis_readiness_avg",
+                y: "accessValue",
+                fx: "accessType",
+                fill: "#0066cc",
+                stroke: "#000",
+                strokeWidth: 1.5,
+                r: 6
+              }
+            ),
+            // Tooltips
+            Plot.tip(
+              facetData,
+              Plot.pointer({
+                x: "cis_readiness_avg",
+                y: "accessValue",
+                fx: "accessType",
+                channels: {
+                  country: {
+                    label: "Country",
+                    value: (d) => d.admin0_name
+                  },
+                  readiness: {
+                    label: _lang(cis.s3ReadinessLabel),
+                    value: (d) => d.cis_readiness_avg
+                  },
+                  access: {
+                    label: "Access",
+                    value: (d) => d.accessValue
+                  }
+                },
+                format: {
+                  country: true,
+                  readiness: (d) => d != null ? d.toFixed(3) : "N/A",
+                  access: (d) => d != null ? (d * 100).toFixed(1) + '%' : "N/A"
+                }
+              })
+            ),
+            // Labels for highlighted countries
+            Plot.text(
+              facetData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
+              {
+                x: "cis_readiness_avg",
+                y: "accessValue",
+                fx: "accessType",
+                text: "admin0_name",
+                dy: -12,
+                fontSize: 9,
+                fontWeight: "bold"
+              }
+            )
+          ]
+        })}
+      </div>`;
 }
   } else {
     // Table View - inline to prevent auto-display

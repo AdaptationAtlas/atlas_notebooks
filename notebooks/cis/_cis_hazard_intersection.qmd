@@ -299,31 +299,25 @@ s2GeoData = {
                         s2CurrentAdminLevel === 1 ? 'gaul1_code' :
                         'gaul2_code';
   
-  // Filter boundaries based on current selection - use same approach as Section 1
+  // Filter boundaries based on current selection - show all regions, not just those with data
   let filteredBoundaries = s2Boundaries;
   if (s2CurrentAdminLevel === 2) {
-    // When showing admin2, only include boundaries that match our processed data
-    const filteredGaulCodes = new Set(s2MapData.map(d => d[gaulCodeField]).filter(c => c != null));
+    // When showing admin2, filter by admin selection (but keep all regions, not just those with data)
     filteredBoundaries = {
       ...s2Boundaries,
       features: s2Boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
         const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
         const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
-        return matchesData || (matchesAdmin0 && matchesAdmin1);
+        return matchesAdmin0 && matchesAdmin1;
       })
     };
   } else if (s2CurrentAdminLevel === 1) {
-    // When showing admin1, filter by admin0 and match with processed data
-    const filteredGaulCodes = new Set(s2MapData.map(d => d[gaulCodeField]).filter(c => c != null));
+    // When showing admin1, filter by admin0 selection
     filteredBoundaries = {
       ...s2Boundaries,
       features: s2Boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
         const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        return matchesData || matchesAdmin0;
+        return matchesAdmin0;
       })
     };
   }
@@ -357,10 +351,11 @@ s2GeoData = {
       properties: {
         ...feature.properties,
         ...(match || {}),
-        isHighlighted: isHighlighted
+        isHighlighted: isHighlighted,
+        hasData: !!match
       }
     };
-  }).filter(f => f.properties.bivariateClass);
+  }); // Show all features, fade those without data
   
   return { type: "FeatureCollection", features };
 }
@@ -459,27 +454,35 @@ s2BivariateMap = {
     d3.select("head").append("style")
       .attr("id", "bivariateTipStyles")
       .text(`
-        .bivariateTip {
+        .bivariateTip,
+        .bivariateLegendTip {
           font-size: 14px !important;
           padding: 10px 12px !important;
           line-height: 1.5 !important;
-          // min-width: 200px !important;
-          // max-width: 300px !important;
+          background: rgba(255, 255, 255, 0.95) !important;
+          border: 1px solid #ccc !important;
+          border-radius: 4px !important;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
         }
-        .bivariateTip table {
+        .bivariateTip table,
+        .bivariateLegendTip table {
           font-size: 14px !important;
         }
         .bivariateTip th,
-        .bivariateTip td {
+        .bivariateTip td,
+        .bivariateLegendTip th,
+        .bivariateLegendTip td {
           padding: 4px 8px !important;
           font-size: 14px !important;
           line-height: 1.4 !important;
         }
-        .bivariateTip th {
+        .bivariateTip th,
+        .bivariateLegendTip th {
           font-weight: 600 !important;
           font-size: 14px !important;
         }
-        .bivariateTip * {
+        .bivariateTip *,
+        .bivariateLegendTip * {
           font-size: 14px !important;
         }
       `);
@@ -526,11 +529,11 @@ s2BivariateMap = {
           properties: {
             ...feature.properties,
             ...(dataMatch || {}),
-            isHighlighted: false
+            isHighlighted: false,
+            hasData: !!dataMatch
           }
         };
-      })
-      .filter(f => f.properties.bivariateClass); // Only show features with data
+      }); // Show all features, fade those without data
     
     featuresToShow = {
       type: "FeatureCollection",
@@ -576,10 +579,10 @@ s2BivariateMap = {
     .create("svg")
     .attr("viewBox", [0, 0, 900, 680])
     .attr("style", "overflow: visible;")
-    .attr("title", "Bivariate Map")
-    .on("dblclick", () => {
-      mutable s2ClickedAdmin0 = null;
-    });
+    .attr("title", "Bivariate Map");
+  
+  // Track frozen tooltip state
+  let frozenRegion = null;
   
   // Render paths
   const paths = svg
@@ -610,16 +613,84 @@ s2BivariateMap = {
       
       return dataEntry ? color(dataEntry.bivariateClass) : "#e8e8e8";
     })
+    .attr("fill-opacity", (d) => {
+      // Fade regions without data instead of hiding them
+      const gaulCodeField = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
+        ? 'gaul1_code'
+        : s2CurrentAdminLevel === 0
+        ? 'gaul0_code'
+        : s2CurrentAdminLevel === 1
+        ? 'gaul1_code'
+        : 'gaul2_code';
+      
+      let dataEntry = dataLookup.get(d.properties[gaulCodeField]);
+      
+      if (!dataEntry && s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null) {
+        const nameKey = `${d.properties.admin0_name}_${d.properties.admin1_name}`;
+        dataEntry = dataLookup.get(nameKey);
+      }
+      
+      return dataEntry ? 1.0 : 0.3; // Faded regions have 30% opacity
+    })
     .attr("d", geo_path)
     .on("click", (event, d) => {
-      if (s2CurrentAdminLevel === 0 && s2ClickedAdmin0 === null) {
-        mutable s2ClickedAdmin0 = d.properties.admin0_name;
+      const gaulCodeField = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
+        ? 'gaul1_code'
+        : s2CurrentAdminLevel === 0
+        ? 'gaul0_code'
+        : s2CurrentAdminLevel === 1
+        ? 'gaul1_code'
+        : 'gaul2_code';
+      
+      let dataEntry = dataLookup.get(d.properties[gaulCodeField]);
+      
+      if (!dataEntry && s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null) {
+        const nameKey = `${d.properties.admin0_name}_${d.properties.admin1_name}`;
+        dataEntry = dataLookup.get(nameKey);
+      }
+      
+      if (!dataEntry) return;
+      
+      // Toggle frozen tooltip: if clicking the same region, unfreeze; otherwise, freeze on new region
+      const regionId = d.properties[gaulCodeField];
+      if (frozenRegion === regionId) {
+        // Unfreeze
+        frozenRegion = null;
+        tooltip.style("opacity", 0);
+      } else {
+        // Freeze on this region
+        frozenRegion = regionId;
+        
+        const regionName = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
+          ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
+          : s2CurrentAdminLevel === 0
+          ? d.properties.admin0_name 
+          : s2CurrentAdminLevel === 1
+          ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
+          : `${d.properties.admin2_name}, ${d.properties.admin1_name}`;
+        
+        const tooltipHtml = `
+          <table>
+            <tr><th>Region</th><td>${regionName}</td></tr>
+            <tr><th>Readiness (0–1)</th><td>${dataEntry.cis_readiness_index != null ? dataEntry.cis_readiness_index.toFixed(2) : "N/A"}</td></tr>
+            <tr><th>${hazardName}</th><td>${dataEntry.hazardValue != null ? dataEntry.hazardValue.toFixed(1) : "N/A"}</td></tr>
+            <tr><th>Bivariate class</th><td>${dataEntry.bivariateClass || "N/A"}</td></tr>
+          </table>
+        `;
+        
+        tooltip
+          .style("top", event.pageY - 10 + "px")
+          .style("left", event.pageX + 10 + "px")
+          .style("opacity", 1)
+          .html(tooltipHtml);
       }
     });
   
-  // Tooltip on mousemove
+  // Tooltip on mousemove (only if not frozen)
   paths
     .on("mousemove", (event, d) => {
+      if (frozenRegion !== null) return; // Don't show hover tooltip if one is frozen
+      
       const gaulCodeField = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
         ? 'gaul1_code'
         : s2CurrentAdminLevel === 0
@@ -650,6 +721,7 @@ s2BivariateMap = {
       // Format tooltip according to specification
       const tooltipHtml = `
         <table>
+          <tr><th>Region</th><td>${regionName}</td></tr>
           <tr><th>Readiness (0–1)</th><td>${dataEntry.cis_readiness_index != null ? dataEntry.cis_readiness_index.toFixed(2) : "N/A"}</td></tr>
           <tr><th>${hazardName}</th><td>${dataEntry.hazardValue != null ? dataEntry.hazardValue.toFixed(1) : "N/A"}</td></tr>
           <tr><th>Bivariate class</th><td>${dataEntry.bivariateClass || "N/A"}</td></tr>
@@ -663,6 +735,7 @@ s2BivariateMap = {
         .html(tooltipHtml);
     })
     .on("mouseout", function (event, d) {
+      if (frozenRegion !== null) return; // Don't hide frozen tooltip
       tooltip.style("opacity", 0);
     });
   
@@ -741,32 +814,28 @@ s2BivariateMap = {
     // Rotate the entire legend 45 degrees to make it a diamond
     legendContent.attr("transform", `rotate(45, ${centerX}, ${centerY})`);
     
-    // Diagonal axis labels (positioned outside the rotated grid)
-    // CIS Readiness label (diagonal from bottom-left towards top-right)
-    const readinessLabelX = -35;
-    const readinessLabelY = totalHeight + 25;
+    // Axis labels parallel to the diamond edges
+    // CIS Readiness label (horizontal, below the legend)
     selection
       .append("text")
-      .attr("x", readinessLabelX)
-      .attr("y", readinessLabelY)
+      .attr("x", centerX)
+      .attr("y", totalHeight + 40)
       .attr("font-size", "11")
       .attr("fill", "#333")
       .attr("font-weight", "600")
-      .attr("transform", `rotate(-45, ${readinessLabelX}, ${readinessLabelY})`)
+      .attr("text-anchor", "middle")
       .text("CIS Readiness");
     
-    // Hazard Severity label (diagonal from bottom-right towards top-left)
-    const hazardLabelX = totalWidth + 35;
-    const hazardLabelY = totalHeight + 25;
+    // Hazard Severity label (vertical, to the right of the legend)
     selection
       .append("text")
-      .attr("x", hazardLabelX)
-      .attr("y", hazardLabelY)
+      .attr("x", totalWidth + 40)
+      .attr("y", centerY)
       .attr("font-size", "11")
       .attr("fill", "#333")
       .attr("font-weight", "600")
-      .attr("text-anchor", "end")
-      .attr("transform", `rotate(45, ${hazardLabelX}, ${hazardLabelY})`)
+      .attr("text-anchor", "middle")
+      .attr("transform", `rotate(-90, ${totalWidth + 40}, ${centerY})`)
       .text("Hazard Severity");
     
     return selection;
