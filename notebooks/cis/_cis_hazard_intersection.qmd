@@ -201,13 +201,11 @@ s2ProcessedData = {
     );
   }
   // Admin1 selected - show all admin2 data for selected admin1 regions
-  // If specific admin2 regions are selected, filter to only those
   else {
     filtered = filtered.filter(d => 
       selectedAdmin0.includes(d.admin0_name) &&
       selectedAdmin1.includes(d.admin1_name) &&
-      d.admin2_name != null &&
-      (selectedAdmin2.length === 0 || selectedAdmin2.includes(d.admin2_name))
+      d.admin2_name != null
     );
   }
   
@@ -368,46 +366,6 @@ s2GeoData = {
 ```{ojs}
 //| echo: false
 
-// Mutable state for clicked admin0 (for zoom interaction)
-mutable s2ClickedAdmin0 = null;
-
-// Prepare admin1 data for zoom (when at admin0 level)
-s2Admin1Data = {
-  if (s2CurrentAdminLevel !== 0) return [];
-  
-  // Get admin1 level data from processed data
-  const hazardColumn = s2HazardType === "drought" ? "drought_ndws" : "waterlogging_ndwl0";
-  const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
-  
-  // Filter to admin1 level data
-  const admin1Data = s2ProcessedData.filter(d => 
-    d.admin1_name != null && 
-    d.admin2_name == null &&
-    d.cis_readiness_index >= s2ReadinessThreshold &&
-    d[hazardColumn] !== null
-  );
-  
-  // Group by admin1 and aggregate
-  const grouped = d3.group(admin1Data, d => d.gaul1_code);
-  return Array.from(grouped.values()).map(group => {
-    const first = group[0];
-    const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
-    const avgHazard = d3.mean(group, d => d[hazardColumn]);
-    const classified = bivariateClassify(avgReadiness, avgHazard, cisReadinessCutoffs, hazardTypeCode);
-    
-    return {
-      admin0_name: first.admin0_name,
-      admin1_name: first.admin1_name,
-      iso3: first.iso3,
-      gaul0_code: first.gaul0_code,
-      gaul1_code: first.gaul1_code,
-      cis_readiness_index: avgReadiness,
-      hazardValue: avgHazard,
-      ...classified
-    };
-  });
-}
-
 // Create data index for quick lookup
 s2DataIndex = {
   const index = new Map();
@@ -422,19 +380,6 @@ s2DataIndex = {
     }
     index.get(admin0).set(admin1, d);
   });
-  
-  // Also index admin1 data for zoom
-  if (s2CurrentAdminLevel === 0) {
-    s2Admin1Data.forEach(d => {
-      const admin0 = d.admin0_name;
-      const admin1 = d.admin1_name;
-      
-      if (!index.has(admin0)) {
-        index.set(admin0, new Map());
-      }
-      index.get(admin0).set(admin1, d);
-    });
-  }
   
   return index;
 }
@@ -471,65 +416,20 @@ s2BivariateMap = {
     .domain(["Low × Low", "Low × Moderate", "Low × High", "Moderate × Low", "Moderate × Moderate", "Moderate × High", "High × Low", "High × Moderate", "High × High"])
     .range(Object.values(bivariateColors));
   
-  // Get features and data based on current admin level and clicked state
-  let featuresToShow, dataToUse;
-  if (s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null) {
-    // Show admin1 for clicked admin0
-    dataToUse = s2Admin1Data.filter(d => d.admin0_name === s2ClickedAdmin0);
-    
-    // Get admin1 boundaries for clicked country and join with data
-    const admin1Features = admin1Boundaries.features
-      .filter(f => f.properties.admin0_name === s2ClickedAdmin0)
-      .map(feature => {
-        const gaulCode = feature.properties.gaul1_code;
-        const match = dataToUse.find(d => d.gaul1_code === gaulCode);
-        
-        // Fallback: try matching by admin names
-        const dataMatch = match || dataToUse.find(d => 
-          d.admin0_name === feature.properties.admin0_name &&
-          d.admin1_name === feature.properties.admin1_name
-        );
-        
-        return {
-          type: "Feature",
-          geometry: feature.geometry,
-          properties: {
-            ...feature.properties,
-            ...(dataMatch || {}),
-            isHighlighted: false,
-            hasData: !!dataMatch
-          }
-        };
-      }); // Show all features, fade those without data
-    
-    featuresToShow = {
-      type: "FeatureCollection",
-      features: admin1Features
-    };
-  } else {
-    // Show current level features
-    featuresToShow = s2GeoData;
-    dataToUse = s2MapData;
-  }
+  // Use s2GeoData which already has proper boundary filtering and data joining
+  const featuresToShow = s2GeoData;
+  const dataToUse = s2MapData;
   
-  // Create lookup map for current data (multiple keys for robustness)
+  // Create lookup map for current data
   const dataLookup = new Map();
   dataToUse.forEach(d => {
-    // Primary key: GAUL code
-    const gaulKey = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
-      ? d.gaul1_code
-      : s2CurrentAdminLevel === 0
+    // Primary key: GAUL code based on current admin level
+    const gaulKey = s2CurrentAdminLevel === 0
       ? d.gaul0_code
       : s2CurrentAdminLevel === 1
       ? d.gaul1_code
       : d.gaul2_code;
     dataLookup.set(gaulKey, d);
-    
-    // Secondary key: admin name combination (for fallback matching)
-    if (s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null) {
-      const nameKey = `${d.admin0_name}_${d.admin1_name}`;
-      dataLookup.set(nameKey, d);
-    }
   });
   
   // Fit projection to features
@@ -559,63 +459,37 @@ s2BivariateMap = {
     .join("path")
     .attr("stroke", "white")
     .attr("stroke-width", d => d.properties.isHighlighted ? "2.5px" : "1px")
-    .attr("class", s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null ? "admin1-boundary" : "admin0-boundary")
+    .attr("class", `admin${s2CurrentAdminLevel}-boundary`)
     .attr("fill", (d) => {
-      const gaulCodeField = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
-        ? 'gaul1_code'
-        : s2CurrentAdminLevel === 0
+      const gaulCodeField = s2CurrentAdminLevel === 0
         ? 'gaul0_code'
         : s2CurrentAdminLevel === 1
         ? 'gaul1_code'
         : 'gaul2_code';
       
-      // Try GAUL code first
-      let dataEntry = dataLookup.get(d.properties[gaulCodeField]);
-      
-      // Fallback: try admin name combination
-      if (!dataEntry && s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null) {
-        const nameKey = `${d.properties.admin0_name}_${d.properties.admin1_name}`;
-        dataEntry = dataLookup.get(nameKey);
-      }
-      
+      const dataEntry = dataLookup.get(d.properties[gaulCodeField]);
       return dataEntry ? color(dataEntry.bivariateClass) : "#e8e8e8";
     })
     .attr("fill-opacity", (d) => {
       // Fade regions without data instead of hiding them
-      const gaulCodeField = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
-        ? 'gaul1_code'
-        : s2CurrentAdminLevel === 0
+      const gaulCodeField = s2CurrentAdminLevel === 0
         ? 'gaul0_code'
         : s2CurrentAdminLevel === 1
         ? 'gaul1_code'
         : 'gaul2_code';
       
-      let dataEntry = dataLookup.get(d.properties[gaulCodeField]);
-      
-      if (!dataEntry && s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null) {
-        const nameKey = `${d.properties.admin0_name}_${d.properties.admin1_name}`;
-        dataEntry = dataLookup.get(nameKey);
-      }
-      
+      const dataEntry = dataLookup.get(d.properties[gaulCodeField]);
       return dataEntry ? 1.0 : 0.3; // Faded regions have 30% opacity
     })
     .attr("d", geo_path)
     .on("click", (event, d) => {
-      const gaulCodeField = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
-        ? 'gaul1_code'
-        : s2CurrentAdminLevel === 0
+      const gaulCodeField = s2CurrentAdminLevel === 0
         ? 'gaul0_code'
         : s2CurrentAdminLevel === 1
         ? 'gaul1_code'
         : 'gaul2_code';
       
-      let dataEntry = dataLookup.get(d.properties[gaulCodeField]);
-      
-      if (!dataEntry && s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null) {
-        const nameKey = `${d.properties.admin0_name}_${d.properties.admin1_name}`;
-        dataEntry = dataLookup.get(nameKey);
-      }
-      
+      const dataEntry = dataLookup.get(d.properties[gaulCodeField]);
       if (!dataEntry) return;
       
       // Toggle frozen tooltip: if clicking the same region, unfreeze; otherwise, freeze on new region
@@ -628,9 +502,7 @@ s2BivariateMap = {
         // Freeze on this region
         frozenRegion = regionId;
         
-        const regionName = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
-          ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
-          : s2CurrentAdminLevel === 0
+        const regionName = s2CurrentAdminLevel === 0
           ? d.properties.admin0_name 
           : s2CurrentAdminLevel === 1
           ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
@@ -658,32 +530,20 @@ s2BivariateMap = {
     .on("mousemove", (event, d) => {
       if (frozenRegion !== null) return; // Don't show hover tooltip if one is frozen
       
-      const gaulCodeField = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
-        ? 'gaul1_code'
-        : s2CurrentAdminLevel === 0
+      const gaulCodeField = s2CurrentAdminLevel === 0
         ? 'gaul0_code'
         : s2CurrentAdminLevel === 1
         ? 'gaul1_code'
         : 'gaul2_code';
       
-      // Try GAUL code first
-      let dataEntry = dataLookup.get(d.properties[gaulCodeField]);
-      
-      // Fallback: try admin name combination
-      if (!dataEntry && s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null) {
-        const nameKey = `${d.properties.admin0_name}_${d.properties.admin1_name}`;
-        dataEntry = dataLookup.get(nameKey);
-      }
-      
+      const dataEntry = dataLookup.get(d.properties[gaulCodeField]);
       if (!dataEntry) return;
       
-      const regionName = s2CurrentAdminLevel === 0 && s2ClickedAdmin0 !== null
+      const regionName = s2CurrentAdminLevel === 0
+        ? d.properties.admin0_name 
+        : s2CurrentAdminLevel === 1
         ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
-        : s2CurrentAdminLevel === 0
-              ? d.properties.admin0_name 
-              : s2CurrentAdminLevel === 1
-              ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
-              : `${d.properties.admin2_name}, ${d.properties.admin1_name}`;
+        : `${d.properties.admin2_name}, ${d.properties.admin1_name}`;
             
       // Format tooltip according to specification
       const tooltipHtml = `
