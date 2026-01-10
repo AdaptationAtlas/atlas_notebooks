@@ -1,4 +1,23 @@
 ```{ojs}
+// ============================================================================
+// SECTION 2: CIS READINESS × CLIMATE HAZARD INTERSECTION
+// ============================================================================
+// This file analyzes the intersection between CIS readiness and climate hazard
+// exposure (drought and waterlogging). It uses a bivariate mapping approach
+// to identify regions that are both high-exposure AND high-readiness (optimal
+// zones for CIS deployment) or high-exposure but low-readiness (priority gaps).
+//
+// Key Concepts:
+// - Bivariate Classification: 3×3 grid combining hazard severity and CIS readiness
+// - NDWS (Normalized Difference Water Stress): Drought indicator (days)
+// - NDWL0 (Normalized Difference Water Level): Waterlogging indicator (days)
+// - Diamond Legend: Rotated 45° to intuitively show the two dimensions
+//
+// Data Sources:
+// - haz-means_adm_historic.parquet: Historical hazard means at admin levels
+// - three_cut_offs.csv: Pre-computed tercile cutoffs for CIS readiness
+// ============================================================================
+
 section2Title = _lang(cis.section2Title)
 section2Intro = _lang(cis.section2Intro)
 ```
@@ -42,37 +61,63 @@ htl.html`
 //| echo: false
 
 // ============================================================================
-// SECTION 2: CIS READINESS × CLIMATE HAZARD INTERSECTION
+// HAZARD DATA LOADING AND PROCESSING
+// ============================================================================
+// Load climate hazard data and pivot from long to wide format.
+// The source data has one row per (region, hazard_type) combination.
+// We need to pivot so each region has separate columns for drought/waterlogging.
 // ============================================================================
 
-// Load hazard data using DuckDB with Parquet for better performance
 hazardDB = await DuckDBClient.of({
   hazard_data: FileAttachment("/data/cis/haz-means_adm_historic.parquet")
 });
 
-// Load all data and filter in JavaScript to avoid DuckDB duplicate key issues
+// Load all hazard data - filtering done in JS to avoid DuckDB key issues
 hazardDataRaw = await hazardDB.query(`SELECT * FROM hazard_data`);
 
-// Filter for only the hazards we need
+// Filter for the two hazards we need:
+// - NDWS-mean: Normalized Difference Water Stress (drought - days of stress)
+// - NDWL0-mean: Normalized Difference Water Level at surface (waterlogging - days)
 hazardData = hazardDataRaw.filter(d => 
   d.hazard === "NDWS-mean" || d.hazard === "NDWL0-mean"
 );
 
-// Load CIS readiness cutoffs from three_cut_offs.csv
+// ============================================================================
+// TERCILE CUTOFFS: Load Pre-Computed Classification Thresholds
+// ============================================================================
+// Rather than computing cutoffs dynamically (which could vary with selections),
+// we load pre-computed Africa-wide cutoffs from a CSV file. This ensures
+// consistent classifications across all views and user interactions.
+// ============================================================================
+
 cisReadinessCutoffs = await d3.csv("/data/cis/three_cut_offs.csv").then(data => {
+  // Find the row for CIS readiness index
   const cisRow = data.find(d => d[''] === 'cis_readiness_index');
   return {
-    low: parseFloat(cisRow['X33.33333.']),
-    moderate: parseFloat(cisRow['X66.66667.'])
+    low: parseFloat(cisRow['X33.33333.']),      // 33rd percentile
+    moderate: parseFloat(cisRow['X66.66667.'])  // 66th percentile
   };
 });
 
-// Pivot hazard data to have separate columns for drought and waterlogging
+// ============================================================================
+// DATA PIVOTING: Transform Long Format to Wide Format
+// ============================================================================
+// Input format (long):  | region | hazard     | value |
+//                       | Kenya  | NDWS-mean  | 18.5  |
+//                       | Kenya  | NDWL0-mean | 3.2   |
+//
+// Output format (wide): | region | drought_ndws | waterlogging_ndwl0 |
+//                       | Kenya  | 18.5         | 3.2                |
+//
+// This uses D3.group to aggregate by region, then extracts values by hazard type.
+// ============================================================================
+
 hazardPivoted = {
+  // Create a composite key for each unique region (all admin levels)
   const grouped = d3.group(hazardData, d => `${d.iso3}_${d.admin0_name}_${d.admin1_name}_${d.admin2_name}`);
   
   return Array.from(grouped.values()).map(group => {
-    const base = group[0];
+    const base = group[0];  // Get region identifiers from first row
     const drought = group.find(d => d.hazard === "NDWS-mean");
     const waterlogging = group.find(d => d.hazard === "NDWL0-mean");
     
@@ -87,8 +132,15 @@ hazardPivoted = {
   });
 }
 
-// Join hazard data with CIS readiness data
+// ============================================================================
+// DATA JOINING: Combine CIS Readiness with Hazard Exposure
+// ============================================================================
+// Join the hazard data with CIS readiness data (from Section 1) to create
+// a unified dataset for bivariate analysis. Match on all admin fields.
+// ============================================================================
+
 combinedData = cisData.map(cis => {
+  // Find matching hazard row by exact admin name match
   const hazard = hazardPivoted.find(h => 
     h.iso3 === cis.iso3 &&
     h.admin0_name === cis.admin0_name &&
@@ -103,21 +155,36 @@ combinedData = cisData.map(cis => {
   };
 }).filter(d => d.drought_ndws !== null || d.waterlogging_ndwl0 !== null);
 
-// Bivariate classification function
+// ============================================================================
+// BIVARIATE CLASSIFICATION FUNCTION
+// ============================================================================
+// Classifies regions into a 3×3 bivariate grid based on:
+// - CIS Readiness: Low/Moderate/High (using pre-computed tercile cutoffs)
+// - Hazard Severity: Low/Moderate/High (using hazard-specific thresholds)
+//
+// Hazard thresholds are based on climate science conventions:
+// - Drought (NDWS): <15 days = Low, 15-20 = Moderate, >20 = High
+// - Waterlogging (NDWL0): <2 days = Low, 2-5 = Moderate, >5 = High
+//
+// The resulting bivariateClass (e.g., "High × High") drives map coloring.
+// ============================================================================
+
 function bivariateClassify(readiness, hazard, readinessCutoffs, hazardType) {
-  // Classify readiness using cutoffs from three_cut_offs.csv
+  // Classify CIS readiness using tercile cutoffs from CSV
   let readinessClass;
   if (readiness < readinessCutoffs.low) readinessClass = "Low";
   else if (readiness < readinessCutoffs.moderate) readinessClass = "Moderate";
   else readinessClass = "High";
   
-  // Classify hazard using thresholds
+  // Classify hazard using hazard-type-specific thresholds
   let hazardClass;
   if (hazardType === "NDWS-mean") {
+    // Drought: measured in stress days per year
     if (hazard < 15) hazardClass = "Low";
     else if (hazard < 20) hazardClass = "Moderate";
     else hazardClass = "High";
   } else if (hazardType === "NDWL0-mean") {
+    // Waterlogging: measured in waterlogged days per year
     if (hazard < 2) hazardClass = "Low";
     else if (hazard < 5) hazardClass = "Moderate";
     else hazardClass = "High";
@@ -130,18 +197,30 @@ function bivariateClassify(readiness, hazard, readinessCutoffs, hazardType) {
   };
 }
 
-// Bivariate color palette (3x3 grid)
+// ============================================================================
+// BIVARIATE COLOR PALETTE: 3×3 Grid Colors
+// ============================================================================
+// Color scheme designed to highlight the "High × High" optimal zone
+// (dark purple) while showing the full spectrum of readiness×hazard combos.
+//
+// Color logic:
+// - Rows (vertical): CIS Readiness increases → more purple/blue
+// - Columns (horizontal): Hazard Severity increases → more saturated
+// - "High × High" = Priority zone for CIS deployment (darkest, most distinct)
+// - "Low × High" = Investment gap (high hazard but low readiness)
+// ============================================================================
+
 bivariateColors = {
   return {
-    "Low × Low": "#e8e8e8",      // Light gray - low priority
+    "Low × Low": "#e8e8e8",       // Light gray - lowest priority
     "Low × Moderate": "#b8d6be",  
-    "Low × High": "#6c9a8b",      // Dark teal-green - high need, low capacity
+    "Low × High": "#6c9a8b",       // Teal-green - high need, low capacity (GAP)
     "Moderate × Low": "#c8b2d6",
     "Moderate × Moderate": "#9c9eba",
     "Moderate × High": "#627a8e",
     "High × Low": "#b8a0c2",      
     "High × Moderate": "#8b7fa8",
-    "High × High": "#5a5f8f"      // Dark blue-purple - OPTIMAL (priority zone)
+    "High × High": "#5a5f8f"       // Dark purple - OPTIMAL (priority for CIS)
   };
 }
 ```

@@ -1,30 +1,65 @@
 ```{ojs}
+// ============================================================================
+// SECTION 1: CIS READINESS INDEX ANALYSIS
+// ============================================================================
+// This file contains the core analysis of Climate Information Services (CIS)
+// readiness across Sub-Saharan Africa. It loads CIS indicator data, calculates
+// Africa-wide tercile classifications, and provides interactive visualizations
+// for weather station density, cloud coverage, satellite agreement, and
+// forecast skill at multiple administrative levels (Admin 0/1/2).
+//
+// Key Features:
+// - DuckDB-powered Parquet data loading for performance
+// - Reactive admin-level filtering with synced selectors across sections
+// - Multiple visualization types (maps, charts, tables, heatmaps)
+// - Dynamic insights that update based on user selections
+// ============================================================================
+
 section1Title = _lang(cis.section1Title)
 ```
 
 # `{ojs} section1Title` {#section1}
 
 ```{ojs}
-// Load CIS data using DuckDB with Parquet for better performance
+// ============================================================================
+// DATA LOADING: CIS Indicator Data
+// ============================================================================
+// Uses DuckDB + Parquet for efficient data loading. This approach:
+// 1. Loads data directly from columnar Parquet format (faster than CSV)
+// 2. Enables SQL queries if needed for server-side filtering
+// 3. Provides better memory efficiency for large datasets
+//
+// Data Source: CIS_nb_data.parquet contains Climate Information Services
+// indicators at Admin 0/1/2 levels across Sub-Saharan Africa.
+// ============================================================================
+
 cisDB = await DuckDBClient.of({
   cis_data: FileAttachment("/data/cis/CIS_nb_data.parquet")
 });
 
-// Load all data and process in JavaScript for type safety
+// Query all data - processing is done in JavaScript for type safety
+// and Observable reactivity compatibility
 cisDataRaw = await cisDB.query(`SELECT * FROM cis_data`);
 
+// Transform raw data with proper type parsing
+// Note: Parquet files from some sources encode NULL as "\\N" string
 cisData = cisDataRaw.map(row => ({
   ...row,
-    // Clean null values represented as \N
-    admin1_name: row.admin1_name === "\\N" || row.admin1_name === "" ? null : row.admin1_name,
-    admin2_name: row.admin2_name === "\\N" || row.admin2_name === "" ? null : row.admin2_name,
-    // Parse numeric fields
+  // Clean null values represented as "\N" (common in database exports)
+  // These must be converted to JavaScript null for proper filtering
+  admin1_name: row.admin1_name === "\\N" || row.admin1_name === "" ? null : row.admin1_name,
+  admin2_name: row.admin2_name === "\\N" || row.admin2_name === "" ? null : row.admin2_name,
+  
+  // Parse all numeric indicator fields from strings to numbers
+  // Each indicator is normalized to 0-1 scale in the source data
   "weather-station_density": parseFloat(row["weather-station_density"]),
   "cloud-coverage_meanannual": parseFloat(row["cloud-coverage_meanannual"]),
   "cv-precipitation_agreement": parseFloat(row["cv-precipitation_agreement"]),
   "short-term_frcst_skill": parseFloat(row["short-term_frcst_skill"]),
   "seasonal_frcst_skill": parseFloat(row["seasonal_frcst_skill"]),
   "cis_readiness_index": parseFloat(row["cis_readiness_index"]),
+  
+  // GAUL (Global Administrative Unit Layers) codes for geo-matching
   gaul0_code: parseInt(row.gaul0_code),
   gaul1_code: parseInt(row.gaul1_code),
   gaul2_code: parseInt(row.gaul2_code)
@@ -45,8 +80,25 @@ admin2Boundaries = await read_topojson(boundary_paths.admin2_path, "atlas_gaul_a
 ```
 
 ```{ojs}
-// Calculate Africa-wide tercile cutoffs for classification
+// ============================================================================
+// TERCILE CALCULATION: Africa-Wide Classification Thresholds  
+// ============================================================================
+// Terciles divide the data into three equal groups (33.3%, 66.7% cutoffs).
+// This provides a relative classification system where:
+//   - "Weaker" = Bottom third of African values
+//   - "Moderate" = Middle third
+//   - "Stronger" = Top third
+//
+// Why terciles? They provide context-appropriate classifications that
+// account for the distribution of values across Sub-Saharan Africa,
+// rather than using arbitrary absolute thresholds.
+//
+// Note: These cutoffs are computed once from ALL data (not filtered),
+// ensuring consistent classifications regardless of user selections.
+// ============================================================================
+
 africaTerciles = {
+  // Extract each indicator's values, filtering out nulls
   const weatherStations = cisData.map(d => d["weather-station_density"]).filter(d => d != null);
   const cloudCover = cisData.map(d => d["cloud-coverage_meanannual"]).filter(d => d != null);
   const precipAgreement = cisData.map(d => parseFloat(d["cv-precipitation_agreement"])).filter(d => !isNaN(d));
@@ -54,16 +106,21 @@ africaTerciles = {
   const seasonalSkill = cisData.map(d => d["seasonal_frcst_skill"]).filter(d => d != null);
   const cisReadiness = cisData.map(d => d["cis_readiness_index"]).filter(d => d != null);
   
+  // Custom quantile function using linear interpolation
+  // This matches most statistical software implementations (e.g., R's type=7)
   const quantile = (arr, q) => {
     const sorted = arr.slice().sort((a, b) => a - b);
-    const pos = (sorted.length - 1) * q;
-    const base = Math.floor(pos);
-    const rest = pos - base;
+    const pos = (sorted.length - 1) * q;  // Position in sorted array
+    const base = Math.floor(pos);          // Lower index
+    const rest = pos - base;               // Fractional part for interpolation
     return sorted[base + 1] !== undefined 
-      ? sorted[base] + rest * (sorted[base + 1] - sorted[base])
-      : sorted[base];
+      ? sorted[base] + rest * (sorted[base + 1] - sorted[base])  // Interpolate
+      : sorted[base];  // Edge case: q=1.0
   };
   
+  // Return tercile cutoffs for each indicator
+  // p33 = 33rd percentile (Weaker/Moderate boundary)
+  // p66 = 66th percentile (Moderate/Stronger boundary)
   return {
     weatherStation: {
       p33: quantile(weatherStations, 0.33),
@@ -94,7 +151,19 @@ africaTerciles = {
 ```
 
 ```{ojs}
-// Classification functions
+// ============================================================================
+// CLASSIFICATION FUNCTIONS: Transform Raw Values to Interpretable Categories
+// ============================================================================
+// These functions convert numeric indicator values into human-readable
+// classification labels for visualization and insight generation.
+// ============================================================================
+
+/**
+ * Classify a value into tercile categories (Weaker/Moderate/Stronger)
+ * @param {number} value - The indicator value to classify
+ * @param {object} terciles - Object with p33 and p66 cutoff values
+ * @returns {string} Classification label
+ */
 classifyTercile = (value, terciles) => {
   if (value == null || isNaN(value)) return "No data";
   if (value <= terciles.p33) return "Weaker";
@@ -102,6 +171,17 @@ classifyTercile = (value, terciles) => {
   return "Stronger";
 }
 
+/**
+ * Classify precipitation satellite agreement (CV - Coefficient of Variation)
+ * Unlike terciles, this uses absolute thresholds based on the number
+ * of satellite products that agree on precipitation patterns:
+ *   0 = No products agree (Very Low confidence)
+ *   1-2 = Partial agreement (Moderate confidence)
+ *   3 = Most products agree (High confidence) 
+ *   4 = All products agree (Very High confidence)
+ * @param {number|string} value - Agreement count (0-4)
+ * @returns {string} Classification label with confidence level
+ */
 classifyPrecipAgreement = (value) => {
   if (value == null || isNaN(value)) return "No data";
   const numVal = parseFloat(value);
@@ -111,27 +191,47 @@ classifyPrecipAgreement = (value) => {
   return "Full agreement (Very High)";
 }
 
+/**
+ * Interpret forecast skill based on both short-term and long-term RPSS scores
+ * RPSS (Ranked Probability Skill Score) measures forecast quality:
+ *   > 0.6 = Good/reliable forecasts
+ *   < 0.4 = Poor/unreliable forecasts
+ * 
+ * The delta (difference) between short and long term indicates skill decay:
+ *   Large positive delta = Rapid skill loss at longer lead times
+ * 
+ * @param {number} shortTerm - Short-term (1-2 month) forecast RPSS
+ * @param {number} longTerm - Long-term (11-12 month) forecast RPSS
+ * @returns {object} Interpretation text and CIS implication
+ */
 classifyForecastSkill = (shortTerm, longTerm) => {
   if (shortTerm == null || longTerm == null) return { interpretation: "No data", implication: "Insufficient data" };
   
   const delta = shortTerm - longTerm;
   
+  // Case 1: Both horizons perform well - ideal for CIS deployment
   if (shortTerm > 0.6 && longTerm > 0.6) {
     return {
       interpretation: "Reliable forecasts at both horizons",
       implication: "Scale CIS for advisories + finance"
     };
-  } else if (shortTerm > 0.6 && longTerm < 0.4 && delta > 0.2) {
+  } 
+  // Case 2: Good short-term but poor long-term - limit to operational use
+  else if (shortTerm > 0.6 && longTerm < 0.4 && delta > 0.2) {
     return {
       interpretation: "Rapid loss of skill",
       implication: "Limit use to short-term planning"
     };
-  } else if (shortTerm < 0.4 && longTerm < 0.4) {
+  } 
+  // Case 3: Both horizons perform poorly - use historical averages instead
+  else if (shortTerm < 0.4 && longTerm < 0.4) {
     return {
       interpretation: "Weak predictability",
       implication: "Use climatology / caution"
     };
-  } else {
+  } 
+  // Case 4: Mixed results - blend forecasts with historical data
+  else {
     return {
       interpretation: "Uncertain but usable",
       implication: "Blend with historical averages"
@@ -141,8 +241,26 @@ classifyForecastSkill = (shortTerm, longTerm) => {
 ```
 
 ```{ojs}
-// Get unique admin values for selectors
+// ============================================================================
+// ADMIN HIERARCHY: Dynamic Options Based on User Selection
+// ============================================================================
+// These functions provide cascading options for admin selectors:
+// - Admin0 (Country): All unique countries in the dataset
+// - Admin1 (Region): Only regions within selected countries
+// - Admin2 (District): Only districts within selected regions
+//
+// This hierarchy enables progressive drill-down through the data
+// while keeping each selector's options relevant to prior selections.
+// ============================================================================
+
+// All unique Admin0 (country) names, sorted alphabetically
 uniqueAdmin0 = Array.from(new Set(cisData.map(d => d.admin0_name))).sort()
+
+/**
+ * Get Admin1 options filtered by selected Admin0
+ * @param {string[]} admin0Selection - Selected country names
+ * @returns {string[]} Available Admin1 names within those countries
+ */
 uniqueAdmin1 = (admin0Selection) => {
   if (!admin0Selection || admin0Selection.length === 0) return [];
   return Array.from(new Set(
@@ -151,6 +269,13 @@ uniqueAdmin1 = (admin0Selection) => {
       .map(d => d.admin1_name)
   )).sort();
 }
+
+/**
+ * Get Admin2 options filtered by selected Admin0 AND Admin1
+ * @param {string[]} admin0Selection - Selected country names
+ * @param {string[]} admin1Selection - Selected region names
+ * @returns {string[]} Available Admin2 names within those regions
+ */
 uniqueAdmin2 = (admin0Selection, admin1Selection) => {
   if (!admin1Selection || admin1Selection.length === 0) return [];
   return Array.from(new Set(
@@ -171,8 +296,17 @@ dropdownCSS
 ```
 
 ```{ojs}
-// Admin level selectors - Master selectors
-// These are the source of truth for all admin selections
+// ============================================================================
+// MASTER ADMIN SELECTORS: Source of Truth for Admin Selections
+// ============================================================================
+// These are the PRIMARY selectors that all other section selectors sync to.
+// Using Observable's Inputs.bind() pattern (defined in cis_readiness.qmd),
+// changes here automatically propagate to section-specific selectors.
+//
+// Note: createSyncedAdminSelector() is defined in the parent file and uses
+// Inputs.bind() to create two-way binding between master and section selectors.
+// ============================================================================
+
 viewof selectedAdmin0 = multiSelect({
   inputLabel: _lang(cis.admin0Label),
   inputId: "admin0Select",
@@ -182,11 +316,12 @@ viewof selectedAdmin0 = multiSelect({
   maxSelections: 10
 })
 
-// Reactive value that all selectors sync to
+// Expose the reactive value for other cells to depend on
 selectedAdmin0Value = selectedAdmin0
 ```
 
 ```{ojs}
+// Admin1 selector - options depend on Admin0 selection
 admin1Options = uniqueAdmin1(selectedAdmin0)
 
 viewof selectedAdmin1 = multiSelect({
@@ -198,11 +333,11 @@ viewof selectedAdmin1 = multiSelect({
   maxSelections: 10
 })
 
-// Reactive value that all selectors sync to
 selectedAdmin1Value = selectedAdmin1
 ```
 
 ```{ojs}
+// Admin2 selector - options depend on both Admin0 AND Admin1 selections
 admin2Options = uniqueAdmin2(selectedAdmin0, selectedAdmin1)
 
 viewof selectedAdmin2 = multiSelect({
@@ -214,34 +349,47 @@ viewof selectedAdmin2 = multiSelect({
   maxSelections: 10
 })
 
-// Reactive value that all selectors sync to
 selectedAdmin2Value = selectedAdmin2
 ```
 
 ```{ojs}
-// Note: createSyncedAdminSelector is now defined in the main cis_readiness.qmd file
-// before the includes to ensure it's available to all sections
+// ============================================================================
+// ADMIN LEVEL DETECTION: Determine Display Level Based on Selections
+// ============================================================================
+// The currentAdminLevel drives which geographic boundaries to display:
+//   Level 0: No selections → Show all countries (Admin0)
+//   Level 1: Country selected → Show regions within that country (Admin1)
+//   Level 2: Region selected → Show districts within that region (Admin2)
+//
+// Note: When Admin2 items are selected, we stay at Level 2 but highlight
+// those specific districts rather than drilling down further.
+// ============================================================================
 
-// Determine current admin level based on selections
-// Level 0: No admin0 selected OR "SSA" selected
-// Level 1: Admin0 selected but no admin1 selected
-// Level 2: Admin1 selected but no admin2 selected
-// Level 2 with highlight: Admin2 selected
 currentAdminLevel = {
-  if (selectedAdmin0.length === 0) return 0;
-  if (selectedAdmin1.length === 0) return 1;
-  if (selectedAdmin2.length === 0) return 2;
-  return 2; // Admin2 selected - still show admin2 level but with highlighting
+  if (selectedAdmin0.length === 0) return 0;  // No country selected → show all
+  if (selectedAdmin1.length === 0) return 1;  // Country selected, no region → admin1
+  if (selectedAdmin2.length === 0) return 2;  // Region selected, no district → admin2
+  return 2; // Districts selected → still admin2, but with highlighting
 }
 
-// Filter data based on admin level
+// ============================================================================
+// DATA FILTERING: Filter CIS Data Based on Admin Level
+// ============================================================================
+// The data structure uses NULL values to indicate admin level:
+// - Admin0 row: admin1_name IS NULL, admin2_name IS NULL
+// - Admin1 row: admin1_name IS NOT NULL, admin2_name IS NULL  
+// - Admin2 row: admin1_name IS NOT NULL, admin2_name IS NOT NULL
+//
+// This allows storing all admin levels in a single flat table.
+// ============================================================================
+
 filteredData = {
-  // Default: No admin0 selected - show all admin0 level data (where admin1_name is null)
+  // Default: No admin0 selected - show country-level data (admin1_name is null)
   if (selectedAdmin0.length === 0) {
     return cisData.filter(d => d.admin1_name == null);
   }
   
-  // Admin0 selected, no admin1 - show all admin1 data for selected countries
+  // Admin0 selected, no admin1 - show region-level data for selected countries
   if (selectedAdmin1.length === 0) {
     return cisData.filter(d => 
       selectedAdmin0.includes(d.admin0_name) &&
@@ -250,15 +398,17 @@ filteredData = {
     );
   }
   
-  // Admin1 selected - show all admin2 data for selected admin1 regions
-    return cisData.filter(d => 
-      selectedAdmin0.includes(d.admin0_name) &&
+  // Admin1 selected - show district-level data for selected regions
+  return cisData.filter(d => 
+    selectedAdmin0.includes(d.admin0_name) &&
     selectedAdmin1.includes(d.admin1_name) &&
     d.admin2_name != null
-    );
-  }
+  );
+}
 
-// For admin2 highlighting: track which admin2 regions are selected
+// Track which Admin2 regions are selected for highlighting on maps
+// When empty, all admin2 regions in the view are shown equally
+// When populated, only these districts get visual emphasis
 highlightedAdmin2 = selectedAdmin2.length > 0 ? selectedAdmin2 : []
 ```
 

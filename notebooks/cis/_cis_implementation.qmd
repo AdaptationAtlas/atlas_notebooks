@@ -1,4 +1,24 @@
 ```{ojs}
+// ============================================================================
+// SECTION 3: CIS READINESS × ACCESS/IMPLEMENTATION INTERSECTION
+// ============================================================================
+// This file analyzes the intersection between CIS readiness and digital/media
+// access (TV, internet, cellphone). It identifies regions where CIS capacity
+// exists but communication channels may limit uptake, and vice versa.
+//
+// Key Concepts:
+// - Access Types: TV, Internet, Cellphone, and Combined average
+// - Gap Analysis: Difference between readiness and access levels
+// - Multiple Visualizations: Map, Dumbbell chart, Scatter plot, Table
+//
+// The bivariate approach mirrors Section 2, but uses access instead of hazard
+// on the second dimension. "High × High" = optimal CIS deployment zones.
+//
+// Data Sources:
+// - CIS_access.parquet: Digital access percentages at admin levels
+// - Section 1 cisData: CIS readiness indicators (reused)
+// ============================================================================
+
 section3Title = _lang(cis.section3Title)
 section31Title = _lang(cis.section31Title)
 section31Intro = _lang(cis.section31Intro)
@@ -45,38 +65,53 @@ htl.html`
 //| echo: false
 
 // ============================================================================
-// SECTION 3.1: CIS READINESS × ACCESS INTERSECTION
+// ACCESS DATA LOADING AND CLEANING
+// ============================================================================
+// Load digital access data (TV, internet, cellphone percentages) and clean
+// null values. Access data is stored as percentages (0-100) and normalized
+// to 0-1 scale for comparison with CIS readiness.
 // ============================================================================
 
-// Load access data using DuckDB with Parquet for better performance
 s3AccessDB = await DuckDBClient.of({
   access_data: FileAttachment("/data/cis/CIS_access.parquet")
 });
 
-// Load and clean the access data
 s3AccessDataRaw = await s3AccessDB.query(`SELECT * FROM access_data`);
 
+// Transform access data with proper null handling and type parsing
+// Note: "\\N" is a common null representation in database exports
 s3AccessData = s3AccessDataRaw.map(row => ({
   admin0_name: row.admin0_name,
   admin1_name: row.admin1_name === "\\N" || row.admin1_name === "" ? null : row.admin1_name,
   admin2_name: row.admin2_name === "\\N" || row.admin2_name === "" ? null : row.admin2_name,
   iso3: row.iso3,
+  // GAUL codes for geographic matching
   gaul0_code: row.gaul0_code !== "\\N" && row.gaul0_code !== "" && row.gaul0_code !== null ? parseInt(row.gaul0_code) : null,
   gaul1_code: row.gaul1_code !== "\\N" && row.gaul1_code !== "" && row.gaul1_code !== null ? parseInt(row.gaul1_code) : null,
   gaul2_code: row.gaul2_code !== "\\N" && row.gaul2_code !== "" && row.gaul2_code !== null ? parseInt(row.gaul2_code) : null,
+  // Access percentages (0-100 scale)
   tv: row.tv !== "\\N" && row.tv !== null && row.tv !== "" ? parseFloat(row.tv) : null,
   internet: row.internet !== "\\N" && row.internet !== null && row.internet !== "" ? parseFloat(row.internet) : null,
   cellphone: row.cellphone !== "\\N" && row.cellphone !== null && row.cellphone !== "" ? parseFloat(row.cellphone) : null
 }));
 
-// Aggregate CIS readiness to Admin 0 level (average)
+// ============================================================================
+// AGGREGATION TO ADMIN0 LEVEL
+// ============================================================================
+// For Section 3, we aggregate both CIS readiness and access data to the
+// country (Admin0) level by taking the mean across all sub-regions.
+// This provides a country-level comparison of capacity vs. access.
+// ============================================================================
+
+// Aggregate CIS readiness to Admin0 (country) level
 s3CisReadinessAdmin0 = {
+  // Verify cisData is available from Section 1
   if (typeof cisData === 'undefined' || !cisData) {
     console.error("cisData is not available - Section 1 must load first");
     return [];
   }
   
-  // Group by admin0 and calculate mean CIS readiness
+  // Group by country and calculate mean CIS readiness
   const grouped = d3.rollup(
     cisData,
     v => ({
@@ -87,17 +122,18 @@ s3CisReadinessAdmin0 = {
     d => d.admin0_name
   );
   
+  // Convert Map to array of objects
   return Array.from(grouped, ([admin0_name, data]) => {
     return {
       admin0_name: admin0_name,
-    ...data
+      ...data
     };
   });
 }
 
-// Aggregate access data to Admin 0 level (average)
+// Aggregate access data to Admin0 (country) level
 s3AccessAdmin0 = {
-  // Group by admin0 and calculate mean access
+  // Group by country and calculate mean for each access type
   const grouped = d3.rollup(
     s3AccessData.filter(d => d.gaul0_code !== null),
     v => ({
@@ -113,39 +149,49 @@ s3AccessAdmin0 = {
   return Array.from(grouped, ([admin0_name, data]) => {
     return {
       admin0_name: admin0_name,
-    ...data
+      ...data
     };
   });
 }
 
-// Join CIS readiness with access data at Admin 0 level
+// ============================================================================
+// DATA JOINING: Combine CIS Readiness with Access Data
+// ============================================================================
+// Join the aggregated CIS readiness with aggregated access data.
+// Also calculate a "combined" access metric (average of TV, internet, cellphone)
+// and normalize all access percentages to 0-1 scale for comparison.
+// ============================================================================
+
 section3Data = {
   return s3CisReadinessAdmin0.map(cis => {
-    // Find matching access data by admin0_name
+    // Find matching access data by country name or ISO3 code
     const access = s3AccessAdmin0.find(a => 
       a.admin0_name === cis.admin0_name || a.iso3 === cis.iso3
     );
     
     if (!access) return null;
     
-    // Calculate combined access (average of all three indicators)
+    // Calculate combined access: average of available indicators
+    // This provides a single "overall access" metric
     const combined_access = (() => {
-      const values = [access.tv_avg, access.internet_avg, access.cellphone_avg].filter(v => v !== null && !isNaN(v));
-      return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+      const values = [access.tv_avg, access.internet_avg, access.cellphone_avg]
+        .filter(v => v !== null && !isNaN(v));
+      return values.length > 0 
+        ? values.reduce((a, b) => a + b, 0) / values.length 
+        : null;
     })();
     
-    // Normalize to 0-1 scale (values are already percentages 0-100)
     return {
       admin0_name: cis.admin0_name,
       iso3: cis.iso3 || access.iso3,
       gaul0_code: cis.gaul0_code || access.gaul0_code,
       cis_readiness_avg: cis.cis_readiness_avg,
-      // Raw percentages
+      // Raw access percentages (0-100 scale)
       tv_pct: access.tv_avg,
       internet_pct: access.internet_avg,
       cellphone_pct: access.cellphone_avg,
       combined_pct: combined_access,
-      // Normalized 0-1
+      // Normalized access values (0-1 scale, for comparison with CIS readiness)
       tv_norm: access.tv_avg !== null ? access.tv_avg / 100 : null,
       internet_norm: access.internet_avg !== null ? access.internet_avg / 100 : null,
       cellphone_norm: access.cellphone_avg !== null ? access.cellphone_avg / 100 : null,
@@ -155,7 +201,7 @@ section3Data = {
 }
 
 // Note: cisReadinessCutoffs is defined in Section 2 (_cis_hazard_intersection.qmd)
-// and reused here to avoid duplicate definitions
+// and reused here to ensure consistent readiness classification across sections
 ```
 
 ```{ojs}
@@ -299,12 +345,17 @@ s3CurrentAccessRawField = s3AccessType === "combined" ? "combined_pct" :
 ```{ojs}
 //| echo: false
 
-// Filter data based on selected countries
+// ============================================================================
+// FILTERED & SORTED DATA PREPARATION
+// ============================================================================
+
+// Filter data based on country selection in multi-select
 s3FilteredData = {
   if (!section3Data || section3Data.length === 0) {
     return [];
   }
   
+  // If no countries selected in filter, show all; otherwise filter to selection
   return section3Data.filter(d => 
     !s3FilteredCountries || s3FilteredCountries.length === 0 || s3FilteredCountries.includes(d.admin0_name)
   );
@@ -314,12 +365,20 @@ s3FilteredData = {
 ```{ojs}
 //| echo: false
 
-// Calculate access cutoffs (terciles) for current access type
+// ============================================================================
+// ACCESS TERCILE CUTOFFS (Dynamic)
+// ============================================================================
+// Unlike CIS readiness (which uses pre-computed cutoffs), access cutoffs
+// are computed dynamically from the filtered data. This allows the
+// bivariate classification to adapt to the current selection.
+// ============================================================================
+
 s3AccessCutoffs = {
   if (!s3FilteredData || s3FilteredData.length === 0) {
-    return { low: 0.33, moderate: 0.67 };
+    return { low: 0.33, moderate: 0.67 };  // Default fallback
   }
   
+  // Extract values for the currently selected access type
   const values = s3FilteredData
     .map(d => d[s3CurrentAccessField])
     .filter(v => v !== null && !isNaN(v))
@@ -329,6 +388,7 @@ s3AccessCutoffs = {
     return { low: 0.33, moderate: 0.67 };
   }
   
+  // Calculate tercile cutoffs (33.3% and 66.7% quantiles)
   return {
     low: d3.quantile(values, 0.333),
     moderate: d3.quantile(values, 0.667)
@@ -339,13 +399,22 @@ s3AccessCutoffs = {
 ```{ojs}
 //| echo: false
 
-// Bivariate classification function (reuse from Section 2)
+// ============================================================================
+// BIVARIATE CLASSIFICATION FOR ACCESS
+// ============================================================================
+// Similar to Section 2's bivariateClassify, but uses access level instead
+// of hazard severity. The "High × High" zone indicates optimal regions
+// for CIS deployment (high capacity AND high communication reach).
+// ============================================================================
+
 function bivariateClassifyAccess(readiness, access, readinessCutoffs, accessCutoffs) {
+  // Classify CIS readiness
   let readinessClass;
   if (readiness < readinessCutoffs.low) readinessClass = "Low";
   else if (readiness < readinessCutoffs.moderate) readinessClass = "Moderate";
   else readinessClass = "High";
   
+  // Classify access level (using dynamic tercile cutoffs)
   let accessClass;
   if (access === null || isNaN(access)) accessClass = "N/A";
   else if (access < accessCutoffs.low) accessClass = "Low";
@@ -359,19 +428,19 @@ function bivariateClassifyAccess(readiness, access, readinessCutoffs, accessCuto
   };
 }
 
-// Bivariate color palette (3x3 grid) - reuse from Section 2
+// Bivariate color palette (reused from Section 2 for consistency)
 s3BivariateColors = {
   return {
-    "Low × Low": "#e8e8e8",
+    "Low × Low": "#e8e8e8",        // Low priority
     "Low × Moderate": "#b8d6be",
-    "Low × High": "#6c9a8b",
+    "Low × High": "#6c9a8b",        // High access but low readiness
     "Moderate × Low": "#c8b2d6",
     "Moderate × Moderate": "#9c9eba",
     "Moderate × High": "#627a8e",
-    "High × Low": "#b8a0c2",
+    "High × Low": "#b8a0c2",        // High readiness but low access (capacity gap)
     "High × Moderate": "#8b7fa8",
-    "High × High": "#5a5f8f",
-    "N/A": "#cccccc"
+    "High × High": "#5a5f8f",       // OPTIMAL - scale CIS here
+    "N/A": "#cccccc"                // No access data available
   };
 }
 ```

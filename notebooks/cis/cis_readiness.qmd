@@ -11,29 +11,79 @@ date-edited: today
 ---
 
 ```{ojs}
+// ============================================================================
+// CIS READINESS NOTEBOOK - MAIN ORCHESTRATION FILE
+// ============================================================================
+// This is the main entry point for the Climate Information Services (CIS)
+// Readiness notebook. It orchestrates:
+//
+// 1. Translations & i18n: Loads translations and sets up language switching
+// 2. UI Components: Imports shared components (hero, buttons, multiselect)
+// 3. Synced Selectors: Defines the createSyncedAdminSelector function used
+//    by all sections to keep admin selections synchronized
+// 4. Sections: Includes the three analysis sections via Quarto {{< include >}}
+//
+// File Structure:
+// - cis_readiness.qmd (this file) - orchestration & shared definitions
+// - _cis_readiness_index.qmd - Section 1: CIS Readiness components
+// - _cis_hazard_intersection.qmd - Section 2: Readiness × Hazard bivariate
+// - _cis_implementation.qmd - Section 3: Readiness × Access bivariate
+//
+// IMPORTANT: The order of definitions matters! UI components must be imported
+// BEFORE sections that use them, and createSyncedAdminSelector must be
+// defined BEFORE the includes run.
+// ============================================================================
+
 cis = await FileAttachment(
   "/data/cis/translations.json",
 ).json();
 ```
 
 ```{ojs}
-// Import all UI components FIRST before any cells that use them
+// ============================================================================
+// UI COMPONENT IMPORTS
+// ============================================================================
+// Import shared UI components from helpers directory.
+// CRITICAL: These must be imported BEFORE any cells that use them!
+// 
+// Components:
+// - atlasHero: Hero banner with title and background image
+// - downloadButton: CSV download button for data tables
+// - tooltipStyle: Global CSS for consistent tooltip styling
+// - atlasTOC/tocStyle: Table of Contents navigation
+// - multiSelect/dropdownCSS: Multi-select dropdown component
+// ============================================================================
+
 import { atlasHero, downloadButton, tooltipStyle } from "/helpers/uiComponents.ojs";
 import { atlasTOC, tocStyle } from "/helpers/toc.ojs";
 import { dropdownInput as multiSelect, dropdownCSS } from "/helpers/multiSelect.ojs";
 ```
 
 ```{ojs}
-// Language setup - MUST be defined before includes
+// ============================================================================
+// LANGUAGE SETUP: Internationalization (i18n)
+// ============================================================================
+// The notebook supports multiple languages (English, French).
+// Language switching:
+// 1. Check URL for ?lang= parameter
+// 2. Fall back to default (English)
+// 3. Store selection in masterLanguage reactive
+// 4. Use _lang() helper to get translated strings
+//
+// The language selector is added to the navbar by NavbarLangSelector (below).
+// ============================================================================
+
 import { lang as Lang } from "/helpers/lang.js"
 
 general_translations = await FileAttachment("/data/shared/generalTranslations.json").json()
 
+// Supported languages with locale codes for formatting
 languages = [
   { key: "en", label: "English", locale: 'en-US' },
   { key: "fr", label: "Français", locale: 'fr-FR' }
 ]
 
+// Determine default language from URL param or fallback to English
 defaultLangKey = {
   const name = "lang";
   const list = languages.map((d) => d.key);
@@ -42,24 +92,56 @@ defaultLangKey = {
   return queryParam ?? defaultKey;
 }
 
+// Hidden radio input that serves as the source of truth for language
+// Other components bind to this via Inputs.bind()
 viewof masterLanguage = {
   const el = Inputs.radio(languages, {
     label: "Main language toggle",
     format: (d) => d.key,
     value: languages.find((x) => x.key === defaultLangKey),
   })
-  el.style.display = 'none';
+  el.style.display = 'none';  // Hidden - controlled via navbar selector
   return el;
 }
 
+// Translation helper function:
+// Usage: _lang({ en: "Hello", fr: "Bonjour" }) => returns "Hello" or "Bonjour"
+// based on current masterLanguage.key value
 _lang = Lang.lg(masterLanguage.key)
 ```
 
 ```{ojs}
-// Helper function to create synchronized admin selectors
-// Uses Observable's Inputs.bind to keep selectors in sync with master
+// ============================================================================
+// SYNCED ADMIN SELECTOR FACTORY
+// ============================================================================
+// Creates admin selectors that stay synchronized with master selectors.
+// 
+// Problem: Each section needs its own visual selector, but selections must
+// be synchronized across all sections (selecting Kenya in Section 1 should
+// also select Kenya in Sections 2 and 3).
+//
+// Solution: Use Observable's Inputs.bind() to create two-way binding between
+// section-specific selectors and the master selectors (defined in Section 1).
+//
+// Parameters:
+// - level: Admin level (0=country, 1=region, 2=district)
+// - masterView: Reference to master selector's viewof (e.g., viewof selectedAdmin0)
+// - options: Array of { value, label } options for dropdown
+// - uniqueId: Unique identifier for this selector's DOM element (e.g., "s2", "s3")
+// - labelString: Display label for the selector
+// - placeholderString: Placeholder text when nothing selected
+//
+// Returns: A multiSelect component bound bidirectionally to the master selector
+//
+// Example usage in section files:
+//   viewof s2Admin0 = createSyncedAdminSelector(
+//     0, viewof selectedAdmin0, uniqueAdmin0.map(d => ({value: d, label: d})),
+//     "s2", "Country", "Select countries..."
+//   )
+// ============================================================================
+
 createSyncedAdminSelector = function(level, masterView, options, uniqueId, labelString, placeholderString) {
-  // Create a new selector
+  // Create a new selector initialized with master's current selection
   const selector = multiSelect({
     inputLabel: labelString,
     inputId: `admin${level}Select-${uniqueId}`,
@@ -69,8 +151,9 @@ createSyncedAdminSelector = function(level, masterView, options, uniqueId, label
     maxSelections: 10
   });
   
-  // Use Inputs.bind to bind this selector to the master
-  // This creates a two-way binding between the selectors
+  // Bind this selector to the master - creates two-way sync:
+  // When master changes → this selector updates
+  // When this selector changes → master updates
   return Inputs.bind(selector, masterView);
 }
 ```
