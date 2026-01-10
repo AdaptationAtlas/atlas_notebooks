@@ -435,41 +435,34 @@ s3SortedData = {
 //| echo: false
 
 // Prepare geographic data for map - dynamically show admin levels based on selection
+// Use the master admin selectors (selectedAdmin0, etc.) for consistency with other sections
 s3GeoData = {
   if (!s3ProcessedData || s3ProcessedData.length === 0) {
     return { type: "FeatureCollection", features: [] };
   }
   
-  // Determine which admin level to show based on selections
-  const allCountries = Array.from(new Set(cisData.map(d => d.admin0_name))).sort();
-  const selectedCountries = s3Admin0 || [];
-  const selectedAdmin1s = s3Admin1 || [];
-  const selectedAdmin2s = s3Admin2 || [];
+  // Use master admin selections (same as Section 1 and 2)
+  const selectedCountries = selectedAdmin0 || [];
+  const selectedAdmin1s = selectedAdmin1 || [];
+  const selectedAdmin2s = selectedAdmin2 || [];
   
   let boundaries = null;
   let levelKey = "admin0_name";
   let gaul_key = "gaul0_code";
   
-  // If specific admin2 regions are selected, show admin2 boundaries
-  if (selectedAdmin2s.length > 0 && selectedAdmin2s.length < admin2Options.length && admin2Boundaries) {
+  // Determine which admin level to show based on currentAdminLevel from Section 1
+  // Level 0: No admin0 selected - show all admin0
+  // Level 1: Admin0 selected but no admin1 - show admin1 within selected countries
+  // Level 2: Admin1 selected - show admin2 within selected admin1s
+  if (currentAdminLevel === 2 && admin2Boundaries) {
     boundaries = admin2Boundaries;
     levelKey = "admin2_name";
     gaul_key = "gaul2_code";
-  }
-  // If specific admin1 regions are selected, show admin2 boundaries within those admin1s
-  else if (selectedAdmin1s.length > 0 && selectedAdmin1s.length < admin1Options.length && admin2Boundaries) {
-    boundaries = admin2Boundaries;
-    levelKey = "admin2_name";
-    gaul_key = "gaul2_code";
-  }
-  // If specific countries are selected (not all), show admin1 boundaries
-  else if (selectedCountries.length > 0 && selectedCountries.length < allCountries.length && admin1Boundaries) {
+  } else if (currentAdminLevel === 1 && admin1Boundaries) {
     boundaries = admin1Boundaries;
     levelKey = "admin1_name";
     gaul_key = "gaul1_code";
-  }
-  // Default: show admin0 boundaries
-  else if (admin0Boundaries) {
+  } else if (admin0Boundaries) {
     boundaries = admin0Boundaries;
     levelKey = "admin0_name";
     gaul_key = "gaul0_code";
@@ -479,45 +472,51 @@ s3GeoData = {
     return { type: "FeatureCollection", features: [] };
   }
   
+  // Filter boundaries based on current selection
+  let filteredBoundaries = boundaries;
+  if (currentAdminLevel === 2) {
+    // Show only admin2 within selected admin1s
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => 
+        selectedCountries.includes(f.properties.admin0_name) &&
+        selectedAdmin1s.includes(f.properties.admin1_name)
+      )
+    };
+  } else if (currentAdminLevel === 1) {
+    // Show only admin1 within selected countries
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => 
+        selectedCountries.includes(f.properties.admin0_name)
+      )
+    };
+  }
+  // Level 0: show all countries (no filtering needed)
+  
   // Map data to boundaries
-  const features = boundaries.features.map(feature => {
-    // For admin0 level, match on admin0
-    if (gaul_key === "gaul0_code") {
-      const countryData = s3ProcessedData.find(d => 
-        d.gaul0_code === feature.properties.gaul0_code ||
-        d.admin0_name === feature.properties.admin0_name
-      );
-      
-      if (!countryData) return null;
-      
-      return {
-        type: "Feature",
-        geometry: feature.geometry,
-        properties: {
-          ...feature.properties,
-          ...countryData,
-          displayName: feature.properties.admin0_name
-        }
-      };
-    }
-    // For admin1/admin2 levels, aggregate data from admin0
-    else {
-      // Find the parent admin0 for this feature
-      const parentCountry = feature.properties.admin0_name;
-      const countryData = s3ProcessedData.find(d => d.admin0_name === parentCountry);
-      
-      if (!countryData) return null;
-      
-      return {
-        type: "Feature",
-        geometry: feature.geometry,
-        properties: {
-          ...feature.properties,
-          ...countryData,
-          displayName: feature.properties[levelKey] || feature.properties.admin0_name
-        }
-      };
-    }
+  const features = filteredBoundaries.features.map(feature => {
+    // Find the parent admin0 for this feature (data is at country level)
+    const parentCountry = feature.properties.admin0_name;
+    const countryData = s3ProcessedData.find(d => d.admin0_name === parentCountry);
+    
+    if (!countryData) return null;
+    
+    // Check if this region is highlighted (for admin2 level)
+    const isHighlighted = currentAdminLevel === 2 && 
+                          selectedAdmin2s.length > 0 && 
+                          selectedAdmin2s.includes(feature.properties.admin2_name);
+    
+    return {
+      type: "Feature",
+      geometry: feature.geometry,
+      properties: {
+        ...feature.properties,
+        ...countryData,
+        displayName: feature.properties[levelKey] || feature.properties.admin0_name,
+        isHighlighted: isHighlighted
+      }
+    };
   }).filter(f => f !== null);
   
   return {
@@ -598,21 +597,21 @@ s3BivariateMap = {
     .domain(["Low × Low", "Low × Moderate", "Low × High", "Moderate × Low", "Moderate × Moderate", "Moderate × High", "High × Low", "High × Moderate", "High × High"])
     .range(Object.values(s3BivariateColors));
   
-  // Fit projection to features - leave space at bottom and left for legend
-  const bottomPadding = 140; // Space for rotated diamond legend (reduced for better integration)
-  const leftPadding = 150; // Extra space for rotated diamond legend and labels
+  // Fit projection to features - leave space at bottom for legend
+  const bottomPadding = 100; // Reduced for tighter integration
+  const leftPadding = 80; // Reduced left padding
   projection.fitExtent(
     [
       [padding + leftPadding, padding],
-      [width - padding, height - bottomPadding]
+      [width - padding, height - padding]
     ],
     s3GeoData
   );
   
-  // Expand viewBox to accommodate rotated legend (negative X for labels, reduced height for tighter integration)
+  // Compact viewBox for tighter legend integration
   const svg = d3
     .create("svg")
-    .attr("viewBox", [-50, 0, 950, 850])
+    .attr("viewBox", [0, 0, 900, 700])
     .attr("style", "overflow: visible;")
     .attr("title", "Bivariate Map");
   
@@ -622,8 +621,8 @@ s3BivariateMap = {
     .selectAll("path")
     .data(s3GeoData.features)
     .join("path")
-    .attr("stroke", "white")
-    .attr("stroke-width", "1px")
+    .attr("stroke", d => d.properties.isHighlighted ? "#000" : "white")
+    .attr("stroke-width", d => d.properties.isHighlighted ? "2.5px" : "1px")
     .attr("fill", (d) => {
       return color(d.properties.bivariateClass) || "#cccccc";
     })
@@ -774,11 +773,9 @@ s3BivariateMap = {
     return selection;
   }
   
-  // Add legend to SVG - integrated with map
-  // Position legend at bottom-left with enough space for rotated diamond and labels
-  // Account for rotation: when rotated 45°, the diagonal extends sqrt(2)/2 * size in each direction
-  const legendX = 50; // More space from left edge to accommodate labels
-  const legendY = 520; // Moved up to ensure full visibility
+  // Add legend to SVG - integrated with map, positioned closer
+  const legendX = 650; // Position to the right of the map
+  const legendY = 480; // Aligned with bottom of map
   const legendGroup = svg
     .append("g")
     .attr("transform", `translate(${legendX}, ${legendY})`);
