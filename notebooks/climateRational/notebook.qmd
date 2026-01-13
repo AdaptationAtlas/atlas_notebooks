@@ -87,18 +87,13 @@ loaderDiv("plotRecentChanges");
 ```{ojs}
 //| output: false
 {
-  const _displayType = viewRecentChanges;
-  const div = document.getElementById("plotRecentChanges");
-  div.innerHTML = "";
-  let viz;
-  if (_displayType === "divergingBar") {
-    viz = barplot_recentChanges();
-  } else if (_displayType === "warmingStripes") {
-    viz = warmingStripes_recentChanges();
-  } else if (_displayType === "table") {
-    viz = dataTable(recentChanges_plotData, 500);
-  }
-  div.appendChild(viz);
+  renderToDiv("plotRecentChanges", () => {
+    if (viewRecentChanges === "divergingBar") return barplot_recentChanges();
+    if (viewRecentChanges === "warmingStripes") {
+      return warmingStripes_recentChanges();
+    }
+    return dataTable(recentChanges_plotData, 500);
+  });
 }
 ```
 
@@ -129,16 +124,10 @@ loaderDiv("plotFutureProjections");
 ```{ojs}
 //| output: false
 {
-  const _displayType = viewFutureChanges;
-  const div = document.getElementById("plotFutureProjections");
-  div.innerHTML = "";
-  let viz;
-  if (_displayType === "plot") {
-    viz = timeseries_futureProjections();
-  } else if (_displayType === "table") {
-    viz = dataTable(futureProjections_plotData, 500);
-  }
-  div.appendChild(viz);
+  renderToDiv("plotFutureProjections", () => {
+    if (viewFutureChanges === "plot") return timeseries_futureProjections();
+    return dataTable(futureProjections_plotData, 500);
+  });
 }
 ```
 
@@ -186,10 +175,7 @@ loaderDiv("plotHazardExposure");
 ```{ojs}
 //| output: false
 {
-  const div = document.getElementById("plotHazardExposure");
-  div.innerHTML = "";
-  const viz = stackbars_hazardExposure();
-  div.appendChild(viz);
+  renderToDiv("plotHazardExposure", stackbars_hazardExposure);
 }
 ```
 
@@ -285,6 +271,20 @@ sqlWhereNull = ({ value, field } = {}) => {
   return value === null ? `and ${field} is null` : `and ${field} = '${value}'`;
 };
 
+sqlList = (values = []) => `('${values.join("', '")}')`;
+
+withAdminName = (rows = []) =>
+  rows.map((row) => ({
+    ...row,
+    adminName: row.admin1_name ? `${row.admin1_name} (${row.iso3})` : row.iso3,
+  }));
+
+renderToDiv = (id, render) => {
+  const div = document.getElementById(id);
+  const viz = render();
+  div.replaceChildren(viz);
+};
+
 // alphabetic sort, nulls first
 sortByField = (a, b, { field } = {}) => {
   const av = a[field];
@@ -374,7 +374,6 @@ dbFutureHive = {
 
 ```{ojs}
 gdp_plotData = {
-  const _iso3 = admin0Select.map((d) => d.iso3c);
   const resp = await db.query(`
     SELECT iso3,
       sector,
@@ -387,7 +386,7 @@ gdp_plotData = {
           4
         ) * 100 AS pct_of_total
     FROM a0_gdp
-    WHERE iso3 in ('${_iso3.join("', '")}')
+    WHERE iso3 in ${sqlList(admin0Iso3)}
     AND sector != 'total'
     AND year = 2022
   `)
@@ -395,7 +394,6 @@ gdp_plotData = {
 }
 
 landuse_plotData = {
-  const _iso3 = admin0Select.map((d) => d.iso3c);
   const resp = await db.query(`
     SELECT iso3,
       sub_group,
@@ -404,7 +402,7 @@ landuse_plotData = {
       ha,
       ha_pct
     FROM a0_landuse
-    WHERE iso3 in ('${_iso3.join("', '")}')
+    WHERE iso3 in ${sqlList(admin0Iso3)}
     AND year = 2021
   `)
   return resp
@@ -417,9 +415,6 @@ landuse_plotData
 
 ```{ojs}
 pov_plotData = {
-  const _iso3 = admin0Select.map((d) => d.iso3c);
-  const _admin1 = admin1Select.map((d) => cleanAdminInput_SQL(d.admin1_name));
-
   const resp = await db.query(`
     SELECT 
       p.iso3,
@@ -440,46 +435,29 @@ pov_plotData = {
         ('not_poverty')
     ) AS g(group_name)
     WHERE 1=1
-    AND iso3 in ('${_iso3.join("', '")}')
+    AND iso3 in ${sqlList(admin0Iso3)}
     AND (
-     admin1_name in ('${_admin1.join("', '")}')
+     admin1_name in ${sqlList(admin1NamesClean)}
      OR admin1_name IS NULL
     )
   `);
-
-  const data = resp.map(row => ({
-    ...row,
-    adminName: row.admin1_name
-      ? `${row.admin1_name} (${row.iso3})`
-      : row.iso3
-  }));
-  return data
+  return withAdminName(resp)
 }
 ```
 
 ```{ojs}
 exposure_plotData = {
-  const _iso3 = admin0Select.map((d) => d.iso3c);
-  const _admin1 = admin1Select.map((d) => cleanAdminInput_SQL(d.admin1_name));
-
   const resp = await db.query(`
   SELECT *
   FROM exposure
     WHERE 1=1
-    AND iso3 in ('${_iso3.join("', '")}')
+    AND iso3 in ${sqlList(admin0Iso3)}
     AND (
-     admin1_name in ('${_admin1.join("', '")}')
+     admin1_name in ${sqlList(admin1NamesClean)}
      OR admin1_name IS NULL
     )
   `);
-
-  const data = resp.map(row => ({
-    ...row,
-    adminName: row.admin1_name
-      ? `${row.admin1_name} (${row.iso3})`
-      : row.iso3
-  }));
-  return data
+  return withAdminName(resp)
 }
 
 exposureMap = new Map(
@@ -546,8 +524,6 @@ exposure_groups = new Object({
 ```{ojs}
 recentChanges_plotData = {
   document.body.style.cursor = "wait";
-  const _iso3 = admin0Select.map((d) => d.iso3c);
-  const _admin1 = admin1Select.map((d) => d.admin1_name);
   const _season = seasonSelect.season;
   const _variable = climateVarSelect.id;
 
@@ -563,24 +539,17 @@ recentChanges_plotData = {
     mean_anomaly
   FROM historic_climate_timeseries
     WHERE 1=1
-    AND iso3 in ('${_iso3.join("', '")}')
+    AND iso3 in ${sqlList(admin0Iso3)}
     AND (
-     admin1_name in ('${_admin1.join("', '")}')
+     admin1_name in ${sqlList(admin1Names)}
      OR admin1_name IS NULL
     )
     ${sqlWhereNull({ field: "season", value: _season })}
     ${sqlWhereNull({ field: "hazard", value: _variable })}
   `);
 
-  const data = resp.map(row => ({
-  ...row,
-  adminName: row.admin1_name
-    ? `${row.admin1_name} (${row.iso3})`
-    : row.iso3
-  }));
-
   document.body.style.cursor = "";
-  return data;
+  return withAdminName(resp);
 }
 
 recentChanges_plotData
@@ -591,8 +560,6 @@ recentChanges_plotData
 ```{ojs}
 futureProjections_plotData = {
   document.body.style.cursor = "wait";
-  const _iso3 = admin0Select.map((d) => d.iso3c);
-  const _admin1 = admin1Select.map((d) => d.admin1_name);
   const _season = seasonSelect.season;
   const _variable = climateVarSelect.id;
 
@@ -614,26 +581,19 @@ futureProjections_plotData = {
     min_anomaly
   FROM futureProjections
     where 1=1
-    AND iso3 in ('${_iso3.join("', '")}')
+    AND iso3 in ${sqlList(admin0Iso3)}
     AND (
-     admin1_name in ('${_admin1.join("', '")}')
+     admin1_name in ${sqlList(admin1Names)}
      OR admin1_name IS NULL
     )
     ${sqlWhereNull({ field: "season", value: _season })}
     ${sqlWhereNull({ field: "hazard", value: _variable })}
-    AND timeperiod in (${["2021-2040"].map((t) => `'${t}'`).join(", ")})
-    AND scenario in (${["ssp245", "ssp585"].map((t) => `'${t}'`).join(", ")})
+    AND timeperiod in ${sqlList(["2021-2040"])}
+    AND scenario in ${sqlList(["ssp245", "ssp585"])}
   `);
 
-  const data = resp.map(row => ({
-    ...row,
-    adminName: row.admin1_name
-      ? `${row.admin1_name} (${row.iso3})`
-      : row.iso3
-  }));
-
   document.body.style.cursor = "";
-  return data;
+  return withAdminName(resp);
 }
 ```
 
@@ -741,10 +701,6 @@ extremeEvents_plotData = {
 
 ```{ojs}
 hazardExposure_plotData = {
-  const _iso3 = admin0Select.map((d) => d.iso3c);
-  const _admin1 = admin1Select.map((d) => d.admin1_name);
-  const _season = seasonSelect.season;
-
   const resp = await db.query(`
   SELECT
     iso3,
@@ -760,26 +716,20 @@ hazardExposure_plotData = {
     AND admin2_name IS NULL
     AND hazard_vars in ('NDWS+NTx35+NDWL0', 'NDWS+THI-max+NDWL0')
     AND exposure_unit = 'nominal-usd-2021'
-    AND iso3 in ('${_iso3.join("', '")}')
+    AND iso3 in ${sqlList(admin0Iso3)}
     AND (
-     admin1_name in ('${_admin1.join("', '")}')
+     admin1_name in ${sqlList(admin1Names)}
      OR admin1_name IS NULL
     )
   `);
 
-  const data = resp.map(row => ({
-    ...row,
-    adminName: row.admin1_name
-      ? `${row.admin1_name} (${row.iso3})`
-      : row.iso3
-  }));
   // Add in total production not exposed
   // const merged = data.map(d => ({
   //   ...d,
   //   total_value: exposureMap.get(`${d.iso3}|${d.admin1_name}|${d.crop}`) ?? null
   // }));
   // return merged
-  return data
+  return withAdminName(resp)
 }
 
 hazardExposure_plotData;
@@ -790,6 +740,14 @@ hazardExposure_plotData;
 #### Admin Regions
 
 {{< include /components/_adminSelectorsMulti.qmd >}}
+
+```{ojs}
+admin0Iso3 = admin0Select.map((d) => d.iso3c);
+admin1Names = admin1Select.map((d) => d.admin1_name);
+admin1NamesClean = admin1Select.map((d) =>
+  cleanAdminInput_SQL(d.admin1_name),
+);
+```
 
 #### Climate data
 
@@ -840,8 +798,6 @@ viewof climateVarSelect = Inputs.select(hazards_obj, {format: (d) => d.id});
 ```
 
 ```{ojs}
-climateForm()
-
 climateForm = () => {
   let season = Inputs.bind(
     Inputs.select(seasons, {
@@ -869,6 +825,8 @@ climateForm = () => {
     }
   )
 };
+
+climateForm();
 ```
 
 ## Figures
