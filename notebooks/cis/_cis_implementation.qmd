@@ -697,8 +697,12 @@ s3BivariateMap = {
     })
     .attr("d", geo_path);
   
-  // Tooltip on mousemove
+  // Tooltip on mousemove with hover effect
   paths
+    .on("mouseover", function(event, d) {
+      // Change stroke to black on hover
+      d3.select(this).attr("stroke", "black").attr("stroke-width", "2px");
+    })
     .on("mousemove", (event, d) => {
       const regionName = d.properties.displayName || d.properties.admin0_name;
       const readiness = d.properties.cis_readiness_avg;
@@ -735,7 +739,13 @@ s3BivariateMap = {
         .style("opacity", 1)
         .html(tooltipHtml);
     })
-    .on("mouseout", () => {
+    .on("mouseout", function(event, d) {
+      // Revert stroke to white (or keep highlighted if selected)
+      const isHighlighted = d.properties.isHighlighted;
+      d3.select(this)
+        .attr("stroke", isHighlighted ? "black" : "white")
+        .attr("stroke-width", isHighlighted ? "2.5px" : "1px");
+      
       tooltip.style("opacity", 0);
     });
   
@@ -814,37 +824,44 @@ s3BivariateMap = {
     // Rotate the entire legend 45 degrees to make it a diamond
     legendContent.attr("transform", `rotate(45, ${centerX}, ${centerY})`);
     
-    // Axis labels rotated to run parallel with the diamond edges
-    // CIS Readiness label (along the bottom-right edge of the diamond, rotated -45°)
+    // Calculate the rotated diamond corners for proper label positioning
+    // After 45° rotation, the diamond extends from the center by totalWidth/2 * sqrt(2)
+    const diagonalOffset = (totalWidth / 2) * Math.sqrt(2);
+    
+    // CIS Readiness label (along bottom-right edge, from bottom corner to right corner)
+    // Position at bottom-right of diamond, text runs along the edge
     selection
       .append("text")
-      .attr("x", centerX + 60)
-      .attr("y", totalHeight + 20)
-      .attr("font-size", "12")
+      .attr("x", centerX + diagonalOffset + 15)
+      .attr("y", centerY + diagonalOffset + 15)
+      .attr("font-size", "11")
       .attr("fill", "#333")
       .attr("font-weight", "600")
-      .attr("text-anchor", "middle")
-      .attr("transform", `rotate(-45, ${centerX + 60}, ${totalHeight + 20})`)
+      .attr("text-anchor", "start")
+      .attr("dominant-baseline", "hanging")
+      .attr("transform", `rotate(-45, ${centerX + diagonalOffset + 15}, ${centerY + diagonalOffset + 15})`)
       .text(_lang(cis.s3ReadinessLabel) + " →");
     
-    // Access label (along the top-right edge of the diamond, rotated +45°)
+    // Access label (along top-right edge, from top corner to right corner)
+    // Position at top-right of diamond, text runs along the edge
     selection
       .append("text")
-      .attr("x", totalWidth + 60)
-      .attr("y", centerY - 30)
-      .attr("font-size", "12")
+      .attr("x", centerX + diagonalOffset + 15)
+      .attr("y", centerY - diagonalOffset - 5)
+      .attr("font-size", "11")
       .attr("fill", "#333")
       .attr("font-weight", "600")
-      .attr("text-anchor", "middle")
-      .attr("transform", `rotate(45, ${totalWidth + 60}, ${centerY - 30})`)
+      .attr("text-anchor", "start")
+      .attr("dominant-baseline", "auto")
+      .attr("transform", `rotate(45, ${centerX + diagonalOffset + 15}, ${centerY - diagonalOffset - 5})`)
       .text(s3CurrentAccessLabel + " →");
     
     return selection;
   }
   
-  // Add legend to SVG - integrated with map, positioned closer
-  const legendX = 650; // Position to the right of the map
-  const legendY = 480; // Aligned with bottom of map
+  // Add legend to SVG - positioned at bottom-left to match Section 2
+  const legendX = 20;
+  const legendY = height - 180;
   const legendGroup = svg
     .append("g")
     .attr("transform", `translate(${legendX}, ${legendY})`);
@@ -1248,11 +1265,9 @@ s3Insights = {
     d.bivariateClass === "High × High"
   );
   
-  const selectedRegion = (s3FilteredCountries && s3FilteredCountries.length === section3Data.length)
-    ? "Africa" 
-    : (s3FilteredCountries && s3FilteredCountries.length === 1)
-    ? s3FilteredCountries[0]
-    : s3FilteredCountries ? `${s3FilteredCountries.length} selected countries` : "Africa";
+  // Use breadcrumb from master admin selectors for consistent region naming
+  // breadcrumb is defined in _cis_readiness_index.qmd and reflects the current admin selection
+  const selectedRegion = breadcrumb || "Sub-Saharan Africa";
   
   const insight1 = `In ${selectedRegion}, average CIS Readiness is **${avgReadiness.toFixed(2)}** while ${s3CurrentAccessLabel} averages **${(avgAccess * 100).toFixed(1)}%**.`;
   
