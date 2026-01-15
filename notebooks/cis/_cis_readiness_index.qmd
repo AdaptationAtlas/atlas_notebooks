@@ -1190,7 +1190,8 @@ s13Data = {
     
     // Calculate responsive height based on number of geographies
     const geographyCount = sorted.length;
-    const height = Math.max(500, geographyCount * 80);
+    // Height is dynamic: 20px per region to prevent label overlap, min 400px
+    const height = Math.max(400, geographyCount * 20);
     
     // Get the ordered list of countries from sorted data
     const countryOrder = sorted.map(d => d.country);
@@ -1213,7 +1214,7 @@ s13Data = {
         label: "RPSS (0-1) or Δ"
       },
       fy: { 
-        padding: 0, 
+        padding: 0,  // Set padding to 0 to reduce spacing between bars
         label: null,
         domain: countryOrder // Use pre-sorted order to maintain sort
       },
@@ -1578,7 +1579,7 @@ s14MapData = {
       rows: 20
     });
   } else {
-    // Heatmap with custom tooltip
+    // Heatmap using Observable Plot (cleaner, no overlap issues)
     // Apply threshold filter
     const thresholdFilteredData = filteredData.filter(d => 
       d["cis_readiness_index"] != null && d["cis_readiness_index"] >= s14Threshold
@@ -1611,175 +1612,67 @@ s14MapData = {
     
     // Calculate responsive dimensions
     const geographyCount = heatmapData.length;
-    const cellHeight = 30;
-    const height = Math.max(500, geographyCount * cellHeight);
-    const width = 900;
+    const cellHeight = 25;
+    const height = Math.max(400, geographyCount * cellHeight + 120); // Extra space for legend at bottom
     const maxNameLength = Math.max(...sortedCountries.map(name => name.length), 0);
-    const marginLeft = Math.max(200, maxNameLength * 8);
-    const margin = { top: 40, right: 100, bottom: 60, left: marginLeft };
+    const marginLeft = Math.max(180, maxNameLength * 7);
     
-    // Create tooltip
-    d3.select(".plotTooltip-s14").remove();
-    
-    // Add CSS for consistent tooltip styling
-    if (!d3.select("style#plotTooltipStyles").node()) {
-      d3.select("head").append("style")
-        .attr("id", "plotTooltipStyles")
-        .text(`
-          .plotTooltip {
-            font-size: 14px !important;
-            padding: 10px 12px !important;
-            line-height: 1.5 !important;
-            background: rgba(255, 255, 255, 0.95) !important;
-            border: 1px solid #ccc !important;
-            border-radius: 4px !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
-            pointer-events: none !important;
-          }
-        `);
-    }
-    
-    const tooltip = d3
-      .select("body")
-      .append("div")
-      .attr("class", "plotTooltip plotTooltip-s14")
-      .style("position", "absolute")
-      .style("opacity", 0);
-    
-    // Create SVG
-    const svg = d3
-      .create("svg")
-      .attr("viewBox", [0, 0, width + margin.left + margin.right, height + margin.top + margin.bottom])
-      .attr("style", "max-width: 100%; height: auto;");
-    
-    const g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
-    
-    // Scales
-    const xScale = d3.scaleBand()
-      .domain(indicators)
-      .range([0, width - margin.right])
-      .padding(0.05);
-    
-    const yScale = d3.scaleBand()
-      .domain(sortedCountries)
-      .range([0, height - margin.bottom])
-      .padding(0.05);
-    
-    // Color scale
-    const allValues = heatmapData.flatMap(row => 
-      indicators.map(metric => row[metric]).filter(v => v != null)
-    );
-    const colorScale = d3.scaleSequential(d3.interpolateRdYlBu)
-      .domain(d3.extent(allValues).reverse()); // Reverse to have red=high, blue=low
-    
-    // Flatten data for heatmap
+    // Flatten data for heatmap (long format)
     const longData = heatmapData.flatMap(row => 
-      indicators.map(metric => ({
+      indicators.map(indicator => ({
         country: row.country,
-        metric: metric,
-        value: row[metric]
+        indicator: indicator,
+        value: row[indicator]
       }))
     ).filter(d => d.value != null);
     
-    // Draw cells
-    g.selectAll("rect")
-      .data(longData)
-      .join("rect")
-      .attr("x", d => xScale(d.metric))
-      .attr("y", d => yScale(d.country))
-      .attr("width", xScale.bandwidth())
-      .attr("height", yScale.bandwidth())
-      .attr("fill", d => d.value !== null ? colorScale(d.value) : "white")
-      .attr("stroke", "#fff")
-      .attr("stroke-width", 0.5)
-      .on("mousemove", (event, d) => {
-        // Format value based on metric type
-        let formattedValue = d.value !== null ? d.value.toFixed(3) : "N/A";
-        if (d.metric === "Weather Stations") {
-          formattedValue = d.value !== null ? d.value.toFixed(2) : "N/A";
-        } else if (d.metric === "Precip Agreement") {
-          formattedValue = d.value !== null ? (d.value * 100).toFixed(1) + "%" : "N/A";
-        } else if (d.metric === "CIS Readiness") {
-          formattedValue = d.value !== null ? d.value.toFixed(3) : "N/A";
-        }
-        
-        tooltip
-          .style("top", event.pageY - 10 + "px")
-          .style("left", event.pageX + 10 + "px")
-          .style("opacity", 1)
-          .html(`${d.country}<br>${d.metric}: ${formattedValue}`);
-      })
-      .on("mouseout", () => {
-        tooltip.style("opacity", 0);
-      });
-    
-    // X-axis (top)
-    g.append("g")
-      .attr("transform", `translate(0, 0)`)
-      .call(d3.axisTop(xScale))
-      .selectAll("text")
-      .style("font-size", "11px")
-      .attr("transform", "rotate(-45)")
-      .style("text-anchor", "end");
-    
-    // X-axis (bottom)
-    g.append("g")
-      .attr("transform", `translate(0, ${height - margin.bottom})`)
-      .call(d3.axisBottom(xScale))
-      .selectAll("text")
-      .style("font-size", "11px")
-      .attr("transform", "rotate(-45)")
-      .style("text-anchor", "end");
-    
-    // Y-axis
-    g.append("g")
-      .call(d3.axisLeft(yScale))
-      .selectAll("text")
-      .style("font-size", "10px");
-    
-    // Color legend (simple version)
-    const legendWidth = 200;
-    const legendHeight = 20;
-    const legendX = width - margin.right - legendWidth - 10;
-    const legendY = 10;
-    
-    const legendScale = d3.scaleLinear()
-      .domain(colorScale.domain())
-      .range([0, legendWidth]);
-    
-    const legendAxis = d3.axisBottom(legendScale)
-      .ticks(5)
-      .tickFormat(d3.format(".2f"));
-    
-    const legendG = svg.append("g")
-      .attr("transform", `translate(${margin.left + legendX},${margin.top + legendY})`);
-    
-    const legendGradient = legendG.append("defs")
-      .append("linearGradient")
-      .attr("id", "heatmap-gradient-s14")
-      .attr("x1", "0%")
-      .attr("x2", "100%");
-    
-    const numStops = 10;
-    for (let i = 0; i <= numStops; i++) {
-      const value = d3.interpolateNumber(colorScale.domain()[0], colorScale.domain()[1])(i / numStops);
-      legendGradient.append("stop")
-        .attr("offset", `${(i / numStops) * 100}%`)
-        .attr("stop-color", colorScale(value));
-    }
-    
-    legendG.append("rect")
-      .attr("width", legendWidth)
-      .attr("height", legendHeight)
-      .style("fill", "url(#heatmap-gradient-s14)");
-    
-    legendG.append("g")
-      .attr("transform", `translate(0, ${legendHeight})`)
-      .call(legendAxis)
-      .selectAll("text")
-      .style("font-size", "9px");
-    
-    return svg.node();
+    // Use Observable Plot.cell for the heatmap
+    return htl.html`<div style="max-height: 700px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 10px;">
+      ${Plot.plot({
+        width: 900,
+        height: height,
+        marginLeft: marginLeft,
+        marginTop: 80,  // More space for rotated axis labels
+        marginBottom: 50,
+        marginRight: 20,
+        x: {
+          label: null,
+          tickRotate: -45,
+          domain: indicators
+        },
+        y: {
+          label: null,
+          domain: sortedCountries
+        },
+        color: {
+          type: "linear",
+          scheme: "RdYlBu",
+          reverse: true,  // Red = high, Blue = low
+          legend: true,
+          label: "Value (0-1)"
+        },
+        marks: [
+          Plot.cell(longData, {
+            x: "indicator",
+            y: "country",
+            fill: "value",
+            tip: {
+              fontSize: 14,
+              format: {
+                fill: d => d != null ? d.toFixed(3) : "N/A"
+              }
+            }
+          }),
+          Plot.text(longData, {
+            x: "indicator",
+            y: "country",
+            text: d => d.value != null ? d.value.toFixed(2) : "",
+            fill: d => d.value > 0.5 ? "white" : "black",
+            fontSize: 9
+          })
+        ]
+      })}
+    </div>`;
   }
 }
 ```
