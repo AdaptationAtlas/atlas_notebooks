@@ -1,370 +1,2963 @@
 ---
-pagetitle: "Atlas Hazard Exposure"
-nb-authors:
-  - Brayden Youngberg
-  - Pete Stewart
-date-created: "2025-02-19"
-date-edited: today
+title: "Atlas Hazard Exposure"
+page-layout: full
+format:
+  html:
+    theme: cosmo
+    toc: false
+    grid:
+      body-width: 1180px
+    css: ../../styles.css
+execute:
+  freeze: auto
 ---
 
-```{ojs}
-import { atlasHero } from "/helpers/uiComponents.ojs";
-import { atlasTOC } from "/helpers/toc.ojs";
-import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
-
-hero_url = "./../../images/default_crop.webp";
-// This ^^ must be relative path due to an issue
-// with how Quarto resolves certain paths if local image.
-// It can also be a url.
-
-atlasHero(nbTitle, hero_url);
-
-atlasTOC({
-  skip: ["notebook-title", "appendix", "source-code"], // These should be the section headings in the {# headings}
-  heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
-});
-```
-
-## `{ojs} keyInsights` {class='key-insights' #key-insight-text}
-
-# `{ojs} heading1` {#example-heading1}
 
 ```{ojs}
-dropdown_section(
-  "Advanced Controls",
-  true,
-  inputTemplate()(
-    [
-      Inputs.bind(
-        Inputs.select(
-          periods,
-          {
-            label: "Calculation Window"
-          }
-        ),
-        viewof mainHazPeriod
-      ),
-      Inputs.bind(
-        Inputs.select(
-          expVariable,
-          {
-            label: "Exposure Variable"
-          }
-        ),
-        viewof mainHazVar
-      ),
-      Inputs.bind(
-        Inputs.select(
-          severity,
-          {
-            label: "Severity"
-          }
-        ),
-        viewof mainHazSev
-      ),
-    ]
-  )
-)
+//| output: false
+import { Inputs } from "@observablehq/inputs"
+import { DuckDBClient } from "@observablehq/duckdb"
 ```
 
 ```{ojs}
-//Admin multi-select usage
-
-section1A0 = renderA0Multi();
-section1A1 = renderA1Multi();
-section1A2 = renderA2Multi();
-
-inputTemplate()([section1A0, section1A1, section1A2]);
+//| output: false
+// Observable Plot (ESM) + CSV parser (ESM)
+// Use dynamic import 
+Plot = await import("https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.14/+esm")
+csvParse = (await import("https://cdn.jsdelivr.net/npm/d3-dsv@3/+esm")).csvParse
 ```
 
-```{ojs}
-// Example queries
-getExposureData();
-getHistoricData();
-getProjectedData();
-```
-
-{{< include _template_plot.qmd >}}
-
-<!-- The above ^  {{< include path.qmd >}} alows for modular import of code.
-This is performed on build, so there are no performance implications,
-but be aware of that the global namespaces are shared, so the same variable
-or module imported in each will result in an error -->
-
-{{< lipsum 2 >}}
-
-# `{ojs} heading2` {#example-heading2}
-
-{{< lipsum 2 >}}
-
-# `{ojs} heading3` {#example-heading3}
-
-{{< lipsum 1 >}}
-
-# `{ojs} heading4` {#example-heading4}
-
-{{< lipsum 1 >}}
-
-# `{ojs} nbSummary` {#summary}
-
-{{< lipsum 1 >}}
-
-# `{ojs} appendix` {#appendix}
-
-# Source code {#source-code .hidden}
-
-<!--
-NOTE:Everything below this point will not appear in the notebook.
-This is useful to hide all of the code, master selectors (language, admin level, etc.),
-and other things that are needed for the notebook to run but would be messy if
-actually appearing in the notebook. Remove the .hidden class to show the code for
-development and testing
--->
 
 ```{ojs}
-import { generateDB, inputTemplate } from "/helpers/std.ojs";
+//| output: false
+// ------------------------------------------------------------------
+// Core helpers
+// ------------------------------------------------------------------
+hz_isHttpUrl = (x) => /^https?:\/\//i.test(String(x ?? ""))
 
-import { dropdown_section } from "/helpers/uiComponents.ojs";
-```
-
-<!-- Database Setup -->
-
-```{ojs}
-dataObj = {
-  const obj = await FileAttachment("/data/hazardExposure/nbData.json").json();
-  return obj.data
+hz_s3ToHttps = (s3) => {
+  const s = String(s3 ?? "")
+  const m = /^s3:\/\/([^\/]+)\/?(.*)$/.exec(s)
+  if (!m) return s3
+  const bucket = m[1]
+  const key = (m[2] ?? "").replace(/^\/+/, "")
+  if (!key) return `https://${bucket}.s3.amazonaws.com/`
+  if (bucket === "digital-atlas") return `https://digital-atlas.s3.amazonaws.com/${key}`
+  return `https://${bucket}.s3.amazonaws.com/${key}`
 }
 
-// The combinations of hazard X exposure data results in ~20 datasets
-// better to just make the db with the exposure data and query the other
-// datasets directly as needed rather than a hive-partiton or similar
-db = await generateDB(dataObj.filter((d) => d.key === "exposure"));
+
+hz_toServedUrl = (p) => {
+  const s = String(p ?? "").trim()
+  if (!s) return s
+  if (/^s3:\/\//i.test(s)) return hz_s3ToHttps(s)
+  if (hz_isHttpUrl(s)) return s
+  // Normalize Windows paths/backslashes to URL-style
+  return s.replace(/\\/g, "/").replace(/^\.\//, "")
+}
+
+
+hz_resolvePath = (entry) => {
+  if (!entry) return { ok: false, raw: null, url: null, source: "missing" }
+  const local = entry.local_path ?? entry.localPath ?? null
+  const s3 = entry.s3_path ?? entry.s3 ?? entry.path ?? null
+  const url0 = entry.url ?? null
+
+  if (local && String(local).trim() !== "") {
+    const raw = String(local)
+    return { ok: true, raw, url: hz_toServedUrl(raw), source: "local_path" }
+  }
+  if (s3 && String(s3).trim() !== "") {
+    const raw = String(s3)
+    const url = hz_isHttpUrl(raw) ? raw : hz_s3ToHttps(raw)
+    return { ok: true, raw, url, source: hz_isHttpUrl(raw) ? "https" : "s3_path" }
+  }
+  if (url0 && String(url0).trim() !== "") {
+    const raw = String(url0)
+    return { ok: true, raw, url: hz_isHttpUrl(raw) ? raw : hz_toServedUrl(raw), source: "url" }
+  }
+  return { ok: false, raw: null, url: null, source: "missing" }
+}
+
+hz_formatNumber = (v, { digits = 0, compact = true } = {}) => {
+  const x = Number(v)
+  if (!Number.isFinite(x)) return "—"
+  const opts = compact
+    ? { notation: "compact", compactDisplay: "short", maximumFractionDigits: digits, minimumFractionDigits: 0 }
+    : { maximumFractionDigits: digits, minimumFractionDigits: 0 }
+  return new Intl.NumberFormat(undefined, opts).format(x)
+}
+
+hz_titleCase = (s) =>
+
+  String(s ?? "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
 ```
 
 ```{ojs}
-S3HazExposurePath = (variable, period, model, severity) => {
-  const s3Root = `s3://digital-atlas/domain=hazard_exposure/source=atlas_cmip6/region=ssa/processing=hazard-risk-exposure`;
+//| output: false
+// hazardExposure_{varShort}_{period}_{model}_{severity}[_{suffix}]
+hz_parseKeyParts = (key) => {
+  const s = String(key ?? "").trim()
+  const out = { raw: s, ok: false, varShort: null, period: null, model: null, severity: null, suffix: null, scenario: null, timeframe: null }
+  if (!s) return out
+  const parts = s.split("_")
+  if (parts.length < 5 || parts[0] !== "hazardExposure") return out
 
-  return `${s3Root}/variable=${variable}/period=${period}/model=${model}/severity=${severity}/interaction.parquet`;
-};
+  out.varShort = parts[1]
+  out.period = parts[2]
+  out.severity = parts[parts.length - 1]
 
-//NOTE: Both of these are examples and need modified for notebook logic
-getHistoricData = async () => {
-  const resp = await db.query(`
-    SELECT *
-    FROM read_parquet("${S3HazExposurePath(mainHazVar, mainHazPeriod, "historic", mainHazSev)}")
-    WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
-    LIMIT 5
-  `);
-  return resp;
-};
+  // model may include underscores (e.g., ssp585_2041-2060)
+  const mid = parts.slice(3, parts.length - 1)
+  out.model = mid.join("_") || null
 
-getProjectedData = async () => {
-  const resp = await db.query(`
-    SELECT *
-    FROM read_parquet("${S3HazExposurePath(mainHazVar, mainHazPeriod, "ENSEMBLE", mainHazSev)}")
-    WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
-    LIMIT 5
-  `);
-  return resp;
-};
+  const knownSuffixes = new Set(["generic", "crop-specific", "crop_specific", "auto", "best"])
+  if (out.model) {
+    const mparts = out.model.split("_")
+    const last = mparts[mparts.length - 1]
+    if (knownSuffixes.has(last)) {
+      out.suffix = last
+      out.model = mparts.slice(0, -1).join("_") || null
+    }
+  }
 
-getExposureData = async () => {
-  //TODO: this is technically incorrect as the usd column in the exposure table is vop_usd21
-  // but due to some data issues, this is what we have to do for now.
-  const resp = await db.query(`
-    SELECT *,
-      CASE unit
-        WHEN 'intld15' THEN 'vop_intld15'
-        WHEN 'usd' THEN 'vop_usd15'
-      END AS variable
-    FROM exposure
-    WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
-    AND variable = '${mainHazVar}'
-    LIMIT 5
-  `);
-  return resp;
-};
+  // derive scenario/timeframe from model
+  if (out.model) {
+    const mod = out.model
+    if (mod === "historic" || mod === "Historical") {
+      out.scenario = "historic"
+      out.timeframe = "historic"
+    } else {
+      const mm = /^([A-Za-z0-9]+)_(\d{4}-\d{4})$/.exec(mod)
+      if (mm) {
+        out.scenario = mm[1]
+        out.timeframe = mm[2]
+      } else {
+        out.scenario = mod
+        out.timeframe = null
+      }
+    }
+  }
+
+  out.ok = true
+  return out
+}
 ```
 
-<!-- Inputs for hazards -->
+
+
+
 
 ```{ojs}
-// Main Global selectors for hazards
-// These are the "advanced controls"
-
-// model = ["historic", "ENSEMBLE"];
-expVariable = ["vop_intld15", "vop_usd15"];
-periods = ["annual", "jagermeyr"];
-severity = ["moderate", "severe", "extreme"];
-
-viewof mainHazVar = Inputs.input("vop_usd15")
-viewof mainHazPeriod = Inputs.input("annual")
-viewof mainHazSev = Inputs.input("severe")
-```
-
-<!-- Text and Language Translations -->
-
-```{ojs}
-// This cell is to contain all the headings and the notebook title
-nbTitle = _lang({
-  en: "This is a template to build Atlas notebooks",
-  fr: "Ceci est un modèle pour construire des notebooks Atlas",
-});
-// key_insights = _lang({en: "Key Insights", fr: "Résumé"})
-heading1 = _lang({ en: "Heading 1", fr: "Titre 1" });
-heading2 = _lang({ en: "Heading 2", fr: "Titre 2" });
-heading3 = _lang({ en: "Heading 3", fr: "Titre 3" });
-heading4 = _lang({ en: "Heading 4", fr: "Titre 4" });
-nbSummary = _lang({ en: "Summary", fr: "Résumé" });
-appendix = _lang(general_translations.appendix);
-```
-
-```{ojs}
-mutable hoverCountry = "SSA" // This mutable is defined here and updated in _template_plot.qmd. It should only be defined once.
-
-keyInsights = {
-  let template = _lang({
-        en: `This is where some key insights should go, they will be dynamic based on the selections such as country (**:::country:::**) and crop type (**:::cropType:::**)`,
-        fr: `Ceci est là où les résumés clés devraient être, ils seront dynamiques en fonction des sélections comme pays (**:::country:::**) et type de culture (**:::cropType:::**)`
+//| output: false
+// Responsive width sensor for Plot
+viewof hz_plotWidth = {
+  const el = html`<div class="hz-width-sensor"></div>`
+  el.value = 900
+  const ro = new ResizeObserver(() => {
+    const w = Math.floor(el.getBoundingClientRect().width || 900)
+    if (w && w !== el.value) {
+      el.value = w
+      el.dispatchEvent(new Event("input", {bubbles:true}))
+    }
   })
-  
-  let fill_items = [
-      { name: "country", value: hoverCountry },
-      { name: "cropType", value: _lang({en: 'potatoes', fr: 'pomme de terre'}) }
-    ]
-  let keyText =  md`${Lang.reduceReplaceTemplateItems(template, fill_items)}`
-  return keyText
+  ro.observe(el)
+  return el
 }
 ```
 
-{{< include /components/_adminSelectorsMulti.qmd >}}
-
-<!-- This ^ defines _adminSelectorsMulti, the admin level selectors. -->
-
-{{< include /components/_lang.qmd >}}
-
-<!-- This ^ defines _lang, the general translations, and the masterLanguage selector. -->
+```{ojs}
+//| output: false
+// Create a DuckDB client
+hz_db = DuckDBClient.of()
+```
 
 ```{ojs}
-// import { NavbarLangSelector } from "/helpers/uiComponents.ojs"
-function NavbarLangSelector(language_obj, masterLanguage) {
-  let navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
-  if (navEnd) {
-    let existingLangSelector = document.getElementById("nav-lang-selector");
-    if (!existingLangSelector) {
-      let lang_sel = Inputs.bind(
-        Inputs.radio(language_obj, {
-          label: "",
-          format: (d) => d.label
-        }),
-        viewof masterLanguage
-      );
-      lang_sel.id = "nav-lang-selector";
-      
-      // Hack the css together for the observable inputs
-      lang_sel.style.display = "flex";
-      lang_sel.style.alignItems = "center";
-      lang_sel.style.marginLeft = "10px";
-      let lang_div = lang_sel.querySelector("div");
-      lang_div.style.display = "flex";
-      lang_div.style.flexDirection = "column";
+//| output: false
+hz_db_http_init = {
+  try { await hz_db.query("INSTALL httpfs"); } catch (e) {}
+  try { await hz_db.query("LOAD httpfs"); } catch (e) {}
+  return true
+}
+```
 
-      // Insert the new item after the GitHub icon and other elements
-      navEnd.parentNode.appendChild(lang_sel);
-    }
+```{ojs}
+//| output: false
+// Normalize DuckDB query results across runtimes.
+hz_rows = {
+  function rows(res) {
+    if (!res) return []
+    if (typeof res.toArray === "function") return rows(res.toArray())
+    if (Array.isArray(res)) return res
+    if (res.data && Array.isArray(res.data)) return res.data
+    // Last resort: try iterable
+    try { return Array.from(res) } catch (e) { return res }
+  }
+  return rows
+}
+
+// Convenience wrapper
+hz_query = async (sql) => {
+  try {
+    return hz_rows(await hz_db.query(sql))
+  } catch (e) {
+    try { hz_addError("hz_query", e, { sql }) } catch (e2) {}
+    if (typeof console !== "undefined") console.error("hz_query failed", e, sql)
+    return []
   }
 }
-
-NavbarLangSelector(languages, masterLanguage)
 ```
 
-```{ojs}
-prettyLanguageView = {
-  return Inputs.bind(
-    Inputs.radio(languages, {
-      label: _lang(general_translations.language),
-      format: (d) => d.label
-    }),
-    viewof masterLanguage
-  );
-}
-```
-
-<!--
-
-# Prototypes for future use to hack a sidebar into notebooks:
-
-{.column-margin}
 
 ```{ojs}
-htl.html`
-<style>
-.sticky-margin-div {
-  position: fixed;
-  }
-@media (max-width: 768px) {
-  .sticky-margin-div {
-    position: static;
-    }
-}
-</style>
+// Simple hero
+hz_title = "Atlas Hazard Exposure"
+hz_hero_url = "./../../images/default_crop.webp"
 
-<div class = "sticky-margin-div">
-    <div>
-      ${Inputs.radio(languages, {
-        label: "Main language toggle",
-        format: (d) => d.key,
-        value: languages.find((x) => x.key === defaultLangKey),
-      })}
+hz_hero = html`
+  <section class="hero">
+    <div class="hero__text">
+      <h1>${hz_title}</h1>
+      <p>Interactive hazard exposure analysis</p>
+      <div class="hero__chips">
+        <span class="chip">Scenario comparison</span>
+        <span class="chip">Admin 0/1/2 filters</span>
+      </div>
     </div>
-  </div>`
+    <div class="hero__img">
+      <img src="${hz_hero_url}" alt="">
+    </div>
+  </section>
+`
 ```
 
-:-::
+```{ojs}
+// Render hero
+hz_hero
+```
 
--->
 
-<!-- Floating Sidebar: Self-contained HTML, CSS, and JS -->
-<!--
-<div id="floating-sidebar">
 
+```{=html}
+<style>
+html, body { overflow-x: hidden; }
+.page-columns, .content { overflow-x: hidden; }
+.quarto-toc, nav#TOC, #TOC { display: none !important; }
+
+:root{
+  --card-bg:#fff;
+  --card-bd:rgba(0,0,0,.08);
+  --muted:rgba(0,0,0,.65);
+  --muted2:rgba(0,0,0,.52);
+  --shadow:0 10px 26px rgba(0,0,0,.07);
+  --radius:16px;
+}
+.hero{
+  display:grid;
+  grid-template-columns:1.2fr .8fr;
+  gap:18px;
+  align-items:stretch;
+  background:linear-gradient(180deg, rgba(0,0,0,.035), rgba(0,0,0,.015));
+  border:1px solid var(--card-bd);
+  border-radius:var(--radius);
+  padding:16px;
+  box-shadow:var(--shadow);
+  margin:10px 0 18px 0;
+}
+.hero__text h1{ margin:0 0 6px 0; font-weight:800; }
+.hero__text p{ margin:0; color:var(--muted); }
+.hero__chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.chip{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid var(--card-bd);
+  background:rgba(255,255,255,.75);
+  font-size:.86rem;
+}
+.hero__img{ display:flex; }
+.hero__img img{
+  width:100%; height:100%;
+  object-fit:cover;
+  border-radius:14px;
+  border:1px solid var(--card-bd);
+}
+.layout{
+  display:grid;
+  grid-template-columns:420px 1fr;
+  gap:14px;
+  align-items:start;
+}
+@media (max-width: 1100px){ .layout{ grid-template-columns:1fr; } }
+.card{
+  background:var(--card-bg);
+  border:1px solid var(--card-bd);
+  border-radius:var(--radius);
+  padding:14px;
+  box-shadow:var(--shadow);
+}
+.card h3{ margin:0 0 6px 0; font-weight:800; font-size:1.05rem; }
+.card .sub{ color:var(--muted); margin:0 0 10px 0; font-size:.9rem; }
+.sticky{ position:sticky; top:10px; }
+.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+@media (max-width: 900px){ .grid2{ grid-template-columns:1fr; } }
+.kpiRow{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.kpi{
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid var(--card-bd);
+  background:rgba(0,0,0,.018);
+}
+.kpi .k{ font-size:.82rem; color:var(--muted2); }
+.kpi .v{ font-size:1.05rem; font-weight:800; margin-top:2px; overflow:hidden; text-overflow:ellipsis; }
+.hr{ height:1px; background:rgba(0,0,0,.06); margin:10px 0; }
+.smallNote{ color:var(--muted2); font-size:.86rem; }
+.badge{
+  display:inline-flex; align-items:center;
+  padding:3px 8px; border-radius:999px;
+  border:1px solid var(--card-bd);
+  background:rgba(0,0,0,.03);
+  font-size:.82rem;
+}
+.warn{
+  border:1px solid rgba(220,53,69,.35);
+  background:rgba(220,53,69,.06);
+  border-radius:14px;
+  padding:10px 12px;
+}
+.ok{
+  border:1px solid rgba(25,135,84,.35);
+  background:rgba(25,135,84,.06);
+  border-radius:14px;
+  padding:10px 12px;
+}
+
+/* ==========================
+   Atlas Hazard Exposure UI
+========================== */
+.hz-card{
+  background:var(--card-bg);
+  border:1px solid var(--card-bd);
+  border-radius:18px;
+  box-shadow:var(--shadow);
+  padding:14px 14px 12px 14px;
+}
+.hz-card__head{
+  display:flex;
+  gap:12px;
+  align-items:flex-start;
+  justify-content:space-between;
+  padding-bottom:10px;
+  border-bottom:1px solid rgba(0,0,0,.06);
+  margin-bottom:12px;
+}
+.hz-card__title{ font-weight:900; font-size:1.05rem; line-height:1.1; }
+.hz-card__sub{ color:var(--muted); font-size:.88rem; margin-top:2px; }
+.hz-pill{
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,.08);
+  background:rgba(0,0,0,.02);
+  font-size:.82rem;
+  white-space:nowrap;
+}
+.hz-grid{ display:grid; gap:14px; }
+.hz-grid--2{ grid-template-columns:1fr 1fr; }
+@media (max-width: 980px){ .hz-grid--2{ grid-template-columns:1fr; } }
+
+.hz-section{
+  border:1px solid rgba(0,0,0,.06);
+  background:rgba(0,0,0,.012);
+  border-radius:16px;
+  padding:12px;
+}
+.hz-section__title{
+  font-weight:900;
+  font-size:.92rem;
+  margin:0 0 8px 0;
+}
+.hz-field{ margin:8px 0; }
+.hz-muted{ color:var(--muted); font-size:.86rem; margin-top:8px; }
+.hz-kv{
+  display:grid;
+  grid-template-columns:110px 1fr;
+  gap:6px 10px;
+  margin-top:10px;
+  font-size:.86rem;
+}
+.hz-kv__k{ color:var(--muted2); }
+.hz-kv__v code{ word-break:break-word; }
+
+.hz-actions{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:12px;
+  padding-top:10px;
+  border-top:1px solid rgba(0,0,0,.06);
+}
+.hz-details summary{
+  cursor:pointer;
+  color:rgba(0,0,0,.78);
+  font-weight:700;
+}
+.hz-details{ margin-top:10px; }
+
+.hz-card select, .hz-card input[type="text"], .hz-card input[type="number"]{
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;
+}
+.hz-card select{
+  border:1px solid rgba(0,0,0,.12);
+  border-radius:12px;
+  padding:8px 10px;
+  background:#fff;
+}
+.hz-card select[multiple]{
+  min-height:180px;
+  max-height:260px;
+  overflow:auto;
+}
+.hz-card input[type="text"], .hz-card input[type="number"]{
+  border:1px solid rgba(0,0,0,.12);
+  border-radius:12px;
+  padding:8px 10px;
+}
+.hz-btn{
+  border:1px solid rgba(0,0,0,.12);
+  background:rgba(0,0,0,.02);
+  border-radius:999px;
+  padding:8px 12px;
+  font-weight:800;
+  cursor:pointer;
+}
+.hz-btn:hover{ background:rgba(0,0,0,.04); }
+.hz-btn--primary{ background:#111; color:#fff; border-color:#111; }
+.hz-btn--primary:hover{ background:#000; }
+
+
+/* ----------------------------------------------------------
+   Layout polish: sidebar + main content
+---------------------------------------------------------- */
+.layout{
+  display:grid;
+  grid-template-columns: 420px minmax(0,1fr);
+  gap:16px;
+  align-items:start;
+}
+.layout__sidebar,.layout__main{ min-width:0; }
+
+.layout__sidebar{
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding-right: 4px;
+}
+.layout__sidebar::-webkit-scrollbar{ width: 10px; }
+.layout__sidebar::-webkit-scrollbar-thumb{ background: rgba(0,0,0,.12); border-radius: 10px; }
+.layout__sidebar::-webkit-scrollbar-track{ background: transparent; }
+
+@media (max-width: 1100px){
+  .layout{ grid-template-columns: 1fr; }
+}
+
+/* Scenario split cards */
+.hz-split{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+@media (max-width: 900px){
+  .hz-split{ grid-template-columns: 1fr; }
+}
+.hz-sideCard{
+  border:1px solid var(--card-bd);
+  border-radius:14px;
+  padding:12px;
+  background:rgba(255,255,255,.7);
+}
+.hz-sideCard__title{ font-weight:700; font-size:13px; margin-bottom:8px; }
+.hz-sideCard__sub{ color:var(--muted); font-size:12px; margin-top:6px; }
+.hz-sideCard__kv{ display:grid; grid-template-columns: 96px 1fr; gap:6px 10px; margin-top:8px; }
+.hz-sideCard__kv .k{ color:var(--muted); font-size:12px; }
+.hz-sideCard__kv .v{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* Inputs: make selects fit */
+.hz-card select, .hz-card input[type="text"], .hz-card input[type="search"], .hz-card input[type="url"]{
+  width:100% !important;
+  max-width:100%;
+}
+
+
+.hz-ms{ display:flex; flex-direction:column; gap:10px; }
+.hz-ms__top{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.hz-ms__search{
+  flex:1;
+  min-width: 180px;
+  padding:10px 12px;
+  border:1px solid var(--card-bd);
+  border-radius:12px;
+  background:#fff;
+}
+.hz-btn{
+  border:1px solid var(--card-bd);
+  background:rgba(0,0,0,.02);
+  border-radius:12px;
+  padding:8px 10px;
+  cursor:pointer;
+}
+.hz-btn:hover{ box-shadow:0 2px 10px rgba(0,0,0,.06); }
+.hz-ms__chips{ display:flex; gap:6px; flex-wrap:wrap; }
+.hz-chip{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid var(--card-bd);
+  background:rgba(255,255,255,.9);
+  font-size:12px;
+}
+.hz-chip button{
+  border:none; background:transparent; cursor:pointer;
+  font-size:14px; line-height:1; padding:0 2px; opacity:.7;
+}
+.hz-chip button:hover{ opacity:1; }
+.hz-ms__list{
+  border:1px solid var(--card-bd);
+  border-radius:14px;
+  padding:8px;
+  max-height: 260px;
+  overflow:auto;
+  background:#fff;
+}
+.hz-ms__item{
+  display:flex; align-items:center; gap:10px;
+  padding:8px 8px;
+  border-radius:10px;
+  cursor:pointer;
+}
+.hz-ms__item:hover{ background:rgba(0,0,0,.03); }
+.hz-ms__item input{ width:16px; height:16px; }
+.hz-ms__meta{ color:var(--muted); font-size:12px; margin-left:auto; }
+.hz-ms__empty{ color:var(--muted); padding:10px; }
+
+
+.hz-width-sensor{ width:100%; height:0; overflow:hidden; }
+
+
+/* ===== v44 layout polish (no horizontal scroll, full-width app) ===== */
+html, body{ max-width:100%; overflow-x:hidden; }
+main.content, .content{ max-width:100%; }
+.app{
+  max-width: min(1240px, 100%);
+  margin: 0 auto;
+  padding: 0 14px;
+}
+.app__stack{ display:flex; flex-direction:column; gap:14px; }
+.hz-card, .card{ max-width:100%; min-width:0; }
+.hz-grid, .hz-split{ min-width:0; }
+.hz-grid--2{
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.hz-split{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap:12px;
+}
+@media (max-width: 980px){
+  .hero{ grid-template-columns: 1fr; }
+  .hz-grid--2{ grid-template-columns: 1fr; }
+  .hz-split{ grid-template-columns: 1fr; }
+}
+.hz-width-sensor{ width:100%; height:1px; }
+pre, code{ max-width:100%; }
+pre{ overflow:auto; }
+.hz-sideCard__kv code, .hz-kv__v code{ word-break: break-word; white-space: normal; }
+
+
+.hz-topnav{
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display:flex;
+  gap:10px;
+  align-items:center;
+  padding:10px 12px;
+  margin: 0 0 12px 0;
+  background: rgba(255,255,255,.82);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--card-bd);
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(0,0,0,.06);
+}
+.hz-topnav a{
+  text-decoration:none;
+  font-weight:600;
+  font-size:13px;
+  color: rgba(0,0,0,.78);
+  padding:8px 10px;
+  border-radius:999px;
+}
+.hz-topnav a:hover{ background: rgba(0,0,0,.05); }
+.hz-topnav .hz-topnav__spacer{ flex:1; }
+.hz-topnav .hz-pill{ margin-left:auto; }
+
+.hz-ms{
+  border:1px solid var(--card-bd);
+  background: rgba(255,255,255,.75);
+  border-radius: 14px;
+  padding:10px;
+}
+.hz-ms__top{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.hz-ms__search{
+  flex: 1 1 260px;
+  padding:10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--card-bd);
+  background: #fff;
+}
+.hz-ms__search:focus{ outline: 2px solid rgba(0,0,0,.18); outline-offset: 2px; }
+.hz-ms__chips{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:10px;
+}
+.hz-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--card-bd);
+  background: rgba(0,0,0,.03);
+}
+.hz-chip button{
+  border:none;
+  background: rgba(0,0,0,.08);
+  width:22px; height:22px;
+  border-radius: 999px;
+  cursor:pointer;
+}
+.hz-chip button:hover{ background: rgba(0,0,0,.14); }
+.hz-ms__list{
+  margin-top:10px;
+  border-top: 1px dashed rgba(0,0,0,.12);
+  padding-top:10px;
+  max-height: 260px;
+  overflow:auto;
+}
+.hz-ms__item{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 8px;
+  border-radius: 10px;
+}
+.hz-ms__item:hover{ background: rgba(0,0,0,.04); }
+.hz-ms__item input{ transform: scale(1.05); }
+</style>
+```
+
+
+```{ojs}
+hz_main
+```
+
+
+
+```{ojs}
+//| output: false
+
+// Runtime diagnostics (browser)
+
+
+hz_diagInit = {
+  try {
+    if (typeof window === "undefined") return null
+    if (window.__hzDiag) return window.__hzDiag
+
+    const state = { errors: [], seen: new Set() }
+
+    const addError = (context, err, details=null) => {
+      try {
+        const msg = String(err?.message ?? err)
+        const stack = err?.stack ? String(err.stack) : ""
+        const id = `${context}::${msg}`
+
+        if (!state.seen.has(id)) {
+          state.seen.add(id)
+          state.errors.push({
+            time: new Date().toISOString(),
+            context,
+            message: msg,
+            stack,
+            details
+          })
+
+          window.dispatchEvent(new CustomEvent("hz:diag", { detail: state.errors.slice() }))
+        }
+      } catch (e) {
+        state.errors.push({
+          time: new Date().toISOString(),
+          context: "hz:addError",
+          message: String(e?.message ?? e),
+          stack: e?.stack ? String(e.stack) : "",
+          details: null
+        })
+        window.dispatchEvent(new CustomEvent("hz:diag", { detail: state.errors.slice() }))
+      }
+    }
+
+    window.__hzDiag = { state, addError }
+
+    // Hook global errors once
+    if (!window.__hzRuntimeHooked) {
+      window.__hzRuntimeHooked = true
+      window.addEventListener("error", (ev) => {
+        addError("window.error", ev?.error ?? ev?.message ?? ev, {
+          filename: ev?.filename, lineno: ev?.lineno, colno: ev?.colno
+        })
+      })
+      window.addEventListener("unhandledrejection", (ev) => {
+        addError("window.unhandledrejection", ev?.reason ?? ev)
+      })
+    }
+
+    // Initial broadcast
+    window.dispatchEvent(new CustomEvent("hz:diag", { detail: state.errors.slice() }))
+    return window.__hzDiag
+  } catch (e) {
+    if (typeof console !== "undefined") console.error("hz_diagInit failed", e)
+    return null
+  }
+}
+
+hz_addError = (context, err, details=null) => {
+  try {
+    if (typeof window !== "undefined" && window.__hzDiag?.addError) {
+      window.__hzDiag.addError(context, err, details)
+    } else if (typeof console !== "undefined") {
+      console.error(`[${context}]`, err, details ?? "")
+    }
+  } catch (e) {
+    if (typeof console !== "undefined") console.error("hz_addError failed", e)
+  }
+}
+
+// Reactive stream of errors for display
+hz_errors = Generators.observe((notify) => {
+  // ensure diagnostics are initialized
+  hz_diagInit
+  if (typeof window === "undefined") {
+    notify([])
+    return () => {}
+  }
+
+  const handler = (ev) => notify(ev?.detail ?? [])
+  window.addEventListener("hz:diag", handler)
+
+  // seed with current state (if any)
+  const existing = window.__hzDiag?.state?.errors ?? []
+  notify(existing.slice())
+
+  return () => window.removeEventListener("hz:diag", handler)
+})
+
+hz_renderErrors = (errors) => {
+  const esc = (s) => String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+
+  if (!errors || errors.length === 0) {
+    return html`<div class="callout callout-note"><strong>No runtime errors captured.</strong></div>`
+  }
+
+  return html`<div class="callout callout-warning">
+    <strong>Runtime diagnostics (${errors.length})</strong>
+    <ol style="margin-top:0.5rem;">
+      ${errors.map(e => html`<li style="margin-bottom:0.75rem;">
+        <div><strong>${esc(e.context)}</strong> <span style="opacity:.75;">${esc(e.time)}</span></div>
+        <div style="white-space:pre-wrap;">${esc(e.message)}</div>
+
+        ${e.details ? html`<details style="margin-top:0.25rem;">
+          <summary>details</summary>
+          <pre style="white-space:pre-wrap; margin:0.5rem 0 0 0;">${esc(JSON.stringify(e.details, null, 2))}</pre>
+        </details>` : null}
+
+        ${e.stack ? html`<details style="margin-top:0.25rem;">
+          <summary>stack</summary>
+          <pre style="white-space:pre-wrap; margin:0.5rem 0 0 0;">${esc(e.stack)}</pre>
+        </details>` : null}
+      </li>`)}
+    </ol>
+  </div>`
+}
+
+
+// nbData.json loader + normalizer
+
+
+hz_loadJson = async (path) => {
+  try {
+    const res = await fetch(path)
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`)
+    return await res.json()
+  } catch (e) {
+    hz_addError(`loadJson(${path})`, e)
+    throw e
+  }
+}
+
+// Make nbData tolerant to different JSON shapes
+// Expected final: Array of dataset objects [{key, local_path|s3_path, sql, ...}, ...]
+hz_normalizeNbData = (raw) => {
+  if (Array.isArray(raw)) return { ok:true, data: raw, note: "root is array" }
+
+  if (raw && typeof raw === "object") {
+    // Common wrapper fields
+    const candidates = ["data", "datasets", "items", "resources", "catalog", "tables"]
+    for (const k of candidates) {
+      const v = raw[k]
+      if (Array.isArray(v)) return { ok:true, data: v, note: `using raw.${k}` }
+      if (v && typeof v === "object" && Array.isArray(v.data)) {
+        return { ok:true, data: v.data, note: `using raw.${k}.data` }
+      }
+    }
+
+    // Object-of-objects → values()
+    const vals = Object.values(raw)
+    if (vals.length && vals.every(v => v && typeof v === "object")) {
+      const looksLike = vals.some(v =>
+        ("key" in v) || ("sql" in v) || ("local_path" in v) || ("s3_path" in v)
+      )
+      if (looksLike) return { ok:true, data: vals, note: "using Object.values(raw)" }
+    }
+
+    return {
+      ok: false,
+      data: null,
+      note: "root object not recognized",
+      rawKeys: Object.keys(raw).slice(0, 50)
+    }
+  }
+
+  return { ok:false, data:null, note: `unsupported JSON type: ${typeof raw}` }
+}
+
+// Load dataset index
+hz_nbMeta = {
+  try {
+    const raw = await hz_loadJson("/data/hazardExposure/nbData.json")
+    const norm = hz_normalizeNbData(raw)
+
+    if (!norm.ok || !Array.isArray(norm.data)) {
+      const err = new Error(`nbData.json did not parse to an array. ${norm.note || ""}`)
+      hz_addError("nbData.json shape", err, { norm, rawType: typeof raw })
+      return {
+        ok: false,
+        reason: err.message,
+        data: [],
+        rawType: typeof raw,
+        rawKeys: norm.rawKeys ?? (raw && typeof raw === "object" ? Object.keys(raw).slice(0, 50) : [])
+      }
+    }
+
+    return {
+      ok: true,
+      reason: norm.note,
+      data: norm.data,
+      rawType: typeof raw,
+      rawKeys: raw && typeof raw === "object" ? Object.keys(raw).slice(0, 50) : []
+    }
+  } catch (e) {
+    hz_addError("Load nbData.json", e)
+    return {
+      ok: false,
+      reason: "Failed to load nbData.json: " + String(e?.message ?? e),
+      data: [],
+      rawType: null,
+      rawKeys: []
+    }
+  }
+}
+```
+
+```{ojs}
+//| output: false
+hz_nbMeta.ok
+  ? html`<div class="callout callout-note">
+      <strong>nbData.json:</strong> Loaded ${hz_nbMeta.data.length} entries <span style="opacity:.75;">(${hz_nbMeta.reason})</span>
+    </div>`
+  : html`<div class="callout callout-important">
+      <strong>nbData.json:</strong> ${hz_nbMeta.reason}
+      <div style="margin-top:.25rem; white-space:pre-wrap; opacity:.85;">
+        Raw keys: ${JSON.stringify(hz_nbMeta.rawKeys)}
+      </div>
+    </div>`
+```
+
+```{ojs}
+//| output: false
+hz_errorsPanel = hz_renderErrors(hz_errors)
+```
+
+
+
+```{ojs}
+//| output: false
+// Build a lookup map for fast key -> entry access
+hz_nbIndex = {
+  const m = new Map()
+  for (const d of hz_nbMeta.data ?? []) m.set(d.key, d)
+  return m
+}
+```
+
+```{ojs}
+//| output: false
+// Parse available hazard exposure datasets from keys like: hazardExposure_usd15_annual_historic_moderate
+hz_hazEntries = {
+  const out = []
+  const methodSuffixes = new Set(["generic", "crop_specific"])
+  for (const d of hz_nbMeta.data ?? []) {
+    if (!d.key?.startsWith("hazardExposure_")) continue
+    const parts = d.key.split("_").filter(Boolean)
+    if (parts.length < 5) continue
+
+    const maybeMethod = parts[parts.length - 1]
+    const hasMethod = methodSuffixes.has(maybeMethod)
+
+    const severity = hasMethod ? parts[parts.length - 2] : parts[parts.length - 1]
+    const method = hasMethod ? maybeMethod : null
+    const modelParts = parts.slice(3, hasMethod ? (parts.length - 2) : (parts.length - 1))
+    const model = modelParts.join("_")
+
+    if (!model || !severity) continue
+
+    out.push({
+      key: d.key,
+      varShort: parts[1],     // usd15 / intld15 etc.
+      period: parts[2],       // annual / jagermeyr etc.
+      model,                 // historical / ensemble / ssp245_2041-2060 etc.
+      severity,              // moderate / severe / extreme etc.
+      method,                // generic / crop_specific (optional)
+      entry: d
+    })
+  }
+  return out
+}
+```
+
+```{ojs}
+//| output: false
+// Options derived from nbData.json (hazard exposure datasets)
+
+hz_parseHazKey = (key) => {
+  try {
+    const s = String(key ?? "")
+    if (!s.startsWith("hazardExposure_")) return null
+
+    const parts = s.split("_")
+    if (parts.length < 5) return null
+
+    const varShort = parts[1]
+    const period = parts[2]
+
+    const knownMethods = new Set(["generic","crop_specific"])
+    let method = null
+    let severity = null
+    let model = null
+
+    if (knownMethods.has(parts[parts.length - 1])) {
+      method = parts[parts.length - 1]
+      severity = parts[parts.length - 2]
+      model = parts.slice(3, parts.length - 2).join("_")
+    } else {
+      severity = parts[parts.length - 1]
+      model = parts.slice(3, parts.length - 1).join("_")
+    }
+
+    return { key: s, varShort, period, model, severity, method }
+  } catch (e) {
+    hz_addError("hz_parseHazKey", e, { key })
+    return null
+  }
+}
+
+hz_parsed = {
+  const parsed = hz_hazEntries
+    .map(d => hz_parseHazKey(d.key))
+    .filter(Boolean)
+
+  if (hz_nbMeta.ok && hz_hazEntries.length > 0 && parsed.length === 0) {
+    hz_addError(
+      "Key parsing",
+      new Error("No keys matched expected pattern hazardExposure_{varShort}_{period}_{model}_{severity}"),
+      { exampleKeys: hz_hazEntries.slice(0, 10).map(d => d.key) }
+    )
+  }
+
+  return parsed
+}
+
+hz_varShorts = Array.from(new Set(hz_parsed.map(d => d.varShort))).sort()
+hz_periods   = Array.from(new Set(hz_parsed.map(d => d.period))).sort()
+hz_models    = Array.from(new Set(hz_parsed.map(d => d.model))).sort()
+hz_severities= Array.from(new Set(hz_parsed.map(d => d.severity))).sort()
+
+hz_formatVarShort = (v) => {
+  const s = String(v ?? "")
+  if (s === "vop") return "Value of production (vop)"
+  if (s === "prod") return "Production (prod)"
+  if (s === "area") return "Area (area)"
+  return s
+}
+
+// Friendly label for the selected exposure value
+hz_varLabel = (() => {
+  const s = String(hz_varShort ?? "")
+  if (s === "intld15") return "International Dollars (2015)"
+  if (s === "usd15") return "USD (2015)"
+  if (s === "people") return "People"
+  return hz_formatVarShort(s)
+})()
+
+hz_formatPeriod = (p) => {
+  const s = String(p ?? "")
+  if (s === "annual") return "Annual"
+  if (s.toLowerCase().includes("jaeger") || s.toLowerCase().includes("jager")) return "Jägermeyr"
+  return s
+}
+
+hz_formatSeverity = (sev) => {
+  const s = String(sev ?? "")
+  if (s === "all") return "All"
+  return s.toUpperCase()
+}
+
+hz_formatModel = (m) => {
+  const s = String(m ?? "")
+  if (/hist|historic/i.test(s)) return "Historical"
+  // ssp245_2050 -> SSP245 (2050)
+  const mm = /^ssp(\d{3})_(\d{4})$/.exec(s)
+  if (mm) return `SSP${mm[1]} (${mm[2]})`
+  return s
+}
+
+hz_varShortOptions  = hz_varShorts.map(v => ({ label: hz_formatVarShort(v), value: v }))
+hz_periodOptions    = hz_periods.map(p => ({ label: hz_formatPeriod(p), value: p }))
+hz_severityOptions  = hz_severities.map(s => ({ label: hz_formatSeverity(s), value: s }))
+hz_scenOptions      = hz_models.map(m => ({ label: hz_formatModel(m), value: m }))
+
+hz_defaultVarShort = hz_varShorts.find(v => /usd15/i.test(String(v))) ?? hz_varShorts.find(v => /intld15/i.test(String(v))) ?? hz_varShorts[0] ?? null
+hz_defaultPeriod    = hz_periods.includes("annual") ? "annual" : (hz_periods[0] ?? null)
+hz_defaultSeverity = hz_severities.find(s => String(s).toLowerCase() === "severe") ?? hz_severities.find(s => String(s).toLowerCase() === "extreme") ?? hz_severities[0] ?? null
+
+hz_defaultModel1 = hz_models.find(m => /historic/i.test(String(m))) ?? hz_models[0] ?? null
+hz_defaultModel2 = hz_models.find(m => /ensemble/i.test(String(m))) ?? hz_models.find(m => String(m) !== String(hz_defaultModel1)) ?? hz_defaultModel1
+
+({
+  varShorts: hz_varShorts,
+  periods: hz_periods,
+  models: hz_models,
+  severities: hz_severities
+})
+```
+
+```{ojs}
+//| output: false
+// View controls
+viewof hz_varShort = Inputs.select(hz_varShorts, {
+  label: "Exposure value:",
+  format: hz_formatVarShort,
+  value: hz_defaultVarShort
+})
+```
+
+```{ojs}
+//| output: false
+viewof hz_period = Inputs.select(hz_periods, {
+  label: "Period:",
+  format: hz_formatPeriod,
+  value: hz_defaultPeriod
+})
+```
+
+```{ojs}
+//| output: false
+viewof hz_severity = Inputs.select(hz_severities, {
+  label: "Severity:",
+  format: hz_formatSeverity,
+  value: hz_defaultSeverity
+})
+```
+
+```{ojs}
+//| output: false
+// Scenario/timeframe label formatter + parser 
+hz_formatScenXTime = (scenTime) => {
+  const s = String(scenTime ?? "").trim()
+  if (!s) return ""
+  if (s === "historic" || s === "Historical") return "Historical"
+  const m = /^([A-Za-z0-9]+)_(\d{4}-\d{4})$/.exec(s)
+  if (m) return `${m[1].toUpperCase()} ${m[2]}`
+  return s
+}
+
+hz_parseScenXTime = (scenTime) => {
+  const s = String(scenTime ?? "").trim()
+  if (!s || s === "historic" || s === "Historical") {
+    return { scenTime: "historic", scenario: "historic", timeframe: "historic", model: "historic" }
+  }
+  const m = /^([A-Za-z0-9]+)_(\d{4}-\d{4})$/.exec(s)
+  if (m) return { scenTime: s, scenario: m[1], timeframe: m[2], model: "ENSEMBLE" }
+  return { scenTime: s, scenario: s, timeframe: null, model: s }
+}
+```
+
+```{ojs}
+//| output: false
+viewof hz_scen1 = Inputs.select(hz_scenXTime, {
+  label: "Scenario A:",
+  format: hz_formatScenXTime,
+  value: "historic"
+})
+```
+
+```{ojs}
+//| output: false
+viewof hz_scen2 = Inputs.select(hz_scenXTime, {
+  label: "Scenario B:",
+  format: hz_formatScenXTime,
+  value: "ssp585_2041-2060"
+})
+
+
+hz_scenXTime = [
+  "historic",
+  "ssp126_2021-2040","ssp126_2041-2060","ssp126_2061-2080",
+  "ssp245_2021-2040","ssp245_2041-2060","ssp245_2061-2080",
+  "ssp370_2021-2040","ssp370_2041-2060","ssp370_2061-2080",
+  "ssp585_2021-2040","ssp585_2041-2060","ssp585_2061-2080"
+]
+// Default  values:
+// scenario1 = historic; scenario2 = ssp585_2041-2060
+```
+
+```{ojs}
+//| output: false
+// Chart toggles
+viewof hz_relative = Inputs.toggle({ label: "Show % (relative values)", value: false })
+```
+
+```{ojs}
+//| output: false
+viewof hz_difference = Inputs.toggle({ label: "Show difference (Right − Left)", value: false })
+```
+
+```{ojs}
+//| output: false
+// Hazard dataset method (suffix) selector
+hz_methodOptions = ["auto", "generic", "crop_specific"]
+hz_methodLabel = (v) => ({
+  auto: "Auto (best available)",
+  generic: "Generic (all commodities aggregated)",
+  crop_specific: "Crop-specific (SPAM crops + GLW livestock)"
+}[v] ?? v)
+
+viewof hz_method = Inputs.radio(hz_methodOptions, {
+  label: "Hazard method:",
+  value: "generic",
+  format: hz_methodLabel
+})
+```
+
+```{ojs}
+//| output: false
+// Commodity metadata from SPAM (crops) and GLW4 (livestock)
+hz_spamCodesUrl = "https://raw.githubusercontent.com/AdaptationAtlas/hazards_prototype/main/metadata/SpamCodes.csv"
+
+hz_spamCodes = {
+  try {
+    const txt = await (await fetch(hz_spamCodesUrl)).text()
+    const rows = csvParse(txt)
+
+    const norm = (s) => String(s ?? "")
+      .trim()
+      .toLowerCase()
+      .replaceAll("/", "-")
+      .replaceAll("&", "and")
+      .replaceAll(" ", "-")
+      .replaceAll("--", "-")
+
+    const crops = rows
+      .map(r => r.Fullname ?? r.fullname ?? r.NAME ?? r.name ?? "")
+      .filter(Boolean)
+      .map(norm)
+
+    // A light categorization
+    const cereals = new Set([
+      "maize","rice","wheat","barley","sorghum","millet","oats","rye","triticale","teff"
+    ])
+    const legumes = new Set([
+      "beans","cowpea","chickpea","lentil","pigeonpea","soybean","groundnuts","peas","bambara-beans"
+    ])
+    const rootsTubers = new Set([
+      "cassava","potato","sweet-potato","yam","taro","cocoyam"
+    ])
+
+    const group = (name) => (c) => {
+      if (name === "cereals") return cereals.has(c)
+      if (name === "legumes") return legumes.has(c)
+      if (name === "roots_tubers") return rootsTubers.has(c)
+      return true
+    }
+
+    return {
+      ok: true,
+      crops: Array.from(new Set(crops)).sort(),
+      groups: {
+        cereals: Array.from(new Set(crops.filter(group("cereals")))).sort(),
+        legumes: Array.from(new Set(crops.filter(group("legumes")))).sort(),
+        roots_tubers: Array.from(new Set(crops.filter(group("roots_tubers")))).sort()
+      }
+    }
+  } catch (e) {
+    hz_addError("Load SpamCodes.csv", e)
+    return { ok:false, crops: [], groups: { cereals: [], legumes: [], roots_tubers: [] } }
+  }
+}
+
+// GLW4 livestock list 
+hz_livestock = [
+  "cattle","chicken","duck","goat","pig","sheep"
+]
+```
+
+```{ojs}
+//| output: false
+// Union of crops + livestock
+hz_allCommodities = {
+  const crops = hz_spamCodes?.crops ?? []
+  const livestock = hz_livestock ?? []
+  const set = new Set([...crops, ...livestock].filter(Boolean))
+  return Array.from(set).sort((a,b) => String(a).localeCompare(String(b)))
+}
+```
+
+
+```{ojs}
+//| output: false
+// Commodity selectors
+hz_commodityGroupOptions = ["all", "crops", "livestock", "cereals", "legumes", "roots_tubers", "custom"]
+hz_commodityGroupLabel = (v) => ({
+  all: "All (crops + livestock)",
+  crops: "Crops (SPAM2020)",
+  livestock: "Livestock (GLW4)",
+  cereals: "Cereals",
+  legumes: "Legumes",
+  roots_tubers: "Roots & tubers",
+  custom: "Custom (pick manually)"
+}[v] ?? v)
+
+viewof hz_commodityGroup = Inputs.select(hz_commodityGroupOptions, {
+  label: "Commodities:",
+  value: "crops",
+  format: hz_commodityGroupLabel
+})
+```
+
+```{ojs}
+//| output: false
+hz_selectedCommodGroup = hz_commodityGroup
+```
+
+
+```{ojs}
+//| output: false
+hz_commodityOptions = {
+  const g = hz_commodityGroup
+  if (g === "livestock") return hz_livestock
+  if (g === "crops") return hz_spamCodes.crops
+  if (g === "cereals") return hz_spamCodes.groups.cereals
+  if (g === "legumes") return hz_spamCodes.groups.legumes
+  if (g === "roots_tubers") return hz_spamCodes.groups.roots_tubers
+  // default list for "all" and "custom"
+  return [...hz_spamCodes.crops, ...hz_livestock].filter(Boolean).sort()
+}
+
+hz_commodityLabelOf = (v) => hz_titleCase(v)
+
+//multi-select: search + chips + checklist
+viewof hz_commodities = {
+  const disabled = (hz_commodityGroup === "all")
+  const options = (hz_commodityOptions ?? []).map(v => ({
+    value: v,
+    label: hz_commodityLabelOf(v)
+  }))
+
+  const form = html`<form class="hz-ms">
+    <div class="hz-ms__top">
+      <input class="hz-ms__search" type="search" placeholder="Search commodities (e.g., maize, cattle, cassava)..." ${disabled ? "disabled" : ""}/>
+      <button class="hz-btn" type="button" data-act="all" ${disabled ? "disabled" : ""}>Select all</button>
+      <button class="hz-btn" type="button" data-act="none" ${disabled ? "disabled" : ""}>Clear</button>
+    </div>
+    <div class="hz-ms__chips"></div>
+    <div class="hz-ms__list"></div>
+    ${disabled ? html`<div class="hz-muted">All commodities selected. Choose a commodity group other than “All” to filter.</div>` : ""}
+  </form>`
+
+  const $search = form.querySelector(".hz-ms__search")
+  const $chips = form.querySelector(".hz-ms__chips")
+  const $list = form.querySelector(".hz-ms__list")
+  const $btnAll = form.querySelector('[data-act="all"]')
+  const $btnNone = form.querySelector('[data-act="none"]')
+
+  let selected = new Set([])
+
+  const emit = () => {
+    form.value = Array.from(selected)
+    form.dispatchEvent(new Event("input", { bubbles: true }))
+  }
+
+  const renderChips = () => {
+    $chips.replaceChildren()
+    if (selected.size === 0) return
+
+    for (const v of Array.from(selected)) {
+      const chip = html`<span class="hz-chip">
+        <span>${hz_commodityLabelOf(v)}</span>
+        <button type="button" aria-label="Remove">×</button>
+      </span>`
+      chip.querySelector("button").onclick = () => {
+        selected.delete(v)
+        render()
+        emit()
+      }
+      $chips.appendChild(chip)
+    }
+  }
+
+  const renderList = () => {
+    const q = String($search?.value ?? "").trim().toLowerCase()
+    const filtered = !q ? options : options.filter(o =>
+      o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)
+    )
+
+    $list.replaceChildren()
+
+    if (filtered.length === 0) {
+      $list.appendChild(html`<div class="hz-ms__empty">No matches.</div>`)
+      return
+    }
+
+    for (const o of filtered) {
+      const checked = selected.has(o.value)
+      const row = html`<div class="hz-ms__item">
+        <input type="checkbox" ${checked ? "checked" : ""}/>
+        <div>${o.label}</div>
+      </div>`
+
+      const cb = row.querySelector("input")
+      const toggle = () => {
+        if (cb.checked) selected.add(o.value)
+        else selected.delete(o.value)
+        renderChips()
+        emit()
+      }
+      cb.onchange = toggle
+      row.onclick = (e) => {
+        if (e.target === cb) return
+        cb.checked = !cb.checked
+        toggle()
+      }
+
+      $list.appendChild(row)
+    }
+  }
+
+  const render = () => {
+    if (disabled) {
+      selected = new Set([])
+      renderChips()
+      renderList()
+      emit()
+      return
+    }
+    renderChips()
+    renderList()
+  }
+
+  if ($btnAll) $btnAll.onclick = () => {
+    const q = String($search?.value ?? "").trim().toLowerCase()
+    const filtered = !q ? options : options.filter(o =>
+      o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)
+    )
+    for (const o of filtered) selected.add(o.value)
+    render()
+    emit()
+  }
+
+  if ($btnNone) $btnNone.onclick = () => {
+    selected.clear()
+    render()
+    emit()
+  }
+
+  if ($search) $search.oninput = () => renderList()
+
+  render()
+  emit()
+  return form
+}
+```
+
+```{ojs}
+//| output: false
+// Final set of commodities used in SQL filter (array of crop strings)
+hz_selectedCommodities = {
+  const g = hz_commodityGroup
+  const picked = (hz_commodities ?? []).filter(Boolean)
+
+  if (g === "all") return hz_allCommodities
+
+  // If user picked explicitly (custom / or after toggling group), trust that.
+  if (picked.length) return picked
+
+  // Group defaults when nothing is manually picked
+  if (g === "livestock") return hz_livestock
+  if (g === "crops") return hz_spamCodes.crops
+  if (g === "cereals") return hz_spamCodes.groups.cereals
+  if (g === "legumes") return hz_spamCodes.groups.legumes
+  if (g === "roots_tubers") return hz_spamCodes.groups.roots_tubers
+
+  // Custom with nothing picked → all commodities
+  return hz_allCommodities
+}
+```
+
+```{ojs}
+//| output: false
+// Display controls
+viewof hz_topN = Inputs.range([5, 40], { label: "Top hazards to show:", step: 1, value: 15 })
+viewof hz_groupOther = Inputs.toggle({ label: "Group remaining hazards into \"Other\" ", value: false })
+viewof hz_chartHeight = Inputs.range([360, 900], { label: "Chart height:", step: 10, value: 520 })
+```
+
+```{ojs}
+//| output: false
+// Total exposure denominator parquet (used for "Relative (% of total exposure)")
+viewof hz_useExternalDenom = Inputs.toggle(false, {
+  label: "Use external denominator parquet (advanced)",
+  description: "Off by default."
+})
+
+viewof hz_totalExposureUrl = Inputs.text({
+  label: "Total exposure parquet URL (denominator for Relative mode)",
+  value: "s3://digital-atlas/domain=exposure/type=combined/source=glw4+spam2020v1r2_ssa/region=ssa/processing=aggregated/gaul24_adm0-1-2_exposure.parquet",
+  width: "100%"
+})
+```
+
+```{ojs}
+//| output: false
+// Resolve denominator parquet URL from the text input.
+hz_totalExposureSrc = {
+  const raw = String(hz_totalExposureUrl ?? "").trim()
+  if (!raw) return { ok: false, raw: null, url: null, source: "input_missing" }
+  const url = hz_isHttpUrl(raw)
+    ? raw
+    : (/^s3:\/\//i.test(raw) ? hz_s3ToHttps(raw) : hz_toServedUrl(raw))
+  return { ok: true, raw, url, source: hz_isHttpUrl(raw) ? "https_input" : (/^s3:\/\//i.test(raw) ? "s3_input" : "local_input") }
+}
+```
+
+
+```{ojs}
+//| output: false
+// Friendly labels for the UI
+hz_geoLabel = {
+  const gf = hz_geoFilter ?? {}
+  const a0 = Array.isArray(gf.admin0) ? gf.admin0.filter(Boolean) : []
+  const a1 = Array.isArray(gf.admin1) ? gf.admin1.filter(Boolean) : []
+  const a2 = Array.isArray(gf.admin2) ? gf.admin2.filter(Boolean) : []
+
+  const hasAll = a0.length === 0 || a0.includes("all")
+  const fmt = (arr, max = 2) => {
+    const xs = arr.slice(0, max)
+    const more = arr.length > max ? ` +${arr.length - max}` : ""
+    return xs.join(", ") + more
+  }
+
+  if (hasAll) return "admin0: all"
+  if (a2.length) return `admin2: ${fmt(a2)} (${a2.length})`
+  if (a1.length) return `admin1: ${fmt(a1)} (${a1.length})`
+  return `admin0: ${fmt(a0)} (${a0.length})`
+}
+
+hz_commodityLabel = {
+  const g = hz_commodityGroup
+  const picked = (hz_commodities ?? []).filter(Boolean)
+  const n = (hz_selectedCommodities ?? []).length
+
+  if (g === "all") return `Commodities: all (${n})`
+  if (g === "crops") return `Commodities: crops (${n})`
+  if (g === "livestock") return `Commodities: livestock (${n})`
+  if (g === "custom") return picked.length ? `Commodities: custom (${n})` : `Commodities: custom (all) (${n})`
+
+  const label = hz_commodityGroupOptions?.[g] ?? String(g)
+  return `Commodities: ${label} (${n})`
+}
+```
+
+
+```{ojs}
+//| output: false
+hz_parseScenario = (s) => {
+  const raw = String(s ?? "")
+  if (!raw) return { raw: "", model: "", scenario: null, timeframe: null, label: "" }
+
+  const parts = raw.split("_").filter(Boolean)
+  const scenario = parts[0] ?? null
+  const timeframe = parts.length > 1 ? parts.slice(1).join("_") : null
+
+  // In this notebook, the dataset key uses the FULL model token as stored in nbData keys
+  // (e.g., historical, ensemble, ssp245_2041-2060). We keep that as `model`.
+  return { raw, model: raw, scenario, timeframe, label: hz_formatModel(raw) }
+}
+hz_parseScenarioPick = (x) => {
+  const p = hz_parseScenXTime(x)
+  const isHist = (p?.scenTime === "historic") || (p?.scenario === "historic")
+  const model = isHist ? "historic" : "ENSEMBLE"
+  const label = isHist ? "historic" : `${String(p.scenario ?? "").toUpperCase()} ${p.timeframe ?? ""}`.trim()
+  return { ...p, model, label }
+}
+hz_s1 = (() => hz_parseScenarioPick(hz_scen1))()
+hz_s2 = (() => hz_parseScenarioPick(hz_scen2))()
+
+```
+
+```{ojs}
+//| output: false
+// Resolve a dataset key from selected controls (note: model determined by scenario pick)
+hz_keyBaseFor = ({ varShort, period, model, severity }) => {
+  // Base key: hazardExposure_{varShort}_{period}_{model}_{severity}
+  return `hazardExposure_${varShort}_${period}_${model}_${severity}`
+}
+
+hz_keyCandidatesFor = ({ varShort, period, model, severity, method }) => {
+  const base = hz_keyBaseFor({ varShort, period, model, severity })
+
+  // Method is modeled as an optional suffix on the key:
+  // ..._{severity}_{generic|crop_specific}
+  if (!method || method === "auto") {
+    // Try base first, then known method suffixes
+    return [base, `${base}_generic`, `${base}_crop_specific`]
+  }
+
+  return [`${base}_${method}`, base]
+}
+
+hz_computeShinyInteractionUrl = ({ varShort, period, model, severity } = {}) => {
+  const u = String(varShort ?? "")
+  const variable = (/usd15|intld15/i.test(u)) ? `vop_${u}` : u
+  const per = String(period ?? "annual")
+  const mod =
+    /hist/i.test(String(model ?? "")) ? "historic" :
+    /ens/i.test(String(model ?? "")) ? "ENSEMBLE" :
+    String(model ?? "")
+  const sev = String(severity ?? "severe").toLowerCase()
+  if (!variable || !per || !mod || !sev) return null
+  return `https://digital-atlas.s3.amazonaws.com/hazard_exposure/v0.4.2/exported_data/${variable}/${per}/model=${mod}/severity=${sev}/interaction.parquet`
+}
+
+hz_resolveFromCandidates = (candidates) => {
+  const cands = Array.isArray(candidates) ? candidates : [String(candidates ?? "")]
+  for (const k of cands) {
+    if (hz_nbIndex?.has(k)) {
+      const entry = hz_nbIndex.get(k)
+      const r = hz_resolvePath(entry)
+      return { ...r, resolvedKey: k, candidates: cands }
+    }
+  }
+
+  const first = cands[0]
+  const parts = hz_parseKeyParts(first)
+  const computedUrl = hz_computeShinyInteractionUrl(parts)
+
+  const entry = hz_nbIndex?.get(first) ?? null
+  const r = hz_resolvePath(entry)
+
+  const out = { ...r }
+  if (!out.url && computedUrl) out.url = computedUrl
+  if (!out.path && computedUrl) out.path = computedUrl
+  if (computedUrl && (!out.pathSource || out.pathSource === "none")) out.pathSource = "computed"
+
+  return { ...out, resolvedKey: first, candidates: cands }
+}
+
+ // Base keys (no suffix)
+hz_key1 = hz_keyBaseFor({ varShort: hz_varShort, period: hz_period, model: hz_s1.model, severity: hz_severity })
+hz_key2 = hz_keyBaseFor({ varShort: hz_varShort, period: hz_period, model: hz_s2.model, severity: hz_severity })
+
+// Candidates that incorporate the selected method preference
+hz_keyCandidates1 = hz_keyCandidatesFor({ varShort: hz_varShort, period: hz_period, model: hz_s1.model, severity: hz_severity, method: hz_method })
+hz_keyCandidates2 = hz_keyCandidatesFor({ varShort: hz_varShort, period: hz_period, model: hz_s2.model, severity: hz_severity, method: hz_method })
+
+// Resolve path/url using nbData.json
+hz_src1 = hz_resolveFromCandidates(hz_keyCandidates1)
+hz_src2 = hz_resolveFromCandidates(hz_keyCandidates2)
+
+// Handy aliases for display
+hz_key1Resolved = hz_src1.resolvedKey
+hz_key2Resolved = hz_src2.resolvedKey
+```
+
+```{ojs}
+//| output: false
+// (debug) suppressed
+null
+```
+
+
+
+```{ojs}
+//| output: false
+// Controls panel UI
+hz_controlsPanelReal = html`
+  <div class="hz-card">
+    <div class="hz-card__head">
+      <div>
+        <div class="hz-card__title">Controls</div>
+        <div class="hz-card__sub">
+          ${hz_geoLabel} · ${hz_commodityLabel}
+        </div>
+      </div>
+      <div class="hz-pill">Method: <b>${hz_method}</b></div>
+    </div>
+
+    <section class="hz-section">
+      <div class="hz-section__title">Dataset</div>
+      <div class="hz-grid hz-grid--2">
+        <div class="hz-field">${viewof hz_varShort}</div>
+        <div class="hz-field">${viewof hz_period}</div>
+        <div class="hz-field">${viewof hz_severity}</div>
+        <div class="hz-field">${viewof hz_method}</div>
+      </div>
+    </section>
+
+    <section class="hz-section">
+      <div class="hz-section__title">Scenario comparison</div>
+      <div class="hz-split">
+        <div class="hz-sideCard">
+          <div class="hz-sideCard__head">
+            <div class="hz-sideCard__title">Left (A)</div>
+            <div class="hz-sideCard__sub">Baseline / Scenario A</div>
+          </div>
+          <div class="hz-field">${viewof hz_scen1}</div>
+          <div class="hz-field"></div>
+          <div class="hz-sideCard__kv">
+            <div class="k">Key</div><div class="v"><code>${hz_key1Resolved}</code></div>
+          </div>
+        </div>
+
+        <div class="hz-sideCard">
+          <div class="hz-sideCard__head">
+            <div class="hz-sideCard__title">Right (B)</div>
+            <div class="hz-sideCard__sub">Future / Scenario B</div>
+          </div>
+          <div class="hz-field">${viewof hz_scen2}</div>
+          <div class="hz-field"></div>
+          <div class="hz-sideCard__kv">
+            <div class="k">Key</div><div class="v"><code>${hz_key2Resolved}</code></div>
+          </div>
+        </div>
+      </div>
+
+      <details class="hz-details">
+        <summary>Resolution details</summary>
+        <div class="hz-muted">
+          Left candidates: <code>${(hz_src1.candidates ?? []).join(" | ")}</code><br/>
+          Right candidates: <code>${(hz_src2.candidates ?? []).join(" | ")}</code>
+        </div>
+      </details>
+    </section>
+
+    <section class="hz-section">
+      <div class="hz-section__title">Commodities</div>
+      <div class="hz-grid hz-grid--2">
+        <div class="hz-field">${viewof hz_commodityGroup}</div>
+        <div class="hz-field">${viewof hz_commodities}</div>
+      </div>
+    </section>
+
+    <section class="hz-section">
+      <div class="hz-section__title">Chart</div>
+      <div class="hz-grid hz-grid--2">
+        <div class="hz-field">${viewof hz_relative}</div>
+        <div class="hz-field">${viewof hz_difference}</div>
+        <div class="hz-field">${viewof hz_topN}</div>
+        <div class="hz-field">${viewof hz_groupOther}</div>
+      </div>
+      <div class="hz-field">${viewof hz_chartHeight}</div>
+    </section>
+
+    <section class="hz-section">
+      <div class="hz-section__title">Relative denominator</div>
+      <div class="hz-field">${viewof hz_useExternalDenom}</div>
+      
+    </section>
+  </div>
+`;
+```
+
+```{ojs}
+//| output: false
+// Path status card
+hz_pathStatus = html`
+  <div class="card">
+    <h3>Dataset paths</h3>
+    
+
+    <div class="${hz_src1.ok ? "ok" : "warn"}">
+      <div><b>Left:</b> <code>${hz_key1Resolved}</code></div>
+      
+    </div>
+
+    <div style="height:10px"></div>
+
+    <div class="${hz_src2.ok ? "ok" : "warn"}">
+      <div><b>Right:</b> <code>${hz_key2Resolved}</code></div>
+      
+    </div>
+
+    <div class="hr"></div>
+
+  </div>
+`
+```
+
+
+```{ojs}
+//| output: false
+// Admin names parquet (used ONLY for selector options).
+// You can point this to a *local* parquet file in the repo for best performance.
+viewof hz_adminNamesUrl = Inputs.text({
+  label: "Admin names parquet URL (override if needed)",
+  value: "https://digital-atlas.s3.amazonaws.com/domain=boundaries/type=admin/source=gaul2024/region=africa/processing=simplified/level=adm2/atlas_gaul24_a2_africa_simple-lowres.parquet",
+  width: "100%"
+})
+
+```
+
+```{ojs}
+//| output: false
+// Resolve admin names URL (supports s3:// -> https inference)
+hz_adminNamesSrc = {
+  const raw = hz_adminNamesUrl
+  const url = String(raw).startsWith("s3://") ? hz_s3ToHttps(raw) : hz_toServedUrl(raw)
+  return { raw, url }
+}
+```
+
+```{ojs}
+//| output: false
+// Load admin name tuples (admin0/admin1/admin2) for cascading selectors
+hz_adminNames = {
+  try {
+    const res = await hz_db.query(`
+      SELECT DISTINCT
+        admin0_name,
+        admin1_name,
+        admin2_name
+      FROM read_parquet('${hz_adminNamesSrc.url}')
+    `)
+    return hz_rows(res)
+  } catch (e) {
+    return [{ error: String(e) }]
+  }
+}
+```
+
+```{ojs}
+//| output: false
+// Build choice lists
+hz_admin0Choices = {
+  const isErr = hz_adminNames?.[0]?.error
+  if (isErr) return ["all"]
+  const vals = Array.from(new Set(hz_adminNames.map(d => d.admin0_name).filter(Boolean))).sort()
+  // Ensure "all" exists as an option (matches hazard exposure parquet convention)
+  return vals.includes("all") ? vals : ["all", ...vals]
+}
+```
+
+```{ojs}
+//| output: false
+// multi-select (chips + search + checklist).
+hz_makeMultiSelect = ({
+  label = "Select",
+  options = [],
+  value = [],
+  placeholder = "Search…",
+  disabled = false,
+  actions = [{ id: "none", label: "Clear" }],
+  exclusive = null,         // e.g., "all" (cannot coexist with others)
+  maxHeight = 240,
+  maxRender = 600
+} = {}) => {
+  const form = html`<form class="hz-ms" style="opacity:${disabled ? 0.65 : 1}; pointer-events:${disabled ? "none" : "auto"}">
+    <label class="hz-ms__label">${label}</label>
+    <div class="hz-ms__top">
+      <input class="hz-ms__search" type="search" placeholder="${placeholder}" />
+      <div class="hz-ms__btns"></div>
+    </div>
+    <div class="hz-ms__chips" aria-label="Selected"></div>
+    <div class="hz-ms__list" style="max-height:${maxHeight}px;"></div>
+    <div class="hz-ms__meta"></div>
+  </form>`
+
+  const search = form.querySelector(".hz-ms__search")
+  const chips = form.querySelector(".hz-ms__chips")
+  const list  = form.querySelector(".hz-ms__list")
+  const btns  = form.querySelector(".hz-ms__btns")
+  const meta  = form.querySelector(".hz-ms__meta")
+
+  const norm = (arr) => Array.from(new Set((arr ?? []).filter((d) => d != null && String(d).trim() !== "")))
+
+  const setExclusiveRules = (selSet) => {
+    if (!exclusive) return selSet
+    if (selSet.size === 0) { selSet.add(exclusive); return selSet }
+    if (selSet.has(exclusive) && selSet.size > 1) selSet.delete(exclusive)
+    return selSet
+  }
+
+  const selected = new Set(norm(value))
+  setExclusiveRules(selected)
+
+  form.value = Array.from(selected)
+
+  const emit = () => {
+    // Apply exclusive rules + keep stable order based on options list
+    setExclusiveRules(selected)
+    const optIndex = new Map(options.map((d, i) => [String(d), i]))
+    const ordered = Array.from(selected).sort((a, b) => (optIndex.get(String(a)) ?? 1e9) - (optIndex.get(String(b)) ?? 1e9))
+    form.value = ordered
+    form.dispatchEvent(new Event("input", { bubbles: true }))
+    renderChips()
+    renderList()
+  }
+
+  const renderChips = () => {
+    chips.replaceChildren()
+    const vals = Array.from(selected)
+    if (!vals.length) return
+    for (const v of vals) {
+      const chip = html`<span class="hz-chip" title="${v}">
+        <span>${v}</span>
+        <button type="button" aria-label="Remove">×</button>
+      </span>`
+      chip.querySelector("button").onclick = () => { selected.delete(v); emit() }
+      chips.appendChild(chip)
+    }
+  }
+
+  const filteredOptions = () => {
+    const q = (search.value ?? "").trim().toLowerCase()
+    if (!q) return options
+    return options.filter((d) => String(d).toLowerCase().includes(q))
+  }
+
+  const renderList = () => {
+    list.replaceChildren()
+    const filt = filteredOptions()
+    const shown = filt.slice(0, maxRender)
+
+    meta.replaceChildren(
+      html`<span class="hz-ms__metaText">
+        ${filt.length.toLocaleString()} match(es) · showing ${shown.length.toLocaleString()}
+        ${filt.length > maxRender ? html` <span class="hz-ms__metaWarn">(refine search to see more)</span>` : ""}
+      </span>`
+    )
+
+    for (const v of shown) {
+      const row = html`<label class="hz-ms__item">
+        <input type="checkbox" />
+        <span class="hz-ms__itemText">${v}</span>
+      </label>`
+      const cb = row.querySelector("input")
+      cb.checked = selected.has(v)
+      cb.onchange = () => {
+        if (cb.checked) {
+          if (exclusive && v === exclusive) {
+            selected.clear()
+            selected.add(exclusive)
+          } else {
+            selected.add(v)
+            if (exclusive) selected.delete(exclusive)
+          }
+        } else {
+          selected.delete(v)
+          setExclusiveRules(selected)
+        }
+        emit()
+      }
+      list.appendChild(row)
+    }
+
+    if (!shown.length) {
+      list.appendChild(html`<div class="hz-ms__empty">No matches.</div>`)
+    }
+  }
+
+  // Build action buttons
+  btns.replaceChildren()
+  for (const a of (actions ?? [])) {
+    const b = html`<button type="button" class="hz-ms__btn">${a.label}</button>`
+    b.onclick = () => {
+      if (a.id === "none") {
+        selected.clear()
+        if (exclusive) selected.add(exclusive)
+        emit()
+      } else if (a.id === "all") {
+        if (exclusive) {
+          selected.clear()
+          selected.add(exclusive)
+        } else {
+          selected.clear()
+          for (const v of options) selected.add(v)
+        }
+        emit()
+      }
+    }
+    btns.appendChild(b)
+  }
+
+  search.oninput = () => renderList()
+
+  // initial paint
+  renderChips()
+  renderList()
+
+  return form
+}
+```
+
+
+```{ojs}
+//| output: false
+viewof hz_admin0 = hz_makeMultiSelect({
+  label: "Admin0 (country)",
+  options: hz_admin0Choices,
+  value: ["Kenya"],
+  placeholder: "Search countries…",
+  actions: [
+    { id: "all", label: "All" },
+    { id: "none", label: "Clear" }
+  ],
+  exclusive: "all",
+  maxHeight: 260,
+  maxRender: 400
+})
+```
+
+
+
+```{ojs}
+//| output: false
+// Admin1 choices depend on admin0 selection (ignore admin1 if admin0 includes only "all")
+hz_admin1Choices = {
+  const isErr = hz_adminNames?.[0]?.error
+  if (isErr) return []
+  const a0 = new Set(hz_admin0 ?? [])
+  if (a0.size === 1 && a0.has("all")) return []
+  return Array.from(new Set(
+    hz_adminNames
+      .filter(d => a0.has(d.admin0_name))
+      .map(d => d.admin1_name)
+      .filter(v => v != null && v !== "")
+  )).sort()
+}
+```
+
+```{ojs}
+//| output: false
+viewof hz_admin1 = hz_makeMultiSelect({
+  label: "Admin1 (optional)",
+  options: hz_admin1Choices,
+  value: [],
+  placeholder: hz_admin1Choices.length ? "Search admin1…" : "Select Admin0 first…",
+  actions: [{ id: "none", label: "Clear" }],
+  disabled: hz_admin1Choices.length === 0,
+  maxHeight: 260,
+  maxRender: 500
+})
+```
+
+
+```{ojs}
+//| output: false
+// Admin2 choices depend on admin0 and admin1 (requires admin1 selection for performance)
+hz_admin2Choices = {
+  const isErr = hz_adminNames?.[0]?.error
+  if (isErr) return []
+  const a0 = new Set((hz_admin0 ?? []).filter((d) => d !== "all"))
+  const a1 = new Set((hz_admin1 ?? []).filter(Boolean))
+  if (a0.size === 0) return []
+  if (a1.size === 0) return []
+  const rows = hz_adminNames.filter((d) => a0.has(d.admin0_name) && a1.has(d.admin1_name))
+  return Array.from(new Set(
+    rows.map((d) => d.admin2_name).filter((v) => v != null && String(v).trim() !== "")
+  )).sort()
+}
+```
+
+```{ojs}
+//| output: false
+viewof hz_admin2 = hz_makeMultiSelect({
+  label: "Admin2 (optional)",
+  options: hz_admin2Choices,
+  value: [],
+  placeholder: hz_admin2Choices.length ? "Search admin2…" : "Select Admin1 first…",
+  actions: [{ id: "none", label: "Clear" }],
+  disabled: hz_admin2Choices.length === 0,
+  maxHeight: 260,
+  maxRender: 600
+})
+```
+
+
+```{ojs}
+//| output: false
+// Build a clean geoFilter object (reuse everywhere)
+hz_geoFilter = ({
+  admin0: (hz_admin0 ?? []),
+  admin1: (hz_admin1 ?? []),
+  admin2: (hz_admin2 ?? [])
+})
+
+
+hz_geoResolvedLevel = {
+  const a0 = hz_geoFilter.admin0 ?? []
+  const hasAll = a0.length === 0 || a0.includes("all")
+  if (hasAll) return "admin0"
+  if ((hz_geoFilter.admin2 ?? []).length) return "admin2"
+  if ((hz_geoFilter.admin1 ?? []).length) return "admin1"
+  return "admin0"
+}
+
+hz_geoSelectionCount = {
+  const lvl = hz_geoResolvedLevel
+  const a0 = (hz_geoFilter.admin0 ?? []).filter((d) => d != null && String(d).trim() !== "" && d !== "all")
+  if (lvl === "admin2") return (hz_geoFilter.admin2 ?? []).length
+  if (lvl === "admin1") return (hz_geoFilter.admin1 ?? []).length
+  return (hz_geoFilter.admin0 ?? []).includes("all") || (hz_geoFilter.admin0 ?? []).length === 0 ? 1 : a0.length
+}
+
+```
+
+```{ojs}
+//| output: false
+// Geo filter preview
+hz_geoTable = {
+  const gf = hz_geoFilter ?? {admin0: [], admin1: [], admin2: []}
+  const a0raw = Array.isArray(gf.admin0) ? gf.admin0.filter(Boolean) : []
+  const hasAll = a0raw.length === 0 || a0raw.includes("all")
+  const a0 = hasAll ? ["all"] : a0raw.filter((d) => d !== "all")
+  const a1 = hasAll ? [] : (Array.isArray(gf.admin1) ? gf.admin1.filter(Boolean) : [])
+  const a2 = hasAll ? [] : (Array.isArray(gf.admin2) ? gf.admin2.filter(Boolean) : [])
+
+  const chipRow = (arr, max = 10) => {
+    const shown = arr.slice(0, max)
+    const more = arr.length > max ? arr.length - max : 0
+    return html`<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
+      ${shown.map((d) => html`<span class="hz-chip"><span>${d}</span></span>`)}
+      ${more ? html`<span class="hz-chip"><span>+${more} more</span></span>` : ""}
+    </div>`
+  }
+
+  return html`<div class="hz-card" style="margin-top:10px;">
+    <div class="hz-card__head">
+      <div>
+        <div class="hz-card__title">Geography summary</div>
+        <div class="hz-card__sub">Resolved level: <b>${hz_geoResolvedLevel}</b> · selections: <b>${hz_geoSelectionCount}</b></div>
+      </div>
+    </div>
+    <div class="hz-muted" style="margin-top:4px;">Admin0</div>
+    ${chipRow(a0)}
+    <div class="hz-muted" style="margin-top:10px;">Admin1</div>
+    ${a1.length ? chipRow(a1) : html`<div class="hz-muted">—</div>`}
+    <div class="hz-muted" style="margin-top:10px;">Admin2</div>
+    ${a2.length ? chipRow(a2) : html`<div class="hz-muted">—</div>`}
+  </div>`
+}
+
+hz_geoPanelReal = html`
+  <div class="card">
+    <h3>Geography</h3>
+    <p class="sub">Select one or more admin0, then optionally narrow to admin1/admin2.</p>
+
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 12px; align-items:end;">
+      <div>${viewof hz_admin0}</div>
+      <div>${viewof hz_admin1}</div>
+      <div>${viewof hz_admin2}</div>
+    </div>
+
+<div class="hz-muted hz-geoSummary" style="margin-top:10px;">
+  <b>Selected:</b>
+  ${hz_admin0.includes("all") ? "All countries" : hz_admin0.join(", ")}
+  ${hz_admin1.length ? html`<br/><b>Admin1:</b> ${hz_admin1.join(", ")}` : ""}
+  ${hz_admin2.length ? html`<br/><b>Admin2:</b> ${hz_admin2.join(", ")}` : ""}
 </div>
 
-<style>
-  #floating-sidebar {
-    position: fixed;
-    top: 150px;           /* Distance from top of the page */
-    left: 20px;          /* Distance from left of the page */
-    width: 260px;        /* Sidebar width */
-    min-height: 400px;   /* Minimum height */
-    max-height: 80vh;    /* Max height relative to viewport */
-    background: #ffffff;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-    border-radius: 8px;
-    padding: 20px;
-    overflow-y: auto;
-    z-index: 9999;
-    transition: box-shadow 0.2s;
-  }
-  #floating-sidebar:hover {
-    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-  }
-  /* Responsive: hide on small screens */
-  @media (max-width: 800px) {
-    #floating-sidebar {
-      display: none;
-    }
-  }
-</style>
+    <div class="hr"></div>
 
-<script>
-  // Optional: Add any JS for interactivity here
-  // Example: Toggle sidebar visibility with a keyboard shortcut (Ctrl+B)
-  document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.key === 'b') {
-      const sidebar = document.getElementById('floating-sidebar');
-      sidebar.style.display = (sidebar.style.display === 'none') ? 'block' : 'none';
+    <div class="kpiRow">
+      <div class="kpi"><div class="k">Resolved level</div><div class="v">${hz_geoResolvedLevel}</div></div>
+      <div class="kpi"><div class="k">Selections</div><div class="v">${hz_geoSelectionCount}</div></div>
+    </div>
+
+    <div class="hr"></div>
+    ${hz_geoTable}
+
+    ${
+      hz_adminNames?.[0]?.error
+        ? html`<div class="warn" style="margin-top:10px"><b>Admin names load failed:</b><br>${hz_adminNames[0].error}</div>`
+        : ""
     }
-  });
-</script> -->
+  </div>
+`
+```
+
+
+```{ojs}
+//| output: false
+// WHERE clause builder for the hazard exposure parquet schema
+hz_q = (s) => "'" + String(s).replaceAll("'", "''") + "'"
+
+hz_geoWhere = (geoFilter) => {
+  const gf = geoFilter ?? {}
+  const admin0 = Array.isArray(gf.admin0) ? gf.admin0.filter((d) => d != null && String(d).trim() !== "") : []
+  const admin1 = Array.isArray(gf.admin1) ? gf.admin1.filter((d) => d != null && String(d).trim() !== "") : []
+  const admin2 = Array.isArray(gf.admin2) ? gf.admin2.filter((d) => d != null && String(d).trim() !== "") : []
+
+  // 'all' is a UI sentinel (not expected to exist in the parquet)
+  const hasAll = admin0.length === 0 || admin0.includes("all")
+  const a0 = hasAll ? [] : admin0.filter((d) => d !== "all")
+  const a1 = hasAll ? [] : admin1
+  const a2 = hasAll ? [] : admin2
+
+  const q = (s) => `'${String(s).replaceAll("'", "''")}'`
+  const inList = (vals) => vals.map(q).join(", ")
+
+  const wh = []
+
+  // Only constrain admin0 when user chose specific countries
+  if (a0.length > 0) {
+    wh.push(`admin0_name IN (${inList(a0)})`)
+  }
+
+  if (a2.length > 0) {
+    // Admin2 totals: admin0 + (optional admin1) + admin2
+    if (a1.length > 0) wh.push(`admin1_name IN (${inList(a1)})`)
+    wh.push(`admin2_name IN (${inList(a2)})`)
+  } else if (a1.length > 0) {
+    // Admin1 totals: admin0 + admin1, and admin2 NULL
+    wh.push(`admin1_name IN (${inList(a1)})`)
+    wh.push(`admin2_name IS NULL`)
+  } else {
+    // Admin0 totals: admin1/admin2 NULL
+    wh.push(`admin1_name IS NULL`)
+    wh.push(`admin2_name IS NULL`)
+  }
+
+  return wh.join("\n      AND ")
+}
+
+hz_scenWhere = (sc) => {
+  const p = (typeof sc === "string") ? hz_parseScenXTime(sc) : (sc ?? {})
+  const scenario = p.scenario
+  const timeframe = p.timeframe ?? (scenario === "historic" ? "historic" : null)
+  if (!scenario || !timeframe) return "FALSE"
+  return `scenario = ${hz_q(scenario)} AND timeframe = ${hz_q(timeframe)}`
+}
+```
+
+```{ojs}
+//| output: false
+// Inspect schema of the left dataset (useful to debug path/permissions)
+hz_schema1 = {
+  if (!hz_src1.ok || !hz_src1.url) return []
+  try {
+    const res = await hz_db.query(`DESCRIBE SELECT * FROM read_parquet('${hz_src1.url}')`)
+    return hz_rows(res)
+  } catch (e) {
+    return [{ error: String(e) }]
+  }
+}
+
+hz_schema2 = {
+  if (!hz_src2.ok || !hz_src2.url) return []
+  try {
+    const res = await hz_db.query(`DESCRIBE SELECT * FROM read_parquet('${hz_src2.url}')`)
+    return hz_rows(res)
+  } catch (e) {
+    return [{ error: String(e) }]
+  }
+}
+```
+
+```{ojs}
+//| output: false
+hz_renderMiniTable = (rows) => {
+  const r = Array.isArray(rows) ? rows : []
+  if (!r.length) return html`<div class="hz-muted">No results.</div>`
+
+  const cols = Object.keys(r[0]).slice(0, 6)
+  const head = html`<thead><tr>${cols.map(c => html`<th>${c}</th>`)}</tr></thead>`
+  const body = html`<tbody>
+    ${r.slice(0, 24).map(row => html`<tr>${cols.map(c => html`<td>${String(row[c] ?? "")}</td>`)}</tr>`)}
+  </tbody>`
+  return html`<div class="hz-tableWrap"><table class="hz-table">${head}${body}</table></div>`
+}
+```
+
+```{ojs}
+//| output: false
+// Render schema tables
+hz_schemaPanel = html`
+  <div class="hz-card">
+    <div class="hz-card__head">
+      <div>
+        <div class="hz-card__title">Data status</div>
+        <div class="hz-card__sub">${hz_geoLabel} · ${hz_commodityLabel}</div>
+      </div>
+      <div class="hz-pill">${hz_src1.ok && hz_src2.ok ? "Ready" : "Check paths"}</div>
+    </div>
+
+    <div class="hz-grid hz-grid--2">
+      <section class="hz-section">
+        <div class="hz-section__title">Left dataset</div>
+        <div class="hz-kv">
+          <div class="hz-kv__k">Resolved key</div>
+          <div class="hz-kv__v"><code>${hz_key1Resolved}</code></div>
+          <div class="hz-kv__k">URL</div>
+          <div class="hz-kv__v"><code>${hz_src1.url}</code></div>
+        </div>
+        ${Inputs.table(hz_schema1, { rows: 12, width: "100%" })}
+      </section>
+
+      <section class="hz-section">
+        <div class="hz-section__title">Right dataset</div>
+        <div class="hz-kv">
+          <div class="hz-kv__k">Resolved key</div>
+          <div class="hz-kv__v"><code>${hz_key2Resolved}</code></div>
+          <div class="hz-kv__k">URL</div>
+          <div class="hz-kv__v"><code>${hz_src2.url}</code></div>
+        </div>
+        ${Inputs.table(hz_schema2, { rows: 12, width: "100%" })}
+      </section>
+    </div>
+  </div>
+`;
+```
+
+
+```{ojs}
+//| output: false
+// Central query: totals by hazard for a given dataset URL + scenario/timeframe + geoFilter.
+// admin0_name/admin1_name/admin2_name/hazard/value/scenario/timeframe)
+// Crop filter helper
+hz_cropWhere = (commodities) => {
+  const list = Array.isArray(commodities) ? commodities.filter(Boolean) : []
+  if (!list.length) return "TRUE"
+  const q = (s) => `'${String(s ?? "").replaceAll("'", "''")}'`
+  return `crop IN (${list.map(q).join(",")})`
+}
+
+// hazard_vars lists from haz_exposure.qmd (Shiny)
+hz_interactions = ({
+  // Match haz_exposure.qmd (Shiny) hazard_vars options
+  // - generic: NDWS (drought) + NTx35 (heat) + NDWL0 (flood)
+  // - crop_specific: PTOT-L (drought) + NTxS (heat) + PTOT-G (flood)
+  generic: [
+    "NDWS+NTx35+NDWL0",
+    "NDWS+THI-max+NDWL0"
+  ],
+  crop_specific: [
+    "PTOT-L+NTxS+PTOT-G",
+    "PTOT-L+THI-max+PTOT-G"
+  ]
+})
+hz_hazardVarsWhere = (method, commodGroup) => {
+  const m = String(method ?? "").toLowerCase()
+  const cg = String(commodGroup ?? "").toLowerCase()
+  const vars =
+    (m === "generic") ? hz_interactions.generic :
+    (m === "crop-specific" || m === "crop_specific") ? hz_interactions.crop_specific :
+    // auto:
+    ((cg === "all" || cg === "" || cg === "total") ? hz_interactions.generic : hz_interactions.crop_specific)
+
+  return `hazard_vars IN (${vars.map(hz_q).join(", ")})`
+}
+
+hz_unitWhere = (varShort) => {
+  const u = String(varShort ?? "").toLowerCase()
+  if (/usd15|intld15/.test(u)) return `exposure_var='vop' AND lower(exposure_unit)=${hz_q(u)}`
+  // fallback: don't filter if varShort isn't a unit token
+  return "TRUE"
+}
+
+hz_sevWhere = (severity) => {
+  const s = String(severity ?? "").toLowerCase()
+  if (!s || s === "all") return "TRUE"
+  return `lower(severity)=${hz_q(s)}`
+}
+
+hz_totalsByHazard = async (url, scen, geoFilter, commodities, { hazards = null } = {}) => {
+  const geoWhere = hz_geoWhere(geoFilter)
+  const cropWhere = hz_cropWhere(commodities)
+  const scenWhere = hz_scenWhere(scen)
+  const hazVarsWhere = hz_hazardVarsWhere(hz_method, hz_selectedCommodGroup)
+  const unitWhere = hz_unitWhere(hz_varShort)
+  const sevWhere = hz_sevWhere(hz_severity)
+
+  const hazardsWhere = (hazards?.length)
+    ? `hazard IN (${hazards.map(hz_q).join(", ")})`
+    : "TRUE"
+
+  const q = `
+    SELECT
+      hazard,
+      SUM(CAST(value AS DOUBLE)) AS total
+    FROM read_parquet(${hz_q(url)})
+    WHERE ${geoWhere}
+      AND ${cropWhere}
+      AND ${scenWhere}
+      AND ${hazVarsWhere}
+      AND ${unitWhere}
+      AND ${sevWhere}
+      AND ${hazardsWhere}
+    GROUP BY hazard
+    ORDER BY total DESC
+  `
+  return await hz_query(q)
+}
+
+
+hz_totalExposureValue = async (url, geoFilter, commodities, varShort) => {
+  const whereGeo = hz_geoWhere(geoFilter)
+  const whereCrop = hz_cropWhere(commodities)
+
+  try {
+    // Inspect columns to build a robust query
+    const desc = await hz_query(`DESCRIBE SELECT * FROM read_parquet('${url}')`)
+    const cols = (desc ?? []).map(d => d.column_name ?? d.column ?? d.name).filter(Boolean)
+    const has = (c) => cols.includes(c)
+
+    const valueCol =
+      has("value") ? "value" :
+      (has(varShort) ? `"${varShort}"` :
+      (has("exposure") ? "exposure" : null))
+
+    if (!valueCol) {
+      throw new Error(`Could not infer value column in exposure parquet. Columns: ${cols.slice(0, 30).join(", ")}`)
+    }
+
+    const wheres = [whereGeo]
+    if (has("crop")) wheres.push(whereCrop)
+
+    // Align with hazard_exposure schema (vop + unit, plus severity if present)
+    if (has("exposure_unit") && has("exposure_var")) wheres.push(hz_unitWhere(varShort))
+    if (has("severity")) wheres.push(hz_sevWhere(hz_severity))
+
+    // Fallback for older schemas that expose a 'variable' column
+    if (has("variable")) wheres.push(`variable='${String(varShort).replaceAll("'", "''")}'`)
+
+    const q = `
+      SELECT SUM(CAST(${valueCol} AS DOUBLE)) AS denom
+      FROM read_parquet('${url}')
+      WHERE ${wheres.join(" AND ")};
+    `
+    const res = await hz_query(q)
+    const row = (res ?? [])[0] ?? {}
+    const denom = Number(row.denom)
+    return { ok: Number.isFinite(denom), denom }
+  } catch (e) {
+    hz_addError("hz_totalExposureValue", e, { url, geoFilter, commodities, varShort })
+    return { ok: false, denom: null, error: String(e) }
+  }
+}
+```
+
+```{ojs}
+//| output: false
+// Totals by hazard (left/right) used in Q1 chart + debug panels
+hz_tot1 = (hz_src1?.ok)
+  ? await hz_totalsByHazard(hz_src1.url, hz_scen1, hz_geoFilter, hz_selectedCommodities)
+  : []
+
+hz_tot2 = (hz_src2?.ok)
+  ? await hz_totalsByHazard(hz_src2.url, hz_scen2, hz_geoFilter, hz_selectedCommodities)
+  : []
+```
+
+
+
+```{ojs}
+//| output: false
+// Denominator value for current geo + commodities + varShort
+hz_denom = (hz_useExternalDenom && hz_totalExposureSrc.ok)
+  ? await hz_totalExposureValue(hz_totalExposureSrc.url, hz_geoFilter, hz_selectedCommodities, hz_varShort)
+  : { ok: false, denom: null, error: hz_useExternalDenom ? "No URL" : "Disabled" }
+
+hz_relativeLabel = (hz_useExternalDenom && hz_denom.ok) ? "% of total exposure" : "% of hazard sum (fallback)"
+```
+
+```{ojs}
+//| output: false
+// Merge totals + compute diff/% (wrapped cell)
+hz_merged = {
+  const byHaz1 = new Map((hz_tot1 ?? []).map(d => [d.hazard, Number(d.total ?? 0)]))
+  const byHaz2 = new Map((hz_tot2 ?? []).map(d => [d.hazard, Number(d.total ?? 0)]))
+
+  const hazards = new Set([...byHaz1.keys(), ...byHaz2.keys()])
+
+  const sum1 = Array.from(byHaz1.values()).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
+  const sum2 = Array.from(byHaz2.values()).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
+
+  const denom = hz_denom?.ok ? hz_denom.denom : null
+
+  const pct = (val, sum) => {
+    if (Number.isFinite(denom) && denom > 0) return (val / denom) * 100
+    if (Number.isFinite(sum) && sum > 0) return (val / sum) * 100
+    return 0
+  }
+
+  const rows = Array.from(hazards).map(h => {
+    const total1 = byHaz1.get(h) ?? 0
+    const total2 = byHaz2.get(h) ?? 0
+    const total_diff = total2 - total1
+
+    const perc1 = pct(total1, sum1)
+    const perc2 = pct(total2, sum2)
+    const pct_diff = perc2 - perc1
+
+    return { hazard: h, total1, total2, total_diff, perc1, perc2, pct_diff }
+  })
+
+  rows.sort((a, b) => Math.abs(b.total_diff) - Math.abs(a.total_diff))
+  return rows
+}
+```
+```{ojs}
+//| output: false
+// Apply Top-N + optional "Other" grouping for charting
+hz_chartRows = {
+  const rows = Array.isArray(hz_merged) ? hz_merged.slice() : []
+  if (!rows.length) return []
+
+  const denom = hz_denom?.ok ? hz_denom.denom : null
+  const sumAll1 = rows.reduce((a, r) => a + Number(r.total1 ?? 0), 0)
+  const sumAll2 = rows.reduce((a, r) => a + Number(r.total2 ?? 0), 0)
+
+  const pct = (val, sum) => {
+    if (Number.isFinite(denom) && denom > 0) return (val / denom) * 100
+    if (Number.isFinite(sum) && sum > 0) return (val / sum) * 100
+    return 0
+  }
+
+  // Choose a sorting metric that matches the selected display mode
+  const metric = hz_difference
+    ? (hz_relative ? "pct_diff" : "total_diff")
+    : (hz_relative ? "perc2" : "total2")
+
+  rows.sort((a, b) => Math.abs(Number(b[metric] ?? 0)) - Math.abs(Number(a[metric] ?? 0)))
+
+  const topN = Math.max(1, Number(hz_topN ?? 15) || 15)
+  let head = rows.slice(0, topN)
+
+  if (hz_groupOther && rows.length > topN) {
+    const rest = rows.slice(topN)
+    const sum = (k) => rest.reduce((a, r) => a + Number(r[k] ?? 0), 0)
+
+    const otherTotal1 = sum("total1")
+    const otherTotal2 = sum("total2")
+    const otherDiff = otherTotal2 - otherTotal1
+
+    head = head.concat([{
+      hazard: "Other",
+      total1: otherTotal1,
+      total2: otherTotal2,
+      total_diff: otherDiff,
+      perc1: pct(otherTotal1, sumAll1),
+      perc2: pct(otherTotal2, sumAll2),
+      pct_diff: pct(otherTotal2, sumAll2) - pct(otherTotal1, sumAll1)
+    }])
+  }
+
+  // Ensure pct fields are consistent with the current denominator mode
+  return head.map(r => {
+    const total1 = Number(r.total1 ?? 0)
+    const total2 = Number(r.total2 ?? 0)
+    const total_diff = Number(r.total_diff ?? (total2 - total1))
+    const perc1 = pct(total1, sumAll1)
+    const perc2 = pct(total2, sumAll2)
+    const pct_diff = perc2 - perc1
+    return { ...r, total1, total2, total_diff, perc1, perc2, pct_diff }
+  })
+}
+```
+
+
+```{ojs}
+//| output: false
+// Build Plot chart
+hz_q1Chart = {
+  const data = Array.isArray(hz_chartRows) ? hz_chartRows : []
+  if (!data.length) return html`<div class="hz-empty">No data for the current filters.</div>`
+
+  const absLabel = hz_varLabel || "Value"
+  const pctLabel = hz_relativeLabel || "%"
+  const xLabel = hz_relative ? pctLabel : absLabel
+
+  const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
+  const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
+
+  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
+
+  if (!hz_difference) {
+    const side = data.flatMap(d => ([
+      { hazard: d.hazard, scenario: hz_s1.label, value: hz_relative ? d.perc1 : d.total1, raw: d.total1, pct: d.perc1 },
+      { hazard: d.hazard, scenario: hz_s2.label, value: hz_relative ? d.perc2 : d.total2, raw: d.total2, pct: d.perc2 }
+    ]))
+
+    return Plot.plot({
+      width: Math.max(520, (hz_plotWidth ?? 900) - 24),
+      height: hz_chartHeight,
+      marginLeft: 210,
+      marginRight: 24,
+      marginTop: 36,
+      marginBottom: 40,
+      x: {
+        label: xLabel,
+        grid: true,
+        tickFormat: hz_relative ? fmtPct : fmtAbs
+      },
+      y: { label: null },
+      color: { legend: true },
+      caption: subtitle,
+      marks: [
+        Plot.ruleX([0]),
+        Plot.barX(side, {
+          x: "value",
+          y: "hazard",
+          fill: "scenario",
+          inset: 0.5,
+          tip: {
+            format: {
+              hazard: true,
+              scenario: true,
+              value: hz_relative ? fmtPct : fmtAbs,
+              raw: hz_relative ? fmtAbs : null,
+              pct: hz_relative ? null : fmtPct
+            }
+          }
+        })
+      ]
+    })
+  }
+
+  // Difference mode
+  return Plot.plot({
+    height: hz_chartHeight,
+    marginLeft: 210,
+    marginRight: 24,
+    marginTop: 36,
+    marginBottom: 40,
+    x: {
+      label: xLabel,
+      grid: true,
+      tickFormat: hz_relative ? fmtPct : fmtAbs
+    },
+    y: { label: null },
+    color: { legend: true },
+    caption: subtitle,
+    marks: [
+      Plot.ruleX([0]),
+      Plot.barX(data, {
+        x: hz_relative ? "pct_diff" : "total_diff",
+        y: "hazard",
+        fill: (d) => (Number(d.total_diff ?? 0) >= 0 ? "Increase" : "Decrease"),
+        inset: 0.5,
+        tip: {
+          format: {
+            hazard: true,
+            value: hz_relative ? fmtPct : fmtAbs
+          }
+        }
+      })
+    ]
+  })
+}
+```
+
+
+
+```{ojs}
+//| output: false
+// Debug panel (safe default so the app never crashes if not used)
+hz_q1Debug = {
+  const left = Array.isArray(hz_tot1) ? hz_tot1.slice(0, 10) : []
+  const right = Array.isArray(hz_tot2) ? hz_tot2.slice(0, 10) : []
+  if (!left.length && !right.length) return html``
+  return html`<details class="hz-details" style="margin-top:12px;">
+    <summary>Underlying totals (debug)</summary>
+    <div class="hz-muted">Showing up to 10 rows per side.</div>
+    <div style="display:grid; gap:12px; grid-template-columns: 1fr 1fr; align-items:start;">
+      <div>
+        <div class="hz-muted"><b>Left</b> (${left.length} shown)</div>
+        <pre style="white-space:pre-wrap; font-size:12px; background:#0b1220; color:#e5e7eb; padding:10px; border-radius:10px; overflow:auto; max-height:240px;">${JSON.stringify(left, null, 2)}</pre>
+      </div>
+      <div>
+        <div class="hz-muted"><b>Right</b> (${right.length} shown)</div>
+        <pre style="white-space:pre-wrap; font-size:12px; background:#0b1220; color:#e5e7eb; padding:10px; border-radius:10px; overflow:auto; max-height:240px;">${JSON.stringify(right, null, 2)}</pre>
+      </div>
+    </div>
+  </details>`
+}
+```
+
+```{ojs}
+// Render main shell (hero section is in markdown above)
+hz_controlsMount = html`<div class=\"hz-mount\"><div class=\"hz-loading\">Loading controls…</div></div>`
+hz_geoMount = html`<div class=\"hz-mount\"><div class=\"hz-loading\">Loading geography…</div></div>`
+hz_dashMount = html`<div class=\"hz-mount\"><div class=\"hz-loading\">Loading dashboard…</div></div>`
+
+hz_statusPill = html`<span class=\"hz-pill\">Loading…</span>`
+hz_chartHost  = html`<div class=\"hz-loading\">Loading chart…</div>`
+hz_debugHost  = html``
+hz_pathHost   = html`<div class=\"hz-loading\">Loading dataset paths…</div>`
+hz_schemaHost = html`<div class=\"hz-loading\">Loading schema…</div>`
+
+// Dashboard shell renders immediately (chart + heavy queries mount later)
+hz_dashboardShell = html`
+  <div>
+    ${viewof hz_plotWidth}
+    <div class=\"hz-card\">
+      <div class=\"hz-card__head\">
+        <div>
+          <div class=\"hz-card__title\">Dashboard — Q1 Total exposure by hazard</div>
+          <div class=\"hz-card__sub\">Compare Left vs Right (side-by-side or Δ). Filters: scenarios, geography, commodities, severity.</div>
+        </div>
+        ${hz_statusPill}
+      </div>
+      ${hz_chartHost}
+      ${hz_debugHost}
+    </div>
+
+    <details class=\"hz-details\" style=\"margin-top:12px;\">
+      <summary>Dataset paths (left/right)</summary>
+      ${hz_pathHost}
+    </details>
+
+    <details class=\"hz-details\" style=\"margin-top:12px;\">
+      <summary>Data status & schema</summary>
+      ${hz_schemaHost}
+    </details>
+  </div>
+`
+
+// Mount panels into placeholders (never blocks hz_main)
+hz_mountControls = {
+  try {
+    hz_controlsMount.replaceChildren(hz_controlsPanelReal)
+  } catch (e) {
+    hz_controlsMount.replaceChildren(html`<div class=\"warn\"><b>Controls failed to render:</b><br>${String(e)}</div>`)
+  }
+  return html``
+}
+
+hz_mountGeo = {
+  try {
+    hz_geoMount.replaceChildren(hz_geoPanelReal)
+  } catch (e) {
+    hz_geoMount.replaceChildren(html`<div class=\"warn\"><b>Geography failed to render:</b><br>${String(e)}</div>`)
+  }
+  return html``
+}
+
+hz_mountDash = {
+  try {
+    hz_dashMount.replaceChildren(hz_dashboardShell)
+  } catch (e) {
+    hz_dashMount.replaceChildren(html`<div class=\"warn\"><b>Dashboard failed to render:</b><br>${String(e)}</div>`)
+  }
+  return html``
+}
+
+// Populate the Details panels (safe)
+hz_mountPathStatus = {
+  try {
+    hz_pathHost.replaceChildren(hz_pathStatus)
+  } catch (e) {
+    hz_pathHost.replaceChildren(html`<div class=\"warn\"><b>Path panel failed:</b><br>${String(e)}</div>`)
+  }
+  return html``
+}
+
+hz_mountSchema = {
+  try {
+    hz_schemaHost.replaceChildren(hz_schemaPanel)
+  } catch (e) {
+    hz_schemaHost.replaceChildren(html`<div class=\"warn\"><b>Schema panel failed:</b><br>${String(e)}</div>`)
+  }
+  return html``
+}
+
+// Build chart *safely* (catch DuckDB/Arrow/Plot errors so UI still renders)
+hz_updateChart = {
+  const errors = []
+
+  const safeTotals = async (side, src, scenPick) => {
+    if (!src?.ok || !src?.url) return []
+    try {
+      return await hz_totalsByHazard(src.url, scenPick, hz_geoFilter, hz_selectedCommodities)
+    } catch (e) {
+      errors.push({ side, error: String(e) })
+      return []
+    }
+  }
+
+  const safeDenom = async () => {
+    if (!hz_useExternalDenom || !hz_totalExposureUrl) return null
+    try {
+      const q = `
+        SELECT SUM(CAST(value AS DOUBLE)) AS denom
+        FROM read_parquet('${hz_totalExposureUrl}')
+        WHERE ${hz_scenWhere(hz_scen1)}
+          AND ${hz_geoFilter}
+          AND ${hz_cropWhere(hz_selectedCommodities)}
+      `
+      const res = await hz_db.query(q)
+      const rows = hz_rows(res)
+      const d = rows?.[0]?.denom
+      const n = Number(d)
+      return Number.isFinite(n) ? n : null
+    } catch (e) {
+      errors.push({ side: 'denom', error: String(e) })
+      return null
+    }
+  }
+
+  // Run queries
+  const [left, right, denom] = await Promise.all([
+    safeTotals('left', hz_src1, hz_scen1),
+    safeTotals('right', hz_src2, hz_scen2),
+    safeDenom()
+  ])
+
+  // Update status pill
+  if (errors.length) {
+    hz_statusPill.textContent = 'Error'
+  } else {
+    hz_statusPill.textContent = (hz_src1?.ok && hz_src2?.ok) ? 'Ready' : 'Check paths'
+  }
+
+  // If query errors, show them (but never throw)
+  if (errors.length) {
+    hz_chartHost.replaceChildren(html`<div class=\"warn\"><b>Chart query failed</b><br/><div class=\"hz-muted\">See details below.</div></div>`)
+    hz_debugHost.replaceChildren(html`<details class=\"hz-details\" style=\"margin-top:12px;\" open>
+      <summary>Chart errors</summary>
+      <pre style=\"white-space:pre-wrap; font-size:12px; background:#0b1220; color:#e5e7eb; padding:10px; border-radius:10px; overflow:auto;\">${JSON.stringify(errors, null, 2)}</pre>
+    </details>`)
+    return html``
+  }
+
+  // No data
+  if (!left.length && !right.length) {
+    hz_chartHost.replaceChildren(html`<div class=\"hz-empty\">No data for the current filters.</div>`)
+    hz_debugHost.replaceChildren(html``)
+    return html``
+  }
+
+  // Merge totals
+  const byHaz1 = new Map(left.map(d => [d.hazard, Number(d.total ?? 0)]))
+  const byHaz2 = new Map(right.map(d => [d.hazard, Number(d.total ?? 0)]))
+  const hazards = new Set([...byHaz1.keys(), ...byHaz2.keys()])
+
+  const sum1 = Array.from(byHaz1.values()).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
+  const sum2 = Array.from(byHaz2.values()).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
+
+  const pct = (val, sum) => {
+    if (Number.isFinite(denom) && denom > 0) return (val / denom) * 100
+    if (Number.isFinite(sum) && sum > 0) return (val / sum) * 100
+    return 0
+  }
+
+  let rows = Array.from(hazards).map(h => {
+    const total1 = byHaz1.get(h) ?? 0
+    const total2 = byHaz2.get(h) ?? 0
+    const total_diff = total2 - total1
+    const perc1 = pct(total1, sum1)
+    const perc2 = pct(total2, sum2)
+    const pct_diff = perc2 - perc1
+    return { hazard: h, total1, total2, total_diff, perc1, perc2, pct_diff }
+  })
+
+  // Sort + topN + optional "Other"
+  const metric = hz_difference
+    ? (hz_relative ? 'pct_diff' : 'total_diff')
+    : (hz_relative ? 'perc2' : 'total2')
+
+  rows.sort((a, b) => Math.abs(Number(b[metric] ?? 0)) - Math.abs(Number(a[metric] ?? 0)))
+
+  const topN = Math.max(1, Number(hz_topN ?? 15) || 15)
+  let head = rows.slice(0, topN)
+
+  if (hz_groupOther && rows.length > topN) {
+    const rest = rows.slice(topN)
+    const sum = (k) => rest.reduce((a, r) => a + Number(r[k] ?? 0), 0)
+    const otherTotal1 = sum('total1')
+    const otherTotal2 = sum('total2')
+    head = head.concat([{
+      hazard: 'Other',
+      total1: otherTotal1,
+      total2: otherTotal2,
+      total_diff: otherTotal2 - otherTotal1,
+      perc1: pct(otherTotal1, sum1),
+      perc2: pct(otherTotal2, sum2),
+      pct_diff: pct(otherTotal2, sum2) - pct(otherTotal1, sum1)
+    }])
+  }
+
+  // Build Plot
+  try {
+    const absLabel = hz_varLabel || 'Value'
+    const pctLabel = hz_relativeLabel || '%'
+    const xLabel = hz_relative ? pctLabel : absLabel
+
+    const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
+    const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
+
+    const s1 = hz_parseScenXTime(hz_scen1)
+    const s2 = hz_parseScenXTime(hz_scen2)
+    const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${s1.label} • Right: ${s2.label}`
+
+    let chart
+
+    if (!hz_difference) {
+      const side = head.flatMap(d => ([
+        { hazard: d.hazard, scenario: s1.label, value: hz_relative ? d.perc1 : d.total1, raw: d.total1, pct: d.perc1 },
+        { hazard: d.hazard, scenario: s2.label, value: hz_relative ? d.perc2 : d.total2, raw: d.total2, pct: d.perc2 }
+      ]))
+
+      chart = Plot.plot({
+        width: Math.max(520, (hz_plotWidth ?? 900) - 24),
+        height: hz_chartHeight,
+        marginLeft: 210,
+        marginRight: 24,
+        marginTop: 36,
+        marginBottom: 40,
+        x: { label: xLabel, grid: true, tickFormat: hz_relative ? fmtPct : fmtAbs },
+        y: { label: null },
+        color: { legend: true },
+        caption: subtitle,
+        marks: [
+          Plot.ruleX([0]),
+          Plot.barX(side, {
+            x: 'value',
+            y: 'hazard',
+            fill: 'scenario',
+            inset: 0.5,
+            tip: {
+              format: {
+                hazard: true,
+                scenario: true,
+                value: hz_relative ? fmtPct : fmtAbs,
+                raw: hz_relative ? fmtAbs : null,
+                pct: hz_relative ? null : fmtPct
+              }
+            }
+          })
+        ]
+      })
+    } else {
+      chart = Plot.plot({
+        width: Math.max(520, (hz_plotWidth ?? 900) - 24),
+        height: hz_chartHeight,
+        marginLeft: 210,
+        marginRight: 24,
+        marginTop: 36,
+        marginBottom: 40,
+        x: { label: xLabel, grid: true, tickFormat: hz_relative ? fmtPct : fmtAbs },
+        y: { label: null },
+        color: { legend: true },
+        caption: subtitle,
+        marks: [
+          Plot.ruleX([0]),
+          Plot.barX(head, {
+            x: hz_relative ? 'pct_diff' : 'total_diff',
+            y: 'hazard',
+            fill: (d) => (Number(d.total_diff ?? 0) >= 0 ? 'Increase' : 'Decrease'),
+            inset: 0.5,
+            tip: { format: { hazard: true, value: hz_relative ? fmtPct : fmtAbs } }
+          })
+        ]
+      })
+    }
+
+    hz_chartHost.replaceChildren(chart)
+    hz_debugHost.replaceChildren(html``)
+  } catch (e) {
+    hz_statusPill.textContent = 'Error'
+    hz_chartHost.replaceChildren(html`<div class=\"warn\"><b>Plot failed to render</b><br>${String(e)}</div>`)
+    hz_debugHost.replaceChildren(html``)
+  }
+
+  return html``
+}
+
+// Bootstrap cell: forces mounts + updates to execute without blocking hz_main.
+hz_bootstrap = {
+  hz_mountControls
+  hz_mountGeo
+  hz_mountDash
+  hz_mountPathStatus
+  hz_mountSchema
+  await hz_updateChart
+  return html``
+}
+
+hz_main = html`
+  <div class=\"app\">
+    <nav class=\"hz-topnav\" aria-label=\"Quick navigation\">
+      <a href=\"#controls\">Controls</a>
+      <a href=\"#geography\">Geography</a>
+      <a href=\"#dashboard\">Dashboard</a>
+      <span class=\"hz-topnav__spacer\"></span>
+      <span class=\"hz-pill\">Atlas Hazard Exposure</span>
+    </nav>
+    <div class=\"app__stack\">
+      <div id=\"controls\">${hz_controlsMount}</div>
+      <div id=\"geography\">${hz_geoMount}</div>
+      <div id=\"dashboard\">${hz_dashMount}</div>
+    </div>
+  </div>
+`;
+
+// Render the shell immediately
+hz_main
+
+// Run mounts + chart updates (non-blocking relative to hz_main)
+hz_bootstrap
+```
+
