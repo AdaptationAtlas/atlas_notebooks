@@ -1,23 +1,37 @@
 ---
-title: "Atlas Hazard Exposure"
-page-layout: full
-format:
-  html:
-    theme: cosmo
-    toc: false
-    grid:
-      body-width: 1180px
-    css: ../../styles.css
-execute:
-  freeze: auto
+pagetitle: "Atlas Hazard Exposure"
+nb-authors:
+  - Brayden Youngberg
+  - Pete Stewart
+  - Joseph Chemutt
+date-created: "2025-02-19"
+date-edited: today
 ---
+{{< include /components/_lang.qmd >}}
 
+```{ojs}
+//| output: false
+import { atlasTOC, atlasHero } from "/helpers/uiComponents.ojs";
+import { enahncedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
+
+hero_url = "./../../images/default_crop.webp";
+// This ^^ must be relative path due to an issue
+// with how Quarto resolves certain paths if local image.
+// It can also be a url.
+nbTitle = _lang({
+  en: "Atlas Hazard Exposure Explorer",
+  fr: "Explorateur d’exposition aux aléas de l’Atlas",
+});
+
+```
 
 ```{ojs}
 //| output: false
 import { Inputs } from "@observablehq/inputs"
 import { DuckDBClient } from "@observablehq/duckdb"
 ```
+{{< include /components/_atlasBoundaries.qmd >}}
+
 
 ```{ojs}
 //| output: false
@@ -26,7 +40,6 @@ import { DuckDBClient } from "@observablehq/duckdb"
 Plot = await import("https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.14/+esm")
 csvParse = (await import("https://cdn.jsdelivr.net/npm/d3-dsv@3/+esm")).csvParse
 ```
-
 
 ```{ojs}
 //| output: false
@@ -46,7 +59,6 @@ hz_s3ToHttps = (s3) => {
   return `https://${bucket}.s3.amazonaws.com/${key}`
 }
 
-
 hz_toServedUrl = (p) => {
   const s = String(p ?? "").trim()
   if (!s) return s
@@ -55,7 +67,6 @@ hz_toServedUrl = (p) => {
   // Normalize Windows paths/backslashes to URL-style
   return s.replace(/\\/g, "/").replace(/^\.\//, "")
 }
-
 
 hz_resolvePath = (entry) => {
   if (!entry) return { ok: false, raw: null, url: null, source: "missing" }
@@ -77,6 +88,23 @@ hz_resolvePath = (entry) => {
     return { ok: true, raw, url: hz_isHttpUrl(raw) ? raw : hz_toServedUrl(raw), source: "url" }
   }
   return { ok: false, raw: null, url: null, source: "missing" }
+}
+
+// Quick URL sanity check: helps avoid confusing DuckDB errors when a URL returns
+hz_validateParquetUrl = async (url) => {
+  const u = String(url ?? "").trim()
+  if (!u || !hz_isHttpUrl(u)) return { ok: true }
+  try {
+    const r = await fetch(u, { headers: { Range: "bytes=0-3" } })
+    if (!r.ok) return { ok: false, error: `HTTP ${r.status} ${r.statusText}` }
+    const buf = new Uint8Array(await r.arrayBuffer())
+    const magic = String.fromCharCode(...buf)
+    if (magic !== "PAR1") return { ok: false, error: `Not a Parquet file (magic=${magic})` }
+    return { ok: true }
+  } catch (e) {
+    // If the check fails due to CORS/network quirks, don't block — DuckDB will still try.
+    return { ok: true, warn: String(e) }
+  }
 }
 
 hz_formatNumber = (v, { digits = 0, compact = true } = {}) => {
@@ -146,10 +174,6 @@ hz_parseKeyParts = (key) => {
 }
 ```
 
-
-
-
-
 ```{ojs}
 //| output: false
 // Responsive width sensor for Plot
@@ -172,15 +196,6 @@ viewof hz_plotWidth = {
 //| output: false
 // Create a DuckDB client
 hz_db = DuckDBClient.of()
-```
-
-```{ojs}
-//| output: false
-hz_db_http_init = {
-  try { await hz_db.query("INSTALL httpfs"); } catch (e) {}
-  try { await hz_db.query("LOAD httpfs"); } catch (e) {}
-  return true
-}
 ```
 
 ```{ojs}
@@ -210,52 +225,39 @@ hz_query = async (sql) => {
 }
 ```
 
-
 ```{ojs}
-// Simple hero
-hz_title = "Atlas Hazard Exposure"
-hz_hero_url = "./../../images/default_crop.webp"
-
-hz_hero = html`
-  <section class="hero">
-    <div class="hero__text">
-      <h1>${hz_title}</h1>
-      <p>Interactive hazard exposure analysis</p>
-      <div class="hero__chips">
-        <span class="chip">Scenario comparison</span>
-        <span class="chip">Admin 0/1/2 filters</span>
-      </div>
-    </div>
-    <div class="hero__img">
-      <img src="${hz_hero_url}" alt="">
-    </div>
-  </section>
-`
-```
-
-```{ojs}
-// Render hero
-hz_hero
+//| output: false
+hz_hero = atlasHero(nbTitle, hero_url)
 ```
 
 
+```{ojs}
+//| output: false
+// Hero is mounted into #hz-hero by the final bootstrap cell.
+null
+```
 
 ```{=html}
 <style>
-html, body { overflow-x: hidden; }
-.page-columns, .content { overflow-x: hidden; }
-.quarto-toc, nav#TOC, #TOC { display: none !important; }
+html, body{
+overflow-x: hidden;
+}
+
+.page-columns, .content{
+overflow-x: hidden;
+}
 
 :root{
-  --card-bg:#fff;
+--card-bg:#fff;
   --card-bd:rgba(0,0,0,.08);
   --muted:rgba(0,0,0,.65);
   --muted2:rgba(0,0,0,.52);
   --shadow:0 10px 26px rgba(0,0,0,.07);
   --radius:16px;
 }
+
 .hero{
-  display:grid;
+display:grid;
   grid-template-columns:1.2fr .8fr;
   gap:18px;
   align-items:stretch;
@@ -266,86 +268,74 @@ html, body { overflow-x: hidden; }
   box-shadow:var(--shadow);
   margin:10px 0 18px 0;
 }
-.hero__text h1{ margin:0 0 6px 0; font-weight:800; }
-.hero__text p{ margin:0; color:var(--muted); }
-.hero__chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+
 .chip{
-  display:inline-flex; align-items:center; gap:6px;
+display:inline-flex; align-items:center; gap:6px;
   padding:6px 10px;
   border-radius:999px;
   border:1px solid var(--card-bd);
   background:rgba(255,255,255,.75);
   font-size:.86rem;
 }
-.hero__img{ display:flex; }
-.hero__img img{
-  width:100%; height:100%;
-  object-fit:cover;
-  border-radius:14px;
-  border:1px solid var(--card-bd);
-}
-.layout{
-  display:grid;
-  grid-template-columns:420px 1fr;
-  gap:14px;
-  align-items:start;
-}
-@media (max-width: 1100px){ .layout{ grid-template-columns:1fr; } }
+
 .card{
-  background:var(--card-bg);
+background:var(--card-bg);
   border:1px solid var(--card-bd);
   border-radius:var(--radius);
   padding:14px;
   box-shadow:var(--shadow);
 }
-.card h3{ margin:0 0 6px 0; font-weight:800; font-size:1.05rem; }
-.card .sub{ color:var(--muted); margin:0 0 10px 0; font-size:.9rem; }
-.sticky{ position:sticky; top:10px; }
-.grid2{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-@media (max-width: 900px){ .grid2{ grid-template-columns:1fr; } }
-.kpiRow{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.kpi{
-  padding:10px 12px;
-  border-radius:14px;
-  border:1px solid var(--card-bd);
-  background:rgba(0,0,0,.018);
+
+.card h3{
+margin:0 0 6px 0; font-weight:800; font-size:1.05rem;
 }
-.kpi .k{ font-size:.82rem; color:var(--muted2); }
-.kpi .v{ font-size:1.05rem; font-weight:800; margin-top:2px; overflow:hidden; text-overflow:ellipsis; }
-.hr{ height:1px; background:rgba(0,0,0,.06); margin:10px 0; }
-.smallNote{ color:var(--muted2); font-size:.86rem; }
-.badge{
-  display:inline-flex; align-items:center;
-  padding:3px 8px; border-radius:999px;
-  border:1px solid var(--card-bd);
-  background:rgba(0,0,0,.03);
-  font-size:.82rem;
+
+.card .sub{
+color:var(--muted); margin:0 0 10px 0; font-size:.9rem;
 }
+
+.grid2{
+display:grid; grid-template-columns:1fr 1fr; gap:12px;
+}
+
+@media (max-width: 900px){
+.grid2{
+grid-template-columns:1fr;
+}
+}
+
+.kpi .k{
+font-size:.82rem; color:var(--muted2);
+}
+
+.kpi .v{
+font-size:1.05rem; font-weight:800; margin-top:2px; overflow:hidden; text-overflow:ellipsis;
+}
+
 .warn{
-  border:1px solid rgba(220,53,69,.35);
+border:1px solid rgba(220,53,69,.35);
   background:rgba(220,53,69,.06);
   border-radius:14px;
   padding:10px 12px;
 }
+
 .ok{
-  border:1px solid rgba(25,135,84,.35);
+border:1px solid rgba(25,135,84,.35);
   background:rgba(25,135,84,.06);
   border-radius:14px;
   padding:10px 12px;
 }
 
-/* ==========================
-   Atlas Hazard Exposure UI
-========================== */
 .hz-card{
-  background:var(--card-bg);
+background:var(--card-bg);
   border:1px solid var(--card-bd);
   border-radius:18px;
   box-shadow:var(--shadow);
   padding:14px 14px 12px 14px;
 }
+
 .hz-card__head{
-  display:flex;
+display:flex;
   gap:12px;
   align-items:flex-start;
   justify-content:space-between;
@@ -353,232 +343,446 @@ html, body { overflow-x: hidden; }
   border-bottom:1px solid rgba(0,0,0,.06);
   margin-bottom:12px;
 }
-.hz-card__title{ font-weight:900; font-size:1.05rem; line-height:1.1; }
-.hz-card__sub{ color:var(--muted); font-size:.88rem; margin-top:2px; }
+
+.hz-card__title{
+font-weight:900; font-size:1.05rem; line-height:1.1;
+}
+
+.hz-card__sub{
+color:var(--muted); font-size:.88rem; margin-top:2px;
+}
+
 .hz-pill{
-  padding:6px 10px;
+padding:6px 10px;
   border-radius:999px;
   border:1px solid rgba(0,0,0,.08);
   background:rgba(0,0,0,.02);
   font-size:.82rem;
   white-space:nowrap;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
 }
-.hz-grid{ display:grid; gap:14px; }
-.hz-grid--2{ grid-template-columns:1fr 1fr; }
-@media (max-width: 980px){ .hz-grid--2{ grid-template-columns:1fr; } }
+
+.hz-tabs{
+display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-top:10px;
+  align-items:center;
+}
+
+.hz-tabs--small{
+gap:6px; margin-top:6px;
+}
+
+.hz-tab{
+appearance:none;
+  cursor:pointer;
+  border:1px solid rgba(15,23,42,.14);
+  background:rgba(255,255,255,.85);
+  color:#0f172a;
+  padding:8px 12px;
+  border-radius:999px;
+  font-weight:800;
+  font-size:.84rem;
+  line-height:1;
+  letter-spacing:.01em;
+  transition:transform .06s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;
+}
+
+.hz-tab:hover{
+background:rgba(2,132,199,.06); border-color:rgba(2,132,199,.35);
+}
+
+.hz-tab:active{
+transform:translateY(1px);
+}
+
+.hz-tab.is-active{
+background:rgba(2,132,199,.12);
+  border-color:rgba(2,132,199,.55);
+  box-shadow:0 1px 0 rgba(2,132,199,.18);
+}
+
+.hz-tab:focus{
+outline:none; box-shadow:0 0 0 3px rgba(2,132,199,.20);
+}
+
+.hz-grid2{
+display:grid;grid-template-columns:1fr 1fr;gap:12px
+}
+
+@media (max-width: 900px){
+.hz-grid2{
+grid-template-columns:1fr
+}
+}
+
+.hz-legendRow{
+display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  margin:6px 0 10px;
+}
+
+.hz-legendRow .plot-legend{
+font-size:.82rem;
+}
+
+.hz-grid2--equal{
+align-items:start;
+}
+
+.hz-mini{
+background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:12px
+}
+
+.hz-mini__title{
+font-size:12px;color:#cbd5e1;margin:0 0 8px 2px;font-weight:600;letter-spacing:.02em;text-transform:uppercase
+}
+
+.hz-card__tabs{
+margin-top:8px
+}
+
+.hz-pill{
+display:inline-flex; align-items:center; gap:8px; position:relative;
+}
+
+.hz-pill__spin{
+width:12px; height:12px; border-radius:999px;
+  border:2px solid rgba(0,0,0,.18);
+  border-top-color: rgba(0,0,0,.55);
+  animation: hzSpin .8s linear infinite;
+  flex:0 0 auto;
+}
+
+@keyframes hzSpin{
+to{
+transform: rotate(360deg);
+}
+}
+
+.hz-chartWrap{
+position:relative; min-height:340px;
+}
+
+.hz-chartWrap--busy::before{
+content:"";
+  position:absolute; inset:0;
+  background:rgba(255,255,255,.62);
+  backdrop-filter: blur(2px);
+  border-radius:14px;
+  z-index: 10;
+}
+
+.hz-chartWrap--busy::after{
+content:"Updating chart…";
+  position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  padding:10px 14px;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,.12);
+  background:rgba(255,255,255,.9);
+  box-shadow:0 10px 26px rgba(0,0,0,.10);
+  font-weight:900;
+  font-size:.9rem;
+  z-index: 11;
+}
+
+.hz-grid{
+display:grid; gap:14px;
+}
+
+.hz-grid--2{
+grid-template-columns:1fr 1fr;
+}
+
+@media (max-width: 980px){
+.hz-grid--2{
+grid-template-columns:1fr;
+}
+}
+
+.hz-grid--auto{
+grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items:end;
+}
+
+.hz-grid--tight{
+gap:10px;
+}
+
+.hz-subtitle{
+font-weight:900; font-size:.82rem; color:rgba(0,0,0,.72); margin: 10px 0 6px 0;
+}
+
+.hz-geoInline{
+margin-top:10px; padding-top:10px; border-top:1px dashed rgba(0,0,0,.12);
+}
 
 .hz-section{
-  border:1px solid rgba(0,0,0,.06);
+border:1px solid rgba(0,0,0,.06);
   background:rgba(0,0,0,.012);
   border-radius:16px;
   padding:12px;
 }
+
 .hz-section__title{
-  font-weight:900;
+font-weight:900;
   font-size:.92rem;
   margin:0 0 8px 0;
 }
-.hz-field{ margin:8px 0; }
-.hz-muted{ color:var(--muted); font-size:.86rem; margin-top:8px; }
-.hz-kv{
-  display:grid;
-  grid-template-columns:110px 1fr;
-  gap:6px 10px;
-  margin-top:10px;
-  font-size:.86rem;
-}
-.hz-kv__k{ color:var(--muted2); }
-.hz-kv__v code{ word-break:break-word; }
 
-.hz-actions{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  flex-wrap:wrap;
-  margin-top:12px;
-  padding-top:10px;
-  border-top:1px solid rgba(0,0,0,.06);
+.hz-field{
+margin:8px 0;
 }
-.hz-details summary{
-  cursor:pointer;
-  color:rgba(0,0,0,.78);
-  font-weight:700;
+
+.hz-muted{
+color:var(--muted); font-size:.86rem; margin-top:8px;
 }
-.hz-details{ margin-top:10px; }
 
 .hz-card select, .hz-card input[type="text"], .hz-card input[type="number"]{
-  width:100%;
+width:100%;
   max-width:100%;
   box-sizing:border-box;
 }
+
 .hz-card select{
-  border:1px solid rgba(0,0,0,.12);
+border:1px solid rgba(0,0,0,.12);
   border-radius:12px;
   padding:8px 10px;
   background:#fff;
 }
+
 .hz-card select[multiple]{
-  min-height:180px;
+min-height:180px;
   max-height:260px;
   overflow:auto;
 }
+
 .hz-card input[type="text"], .hz-card input[type="number"]{
-  border:1px solid rgba(0,0,0,.12);
+border:1px solid rgba(0,0,0,.12);
   border-radius:12px;
   padding:8px 10px;
 }
+
 .hz-btn{
-  border:1px solid rgba(0,0,0,.12);
+border:1px solid rgba(0,0,0,.12);
   background:rgba(0,0,0,.02);
   border-radius:999px;
   padding:8px 12px;
   font-weight:800;
   cursor:pointer;
 }
-.hz-btn:hover{ background:rgba(0,0,0,.04); }
-.hz-btn--primary{ background:#111; color:#fff; border-color:#111; }
-.hz-btn--primary:hover{ background:#000; }
 
-
-/* ----------------------------------------------------------
-   Layout polish: sidebar + main content
----------------------------------------------------------- */
-.layout{
-  display:grid;
-  grid-template-columns: 420px minmax(0,1fr);
-  gap:16px;
-  align-items:start;
-}
-.layout__sidebar,.layout__main{ min-width:0; }
-
-.layout__sidebar{
-  position: sticky;
-  top: 12px;
-  align-self: start;
-  max-height: calc(100vh - 24px);
-  overflow: auto;
-  padding-right: 4px;
-}
-.layout__sidebar::-webkit-scrollbar{ width: 10px; }
-.layout__sidebar::-webkit-scrollbar-thumb{ background: rgba(0,0,0,.12); border-radius: 10px; }
-.layout__sidebar::-webkit-scrollbar-track{ background: transparent; }
-
-@media (max-width: 1100px){
-  .layout{ grid-template-columns: 1fr; }
+.hz-btn:hover{
+background:rgba(0,0,0,.04);
 }
 
-/* Scenario split cards */
-.hz-split{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+.hz-split{
+display:grid; grid-template-columns: 1fr 1fr; gap:12px;
+}
+
 @media (max-width: 900px){
-  .hz-split{ grid-template-columns: 1fr; }
+.hz-split{
+grid-template-columns: 1fr;
 }
+}
+
 .hz-sideCard{
-  border:1px solid var(--card-bd);
+border:1px solid var(--card-bd);
   border-radius:14px;
   padding:12px;
   background:rgba(255,255,255,.7);
 }
-.hz-sideCard__title{ font-weight:700; font-size:13px; margin-bottom:8px; }
-.hz-sideCard__sub{ color:var(--muted); font-size:12px; margin-top:6px; }
-.hz-sideCard__kv{ display:grid; grid-template-columns: 96px 1fr; gap:6px 10px; margin-top:8px; }
-.hz-sideCard__kv .k{ color:var(--muted); font-size:12px; }
-.hz-sideCard__kv .v{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-/* Inputs: make selects fit */
+.hz-sideCard__title{
+font-weight:700; font-size:13px; margin-bottom:8px;
+}
+
+.hz-sideCard__sub{
+color:var(--muted); font-size:12px; margin-top:6px;
+}
+
+.hz-sideCard__kv{
+display:grid; grid-template-columns: 96px 1fr; gap:6px 10px; margin-top:8px;
+}
+
+.hz-sideCard__kv .k{
+color:var(--muted); font-size:12px;
+}
+
+.hz-sideCard__kv .v{
+font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
 .hz-card select, .hz-card input[type="text"], .hz-card input[type="search"], .hz-card input[type="url"]{
-  width:100% !important;
+width:100% !important;
   max-width:100%;
 }
 
+.hz-ms{
+display:flex; flex-direction:column; gap:10px;
+}
 
-.hz-ms{ display:flex; flex-direction:column; gap:10px; }
-.hz-ms__top{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.hz-ms__top{
+display:flex; gap:8px; align-items:center; flex-wrap:nowrap;
+}
+
+@media (max-width: 900px){
+.hz-ms__top{
+flex-wrap:wrap;
+}
+}
+
 .hz-ms__search{
-  flex:1;
+flex:1;
   min-width: 180px;
   padding:10px 12px;
   border:1px solid var(--card-bd);
   border-radius:12px;
   background:#fff;
 }
+
 .hz-btn{
-  border:1px solid var(--card-bd);
+border:1px solid var(--card-bd);
   background:rgba(0,0,0,.02);
   border-radius:12px;
   padding:8px 10px;
   cursor:pointer;
 }
-.hz-btn:hover{ box-shadow:0 2px 10px rgba(0,0,0,.06); }
-.hz-ms__chips{ display:flex; gap:6px; flex-wrap:wrap; }
+
+.hz-btn:hover{
+box-shadow:0 2px 10px rgba(0,0,0,.06);
+}
+
+.hz-ms__chips{
+display:flex; gap:6px; flex-wrap:wrap;
+}
+
 .hz-chip{
-  display:inline-flex; align-items:center; gap:6px;
+display:inline-flex; align-items:center; gap:6px;
   padding:6px 10px;
   border-radius:999px;
   border:1px solid var(--card-bd);
   background:rgba(255,255,255,.9);
   font-size:12px;
 }
+
 .hz-chip button{
-  border:none; background:transparent; cursor:pointer;
+border:none; background:transparent; cursor:pointer;
   font-size:14px; line-height:1; padding:0 2px; opacity:.7;
 }
-.hz-chip button:hover{ opacity:1; }
+
+.hz-chip button:hover{
+opacity:1;
+}
+
 .hz-ms__list{
-  border:1px solid var(--card-bd);
+border:1px solid var(--card-bd);
   border-radius:14px;
   padding:8px;
   max-height: 260px;
   overflow:auto;
   background:#fff;
 }
+
 .hz-ms__item{
-  display:flex; align-items:center; gap:10px;
+display:flex; align-items:center; gap:10px;
   padding:8px 8px;
   border-radius:10px;
   cursor:pointer;
 }
-.hz-ms__item:hover{ background:rgba(0,0,0,.03); }
-.hz-ms__item input{ width:16px; height:16px; }
-.hz-ms__meta{ color:var(--muted); font-size:12px; margin-left:auto; }
-.hz-ms__empty{ color:var(--muted); padding:10px; }
 
+.hz-ms__item:hover{
+background:rgba(0,0,0,.03);
+}
 
-.hz-width-sensor{ width:100%; height:0; overflow:hidden; }
+.hz-ms__item input{
+width:16px; height:16px;
+}
 
+.hz-ms__meta{
+color:var(--muted); font-size:12px; margin-left:auto;
+}
 
-/* ===== v44 layout polish (no horizontal scroll, full-width app) ===== */
-html, body{ max-width:100%; overflow-x:hidden; }
-main.content, .content{ max-width:100%; }
+.hz-ms__empty{
+color:var(--muted); padding:10px;
+}
+
+.hz-width-sensor{
+width:100%; height:0; overflow:hidden;
+}
+
+html, body{
+max-width:100%; overflow-x:hidden;
+}
+
+main.content, .content{
+max-width:100%;
+}
+
 .app{
-  max-width: min(1240px, 100%);
+max-width: min(1240px, 100%);
   margin: 0 auto;
   padding: 0 14px;
 }
-.app__stack{ display:flex; flex-direction:column; gap:14px; }
-.hz-card, .card{ max-width:100%; min-width:0; }
-.hz-grid, .hz-split{ min-width:0; }
-.hz-grid--2{
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+.app__stack{
+display:flex; flex-direction:column; gap:14px;
 }
+
+.hz-card, .card{
+max-width:100%; min-width:0;
+}
+
+.hz-grid, .hz-split{
+min-width:0;
+}
+
+.hz-grid--2{
+grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .hz-split{
-  display:grid;
+display:grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap:12px;
 }
-@media (max-width: 980px){
-  .hero{ grid-template-columns: 1fr; }
-  .hz-grid--2{ grid-template-columns: 1fr; }
-  .hz-split{ grid-template-columns: 1fr; }
-}
-.hz-width-sensor{ width:100%; height:1px; }
-pre, code{ max-width:100%; }
-pre{ overflow:auto; }
-.hz-sideCard__kv code, .hz-kv__v code{ word-break: break-word; white-space: normal; }
 
+@media (max-width: 980px){
+.hero{
+grid-template-columns: 1fr;
+}
+
+.hz-grid--2{
+grid-template-columns: 1fr;
+}
+
+.hz-split{
+grid-template-columns: 1fr;
+}
+}
+
+.hz-width-sensor{
+width:100%; height:1px;
+}
+
+pre, code{
+max-width:100%;
+}
+
+pre{
+overflow:auto;
+}
+
+.hz-sideCard__kv code, .hz-kv__v code{
+word-break: break-word; white-space: normal;
+}
 
 .hz-topnav{
-  position: sticky;
+position: sticky;
   top: 0;
   z-index: 50;
   display:flex;
@@ -592,46 +796,69 @@ pre{ overflow:auto; }
   border-radius: 999px;
   box-shadow: 0 8px 18px rgba(0,0,0,.06);
 }
+
 .hz-topnav a{
-  text-decoration:none;
+text-decoration:none;
   font-weight:600;
   font-size:13px;
   color: rgba(0,0,0,.78);
   padding:8px 10px;
   border-radius:999px;
 }
-.hz-topnav a:hover{ background: rgba(0,0,0,.05); }
-.hz-topnav .hz-topnav__spacer{ flex:1; }
-.hz-topnav .hz-pill{ margin-left:auto; }
+
+.hz-topnav a:hover{
+background: rgba(0,0,0,.05);
+}
+
+.hz-topnav .hz-topnav__spacer{
+flex:1;
+}
+
+.hz-topnav .hz-pill{
+margin-left:auto;
+}
 
 .hz-ms{
-  border:1px solid var(--card-bd);
+border:1px solid var(--card-bd);
   background: rgba(255,255,255,.75);
   border-radius: 14px;
   padding:10px;
 }
+
 .hz-ms__top{
-  display:flex;
+display:flex;
   gap:8px;
   align-items:center;
-  flex-wrap:wrap;
+  flex-wrap:nowrap;
 }
+
+@media (max-width: 900px){
+.hz-ms__top{
+flex-wrap:wrap;
+}
+}
+
 .hz-ms__search{
-  flex: 1 1 260px;
+flex: 1 1 260px;
   padding:10px 12px;
   border-radius: 12px;
   border: 1px solid var(--card-bd);
   background: #fff;
 }
-.hz-ms__search:focus{ outline: 2px solid rgba(0,0,0,.18); outline-offset: 2px; }
+
+.hz-ms__search:focus{
+outline: 2px solid rgba(0,0,0,.18); outline-offset: 2px;
+}
+
 .hz-ms__chips{
-  display:flex;
+display:flex;
   gap:8px;
   flex-wrap:wrap;
   margin-top:10px;
 }
+
 .hz-chip{
-  display:inline-flex;
+display:inline-flex;
   align-items:center;
   gap:10px;
   padding:8px 10px;
@@ -639,45 +866,208 @@ pre{ overflow:auto; }
   border: 1px solid var(--card-bd);
   background: rgba(0,0,0,.03);
 }
+
 .hz-chip button{
-  border:none;
+border:none;
   background: rgba(0,0,0,.08);
   width:22px; height:22px;
   border-radius: 999px;
   cursor:pointer;
 }
-.hz-chip button:hover{ background: rgba(0,0,0,.14); }
+
+.hz-chip button:hover{
+background: rgba(0,0,0,.14);
+}
+
 .hz-ms__list{
-  margin-top:10px;
+margin-top:10px;
   border-top: 1px dashed rgba(0,0,0,.12);
   padding-top:10px;
   max-height: 260px;
   overflow:auto;
 }
+
 .hz-ms__item{
-  display:flex;
+display:flex;
   align-items:center;
   gap:10px;
   padding:8px 8px;
   border-radius: 10px;
 }
-.hz-ms__item:hover{ background: rgba(0,0,0,.04); }
-.hz-ms__item input{ transform: scale(1.05); }
+
+.hz-ms__item:hover{
+background: rgba(0,0,0,.04);
+}
+
+.hz-ms__item input{
+transform: scale(1.05);
+}
+
+:root{
+--hz-font-sm: 12.5px;
+  --hz-font-md: 13.5px;
+  --hz-font-lg: 14.5px;
+  --hz-control-pad-y: 8px;
+  --hz-control-pad-x: 10px;
+}
+
+.hz-field form{
+width:100%;
+}
+
+.hz-field form > label,
+.hz-field label{
+display:block;
+  font-size: var(--hz-font-sm);
+  font-weight: 800;
+  letter-spacing: .01em;
+  color: rgba(0,0,0,.72);
+  margin: 0 0 6px 0;
+}
+
+.hz-field select,
+.hz-field input[type="text"],
+.hz-field input[type="search"],
+.hz-field input[type="number"]{
+width: 100%;
+  font-size: var(--hz-font-md);
+  line-height: 1.25;
+  padding: var(--hz-control-pad-y) var(--hz-control-pad-x);
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,.12);
+  background: rgba(255,255,255,.9);
+}
+
+.hz-field select{
+appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(0,0,0,.55) 50%),
+    linear-gradient(135deg, rgba(0,0,0,.55) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% - 2px),
+    calc(100% - 11px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 30px;
+}
+
+.hz-field select option{
+font-size: var(--hz-font-md);
+}
+
+.hz-ms{
+font-size: var(--hz-font-md);
+}
+
+.hz-ms__top{
+gap: 8px;
+}
+
+.hz-ms__label{
+font-size: var(--hz-font-sm);
+  font-weight: 800;
+  color: rgba(0,0,0,.72);
+}
+
+.hz-ms__search{
+font-size: var(--hz-font-md);
+  padding: var(--hz-control-pad-y) var(--hz-control-pad-x);
+  border-radius: 14px;
+}
+
+.hz-ms__btns{
+gap: 8px;
+}
+
+.hz-btn{
+font-size: var(--hz-font-sm);
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,.12);
+  background: rgba(255,255,255,.9);
+}
+
+.hz-btn:hover{
+filter: brightness(0.98);
+}
+
+.hz-btn:active{
+transform: translateY(1px);
+}
+
+.hz-ms__chips{
+display:flex;
+  flex-wrap:wrap;
+  gap: 6px;
+  padding: 6px 6px;
+  margin-top: 8px;
+  border-radius: 14px;
+  border: 1px dashed rgba(0,0,0,.16);
+  background: rgba(255,255,255,.7);
+  min-height: 34px;
+  max-height: 92px;
+  overflow:auto;
+}
+
+.hz-chip{
+font-size: 11.5px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(0,0,0,.04);
+}
+
+.hz-chip button{
+width: 18px;
+  height: 18px;
+  border-radius: 999px;
+}
+
+.hz-ms__list{
+margin-top: 10px;
+  padding: 8px;
+  border-radius: 16px;
+}
+
+.hz-ms__item{
+padding: 6px 6px;
+  border-radius: 12px;
+  font-size: var(--hz-font-md);
+}
+
+.hz-ms__item input{
+width: 16px;
+  height: 16px;
+}
+
+@media (min-width: 980px){
+.hz-ms__list{
+display:grid;
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+    gap: 6px 12px;
+    align-items:start;
+}
+
+.hz-ms__item{
+margin: 0;
+}
+}
+
+.hz-card__sub{
+font-size: 13px;
+}
+
 </style>
 ```
 
-
-```{ojs}
-hz_main
+```{=html}
+<div id="hz-app"></div>
 ```
-
-
 
 ```{ojs}
 //| output: false
 
 // Runtime diagnostics (browser)
-
 
 hz_diagInit = {
   try {
@@ -802,9 +1192,7 @@ hz_renderErrors = (errors) => {
   </div>`
 }
 
-
 // nbData.json loader + normalizer
-
 
 hz_loadJson = async (path) => {
   try {
@@ -903,11 +1291,6 @@ hz_nbMeta.ok
         Raw keys: ${JSON.stringify(hz_nbMeta.rawKeys)}
       </div>
     </div>`
-```
-
-```{ojs}
-//| output: false
-hz_errorsPanel = hz_renderErrors(hz_errors)
 ```
 
 
@@ -1031,6 +1414,16 @@ hz_varLabel = (() => {
   return hz_formatVarShort(s)
 })()
 
+
+// Absolute axis label used by charts (when not in Relative % mode)
+hz_varLabelAbs = (() => {
+  const base = String(hz_varLabel ?? '').trim()
+  if (!base) return 'Exposure'
+  // If hz_varLabel already reads like a full label, keep it.
+  if (/exposure/i.test(base)) return base
+  return `Exposure (${base})`
+})()
+
 hz_formatPeriod = (p) => {
   const s = String(p ?? "")
   if (s === "annual") return "Annual"
@@ -1140,7 +1533,6 @@ viewof hz_scen2 = Inputs.select(hz_scenXTime, {
   format: hz_formatScenXTime,
   value: "ssp585_2041-2060"
 })
-
 
 hz_scenXTime = [
   "historic",
@@ -1254,7 +1646,6 @@ hz_allCommodities = {
 }
 ```
 
-
 ```{ojs}
 //| output: false
 // Commodity selectors
@@ -1270,7 +1661,7 @@ hz_commodityGroupLabel = (v) => ({
 }[v] ?? v)
 
 viewof hz_commodityGroup = Inputs.select(hz_commodityGroupOptions, {
-  label: "Commodities:",
+  label: "Group",
   value: "crops",
   format: hz_commodityGroupLabel
 })
@@ -1280,7 +1671,6 @@ viewof hz_commodityGroup = Inputs.select(hz_commodityGroupOptions, {
 //| output: false
 hz_selectedCommodGroup = hz_commodityGroup
 ```
-
 
 ```{ojs}
 //| output: false
@@ -1448,38 +1838,43 @@ hz_selectedCommodities = {
 ```{ojs}
 //| output: false
 // Display controls
-viewof hz_topN = Inputs.range([5, 40], { label: "Top hazards to show:", step: 1, value: 15 })
-viewof hz_groupOther = Inputs.toggle({ label: "Group remaining hazards into \"Other\" ", value: false })
+// Compare mode affects Q2/Q4 when comparing Left vs Right.
+viewof hz_compareMode = {
+  const options = [
+    { value: 'side', label: 'Side-by-side' },
+    { value: 'diff', label: 'Δ Right − Left' }
+  ]
+  const root = document.createElement('div')
+  root.className = 'hz-tabs hz-tabs--small'
+  const buttons = new Map()
+
+  const set = (v) => {
+    root.value = v
+    for (const [val, btn] of buttons.entries()) btn.classList.toggle('is-active', val === v)
+    root.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+
+  for (const opt of options) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'hz-tab'
+    b.textContent = opt.label
+    b.onclick = () => set(opt.value)
+    root.appendChild(b)
+    buttons.set(opt.value, b)
+  }
+
+  set('side')
+  return root
+}
+
+viewof hz_topN = Inputs.range([5, 50], { label: "Top items (Top N):", step: 1, value: 25 })
+viewof hz_groupOther = Inputs.toggle({ label: 'Group remaining hazards into "Other" (Q1)', value: false })
+viewof hz_rel = Inputs.toggle({ label: "Relative (%)", value: false })
+hz_isRelative = !!hz_rel
 viewof hz_chartHeight = Inputs.range([360, 900], { label: "Chart height:", step: 10, value: 520 })
 ```
 
-```{ojs}
-//| output: false
-// Total exposure denominator parquet (used for "Relative (% of total exposure)")
-viewof hz_useExternalDenom = Inputs.toggle(false, {
-  label: "Use external denominator parquet (advanced)",
-  description: "Off by default."
-})
-
-viewof hz_totalExposureUrl = Inputs.text({
-  label: "Total exposure parquet URL (denominator for Relative mode)",
-  value: "s3://digital-atlas/domain=exposure/type=combined/source=glw4+spam2020v1r2_ssa/region=ssa/processing=aggregated/gaul24_adm0-1-2_exposure.parquet",
-  width: "100%"
-})
-```
-
-```{ojs}
-//| output: false
-// Resolve denominator parquet URL from the text input.
-hz_totalExposureSrc = {
-  const raw = String(hz_totalExposureUrl ?? "").trim()
-  if (!raw) return { ok: false, raw: null, url: null, source: "input_missing" }
-  const url = hz_isHttpUrl(raw)
-    ? raw
-    : (/^s3:\/\//i.test(raw) ? hz_s3ToHttps(raw) : hz_toServedUrl(raw))
-  return { ok: true, raw, url, source: hz_isHttpUrl(raw) ? "https_input" : (/^s3:\/\//i.test(raw) ? "s3_input" : "local_input") }
-}
-```
 
 
 ```{ojs}
@@ -1518,7 +1913,6 @@ hz_commodityLabel = {
   return `Commodities: ${label} (${n})`
 }
 ```
-
 
 ```{ojs}
 //| output: false
@@ -1628,8 +2022,6 @@ hz_key2Resolved = hz_src2.resolvedKey
 null
 ```
 
-
-
 ```{ojs}
 //| output: false
 // Controls panel UI
@@ -1646,12 +2038,35 @@ hz_controlsPanelReal = html`
     </div>
 
     <section class="hz-section">
-      <div class="hz-section__title">Dataset</div>
-      <div class="hz-grid hz-grid--2">
+      <div class="hz-section__title">Dataset · Commodities · Geography</div>
+
+      <div class="hz-subtitle">Dataset</div>
+      <div class="hz-grid hz-grid--auto hz-grid--tight">
         <div class="hz-field">${viewof hz_varShort}</div>
         <div class="hz-field">${viewof hz_period}</div>
         <div class="hz-field">${viewof hz_severity}</div>
         <div class="hz-field">${viewof hz_method}</div>
+      </div>
+
+      <div class="hz-subtitle">Commodities</div>
+      <div class="hz-grid hz-grid--2 hz-grid--tight">
+        <div class="hz-field">${viewof hz_commodityGroup}</div>
+        <div class="hz-field">${viewof hz_commodities}</div>
+      </div>
+
+      <div class="hz-subtitle">Geography</div>
+      <div class="hz-grid hz-grid--auto hz-grid--tight">
+        <div class="hz-field">${viewof hz_admin0}</div>
+        <div class="hz-field">${viewof hz_admin1}</div>
+        <div class="hz-field">${viewof hz_admin2}</div>
+      </div>
+
+      <div class="hz-muted hz-geoInline">
+        <b>Resolved:</b> ${hz_geoResolvedLevel} · <b>Selections:</b> ${hz_geoSelectionCount}<br/>
+        <b>Selected:</b>
+        ${(Array.isArray(hz_admin0) && (hz_admin0.length === 0 || hz_admin0.includes("all"))) ? "All countries" : (hz_admin0 ?? []).join(", ")}
+        ${(hz_admin1 ?? []).length ? html`<br/><b>Admin1:</b> ${(hz_admin1 ?? []).join(", ")}` : ""}
+        ${(hz_admin2 ?? []).length ? html`<br/><b>Admin2:</b> ${(hz_admin2 ?? []).join(", ")}` : ""}
       </div>
     </section>
 
@@ -1683,26 +2098,14 @@ hz_controlsPanelReal = html`
         </div>
       </div>
 
-      <details class="hz-details">
-        <summary>Resolution details</summary>
-        <div class="hz-muted">
-          Left candidates: <code>${(hz_src1.candidates ?? []).join(" | ")}</code><br/>
-          Right candidates: <code>${(hz_src2.candidates ?? []).join(" | ")}</code>
-        </div>
-      </details>
-    </section>
-
-    <section class="hz-section">
-      <div class="hz-section__title">Commodities</div>
-      <div class="hz-grid hz-grid--2">
-        <div class="hz-field">${viewof hz_commodityGroup}</div>
-        <div class="hz-field">${viewof hz_commodities}</div>
-      </div>
     </section>
 
     <section class="hz-section">
       <div class="hz-section__title">Chart</div>
-      <div class="hz-grid hz-grid--2">
+
+    <div class=\"hz-muted\" style=\"margin-top:8px;\"></div>
+
+    <div class=\"hz-grid hz-grid--2\">
         <div class="hz-field">${viewof hz_relative}</div>
         <div class="hz-field">${viewof hz_difference}</div>
         <div class="hz-field">${viewof hz_topN}</div>
@@ -1710,82 +2113,53 @@ hz_controlsPanelReal = html`
       </div>
       <div class="hz-field">${viewof hz_chartHeight}</div>
     </section>
-
-    <section class="hz-section">
-      <div class="hz-section__title">Relative denominator</div>
-      <div class="hz-field">${viewof hz_useExternalDenom}</div>
-      
-    </section>
   </div>
 `;
 ```
 
-```{ojs}
-//| output: false
-// Path status card
-hz_pathStatus = html`
-  <div class="card">
-    <h3>Dataset paths</h3>
-    
-
-    <div class="${hz_src1.ok ? "ok" : "warn"}">
-      <div><b>Left:</b> <code>${hz_key1Resolved}</code></div>
-      
-    </div>
-
-    <div style="height:10px"></div>
-
-    <div class="${hz_src2.ok ? "ok" : "warn"}">
-      <div><b>Right:</b> <code>${hz_key2Resolved}</code></div>
-      
-    </div>
-
-    <div class="hr"></div>
-
-  </div>
-`
-```
 
 
 ```{ojs}
 //| output: false
-// Admin names parquet (used ONLY for selector options).
-// You can point this to a *local* parquet file in the repo for best performance.
-viewof hz_adminNamesUrl = Inputs.text({
-  label: "Admin names parquet URL (override if needed)",
-  value: "https://digital-atlas.s3.amazonaws.com/domain=boundaries/type=admin/source=gaul2024/region=africa/processing=simplified/level=adm2/atlas_gaul24_a2_africa_simple-lowres.parquet",
-  width: "100%"
-})
-
-```
-
-```{ojs}
-//| output: false
-// Resolve admin names URL (supports s3:// -> https inference)
-hz_adminNamesSrc = {
-  const raw = hz_adminNamesUrl
-  const url = String(raw).startsWith("s3://") ? hz_s3ToHttps(raw) : hz_toServedUrl(raw)
-  return { raw, url }
-}
-```
-
-```{ojs}
-//| output: false
-// Load admin name tuples (admin0/admin1/admin2) for cascading selectors
+// Admin name tuples (admin0/admin1/admin2) for cascading selectors.
+// Uses the shared local component: components/_atlasBoundaries.ojs
+// (No remote parquet needed.)
 hz_adminNames = {
   try {
-    const res = await hz_db.query(`
-      SELECT DISTINCT
-        admin0_name,
-        admin1_name,
-        admin2_name
-      FROM read_parquet('${hz_adminNamesSrc.url}')
-    `)
-    return hz_rows(res)
+    const { admin2 } = await getAdminBoundaries([2])
+    const feats = admin2?.features ?? []
+
+    const pick = (p, keys) => {
+      for (const k of keys) {
+        const v = p?.[k]
+        if (v != null && String(v).trim() !== "") return v
+      }
+      return null
+    }
+
+    const rows = feats.map((f) => {
+      const p = f?.properties ?? {}
+      
+      const admin0_name = pick(p, ["admin0_name","ADM0_NAME","NAME_0","adm0_name","country","COUNTRY","admin0","name0"])
+      const admin1_name = pick(p, ["admin1_name","ADM1_NAME","NAME_1","adm1_name","admin1","name1"])
+      const admin2_name = pick(p, ["admin2_name","ADM2_NAME","NAME_2","adm2_name","admin2","name2"])
+      return { admin0_name, admin1_name, admin2_name }
+    }).filter((d) => d.admin0_name != null)
+
+    
+    const seen = new Set()
+    const out = []
+    for (const d of rows) {
+      const k = `${d.admin0_name ?? ""}||${d.admin1_name ?? ""}||${d.admin2_name ?? ""}`
+      if (!seen.has(k)) { seen.add(k); out.push(d) }
+    }
+
+    return out
   } catch (e) {
-    return [{ error: String(e) }]
+    return [{ error: `Failed to load admin names from components/_atlasBoundaries.ojs: ${e}` }]
   }
 }
+
 ```
 
 ```{ojs}
@@ -1795,7 +2169,6 @@ hz_admin0Choices = {
   const isErr = hz_adminNames?.[0]?.error
   if (isErr) return ["all"]
   const vals = Array.from(new Set(hz_adminNames.map(d => d.admin0_name).filter(Boolean))).sort()
-  // Ensure "all" exists as an option (matches hazard exposure parquet convention)
   return vals.includes("all") ? vals : ["all", ...vals]
 }
 ```
@@ -1951,7 +2324,6 @@ hz_makeMultiSelect = ({
 }
 ```
 
-
 ```{ojs}
 //| output: false
 viewof hz_admin0 = hz_makeMultiSelect({
@@ -1969,11 +2341,8 @@ viewof hz_admin0 = hz_makeMultiSelect({
 })
 ```
 
-
-
 ```{ojs}
 //| output: false
-// Admin1 choices depend on admin0 selection (ignore admin1 if admin0 includes only "all")
 hz_admin1Choices = {
   const isErr = hz_adminNames?.[0]?.error
   if (isErr) return []
@@ -2002,10 +2371,8 @@ viewof hz_admin1 = hz_makeMultiSelect({
 })
 ```
 
-
 ```{ojs}
 //| output: false
-// Admin2 choices depend on admin0 and admin1 (requires admin1 selection for performance)
 hz_admin2Choices = {
   const isErr = hz_adminNames?.[0]?.error
   if (isErr) return []
@@ -2034,16 +2401,13 @@ viewof hz_admin2 = hz_makeMultiSelect({
 })
 ```
 
-
 ```{ojs}
 //| output: false
-// Build a clean geoFilter object (reuse everywhere)
 hz_geoFilter = ({
   admin0: (hz_admin0 ?? []),
   admin1: (hz_admin1 ?? []),
   admin2: (hz_admin2 ?? [])
 })
-
 
 hz_geoResolvedLevel = {
   const a0 = hz_geoFilter.admin0 ?? []
@@ -2101,31 +2465,19 @@ hz_geoTable = {
 }
 
 hz_geoPanelReal = html`
-  <div class="card">
-    <h3>Geography</h3>
-    <p class="sub">Select one or more admin0, then optionally narrow to admin1/admin2.</p>
-
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 12px; align-items:end;">
-      <div>${viewof hz_admin0}</div>
-      <div>${viewof hz_admin1}</div>
-      <div>${viewof hz_admin2}</div>
+  <div>
+    <div class="hz-card">
+      <div class="hz-card__head">
+        <div>
+          <div class="hz-card__title">Geography</div>
+          <div class="hz-card__sub">Geography selection is in <a href="#controls">Controls</a>. This section shows a summary.</div>
+        </div>
+        <a class="hz-pill" href="#controls" style="text-decoration:none">Change selection</a>
+      </div>
+      <div class="hz-muted">Tip: If you need to confirm what’s being queried, use the chips below (resolved level + selected admin names).</div>
     </div>
 
-<div class="hz-muted hz-geoSummary" style="margin-top:10px;">
-  <b>Selected:</b>
-  ${hz_admin0.includes("all") ? "All countries" : hz_admin0.join(", ")}
-  ${hz_admin1.length ? html`<br/><b>Admin1:</b> ${hz_admin1.join(", ")}` : ""}
-  ${hz_admin2.length ? html`<br/><b>Admin2:</b> ${hz_admin2.join(", ")}` : ""}
-</div>
-
-    <div class="hr"></div>
-
-    <div class="kpiRow">
-      <div class="kpi"><div class="k">Resolved level</div><div class="v">${hz_geoResolvedLevel}</div></div>
-      <div class="kpi"><div class="k">Selections</div><div class="v">${hz_geoSelectionCount}</div></div>
-    </div>
-
-    <div class="hr"></div>
+    <div style="height:12px"></div>
     ${hz_geoTable}
 
     ${
@@ -2137,11 +2489,58 @@ hz_geoPanelReal = html`
 `
 ```
 
-
 ```{ojs}
 //| output: false
 // WHERE clause builder for the hazard exposure parquet schema
 hz_q = (s) => "'" + String(s).replaceAll("'", "''") + "'"
+
+// Crop WHERE helper (safe SQL quoting; supports UI sentinel "all")
+hz_cropWhere = (commodities) => {
+  const list = Array.isArray(commodities) ? commodities.filter((d) => d != null && String(d).trim() !== "") : []
+  const hasAll = list.length === 0 || list.includes("all")
+  if (hasAll) return "TRUE"
+  const vals = list.filter((d) => d !== "all")
+  if (!vals.length) return "TRUE"
+  return `crop IN (${vals.map(hz_q).join(", ")})`
+}
+
+// hazard_vars lists
+// - generic: NDWS (drought) + NTx35 / THI-max (heat) + NDWL0 (flood)
+// - crop_specific: PTOT-L (drought) + NTxS / THI-max (heat) + PTOT-G (flood)
+hz_interactions = ({
+  generic: [
+    "NDWS+NTx35+NDWL0",
+    "NDWS+THI-max+NDWL0"
+  ],
+  crop_specific: [
+    "PTOT-L+NTxS+PTOT-G",
+    "PTOT-L+THI-max+PTOT-G"
+  ]
+})
+
+// hazard_vars WHERE helper
+hz_hazardVarsWhere = (method, commodGroup) => {
+  const m = String(method ?? "").toLowerCase()
+  const cg = String(commodGroup ?? "").toLowerCase()
+
+  const vars =
+    (m === "generic") ? hz_interactions.generic :
+    (m === "crop-specific" || m === "crop_specific") ? hz_interactions.crop_specific :
+    // auto (best available): default to crop_specific unless we're aggregating "all"
+    ((cg === "all" || cg === "" || cg === "total") ? hz_interactions.generic : hz_interactions.crop_specific)
+
+  return `hazard_vars IN (${vars.map(hz_q).join(", ")})`
+}
+
+// Exposure value/unit WHERE helper
+hz_unitWhere = (varShort) => {
+  return "TRUE"
+}
+
+// Severity WHERE helper
+hz_sevWhere = (severity) => {
+  return "TRUE"
+}
 
 hz_geoWhere = (geoFilter) => {
   const gf = geoFilter ?? {}
@@ -2149,7 +2548,7 @@ hz_geoWhere = (geoFilter) => {
   const admin1 = Array.isArray(gf.admin1) ? gf.admin1.filter((d) => d != null && String(d).trim() !== "") : []
   const admin2 = Array.isArray(gf.admin2) ? gf.admin2.filter((d) => d != null && String(d).trim() !== "") : []
 
-  // 'all' is a UI sentinel (not expected to exist in the parquet)
+  
   const hasAll = admin0.length === 0 || admin0.includes("all")
   const a0 = hasAll ? [] : admin0.filter((d) => d !== "all")
   const a1 = hasAll ? [] : admin1
@@ -2193,294 +2592,259 @@ hz_scenWhere = (sc) => {
 
 ```{ojs}
 //| output: false
-// Inspect schema of the left dataset (useful to debug path/permissions)
-hz_schema1 = {
-  if (!hz_src1.ok || !hz_src1.url) return []
+viewof hz_loadSchema = Inputs.toggle(false, { label: "Load schema tables (debug, slower)" })
+```
+
+
+
+```{ojs}
+//| output: false
+// -----------------------------
+// FAST API PATH (v3): call the FastAPI + Redis service for all heavy queries.
+
+// API base URL
+hz_apiBaseUrl = (() => {
   try {
-    const res = await hz_db.query(`DESCRIBE SELECT * FROM read_parquet('${hz_src1.url}')`)
-    return hz_rows(res)
-  } catch (e) {
-    return [{ error: String(e) }]
+    const u = new URL(window.location.href)
+    const p = u.searchParams.get('api')
+    if (p) return p.replace(/\/+$/, '')
+  } catch (_) {}
+  return (globalThis.__ATLAS_HZ_API_BASE__ ??= 'https://atlasapi.jcdevops.com')
+})()
+
+// Tiny client cache + debounce state (persists across reactive runs)
+hz_apiState = globalThis.__ATLAS_HZ_API_STATE__ ??= {
+  cache: new Map(),       // key -> { t:number, v:any }
+  order: [],              // insertion order for LRU
+  inflight: new Map(),    // key -> Promise
+  timers: new Map(),      // group -> timeout id
+  aborts: new Map(),      // group -> AbortController
+  tokens: new Map(),      // group -> number
+  maxEntries: 40
+}
+
+hz_stableStringify = (v) => {
+  const seen = new WeakSet()
+  const norm = (x) => {
+    if (x === null || x === undefined) return x
+    if (typeof x !== 'object') return x
+    if (seen.has(x)) return null
+    seen.add(x)
+    if (Array.isArray(x)) return x.map(norm)
+    const out = {}
+    for (const k of Object.keys(x).sort()) out[k] = norm(x[k])
+    return out
   }
+  return JSON.stringify(norm(v))
 }
 
-hz_schema2 = {
-  if (!hz_src2.ok || !hz_src2.url) return []
-  try {
-    const res = await hz_db.query(`DESCRIBE SELECT * FROM read_parquet('${hz_src2.url}')`)
-    return hz_rows(res)
-  } catch (e) {
-    return [{ error: String(e) }]
+hz_lruGet = (key, ttlMs) => {
+  const hit = hz_apiState.cache.get(key)
+  if (!hit) return null
+  if (ttlMs > 0 && (Date.now() - hit.t) > ttlMs) {
+    hz_apiState.cache.delete(key)
+    return null
   }
-}
-```
-
-```{ojs}
-//| output: false
-hz_renderMiniTable = (rows) => {
-  const r = Array.isArray(rows) ? rows : []
-  if (!r.length) return html`<div class="hz-muted">No results.</div>`
-
-  const cols = Object.keys(r[0]).slice(0, 6)
-  const head = html`<thead><tr>${cols.map(c => html`<th>${c}</th>`)}</tr></thead>`
-  const body = html`<tbody>
-    ${r.slice(0, 24).map(row => html`<tr>${cols.map(c => html`<td>${String(row[c] ?? "")}</td>`)}</tr>`)}
-  </tbody>`
-  return html`<div class="hz-tableWrap"><table class="hz-table">${head}${body}</table></div>`
-}
-```
-
-```{ojs}
-//| output: false
-// Render schema tables
-hz_schemaPanel = html`
-  <div class="hz-card">
-    <div class="hz-card__head">
-      <div>
-        <div class="hz-card__title">Data status</div>
-        <div class="hz-card__sub">${hz_geoLabel} · ${hz_commodityLabel}</div>
-      </div>
-      <div class="hz-pill">${hz_src1.ok && hz_src2.ok ? "Ready" : "Check paths"}</div>
-    </div>
-
-    <div class="hz-grid hz-grid--2">
-      <section class="hz-section">
-        <div class="hz-section__title">Left dataset</div>
-        <div class="hz-kv">
-          <div class="hz-kv__k">Resolved key</div>
-          <div class="hz-kv__v"><code>${hz_key1Resolved}</code></div>
-          <div class="hz-kv__k">URL</div>
-          <div class="hz-kv__v"><code>${hz_src1.url}</code></div>
-        </div>
-        ${Inputs.table(hz_schema1, { rows: 12, width: "100%" })}
-      </section>
-
-      <section class="hz-section">
-        <div class="hz-section__title">Right dataset</div>
-        <div class="hz-kv">
-          <div class="hz-kv__k">Resolved key</div>
-          <div class="hz-kv__v"><code>${hz_key2Resolved}</code></div>
-          <div class="hz-kv__k">URL</div>
-          <div class="hz-kv__v"><code>${hz_src2.url}</code></div>
-        </div>
-        ${Inputs.table(hz_schema2, { rows: 12, width: "100%" })}
-      </section>
-    </div>
-  </div>
-`;
-```
-
-
-```{ojs}
-//| output: false
-// Central query: totals by hazard for a given dataset URL + scenario/timeframe + geoFilter.
-// admin0_name/admin1_name/admin2_name/hazard/value/scenario/timeframe)
-// Crop filter helper
-hz_cropWhere = (commodities) => {
-  const list = Array.isArray(commodities) ? commodities.filter(Boolean) : []
-  if (!list.length) return "TRUE"
-  const q = (s) => `'${String(s ?? "").replaceAll("'", "''")}'`
-  return `crop IN (${list.map(q).join(",")})`
+  // refresh LRU position
+  const i = hz_apiState.order.indexOf(key)
+  if (i >= 0) hz_apiState.order.splice(i, 1)
+  hz_apiState.order.push(key)
+  return hit.v
 }
 
-// hazard_vars lists from haz_exposure.qmd (Shiny)
-hz_interactions = ({
-  // Match haz_exposure.qmd (Shiny) hazard_vars options
-  // - generic: NDWS (drought) + NTx35 (heat) + NDWL0 (flood)
-  // - crop_specific: PTOT-L (drought) + NTxS (heat) + PTOT-G (flood)
-  generic: [
-    "NDWS+NTx35+NDWL0",
-    "NDWS+THI-max+NDWL0"
-  ],
-  crop_specific: [
-    "PTOT-L+NTxS+PTOT-G",
-    "PTOT-L+THI-max+PTOT-G"
-  ]
-})
-hz_hazardVarsWhere = (method, commodGroup) => {
-  const m = String(method ?? "").toLowerCase()
-  const cg = String(commodGroup ?? "").toLowerCase()
-  const vars =
-    (m === "generic") ? hz_interactions.generic :
-    (m === "crop-specific" || m === "crop_specific") ? hz_interactions.crop_specific :
-    // auto:
-    ((cg === "all" || cg === "" || cg === "total") ? hz_interactions.generic : hz_interactions.crop_specific)
-
-  return `hazard_vars IN (${vars.map(hz_q).join(", ")})`
-}
-
-hz_unitWhere = (varShort) => {
-  const u = String(varShort ?? "").toLowerCase()
-  if (/usd15|intld15/.test(u)) return `exposure_var='vop' AND lower(exposure_unit)=${hz_q(u)}`
-  // fallback: don't filter if varShort isn't a unit token
-  return "TRUE"
-}
-
-hz_sevWhere = (severity) => {
-  const s = String(severity ?? "").toLowerCase()
-  if (!s || s === "all") return "TRUE"
-  return `lower(severity)=${hz_q(s)}`
-}
-
-hz_totalsByHazard = async (url, scen, geoFilter, commodities, { hazards = null } = {}) => {
-  const geoWhere = hz_geoWhere(geoFilter)
-  const cropWhere = hz_cropWhere(commodities)
-  const scenWhere = hz_scenWhere(scen)
-  const hazVarsWhere = hz_hazardVarsWhere(hz_method, hz_selectedCommodGroup)
-  const unitWhere = hz_unitWhere(hz_varShort)
-  const sevWhere = hz_sevWhere(hz_severity)
-
-  const hazardsWhere = (hazards?.length)
-    ? `hazard IN (${hazards.map(hz_q).join(", ")})`
-    : "TRUE"
-
-  const q = `
-    SELECT
-      hazard,
-      SUM(CAST(value AS DOUBLE)) AS total
-    FROM read_parquet(${hz_q(url)})
-    WHERE ${geoWhere}
-      AND ${cropWhere}
-      AND ${scenWhere}
-      AND ${hazVarsWhere}
-      AND ${unitWhere}
-      AND ${sevWhere}
-      AND ${hazardsWhere}
-    GROUP BY hazard
-    ORDER BY total DESC
-  `
-  return await hz_query(q)
-}
-
-
-hz_totalExposureValue = async (url, geoFilter, commodities, varShort) => {
-  const whereGeo = hz_geoWhere(geoFilter)
-  const whereCrop = hz_cropWhere(commodities)
-
-  try {
-    // Inspect columns to build a robust query
-    const desc = await hz_query(`DESCRIBE SELECT * FROM read_parquet('${url}')`)
-    const cols = (desc ?? []).map(d => d.column_name ?? d.column ?? d.name).filter(Boolean)
-    const has = (c) => cols.includes(c)
-
-    const valueCol =
-      has("value") ? "value" :
-      (has(varShort) ? `"${varShort}"` :
-      (has("exposure") ? "exposure" : null))
-
-    if (!valueCol) {
-      throw new Error(`Could not infer value column in exposure parquet. Columns: ${cols.slice(0, 30).join(", ")}`)
-    }
-
-    const wheres = [whereGeo]
-    if (has("crop")) wheres.push(whereCrop)
-
-    // Align with hazard_exposure schema (vop + unit, plus severity if present)
-    if (has("exposure_unit") && has("exposure_var")) wheres.push(hz_unitWhere(varShort))
-    if (has("severity")) wheres.push(hz_sevWhere(hz_severity))
-
-    // Fallback for older schemas that expose a 'variable' column
-    if (has("variable")) wheres.push(`variable='${String(varShort).replaceAll("'", "''")}'`)
-
-    const q = `
-      SELECT SUM(CAST(${valueCol} AS DOUBLE)) AS denom
-      FROM read_parquet('${url}')
-      WHERE ${wheres.join(" AND ")};
-    `
-    const res = await hz_query(q)
-    const row = (res ?? [])[0] ?? {}
-    const denom = Number(row.denom)
-    return { ok: Number.isFinite(denom), denom }
-  } catch (e) {
-    hz_addError("hz_totalExposureValue", e, { url, geoFilter, commodities, varShort })
-    return { ok: false, denom: null, error: String(e) }
+hz_lruSet = (key, val) => {
+  if (hz_apiState.cache.has(key)) {
+    hz_apiState.cache.delete(key)
+    const i = hz_apiState.order.indexOf(key)
+    if (i >= 0) hz_apiState.order.splice(i, 1)
   }
-}
-```
-
-```{ojs}
-//| output: false
-// Totals by hazard (left/right) used in Q1 chart + debug panels
-hz_tot1 = (hz_src1?.ok)
-  ? await hz_totalsByHazard(hz_src1.url, hz_scen1, hz_geoFilter, hz_selectedCommodities)
-  : []
-
-hz_tot2 = (hz_src2?.ok)
-  ? await hz_totalsByHazard(hz_src2.url, hz_scen2, hz_geoFilter, hz_selectedCommodities)
-  : []
-```
-
-
-
-```{ojs}
-//| output: false
-// Denominator value for current geo + commodities + varShort
-hz_denom = (hz_useExternalDenom && hz_totalExposureSrc.ok)
-  ? await hz_totalExposureValue(hz_totalExposureSrc.url, hz_geoFilter, hz_selectedCommodities, hz_varShort)
-  : { ok: false, denom: null, error: hz_useExternalDenom ? "No URL" : "Disabled" }
-
-hz_relativeLabel = (hz_useExternalDenom && hz_denom.ok) ? "% of total exposure" : "% of hazard sum (fallback)"
-```
-
-```{ojs}
-//| output: false
-// Merge totals + compute diff/% (wrapped cell)
-hz_merged = {
-  const byHaz1 = new Map((hz_tot1 ?? []).map(d => [d.hazard, Number(d.total ?? 0)]))
-  const byHaz2 = new Map((hz_tot2 ?? []).map(d => [d.hazard, Number(d.total ?? 0)]))
-
-  const hazards = new Set([...byHaz1.keys(), ...byHaz2.keys()])
-
-  const sum1 = Array.from(byHaz1.values()).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
-  const sum2 = Array.from(byHaz2.values()).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
-
-  const denom = hz_denom?.ok ? hz_denom.denom : null
-
-  const pct = (val, sum) => {
-    if (Number.isFinite(denom) && denom > 0) return (val / denom) * 100
-    if (Number.isFinite(sum) && sum > 0) return (val / sum) * 100
-    return 0
+  hz_apiState.cache.set(key, { t: Date.now(), v: val })
+  hz_apiState.order.push(key)
+  while (hz_apiState.order.length > hz_apiState.maxEntries) {
+    const oldest = hz_apiState.order.shift()
+    if (oldest) hz_apiState.cache.delete(oldest)
   }
+  return val
+}
 
-  const rows = Array.from(hazards).map(h => {
-    const total1 = byHaz1.get(h) ?? 0
-    const total2 = byHaz2.get(h) ?? 0
-    const total_diff = total2 - total1
+hz_apiPostJson = async (path, body, { signal } = {}) => {
+  const url = hz_apiBaseUrl + path
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+    signal
+  })
+  const isJson = (res.headers.get('content-type') || '').includes('application/json')
+  const payload = isJson ? await res.json() : { ok: false, detail: await res.text() }
+  if (!res.ok) {
+    const msg = payload?.detail || payload?.error || payload?.message || ('' + res.status)
+    throw new Error(msg)
+  }
+  return payload
+}
 
-    const perc1 = pct(total1, sum1)
-    const perc2 = pct(total2, sum2)
-    const pct_diff = perc2 - perc1
+// Debounced + cached API call.
+hz_apiDebouncedCached = async (groupKey, path, body, { ttlMs = 60000, debounceMs = 250 } = {}) => {
+  const key = `${path}|${hz_stableStringify(body)}`
 
-    return { hazard: h, total1, total2, total_diff, perc1, perc2, pct_diff }
+  // local cache hit
+  const cached = hz_lruGet(key, ttlMs)
+  if (cached != null) return cached
+
+  // share inflight identical requests
+  if (hz_apiState.inflight.has(key)) return await hz_apiState.inflight.get(key)
+
+  // cancel previous in this group
+  try { clearTimeout(hz_apiState.timers.get(groupKey)) } catch (_) {}
+  try { hz_apiState.aborts.get(groupKey)?.abort() } catch (_) {}
+
+  const token = (hz_apiState.tokens.get(groupKey) || 0) + 1
+  hz_apiState.tokens.set(groupKey, token)
+
+  const ac = new AbortController()
+  hz_apiState.aborts.set(groupKey, ac)
+
+  const p = new Promise((resolve) => {
+    const t = setTimeout(async () => {
+      let busyOn = false
+      try {
+        // If a newer request has superseded this one before it even starts, skip.
+        if (hz_apiState.tokens.get(groupKey) !== token) return resolve([])
+
+        // UI: show an 'Updating…' overlay ONLY when the network call actually starts.
+        try { globalThis.__ATLAS_HZ_UI__?.setBusy?.(true) ; busyOn = true } catch (_) { busyOn = false }
+
+        const out = await hz_apiPostJson(path, body, { signal: ac.signal })
+        // Only accept latest
+        if (hz_apiState.tokens.get(groupKey) !== token) return resolve([])
+        resolve(hz_lruSet(key, out))
+      } catch (e) {
+        if (String(e).includes('AbortError')) return resolve([])
+        resolve({ ok: false, error: String(e) })
+      } finally {
+        // Always clear the busy overlay if we turned it on.
+        try { if (busyOn) globalThis.__ATLAS_HZ_UI__?.setBusy?.(false) } catch (_) {}
+        hz_apiState.inflight.delete(key)
+      }
+    }, debounceMs)
+    hz_apiState.timers.set(groupKey, t)
   })
 
-  rows.sort((a, b) => Math.abs(b.total_diff) - Math.abs(a.total_diff))
-  return rows
+  hz_apiState.inflight.set(key, p)
+  return await p
 }
+
 ```
+
 ```{ojs}
 //| output: false
-// Apply Top-N + optional "Other" grouping for charting
-hz_chartRows = {
-  const rows = Array.isArray(hz_merged) ? hz_merged.slice() : []
-  if (!rows.length) return []
+// Build a single "Q1" request that returns everything needed for the main chart.
+hz_isBroadGeo = (geo) => {
+  const a0 = Array.isArray(geo?.admin0) ? geo.admin0.filter((d) => d && d !== "all") : []
+  // If no specific admin0 selected, it's broad.
+  if (a0.length === 0) return true
+  // If the UI includes "all" explicitly, treat as broad.
+  if (Array.isArray(geo?.admin0) && geo.admin0.includes("all")) return true
+  return false
+}
 
-  const denom = hz_denom?.ok ? hz_denom.denom : null
-  const sumAll1 = rows.reduce((a, r) => a + Number(r.total1 ?? 0), 0)
-  const sumAll2 = rows.reduce((a, r) => a + Number(r.total2 ?? 0), 0)
-
-  const pct = (val, sum) => {
-    if (Number.isFinite(denom) && denom > 0) return (val / denom) * 100
-    if (Number.isFinite(sum) && sum > 0) return (val / sum) * 100
-    return 0
+hz_q1Req = (() => {
+  if (hz_isBroadGeo?.(hz_geoFilter)) {
+    return { ok: false, error: 'Select at least an Admin0 (or Admin1/Admin2). Broad selection is intentionally blocked for speed.' }
   }
 
-  // Choose a sorting metric that matches the selected display mode
-  const metric = hz_difference
-    ? (hz_relative ? "pct_diff" : "total_diff")
-    : (hz_relative ? "perc2" : "total2")
+  if (!(hz_src1?.ok && hz_src2?.ok)) {
+    return { ok: false, error: 'Dataset URLs not resolved yet.' }
+  }
 
-  rows.sort((a, b) => Math.abs(Number(b[metric] ?? 0)) - Math.abs(Number(a[metric] ?? 0)))
+  const left = {
+    dataset_url: hz_src1.url,
+    scen: { scenario: hz_s1?.scenario, timeframe: hz_s1?.timeframe },
+    geo: hz_geoFilter,
+    commodities: hz_selectedCommodities ?? [],
+    hazard_vars: null,
+    hazards: null,
+    method: hz_method,
+    commodity_group: hz_selectedCommodGroup,
+  }
+
+  const right = {
+    dataset_url: hz_src2.url,
+    scen: { scenario: hz_s2?.scenario, timeframe: hz_s2?.timeframe },
+    geo: hz_geoFilter,
+    commodities: hz_selectedCommodities ?? [],
+    hazard_vars: null,
+    hazards: null,
+    method: hz_method,
+    commodity_group: hz_selectedCommodGroup,
+  }
+
+  const denom = null
+return { ok: true, body: { left, right, denom } }
+})()
+
+```
+
+```{ojs}
+//| output: false
+// Call the API (debounced + cached)
+
+hz_q1Resp = (hz_activeQuestion === "q1" && hz_q1Req?.ok)
+  ? await hz_apiDebouncedCached("q1", "/api/v1/hz/q1", hz_q1Req.body, { ttlMs: 60000, debounceMs: 250 })
+  : { ok: false, error: hz_q1Req?.error || "Inactive", left: [], right: [], merged: [], denom: { ok: false, denom: null }, relative_label: "% of hazard sum" }
+
+// Expose the same variables the rest of the notebook already expects
+hz_tot1 = hz_q1Resp?.left ?? []
+hz_tot2 = hz_q1Resp?.right ?? []
+hz_merged = hz_q1Resp?.merged ?? []
+hz_denom = hz_q1Resp?.denom ?? { ok: false, denom: null, error: "No denom" }
+hz_relativeLabel = hz_q1Resp?.relative_label ?? "% of hazard sum"
+
+// Meta object expected by hz_updateChart
+hz_q1Meta = ({
+  ok: !!(hz_q1Resp?.ok),
+  cached: !!(hz_q1Resp?.cached),
+  t_ms: Number(hz_q1Resp?.t_ms || 0),
+  error: hz_q1Resp?.error || null
+})
+
+
+// Normalize + rank rows for chart/table (Q1)
+hz_chartRows = {
+  const src = Array.isArray(hz_merged) ? hz_merged : []
+
+  const rows = src.map((r) => {
+    const hazard = r.hazard ?? r.Hazard ?? r.name ?? r.key ?? "Unknown"
+    const total1 = Number(r.total1 ?? r.left ?? r.value1 ?? r.total_left ?? 0)
+    const total2 = Number(r.total2 ?? r.right ?? r.value2 ?? r.total_right ?? 0)
+    const total_diff = Number(r.total_diff ?? (total2 - total1))
+    return { ...r, hazard, total1, total2, total_diff }
+  })
+
+  const sumAll1 = rows.reduce((a, r) => a + Number(r.total1 ?? 0), 0)
+  const sumAll2 = rows.reduce((a, r) => a + Number(r.total2 ?? 0), 0)
+  const pct = (v, denom) => (denom ? (100 * Number(v ?? 0)) / denom : 0)
+
+  for (const r of rows) {
+    r.perc1 = Number(r.perc1 ?? pct(r.total1, sumAll1))
+    r.perc2 = Number(r.perc2 ?? pct(r.total2, sumAll2))
+    r.pct_diff = Number(r.pct_diff ?? (r.perc2 - r.perc1))
+  }
+
+  if (hz_compareMode === "diff") {
+    const metric = hz_relative ? "pct_diff" : "total_diff"
+    rows.sort((a, b) =>
+      Math.abs(Number(b[metric] ?? 0)) - Math.abs(Number(a[metric] ?? 0))
+    )
+  } else {
+    const m2 = hz_relative ? "perc2" : "total2"
+    const m1 = hz_relative ? "perc1" : "total1"
+    rows.sort((a, b) =>
+      (Number(b[m2] ?? 0) - Number(a[m2] ?? 0)) ||
+      (Number(b[m1] ?? 0) - Number(a[m1] ?? 0))
+    )
+  }
 
   const topN = Math.max(1, Number(hz_topN ?? 15) || 15)
   let head = rows.slice(0, topN)
@@ -2504,19 +2868,17 @@ hz_chartRows = {
     }])
   }
 
-  // Ensure pct fields are consistent with the current denominator mode
-  return head.map(r => {
+  return head.map((r) => {
     const total1 = Number(r.total1 ?? 0)
     const total2 = Number(r.total2 ?? 0)
     const total_diff = Number(r.total_diff ?? (total2 - total1))
     const perc1 = pct(total1, sumAll1)
     const perc2 = pct(total2, sumAll2)
     const pct_diff = perc2 - perc1
-    return { ...r, total1, total2, total_diff, perc1, perc2, pct_diff }
+    return { ...r, hazard: r.hazard ?? "Unknown", total1, total2, total_diff, perc1, perc2, pct_diff }
   })
 }
 ```
-
 
 ```{ojs}
 //| output: false
@@ -2610,43 +2972,396 @@ hz_q1Chart = {
 }
 ```
 
+```{ojs}
+//| output: false
+// Dashboard question selector (tabs)
+viewof hz_question = {
+  const options = [
+    { value: "q1", label: "By hazard" },
+    { value: "q2", label: "By crop" },
+    { value: "q3", label: "Hazard × crop" },
+    { value: "q4", label: "By admin" }
+  ];
 
+  const root = document.createElement("div");
+  root.className = "hz-tabs";
+
+  const buttons = new Map();
+  const paint = (v) => {
+    for (const [val, btn] of buttons.entries()) btn.classList.toggle("is-active", val === v);
+  };
+
+  const set = (v, { silent = false } = {}) => {
+    if (root.value === v) return; // prevents duplicate requests on re-click
+    root.value = v;
+    paint(v);
+    if (!silent) root.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  for (const opt of options) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "hz-tab";
+    b.textContent = opt.label;
+    b.onclick = () => set(opt.value);
+    root.appendChild(b);
+    buttons.set(opt.value, b);
+  }
+
+  // Initial value is set WITHOUT emitting an input event.
+  // Observable reads the initial value from root.value when the view is created.
+  root.value = "q1";
+  paint("q1");
+
+  return root;
+}
+
+hz_activeQuestion = (hz_question ?? "q1")
+
+hz_dashTitle = ({
+  q1: "Total exposure by hazard",
+  q2: "Total exposure by crop",
+  q3: "Hazard composition by crop",
+  q4: "Exposure by administrative area"
+})[hz_activeQuestion] || "Dashboard"
+
+hz_dashSub = ({
+  q1: "Compare Left vs Right (side-by-side or Δ). Filters: scenarios, geography, commodities, severity.",
+  q2: "Which commodities contribute most to exposure in the selected geography?",
+  q3: "For the top crops, how is exposure split across hazards? (stacked)",
+  q4: "Which admin areas contribute most to exposure under the current geography?"
+})[hz_activeQuestion] || ""
+// Common request payload for single-side endpoints
+hz_sideReq = (src, scen, extra = {}) => ({
+  dataset_url: src?.url,
+  scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
+  geo: hz_geoFilter,
+  commodities: hz_selectedCommodities ?? [],
+  hazard_vars: null,
+  hazards: null,
+  method: hz_method,
+  commodity_group: hz_selectedCommodGroup,
+  ...extra
+})
+```
 
 ```{ojs}
 //| output: false
-// Debug panel (safe default so the app never crashes if not used)
-hz_q1Debug = {
-  const left = Array.isArray(hz_tot1) ? hz_tot1.slice(0, 10) : []
-  const right = Array.isArray(hz_tot2) ? hz_tot2.slice(0, 10) : []
-  if (!left.length && !right.length) return html``
-  return html`<details class="hz-details" style="margin-top:12px;">
-    <summary>Underlying totals (debug)</summary>
-    <div class="hz-muted">Showing up to 10 rows per side.</div>
-    <div style="display:grid; gap:12px; grid-template-columns: 1fr 1fr; align-items:start;">
-      <div>
-        <div class="hz-muted"><b>Left</b> (${left.length} shown)</div>
-        <pre style="white-space:pre-wrap; font-size:12px; background:#0b1220; color:#e5e7eb; padding:10px; border-radius:10px; overflow:auto; max-height:240px;">${JSON.stringify(left, null, 2)}</pre>
-      </div>
-      <div>
-        <div class="hz-muted"><b>Right</b> (${right.length} shown)</div>
-        <pre style="white-space:pre-wrap; font-size:12px; background:#0b1220; color:#e5e7eb; padding:10px; border-radius:10px; overflow:auto; max-height:240px;">${JSON.stringify(right, null, 2)}</pre>
-      </div>
+// ----------------------------
+// Q2 — totals by crop
+// ----------------------------
+hz_q2RespL = (hz_activeQuestion === "q2")
+  ? await hz_apiDebouncedCached("q2L", "/api/v1/hz/totals-by-crop", hz_sideReq(hz_src1, hz_s1), { ttlMs: 300000, debounceMs: 250 })
+  : null
+
+hz_q2RespR = (hz_activeQuestion === "q2")
+  ? await hz_apiDebouncedCached("q2R", "/api/v1/hz/totals-by-crop", hz_sideReq(hz_src2, hz_s2), { ttlMs: 300000, debounceMs: 250 })
+  : null
+
+hz_q2DataL = hz_q2RespL?.data ?? []
+hz_q2DataR = hz_q2RespR?.data ?? []
+
+hz_q2Meta = ({
+  ok: !!(hz_q2RespL?.ok && hz_q2RespR?.ok),
+  cached: !!(hz_q2RespL?.cached && hz_q2RespR?.cached),
+  t_ms: Math.max(Number(hz_q2RespL?.t_ms || 0), Number(hz_q2RespR?.t_ms || 0)),
+  error: hz_q2RespL?.error || hz_q2RespR?.error || null
+})
+
+hz_q2Rows = {
+  const mapL = new Map(hz_q2DataL.map(d => [d.crop, Number(d.total)]))
+  const mapR = new Map(hz_q2DataR.map(d => [d.crop, Number(d.total)]))
+  const crops = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
+  const rows = crops.map(crop => ({ crop, total1: mapL.get(crop) || 0, total2: mapR.get(crop) || 0 }))
+  rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
+  return rows.slice(0, hz_topN)
+}
+
+hz_q2Chart = {
+  const rows = hz_q2Rows ?? []
+  const labelAbs = hz_varLabelAbs
+  const xLabel = hz_rel ? "Percent of side total (%)" : labelAbs
+
+  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
+
+  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
+
+  const sum1 = rows.reduce((s,r) => s + (r.total1 || 0), 0)
+  const sum2 = rows.reduce((s,r) => s + (r.total2 || 0), 0)
+
+  const v1 = (d) => hz_rel ? (sum1 ? (100 * d.total1 / sum1) : 0) : d.total1
+  const v2 = (d) => hz_rel ? (sum2 ? (100 * d.total2 / sum2) : 0) : d.total2
+
+  if (hz_compareMode === "diff") {
+    const diff = rows.map(d => ({ crop: d.crop, delta: v2(d) - v1(d) }))
+    return Plot.plot({
+      height: Math.max(280, diff.length * 22, Number(hz_chartHeight ?? 520)),
+      marginLeft: 160,
+      x: { grid: true, label: hz_rel ? "Δ percentage points (Right − Left)" : "Δ exposure (Right − Left)" },
+      y: { domain: diff.map(d => d.crop) },
+      caption: subtitle,
+      marks: [
+        Plot.ruleX([0]),
+        Plot.barX(diff, { x: "delta", y: "crop", tip: true })
+      ]
+    })
+  }
+
+  const crops = rows.map(d => d.crop)
+  const left = rows.map(d => ({ crop: d.crop, value: v1(d) }))
+  const right = rows.map(d => ({ crop: d.crop, value: v2(d) }))
+
+  const plotSide = (data, title) => html`
+    <div class="hz-mini">
+      <div class="hz-mini__title">${title}</div>
+      ${Plot.plot({
+        height: Math.max(280, crops.length * 22, Number(hz_chartHeight ?? 520)),
+        marginLeft: 160,
+        x: { grid: true, label: xLabel },
+        y: { domain: crops },
+        caption: subtitle,
+        marks: [
+          Plot.barX(data, { x: "value", y: "crop", tip: true }),
+          Plot.ruleX([0])
+        ]
+      })}
     </div>
-  </details>`
+  `
+
+  return html`<div class="hz-grid2">${plotSide(left, "Left")}${plotSide(right, "Right")}</div>`
 }
 ```
 
 ```{ojs}
-// Render main shell (hero section is in markdown above)
+//| output: false
+// ----------------------------
+// Q3 — hazard by crop
+// ----------------------------
+hz_q3ReqExtra = ({ top_hazards: 10, top_crops: 12 })
+
+hz_q3RespL = (hz_activeQuestion === "q3")
+  ? await hz_apiDebouncedCached("q3L", "/api/v1/hz/hazard-by-crop", hz_sideReq(hz_src1, hz_s1, hz_q3ReqExtra), { ttlMs: 300000, debounceMs: 250 })
+  : null
+
+hz_q3RespR = (hz_activeQuestion === "q3")
+  ? await hz_apiDebouncedCached("q3R", "/api/v1/hz/hazard-by-crop", hz_sideReq(hz_src2, hz_s2, hz_q3ReqExtra), { ttlMs: 300000, debounceMs: 250 })
+  : null
+
+hz_q3DataL = hz_q3RespL?.data ?? []
+hz_q3DataR = hz_q3RespR?.data ?? []
+
+hz_q3Meta = ({
+  ok: !!(hz_q3RespL?.ok && hz_q3RespR?.ok),
+  cached: !!(hz_q3RespL?.cached && hz_q3RespR?.cached),
+  t_ms: Math.max(Number(hz_q3RespL?.t_ms || 0), Number(hz_q3RespR?.t_ms || 0)),
+  error: hz_q3RespL?.error || hz_q3RespR?.error || null
+})
+
+hz_q3Chart = {
+  const L = hz_q3DataL ?? []
+  const R = hz_q3DataR ?? []
+  if (!L.length && !R.length) return html`<div class="hz-muted">No data.</div>`
+
+  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
+  const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
+
+
+  // Top crops by combined exposure (Left + Right)
+  const cropTotals = new Map()
+  const bump = (crop, v) => cropTotals.set(crop, (cropTotals.get(crop) || 0) + Number(v || 0))
+  for (const d of R) bump(d.crop, d.total)
+  for (const d of L) bump(d.crop, d.total)
+
+  const maxCrops = Math.min(10, Number(hz_topN || 10))
+  const crops = Array.from(cropTotals.entries())
+    .sort((a,b) => b[1] - a[1])
+    .slice(0, maxCrops)
+    .map(([c]) => c)
+
+  const hazards = Array.from(new Set([...L.map(d => d.hazard), ...R.map(d => d.hazard)])).sort()
+
+  const filter = (data) =>
+    data
+      .filter(d => crops.includes(d.crop) && hazards.includes(d.hazard))
+      .map(d => ({ crop: d.crop, hazard: d.hazard, total: Number(d.total || 0) }))
+
+  // Shared categorical color scale (keeps left/right colors aligned)
+  const color = { type: "categorical", domain: hazards, scheme: "tableau10", legend: false }
+  const legend = Plot.legend({ color: { domain: hazards, scheme: "tableau10" }, columns: 3 })
+
+  const plotStack = (data, title) => html`
+    <div class="hz-mini hz-mini--stack">
+      <div class="hz-mini__title">${title}</div>
+      ${Plot.plot({
+        height: Math.max(320, crops.length * 26, Number(hz_chartHeight ?? 520)),
+        marginLeft: 160,
+        marginRight: 18,
+        marginTop: 10,
+        marginBottom: 28,
+        x: { label: (hz_varLabelAbs ?? "Exposure"), grid: true },
+        y: { domain: crops, label: null },
+        color,
+        caption: subtitle,
+        marks: [
+          Plot.barX(filter(data), {
+            ...Plot.stackX({ x: "total", y: "crop", fill: "hazard" }),
+            tip: {
+              format: {
+                crop: true,
+                hazard: true,
+                total: fmtAbs
+              }
+            }
+          }),
+          Plot.ruleX([0])
+        ]
+      })}
+    </div>
+  `
+
+  return html`
+    <div class="hz-legendRow">${legend}</div>
+    <div class="hz-grid2 hz-grid2--equal">
+      ${plotStack(L, "Left")}
+      ${plotStack(R, "Right")}
+    </div>
+  `
+}
+
+```
+
+```{ojs}
+//| output: false
+// ----------------------------
+// Q4 — totals by admin area
+// ----------------------------
+hz_q4ReqExtra = ({ group_child: false })
+
+hz_q4RespL = (hz_activeQuestion === "q4")
+  ? await hz_apiDebouncedCached("q4L", "/api/v1/hz/by-admin", hz_sideReq(hz_src1, hz_s1, hz_q4ReqExtra), { ttlMs: 300000, debounceMs: 250 })
+  : null
+
+hz_q4RespR = (hz_activeQuestion === "q4")
+  ? await hz_apiDebouncedCached("q4R", "/api/v1/hz/by-admin", hz_sideReq(hz_src2, hz_s2, hz_q4ReqExtra), { ttlMs: 300000, debounceMs: 250 })
+  : null
+
+hz_q4DataL = hz_q4RespL?.data ?? []
+hz_q4DataR = hz_q4RespR?.data ?? []
+
+hz_q4Meta = ({
+  ok: !!(hz_q4RespL?.ok && hz_q4RespR?.ok),
+  cached: !!(hz_q4RespL?.cached && hz_q4RespR?.cached),
+  t_ms: Math.max(Number(hz_q4RespL?.t_ms || 0), Number(hz_q4RespR?.t_ms || 0)),
+  error: hz_q4RespL?.error || hz_q4RespR?.error || null
+})
+
+hz_q4Rows = {
+  const mapL = new Map(hz_q4DataL.map(d => [(d.admin_name ?? d.admin), Number(d.total)]))
+  const mapR = new Map(hz_q4DataR.map(d => [(d.admin_name ?? d.admin), Number(d.total)]))
+  const names = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
+  const rows = names.map(name => ({ name, total1: mapL.get(name) || 0, total2: mapR.get(name) || 0 }))
+  rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
+  return rows.slice(0, hz_topN)
+}
+
+hz_q4Chart = {
+  const rows = hz_q4Rows ?? []
+  const xLabel = hz_rel ? "Percent of side total (%)" : hz_varLabelAbs
+
+  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
+
+  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
+
+  const sum1 = rows.reduce((s,r) => s + (r.total1 || 0), 0)
+  const sum2 = rows.reduce((s,r) => s + (r.total2 || 0), 0)
+
+  const v1 = (d) => hz_rel ? (sum1 ? (100 * d.total1 / sum1) : 0) : d.total1
+  const v2 = (d) => hz_rel ? (sum2 ? (100 * d.total2 / sum2) : 0) : d.total2
+
+  if (hz_compareMode === "diff") {
+    const diff = rows.map(d => ({ name: d.name, delta: v2(d) - v1(d) }))
+    return Plot.plot({
+      height: Math.max(280, diff.length * 22, Number(hz_chartHeight ?? 520)),
+      marginLeft: 180,
+      x: { grid: true, label: hz_rel ? "Δ percentage points (Right − Left)" : "Δ exposure (Right − Left)" },
+      y: { domain: diff.map(d => d.name) },
+      caption: subtitle,
+      marks: [
+        Plot.ruleX([0]),
+        Plot.barX(diff, { x: "delta", y: "name", tip: true })
+      ]
+    })
+  }
+
+  const names = rows.map(d => d.name)
+  const left = rows.map(d => ({ name: d.name, value: v1(d) }))
+  const right = rows.map(d => ({ name: d.name, value: v2(d) }))
+
+  const plotSide = (data, title) => html`
+    <div class="hz-mini">
+      <div class="hz-mini__title">${title}</div>
+      ${Plot.plot({
+        height: Math.max(280, names.length * 22, Number(hz_chartHeight ?? 520)),
+        marginLeft: 180,
+        x: { grid: true, label: xLabel },
+        y: { domain: names },
+        caption: subtitle,
+        marks: [
+          Plot.barX(data, { x: "value", y: "name", tip: true }),
+          Plot.ruleX([0])
+        ]
+      })}
+    </div>
+  `
+  return html`<div class="hz-grid2">${plotSide(left, "Left")}${plotSide(right, "Right")}</div>`
+}
+```
+
+
+
+```{ojs}
+//| output: false
+// Render main shell
 hz_controlsMount = html`<div class=\"hz-mount\"><div class=\"hz-loading\">Loading controls…</div></div>`
-hz_geoMount = html`<div class=\"hz-mount\"><div class=\"hz-loading\">Loading geography…</div></div>`
 hz_dashMount = html`<div class=\"hz-mount\"><div class=\"hz-loading\">Loading dashboard…</div></div>`
 
 hz_statusPill = html`<span class=\"hz-pill\">Loading…</span>`
-hz_chartHost  = html`<div class=\"hz-loading\">Loading chart…</div>`
+hz_chartHost  = html`<div class="hz-chartWrap"><div class="hz-loading">Loading chart…</div></div>`
 hz_debugHost  = html``
-hz_pathHost   = html`<div class=\"hz-loading\">Loading dataset paths…</div>`
-hz_schemaHost = html`<div class=\"hz-loading\">Loading schema…</div>`
+hz_pathHost   = html``
+hz_schemaHost = html``
+
+
+// Register UI elements for cross-cell updates
+hz_registerUi = {
+  const ui = (globalThis.__ATLAS_HZ_UI__ ??= {})
+  ui.statusPill = hz_statusPill
+  ui.chartWrap = hz_chartHost
+
+  ui._busyCount = ui._busyCount ?? 0
+  ui.setBusy = (on, msg = "Updating…") => {
+    try {
+      if (!ui.statusPill || !ui.chartWrap) return
+
+      if (on) {
+        ui._busyCount += 1
+        // pill: spinner + label
+        ui.statusPill.replaceChildren(
+          html`<span class="hz-pill__spin" aria-hidden="true"></span><span>${msg || "Updating…"}</span>`
+        )
+        ui.chartWrap.classList.add("hz-chartWrap--busy")
+        return
+      }
+
+      ui._busyCount = Math.max(0, ui._busyCount - 1)
+      if (ui._busyCount === 0) {
+        ui.chartWrap.classList.remove("hz-chartWrap--busy")
+      }
+    } catch (e) {}
+  }
+
+  return null
+}
 
 // Dashboard shell renders immediately (chart + heavy queries mount later)
 hz_dashboardShell = html`
@@ -2655,25 +3370,15 @@ hz_dashboardShell = html`
     <div class=\"hz-card\">
       <div class=\"hz-card__head\">
         <div>
-          <div class=\"hz-card__title\">Dashboard — Q1 Total exposure by hazard</div>
-          <div class=\"hz-card__sub\">Compare Left vs Right (side-by-side or Δ). Filters: scenarios, geography, commodities, severity.</div>
+          <div class=\"hz-card__title\">${hz_dashTitle}</div>
+          <div class=\"hz-card__sub\">${hz_dashSub}</div>\n          <div class=\"hz-card__tabs\">${viewof hz_question}</div>
         </div>
         ${hz_statusPill}
       </div>
       ${hz_chartHost}
-      ${hz_debugHost}
+      
     </div>
-
-    <details class=\"hz-details\" style=\"margin-top:12px;\">
-      <summary>Dataset paths (left/right)</summary>
-      ${hz_pathHost}
-    </details>
-
-    <details class=\"hz-details\" style=\"margin-top:12px;\">
-      <summary>Data status & schema</summary>
-      ${hz_schemaHost}
-    </details>
-  </div>
+</div>
 `
 
 // Mount panels into placeholders (never blocks hz_main)
@@ -2686,14 +3391,6 @@ hz_mountControls = {
   return html``
 }
 
-hz_mountGeo = {
-  try {
-    hz_geoMount.replaceChildren(hz_geoPanelReal)
-  } catch (e) {
-    hz_geoMount.replaceChildren(html`<div class=\"warn\"><b>Geography failed to render:</b><br>${String(e)}</div>`)
-  }
-  return html``
-}
 
 hz_mountDash = {
   try {
@@ -2704,235 +3401,57 @@ hz_mountDash = {
   return html``
 }
 
-// Populate the Details panels (safe)
-hz_mountPathStatus = {
-  try {
-    hz_pathHost.replaceChildren(hz_pathStatus)
-  } catch (e) {
-    hz_pathHost.replaceChildren(html`<div class=\"warn\"><b>Path panel failed:</b><br>${String(e)}</div>`)
-  }
-  return html``
-}
-
-hz_mountSchema = {
-  try {
-    hz_schemaHost.replaceChildren(hz_schemaPanel)
-  } catch (e) {
-    hz_schemaHost.replaceChildren(html`<div class=\"warn\"><b>Schema panel failed:</b><br>${String(e)}</div>`)
-  }
-  return html``
-}
 
 // Build chart *safely* (catch DuckDB/Arrow/Plot errors so UI still renders)
 hz_updateChart = {
+  const q = (hz_activeQuestion || "q1")
   const errors = []
 
-  const safeTotals = async (side, src, scenPick) => {
-    if (!src?.ok || !src?.url) return []
-    try {
-      return await hz_totalsByHazard(src.url, scenPick, hz_geoFilter, hz_selectedCommodities)
-    } catch (e) {
-      errors.push({ side, error: String(e) })
-      return []
-    }
+  const pick = () => {
+    if (q === "q1") return { meta: hz_q1Meta, chart: hz_q1Chart }
+    if (q === "q2") return { meta: hz_q2Meta, chart: hz_q2Chart }
+    if (q === "q3") return { meta: hz_q3Meta, chart: hz_q3Chart }
+    if (q === "q4") return { meta: hz_q4Meta, chart: hz_q4Chart }
+    return { meta: hz_q1Meta, chart: hz_q1Chart }
   }
 
-  const safeDenom = async () => {
-    if (!hz_useExternalDenom || !hz_totalExposureUrl) return null
-    try {
-      const q = `
-        SELECT SUM(CAST(value AS DOUBLE)) AS denom
-        FROM read_parquet('${hz_totalExposureUrl}')
-        WHERE ${hz_scenWhere(hz_scen1)}
-          AND ${hz_geoFilter}
-          AND ${hz_cropWhere(hz_selectedCommodities)}
-      `
-      const res = await hz_db.query(q)
-      const rows = hz_rows(res)
-      const d = rows?.[0]?.denom
-      const n = Number(d)
-      return Number.isFinite(n) ? n : null
-    } catch (e) {
-      errors.push({ side: 'denom', error: String(e) })
-      return null
-    }
-  }
+  const { meta, chart } = pick()
 
-  // Run queries
-  const [left, right, denom] = await Promise.all([
-    safeTotals('left', hz_src1, hz_scen1),
-    safeTotals('right', hz_src2, hz_scen2),
-    safeDenom()
-  ])
+  if (!meta?.ok) {
+    errors.push({ side: "api", error: meta?.error || "API call failed" })
+  }
 
   // Update status pill
   if (errors.length) {
-    hz_statusPill.textContent = 'Error'
+    hz_statusPill.textContent = "Error"
   } else {
-    hz_statusPill.textContent = (hz_src1?.ok && hz_src2?.ok) ? 'Ready' : 'Check paths'
+    const tag = meta?.cached ? "Cached" : "Ready"
+    const ms = Number.isFinite(meta?.t_ms) ? ` (${meta.t_ms} ms)` : ""
+    hz_statusPill.textContent = tag + ms
   }
 
-  // If query errors, show them (but never throw)
   if (errors.length) {
-    hz_chartHost.replaceChildren(html`<div class=\"warn\"><b>Chart query failed</b><br/><div class=\"hz-muted\">See details below.</div></div>`)
-    hz_debugHost.replaceChildren(html`<details class=\"hz-details\" style=\"margin-top:12px;\" open>
-      <summary>Chart errors</summary>
-      <pre style=\"white-space:pre-wrap; font-size:12px; background:#0b1220; color:#e5e7eb; padding:10px; border-radius:10px; overflow:auto;\">${JSON.stringify(errors, null, 2)}</pre>
-    </details>`)
+    hz_chartHost.replaceChildren(html`<div class="warn"><b>Data load failed</b><br/><div class="hz-muted">${errors[0].error}</div></div>`)
     return html``
   }
 
-  // No data
-  if (!left.length && !right.length) {
-    hz_chartHost.replaceChildren(html`<div class=\"hz-empty\">No data for the current filters.</div>`)
-    hz_debugHost.replaceChildren(html``)
-    return html``
-  }
-
-  // Merge totals
-  const byHaz1 = new Map(left.map(d => [d.hazard, Number(d.total ?? 0)]))
-  const byHaz2 = new Map(right.map(d => [d.hazard, Number(d.total ?? 0)]))
-  const hazards = new Set([...byHaz1.keys(), ...byHaz2.keys()])
-
-  const sum1 = Array.from(byHaz1.values()).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
-  const sum2 = Array.from(byHaz2.values()).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0)
-
-  const pct = (val, sum) => {
-    if (Number.isFinite(denom) && denom > 0) return (val / denom) * 100
-    if (Number.isFinite(sum) && sum > 0) return (val / sum) * 100
-    return 0
-  }
-
-  let rows = Array.from(hazards).map(h => {
-    const total1 = byHaz1.get(h) ?? 0
-    const total2 = byHaz2.get(h) ?? 0
-    const total_diff = total2 - total1
-    const perc1 = pct(total1, sum1)
-    const perc2 = pct(total2, sum2)
-    const pct_diff = perc2 - perc1
-    return { hazard: h, total1, total2, total_diff, perc1, perc2, pct_diff }
-  })
-
-  // Sort + topN + optional "Other"
-  const metric = hz_difference
-    ? (hz_relative ? 'pct_diff' : 'total_diff')
-    : (hz_relative ? 'perc2' : 'total2')
-
-  rows.sort((a, b) => Math.abs(Number(b[metric] ?? 0)) - Math.abs(Number(a[metric] ?? 0)))
-
-  const topN = Math.max(1, Number(hz_topN ?? 15) || 15)
-  let head = rows.slice(0, topN)
-
-  if (hz_groupOther && rows.length > topN) {
-    const rest = rows.slice(topN)
-    const sum = (k) => rest.reduce((a, r) => a + Number(r[k] ?? 0), 0)
-    const otherTotal1 = sum('total1')
-    const otherTotal2 = sum('total2')
-    head = head.concat([{
-      hazard: 'Other',
-      total1: otherTotal1,
-      total2: otherTotal2,
-      total_diff: otherTotal2 - otherTotal1,
-      perc1: pct(otherTotal1, sum1),
-      perc2: pct(otherTotal2, sum2),
-      pct_diff: pct(otherTotal2, sum2) - pct(otherTotal1, sum1)
-    }])
-  }
-
-  // Build Plot
+  // Render selected chart
   try {
-    const absLabel = hz_varLabel || 'Value'
-    const pctLabel = hz_relativeLabel || '%'
-    const xLabel = hz_relative ? pctLabel : absLabel
-
-    const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
-    const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
-
-    const s1 = hz_parseScenXTime(hz_scen1)
-    const s2 = hz_parseScenXTime(hz_scen2)
-    const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${s1.label} • Right: ${s2.label}`
-
-    let chart
-
-    if (!hz_difference) {
-      const side = head.flatMap(d => ([
-        { hazard: d.hazard, scenario: s1.label, value: hz_relative ? d.perc1 : d.total1, raw: d.total1, pct: d.perc1 },
-        { hazard: d.hazard, scenario: s2.label, value: hz_relative ? d.perc2 : d.total2, raw: d.total2, pct: d.perc2 }
-      ]))
-
-      chart = Plot.plot({
-        width: Math.max(520, (hz_plotWidth ?? 900) - 24),
-        height: hz_chartHeight,
-        marginLeft: 210,
-        marginRight: 24,
-        marginTop: 36,
-        marginBottom: 40,
-        x: { label: xLabel, grid: true, tickFormat: hz_relative ? fmtPct : fmtAbs },
-        y: { label: null },
-        color: { legend: true },
-        caption: subtitle,
-        marks: [
-          Plot.ruleX([0]),
-          Plot.barX(side, {
-            x: 'value',
-            y: 'hazard',
-            fill: 'scenario',
-            inset: 0.5,
-            tip: {
-              format: {
-                hazard: true,
-                scenario: true,
-                value: hz_relative ? fmtPct : fmtAbs,
-                raw: hz_relative ? fmtAbs : null,
-                pct: hz_relative ? null : fmtPct
-              }
-            }
-          })
-        ]
-      })
-    } else {
-      chart = Plot.plot({
-        width: Math.max(520, (hz_plotWidth ?? 900) - 24),
-        height: hz_chartHeight,
-        marginLeft: 210,
-        marginRight: 24,
-        marginTop: 36,
-        marginBottom: 40,
-        x: { label: xLabel, grid: true, tickFormat: hz_relative ? fmtPct : fmtAbs },
-        y: { label: null },
-        color: { legend: true },
-        caption: subtitle,
-        marks: [
-          Plot.ruleX([0]),
-          Plot.barX(head, {
-            x: hz_relative ? 'pct_diff' : 'total_diff',
-            y: 'hazard',
-            fill: (d) => (Number(d.total_diff ?? 0) >= 0 ? 'Increase' : 'Decrease'),
-            inset: 0.5,
-            tip: { format: { hazard: true, value: hz_relative ? fmtPct : fmtAbs } }
-          })
-        ]
-      })
-    }
-
     hz_chartHost.replaceChildren(chart)
-    hz_debugHost.replaceChildren(html``)
   } catch (e) {
-    hz_statusPill.textContent = 'Error'
-    hz_chartHost.replaceChildren(html`<div class=\"warn\"><b>Plot failed to render</b><br>${String(e)}</div>`)
-    hz_debugHost.replaceChildren(html``)
+    hz_statusPill.textContent = "Error"
+    hz_chartHost.replaceChildren(html`<div class="warn"><b>Plot failed to render</b><br>${String(e)}</div>`)
   }
 
   return html``
 }
+
 
 // Bootstrap cell: forces mounts + updates to execute without blocking hz_main.
 hz_bootstrap = {
   hz_mountControls
-  hz_mountGeo
   hz_mountDash
-  hz_mountPathStatus
-  hz_mountSchema
+  hz_registerUi
   await hz_updateChart
   return html``
 }
@@ -2941,23 +3460,30 @@ hz_main = html`
   <div class=\"app\">
     <nav class=\"hz-topnav\" aria-label=\"Quick navigation\">
       <a href=\"#controls\">Controls</a>
-      <a href=\"#geography\">Geography</a>
-      <a href=\"#dashboard\">Dashboard</a>
+            <a href=\"#dashboard\">Dashboard</a>
       <span class=\"hz-topnav__spacer\"></span>
       <span class=\"hz-pill\">Atlas Hazard Exposure</span>
     </nav>
     <div class=\"app__stack\">
+      ${hz_hero}
       <div id=\"controls\">${hz_controlsMount}</div>
-      <div id=\"geography\">${hz_geoMount}</div>
-      <div id=\"dashboard\">${hz_dashMount}</div>
+            <div id=\"dashboard\">${hz_dashMount}</div>
     </div>
   </div>
 `;
+// Mount the app into the markdown placeholder (keeps the page free of Observable inspector "HTMLElement {}" output)
+hz_renderApp = {
+  const host = document.getElementById("hz-app")
+  if (host) host.replaceChildren(hz_main)
+  return null
+}
 
-// Render the shell immediately
-hz_main
+// Bootstrap: mount sub-panels and update the chart (debounced/cached API)
+hz_run = {
+  hz_renderApp
+  await hz_bootstrap
+  return null
+}
 
-// Run mounts + chart updates (non-blocking relative to hz_main)
-hz_bootstrap
+hz_run
 ```
-

@@ -1,0 +1,67 @@
+```{ojs}
+//| output: false
+
+
+getAdminBoundaries = {
+  // Reuse a cached instance if this file is included multiple times
+  if (
+    globalThis.__ATLAS_getAdminBoundaries &&
+    typeof globalThis.__ATLAS_getAdminBoundaries === "function"
+  ) {
+    return globalThis.__ATLAS_getAdminBoundaries
+  }
+
+  const topojson = await import("https://cdn.jsdelivr.net/npm/topojson-client@3/+esm")
+
+  const ADMIN_CONFIG = {
+    0: {
+      file: FileAttachment("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson"),
+      object: "atlas_gaul24_a0_africa",
+    },
+    1: {
+      file: FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson"),
+      object: "atlas_gaul24_a1_africa",
+    },
+    2: {
+      file: FileAttachment("/data/shared/atlas_gaul_a2_africa_simple-lowres.topojson"),
+      object: "atlas_gaul_a2_africa_simple-lowres",
+    },
+  }
+
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json()
+  const iso3Set = new Set(country_list.filter((d) => d?.include).map((d) => d.iso3c))
+
+  const _loadAdminBoundaries = async (level = 0) => {
+    const cfg = ADMIN_CONFIG[level]
+    if (!cfg) throw new Error(`Invalid level ${level}`)
+    const bounds = await cfg.file.json()
+
+    const obj = bounds?.objects?.[cfg.object]
+    if (!obj?.geometries) throw new Error(`TopoJSON object not found: ${cfg.object}`)
+
+    const geometries = iso3Set?.size
+      ? obj.geometries.filter((g) => iso3Set.has(g?.properties?.iso3))
+      : obj.geometries
+
+    return topojson.feature(bounds, {
+      type: "GeometryCollection",
+      geometries,
+    })
+  }
+
+  const fn = async (levels) => {
+    const validLevels = new Set(Object.keys(ADMIN_CONFIG).map(Number))
+    const levelsArray = Array.isArray(levels) ? levels : [levels]
+
+    if (!levelsArray.every((level) => validLevels.has(level))) {
+      throw new Error(`Invalid level(s). Valid levels are: ${[...validLevels].join(", ")}`)
+    }
+
+    const results = await Promise.all(levelsArray.map((l) => _loadAdminBoundaries(l)))
+    return Object.fromEntries(levelsArray.map((l, i) => ["admin" + l, results[i]]))
+  }
+
+  globalThis.__ATLAS_getAdminBoundaries = fn
+  return fn
+}
+```
