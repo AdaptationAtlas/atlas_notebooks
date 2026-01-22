@@ -116,6 +116,22 @@ hz_formatNumber = (v, { digits = 0, compact = true } = {}) => {
   return new Intl.NumberFormat(undefined, opts).format(x)
 }
 
+// Shared display formatters (used in Chart/Table/Map)
+fmtAbs = (v) => hz_formatNumber(v, { digits: 2, compact: true })
+fmtAbs0 = (v) => hz_formatNumber(v, { digits: 0, compact: true })
+fmtPct = (v) => {
+  const x = Number(v)
+  if (!Number.isFinite(x)) return "—"
+  return `${hz_formatNumber(x, { digits: 2, compact: false })}%`
+}
+fmtSigned = (v) => {
+  const x = Number(v)
+  if (!Number.isFinite(x)) return "—"
+  const s = x > 0 ? "+" : ""
+  return s + hz_formatNumber(x, { digits: 2, compact: true })
+}
+
+
 hz_titleCase = (s) =>
 
   String(s ?? "")
@@ -1345,6 +1361,16 @@ font-size: 13px;
 .hz-tableWrap .gridjs-summary{
   font-size:12px;
 }
+
+/* Map view */
+.hz-mapWrap { min-height: 460px; }
+.hz-mapWrap--busy { opacity: 0.7; }
+.hz-mapPlot { width: 100%; overflow: hidden; }
+.hz-mapPlot svg { max-width: 100%; height: auto; display: block; }
+.hz-mapMetric { display: inline-flex; align-items: center; gap: 8px; }
+.hz-mapSub { margin-top: -2px; margin-bottom: 10px; }
+.hz-miniControls .observablehq--inspect { display: none; }
+
 </style>
 ```
 
@@ -2973,6 +2999,217 @@ hz_apiPostJson = async (path, body, { signal } = {}) => {
 }
 
 // Debounced + cached API call.
+//| output: false
+// ============================================================
+// Map view (choropleth) — reuses getAdminBoundaries + by-admin API
+// ============================================================
+
+viewof hz_mapMetric = {
+  const labels = {
+    right: "Right",
+    left:  "Left",
+    delta: "Δ (Right − Left)"
+  }
+  const values = ["right", "left", "delta"]
+  const root = Inputs.radio(values, {
+    label: "Color by",
+    value: (hz_compareMode === "diff") ? "delta" : "right",
+    format: (v) => labels[v] || String(v)
+  })
+  root.classList.add("hz-mapMetric")
+  return root
+}
+
+
+hz_mapMetricEff = hz_mapMetric || ((hz_compareMode === "diff") ? "delta" : "right")
+
+hz_mapReqExtra = ({ group_child: true })
+
+hz_mapRespL = {
+  if (hz_viewMode !== "map") return null
+  const out = await hz_apiDebouncedCached("mapL", "/api/v1/hz/by-admin", hz_sideReq(hz_src1, hz_s1, hz_mapReqExtra), { debounceMs: 120 })
+  return (out && typeof out === "object" && ("ok" in out)) ? out : null
+}
+
+hz_mapRespR = {
+  if (hz_viewMode !== "map") return null
+  const out = await hz_apiDebouncedCached("mapR", "/api/v1/hz/by-admin", hz_sideReq(hz_src2, hz_s2, hz_mapReqExtra), { debounceMs: 120 })
+  return (out && typeof out === "object" && ("ok" in out)) ? out : null
+}
+
+hz_mapMeta = {
+  if (hz_viewMode !== "map") return { ok: false, loading: false, error: "hidden" }
+  if (!hz_mapRespL || !hz_mapRespR) return { ok: false, loading: true, error: null }
+  const ok = Boolean(hz_mapRespL?.ok && hz_mapRespR?.ok)
+  const err = (!ok) ? String(hz_mapRespL?.error || hz_mapRespR?.error || "Map query failed") : null
+  return { ok, loading: false, error: err }
+}
+
+hz_mapRowsL = (hz_mapRespL?.data ?? [])
+hz_mapRowsR = (hz_mapRespR?.data ?? [])
+
+hz_mapLevel = {
+  const a2 = (hz_geoFilter?.admin2 ?? []).filter(Boolean)
+  const a1 = (hz_geoFilter?.admin1 ?? []).filter(Boolean)
+  const a0 = (hz_geoFilter?.admin0 ?? []).filter(Boolean).filter(x => String(x).toLowerCase() !== "all")
+  if (a2.length) return 2
+  if (a1.length) return 2
+  if (a0.length) return 1
+  return 0
+}
+
+hz_mapLevelLabel = (hz_mapLevel === 2) ? "Admin2" : (hz_mapLevel === 1) ? "Admin1" : "Admin0"
+
+hz_mapSub = {
+  const a2 = (hz_geoFilter?.admin2 ?? []).filter(Boolean)
+  const a1 = (hz_geoFilter?.admin1 ?? []).filter(Boolean)
+  const a0 = (hz_geoFilter?.admin0 ?? []).filter(Boolean).filter(x => String(x).toLowerCase() !== "all")
+  if (hz_mapLevel === 2 && a1.length && !a2.length) return `Showing Admin2 (children of selected Admin1).`
+  if (hz_mapLevel === 2 && a2.length) return `Showing selected Admin2 areas.`
+  if (hz_mapLevel === 1 && a0.length) return `Showing Admin1 (children of selected Admin0).`
+  return `Showing Admin0 across current selection.`
+}
+
+hz_guessNameKey = (feature, level) => {
+  const props = feature?.properties ?? {}
+  const keys = Object.keys(props)
+  const prefer = (level === 0)
+    ? ["admin0_name", "ADM0_NAME", "NAME_0", "name", "NAME", "country", "COUNTRY"]
+    : (level === 1)
+      ? ["admin1_name", "ADM1_NAME", "NAME_1", "name", "NAME"]
+      : ["admin2_name", "ADM2_NAME", "NAME_2", "name", "NAME"]
+
+  for (const k of prefer) if (k in props) return k
+  const re = (level === 0) ? /(adm0|admin0|name_0|country)/i : (level === 1) ? /(adm1|admin1|name_1)/i : /(adm2|admin2|name_2)/i
+  return keys.find(k => re.test(k)) || keys.find(k => /name/i.test(k)) || null
+}
+
+hz_mapPlot = {
+  if (hz_viewMode !== "map") return html``
+  if (hz_mapMeta.loading) return html`<div class="hz-loading">Loading map…</div>`
+  if (!hz_mapMeta.ok) return html`<div class="warn"><b>Map query failed:</b><br>${hz_mapMeta.error}</div>`
+
+  // Value lookups
+  const mapL = new Map((hz_mapRowsL ?? []).map(d => [String(d.admin ?? ""), +d.total]))
+  const mapR = new Map((hz_mapRowsR ?? []).map(d => [String(d.admin ?? ""), +d.total]))
+  const names = new Set([...mapL.keys(), ...mapR.keys()].filter(Boolean))
+
+  const metric = hz_mapMetricEff || "right"
+  const lookup = (name) => {
+    const vL = mapL.get(name)
+    const vR = mapR.get(name)
+    if (metric === "left") return vL
+    if (metric === "right") return vR
+    return (Number(vR ?? 0) - Number(vL ?? 0))
+  }
+
+  const boundsObj = await getAdminBoundaries([hz_mapLevel])
+  const fc = boundsObj?.[`admin${hz_mapLevel}`]
+  const feats = Array.isArray(fc?.features) ? fc.features : []
+  if (!feats.length) return html`<div class="warn"><b>No boundary features found</b> for ${hz_mapLevelLabel}.</div>`
+
+  const nameKey = hz_guessNameKey(feats[0], hz_mapLevel)
+  const getName = (f) => {
+    const p = f?.properties ?? {}
+    return (nameKey && p[nameKey] != null) ? String(p[nameKey]) : ""
+  }
+
+
+
+// Scope features to the user's geographic selection (more intuitive than filtering by join results)
+const a0 = (hz_geoFilter?.admin0 ?? []).filter(Boolean).filter(x => String(x).toLowerCase() !== "all")
+const a1 = (hz_geoFilter?.admin1 ?? []).filter(Boolean)
+const a2 = (hz_geoFilter?.admin2 ?? []).filter(Boolean)
+
+const guessKey = (levelWanted) => {
+  const props0 = feats?.[0]?.properties ?? {}
+  const keys = Object.keys(props0)
+  const prefer = (levelWanted === 0)
+    ? ["admin0_name", "ADM0_NAME", "NAME_0", "country", "COUNTRY", "name", "NAME"]
+    : (levelWanted === 1)
+      ? ["admin1_name", "ADM1_NAME", "NAME_1", "name", "NAME"]
+      : ["admin2_name", "ADM2_NAME", "NAME_2", "name", "NAME"]
+  for (const k of prefer) if (k in props0) return k
+  const re = (levelWanted === 0) ? /(adm0|admin0|name_0|country)/i
+    : (levelWanted === 1) ? /(adm1|admin1|name_1)/i
+    : /(adm2|admin2|name_2)/i
+  return keys.find(k => re.test(k)) || keys.find(k => /name/i.test(k)) || null
+}
+
+const admin0Key = guessKey(0)
+const admin1Key = guessKey(1)
+const getAdmin0 = (f) => {
+  const p = f?.properties ?? {}
+  return (admin0Key && p[admin0Key] != null) ? String(p[admin0Key]) : ""
+}
+const getAdmin1 = (f) => {
+  const p = f?.properties ?? {}
+  return (admin1Key && p[admin1Key] != null) ? String(p[admin1Key]) : ""
+}
+
+let featsUse = feats
+
+// If a country is selected, show only its children at admin1
+if (hz_mapLevel === 1 && a0.length) {
+  featsUse = featsUse.filter(f => a0.includes(getAdmin0(f)))
+}
+
+// If an admin1 is selected, show only its children at admin2
+if (hz_mapLevel === 2) {
+  if (a1.length) featsUse = featsUse.filter(f => a1.includes(getAdmin1(f)))
+  else if (a2.length) featsUse = featsUse.filter(f => a2.includes(getName(f)))
+}
+
+// Keep only valid geometries
+featsUse = featsUse.filter(f => f?.geometry && f.geometry.coordinates && f.geometry.coordinates.length)
+
+if (!featsUse.length) {
+  return html`<div class="warn"><b>No boundary features found for the current selection.</b><br>
+    Try clearing the most specific boundary filter (Admin2 → Admin1 → Admin0).</div>`
+}
+
+const fcUse = { type: "FeatureCollection", features: featsUse }
+
+// If the join doesn't match, we still render boundaries; data-less areas appear empty
+const joinHits = featsUse.some(f => names.has(getName(f)))
+const joinNote = (!joinHits)
+  ? html`<div class="hz-muted hz-note">Note: could not match by-admin names to boundary properties; showing boundaries without fill.</div>`
+  : null
+
+const isDelta = (metric === "delta")
+  const label = isDelta ? "Δ exposure (Right − Left)" : (metric === "left" ? "Exposure (Left)" : "Exposure (Right)")
+
+  const plot = Plot.plot({
+    projection: { type: "mercator", domain: fcUse, inset: 10 },
+    height: 440,
+    color: isDelta
+      ? { type: "diverging", legend: true, label, pivot: 0 }
+      : { legend: true, label },
+    marks: [
+      Plot.geo(fcUse, {
+        fill: f => {
+          const n = getName(f)
+          const v = lookup(n)
+          return (v == null) ? NaN : v
+        },
+        stroke: "white",
+        strokeWidth: 0.4,
+        title: f => {
+          const n = getName(f)
+          const v = lookup(n)
+          const vv = (v == null) ? "n/a" : fmtAbs(v)
+          return `${n}\n${label}: ${vv}`
+        }
+      })
+    ]
+  })
+
+  const box = html`<div class="hz-mapPlot"></div>`
+  if (joinNote) box.appendChild(joinNote)
+  box.appendChild(plot)
+  return box
+}
+
 hz_apiDebouncedCached = async (groupKey, path, body, { ttlMs = 60000, debounceMs = 250 } = {}) => {
   const key = `${path}|${hz_stableStringify(body)}`
 
@@ -3307,68 +3544,49 @@ viewof hz_question = {
 
 viewof hz_viewMode = {
   const options = [
-    { value: "chart",   label: "Chart",        icon: "📈" },
-    { value: "table",   label: "Summary Table",        icon: "▦" },
-    { value: "both",    label: "Chart+ Summary",  icon: "▤" },
-    { value: "records", label: "Raw Records",      icon: "🗃️" }
-  ];
+    { value: "chart",   label: "Chart",       icon: "📈", hint: "Interactive charts & comparisons" },
+    { value: "both",    label: "Dashboard",   icon: "▤",  hint: "Chart + summary table (grouped totals)" },
+    { value: "table",   label: "Summary",     icon: "▦",  hint: "Aggregated totals (paginated)" },
+    { value: "map",     label: "Map",         icon: "🗺️", hint: "Choropleth by admin area (uses current filters)" },
+    { value: "records", label: "Raw records", icon: "🧾", hint: "Row-level values (paginated)" }
+  ]
 
-  const root = document.createElement("div");
-  root.className = "hz-viewToggle";
-  root.setAttribute("role", "radiogroup");
+  const root = document.createElement("div")
+  root.className = "hz-viewToggle"
+  root.value = "chart"
 
-  const lbl = document.createElement("div");
-  lbl.className = "hz-viewToggle__label";
-  lbl.textContent = "View";
-  root.appendChild(lbl);
+  const lab = document.createElement("div")
+  lab.className = "hz-viewToggle__label"
+  lab.textContent = "View"
 
-  const group = document.createElement("div");
-  group.className = "hz-viewToggle__group";
-  root.appendChild(group);
+  const grp = document.createElement("div")
+  grp.className = "hz-viewToggle__group"
 
-  const buttons = new Map();
-
-  const set = (v, emit = true) => {
-    root.value = v;
-    paint(v);
-    if (emit) root.dispatchEvent(new Event("input", { bubbles: true }));
-  };
-
-  const paint = (v) => {
-    for (const [val, btn] of buttons.entries()) {
-      const on = (val === v);
-      btn.classList.toggle("is-active", on);
-      btn.setAttribute("aria-checked", on ? "true" : "false");
-      btn.setAttribute("tabindex", on ? "0" : "-1");
+  const btns = options.map(op => {
+    const b = document.createElement("button")
+    b.type = "button"
+    b.className = "hz-viewBtn"
+    b.dataset.value = op.value
+    b.title = op.hint || op.label
+    b.innerHTML = `<span class="hz-viewBtn__icon" aria-hidden="true">${op.icon || ""}</span><span class="hz-viewBtn__txt">${op.label}</span>`
+    b.onclick = () => {
+      if (root.value === op.value) return
+      root.value = op.value
+      paint()
+      root.dispatchEvent(new Event("input", { bubbles: true }))
     }
-  };
+    return b
+  })
 
-  for (const op of options) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "hz-viewBtn";
-    b.setAttribute("role", "radio");
-    b.setAttribute("aria-checked", "false");
-    b.innerHTML = `<span class="hz-viewBtn__ic">${op.icon}</span><span class="hz-viewBtn__tx">${op.label}</span>`;
-    b.onclick = () => set(op.value);
-    b.onkeydown = (e) => {
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-      e.preventDefault();
-      const vals = options.map(o => o.value);
-      const i = Math.max(0, vals.indexOf(root.value));
-      const j = (e.key === "ArrowRight") ? Math.min(vals.length - 1, i + 1) : Math.max(0, i - 1);
-      set(vals[j]);
-      buttons.get(vals[j])?.focus?.();
-    };
-    buttons.set(op.value, b);
-    group.appendChild(b);
+  const paint = () => {
+    for (const b of btns) b.classList.toggle("is-active", b.dataset.value === root.value)
   }
 
-  // Default: Chart (as requested)
-  root.value = "chart";
-  paint("chart");
+  btns.forEach(b => grp.appendChild(b))
+  paint()
 
-  return root;
+  root.append(lab, grp)
+  return root
 }
 
 viewof hz_recordsSide = {
@@ -3784,6 +4002,7 @@ hz_statusPill = html`<span class=\"hz-pill\">Loading…</span>`
 hz_chartHost  = html`<div class="hz-chartWrap"><div class="hz-loading">Loading chart…</div></div>`
 hz_tableActionsHost = html`<div class="hz-actions"></div>`
 hz_tableHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading table…</div></div>`
+hz_mapHost  = html`<div class="hz-mapWrap"><div class="hz-loading">Loading map…</div></div>`
 hz_recordsActionsHost = html`<div class="hz-actions"></div>`
 hz_recordsHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading records…</div></div>`
 hz_debugHost  = html``
@@ -3797,6 +4016,7 @@ hz_registerUi = {
   ui.statusPill = hz_statusPill
   ui.chartWrap = hz_chartHost
   ui.tableWrap = hz_tableHost
+  ui.mapWrap = hz_mapHost
   ui.recordsWrap = hz_recordsHost
 
   ui._busyCount = ui._busyCount ?? 0
@@ -3813,6 +4033,7 @@ hz_registerUi = {
         try { ui.chartWrap?.classList?.add?.("hz-chartWrap--busy") } catch (_) {}
         try { ui.tableWrap?.classList?.add?.("hz-tableWrap--busy") } catch (_) {}
         try { ui.recordsWrap?.classList?.add?.("hz-tableWrap--busy") } catch (_) {}
+        try { ui.mapWrap?.classList?.add?.("hz-mapWrap--busy") } catch (_) {}
         return
       }
 
@@ -3821,6 +4042,7 @@ hz_registerUi = {
         try { ui.chartWrap?.classList?.remove?.("hz-chartWrap--busy") } catch (_) {}
         try { ui.tableWrap?.classList?.remove?.("hz-tableWrap--busy") } catch (_) {}
         try { ui.recordsWrap?.classList?.remove?.("hz-tableWrap--busy") } catch (_) {}
+        try { ui.mapWrap?.classList?.remove?.("hz-mapWrap--busy") } catch (_) {}
       }
     } catch (e) {}
   }
@@ -3854,7 +4076,7 @@ hz_dashboardShell = html`
         (hz_viewMode === "records")
           ? html`<div class="hz-sideCard">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
-                <div class="hz-sideCard__title" style="margin:0">Records</div>
+                <div class="hz-sideCard__title" style="margin:0">Raw records</div>
                 ${hz_recordsActionsHost}
               </div>
               <div class="hz-recordsBar">
@@ -3869,29 +4091,38 @@ hz_dashboardShell = html`
               </div>
               ${hz_recordsHost}
             </div>`
-          : (hz_viewMode === "chart")
-            ? html`<div class="hz-sideCard">${hz_chartHost}</div>`
-            : (hz_viewMode === "table")
-              ? html`<div class="hz-sideCard">
-                  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
-                    <div class="hz-sideCard__title" style="margin:0">Table</div>
-                    ${hz_tableActionsHost}
-                  </div>
-                  ${hz_tableHost}
-                </div>`
-              : html`<div class="hz-stack">
-                  <div class="hz-sideCard">
-                    <div class="hz-sideCard__title">Chart</div>
-                    ${hz_chartHost}
-                  </div>
-                  <div class="hz-sideCard">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-                      <div class="hz-sideCard__title" style="margin:0">Table</div>
+          : (hz_viewMode === "map")
+            ? html`<div class="hz-sideCard">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
+                  <div class="hz-sideCard__title" style="margin:0">Map</div>
+                  <div class="hz-miniControls">${viewof hz_mapMetric}</div>
+                </div>
+                <div class="hz-muted hz-mapSub">${hz_mapSub}</div>
+                ${hz_mapHost}
+              </div>`
+            : (hz_viewMode === "chart")
+              ? html`<div class="hz-sideCard">${hz_chartHost}</div>`
+              : (hz_viewMode === "table")
+                ? html`<div class="hz-sideCard">
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
+                      <div class="hz-sideCard__title" style="margin:0">Summary table</div>
                       ${hz_tableActionsHost}
                     </div>
                     ${hz_tableHost}
-                  </div>
-                </div>`
+                  </div>`
+                : html`<div class="hz-stack">
+                    <div class="hz-sideCard">
+                      <div class="hz-sideCard__title">Chart</div>
+                      ${hz_chartHost}
+                    </div>
+                    <div class="hz-sideCard">
+                      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+                        <div class="hz-sideCard__title" style="margin:0">Summary table</div>
+                        ${hz_tableActionsHost}
+                      </div>
+                      ${hz_tableHost}
+                    </div>
+                  </div>`
       }
     </div>
   </div>
@@ -4014,6 +4245,34 @@ hz_updateChart = {
     const tag = r.cached ? "Cached" : "Ready"
     const ms = Number.isFinite(r.t_ms) ? ` (${r.t_ms} ms)` : ""
     hz_statusPill.textContent = tag + ms
+    return html``
+  }
+
+  // Map view: choropleth by admin (uses by-admin endpoint + getAdminBoundaries)
+  if (hz_viewMode === "map") {
+    const meta = hz_mapMeta || { loading: true, ok: false }
+
+    // Loading
+    if (meta.loading) {
+      hz_statusPill.className = "hz-pill hz-pill--loading"
+      hz_statusPill.textContent = "Loading…"
+      hz_mapHost.replaceChildren(html`<div class=\"hz-loading\">Loading map…</div>`)
+      return html``
+    }
+
+    // Error
+    if (!meta.ok) {
+      hz_statusPill.className = "hz-pill hz-pill--error"
+      hz_statusPill.textContent = "Error"
+      const err = html`<div class=\"warn\"><b>Map error:</b><br>${String(meta.error || "Map query failed")}</div>`
+      hz_mapHost.replaceChildren(err)
+      return html``
+    }
+
+    // Ready
+    hz_statusPill.className = "hz-pill hz-pill--ready"
+    hz_statusPill.textContent = "Ready"
+    hz_mapHost.replaceChildren(hz_mapPlot)
     return html``
   }
 
