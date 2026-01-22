@@ -26,6 +26,15 @@ import { atlasTOC } from "/helpers/toc.ojs";
 atlasHero(nbTitle, "../../images/default_crop.webp");
 ```
 
+```{=html}
+<style>
+  .atlasFigCaption {
+    position: relative;
+    z-index: -1;
+  }
+</style>
+```
+
 # `{ojs} heading1` {#overview}
 
 ```{ojs}
@@ -93,7 +102,31 @@ loaderDiv("plotRecentChanges");
     if (viewRecentChanges === "warmingStripes") {
       return warmingStripes_recentChanges();
     }
-    return dataTable(recentChanges_plotData, 500);
+    return dataTable(recentChanges_plotData, {
+      format: {
+        year: (d) => d,
+      },
+      header: {
+        iso3: "ISO3",
+        admin0_name: "Country",
+        admin1_name: "Admin 1",
+        season: "Season",
+        year: "Year",
+        hazard: "Hazard",
+        mean: "Mean",
+        mean_anomaly: "Mean Anomaly",
+      },
+      columns: [
+        "iso3",
+        "admin0_name",
+        "admin1_name",
+        "season",
+        "year",
+        "hazard",
+        "mean",
+        "mean_anomaly",
+      ],
+    });
   });
 }
 ```
@@ -127,7 +160,7 @@ loaderDiv("plotFutureProjections");
 {
   renderToDiv("plotFutureProjections", () => {
     if (viewFutureChanges === "plot") return timeseries_futureProjections();
-    return dataTable(futureProjections_plotData, 500);
+    return dataTable(futureProjections_plotData);
   });
 }
 ```
@@ -258,6 +291,14 @@ appendix = _lang(general_translations.appendix);
 methodsData = _lang(general_translations.methodsData);
 ```
 
+```{ojs}
+adminNames = await FileAttachment("/data/shared/atlas_countries.json").json();
+
+iso3ToTranslation = Object.fromEntries(
+  adminNames.map(({ iso3c, translation }) => [iso3c, translation]),
+);
+```
+
 ## General
 
 ### formatters
@@ -268,6 +309,7 @@ import {
   formatNumCompactShort,
   formatUSD,
   generateDB,
+  wrapTickLabel,
 } from "/helpers/std.ojs";
 ```
 
@@ -464,54 +506,21 @@ exposureMap = new Map(
 ```
 
 ```{ojs}
-exposure_groups = new Object({
-  livestock: [
-    "sheep-tropical",
-    "sheep-highland",
-    "goats-tropical",
-    "goats-highland",
-    "pigs-tropical",
-    "pigs-highland",
-    "poultry-tropical",
-    "poultry-highland",
-    "cattle-tropical",
-    "cattle-highland",
-  ],
-  rootsTuber: ["potato", "sweet-potato", "yams", "cassava"],
-  cereals: [
-    "wheat",
-    "rice",
-    "maize",
-    "barley",
-    "pearl-millet",
-    "small-millet",
-    "sorghum",
-  ],
-  legumes: [
-    "bean",
-    "chickpea",
-    "cowpea",
-    "pigeonpea",
-    "lentil",
-    "groundnut",
-    "soybean",
-  ],
-  fruitVeg: ["plantain", "coconut", "banana"],
-  nonEdible: [
-    "cocoa",
-    "rapeseed",
-    "sesameseed",
-    "oilpalm",
-    "cotton",
-    "tea",
-    "tobacco",
-    "arabica-coffee",
-    "sunflower",
-    "sugarcane",
-    "sugarbeet",
-    "robusta-coffee",
-  ],
-});
+mapSpamCrops = await FileAttachment("/data/shared/MapSpamCrops.json").json();
+
+cropTranslations = Object.fromEntries(
+  Object.entries(mapSpamCrops).flatMap(([category, { label, items }]) => [
+    [category, label],
+    ...items.map(({ id, label }) => [id, label]),
+  ]),
+);
+
+exposure_groups = Object.fromEntries(
+  Object.entries(mapSpamCrops).map(([category, data]) => [
+    category,
+    data.items.map((item) => item.id),
+  ]),
+);
 
 cropCategoryMap = new Map(
   Object.entries(exposure_groups).flatMap(([category, crops]) =>
@@ -717,6 +726,7 @@ hazardExposure_plotData = {
     AND admin2_name IS NULL
     AND hazard_vars in ('NDWS+NTx35+NDWL0', 'NDWS+THI-max+NDWL0')
     AND exposure_unit = 'nominal-usd-2021'
+    AND crop != 'generic-crop'
     AND iso3 in ${sqlList(admin0Iso3)}
     AND (
      admin1_name in ${sqlList(admin1Names)}
@@ -867,6 +877,7 @@ exposureBars_keyFacts = function () {
   }
 
   if (_data.length === 0) {
+    //TODO: make this a function
     return html`
       <div style="
         width: ${width}px;
@@ -887,14 +898,17 @@ exposureBars_keyFacts = function () {
   return Plot.plot({
     width,
     height: 400,
-    marginLeft: 30,
+    marginLeft: 70,
     marginBottom: 50,
     marginTop: 30,
     subtitle: "Agricultural Production",
-    caption: multiLineText([
-      "Data is from 2020, measured in 2021 US dollars",
-      "Source: MapSpam 2020 SSA Adaptation Atlas",
-    ]),
+    caption: multiLineText(
+      [
+        "Data is from 2020, measured in 2021 US dollars",
+        "Source: MapSpam 2020 SSA Adaptation Atlas",
+      ],
+      "atlasFigCaption",
+    ),
 
     x: {
       axis: "bottom",
@@ -904,7 +918,10 @@ exposureBars_keyFacts = function () {
       tickFormat: formatUSD(),
     },
 
-    y: { label: null },
+    y: {
+      label: null,
+      tickFormat: (d) => wrapTickLabel(_lang(cropTranslations[d])),
+    },
 
     facet: {
       data: _data,
@@ -924,7 +941,31 @@ exposureBars_keyFacts = function () {
         y: "crop",
         fill: "value", // color by total
         sort: { y: "x", reverse: true },
-        tip: true,
+        channels: {
+          crop: {
+            label: "Crop",
+            value: "crop",
+          },
+          a1: {
+            label: "Region",
+            value: "admin1_name",
+          },
+          a0: {
+            label: "Country",
+            value: (d) => _lang(iso3ToTranslation[d.iso3]),
+          },
+        },
+        tip: {
+          format: {
+            a0: true,
+            a1: true,
+            crop: (d) => _lang(cropTranslations[d]),
+            x: formatUSD(),
+            fill: false,
+            y: false,
+            fx: false,
+          },
+        },
       }),
     ],
   });
@@ -1045,10 +1086,29 @@ gdpBar_keyFacts = () => {
     },
     fillLabelFormatter: (d) => (d) => d.toUpperCase(),
     title: "Country GDP by Sector",
-    caption: multiLineText([
-      "Data is from 2022, measured in 2015 US dollars",
-      "Source: FAOSTAT",
-    ]),
+    caption: multiLineText(
+      ["Data is from 2022, measured in 2015 US dollars", "Source: FAOSTAT"],
+      "atlasFigCaption",
+    ),
+    channels: {
+      pct: {
+        value: "pct_of_total",
+        label: "% of GDP",
+      },
+      group: {
+        value: "sector",
+        label: "Sector",
+      },
+      admin0: {
+        value: (d) => _lang(iso3ToTranslation[d.iso3]),
+        label: "Country",
+      },
+    },
+    tip: {
+      pct: true,
+      group: true,
+      admin0: true,
+    },
   });
 };
 
@@ -1069,7 +1129,29 @@ areaBar_keyFacts = () => {
     },
     fillLabelFormatter: (d) => (d) => d.toUpperCase(),
     title: "Country Land Use by Sector",
-    caption: multiLineText(["Data is based on 2021 values", "Source: FAOSTAT"]),
+    caption: multiLineText(
+      ["Data is based on 2021 values", "Source: FAOSTAT"],
+      "atlasFigCaption",
+    ),
+    channels: {
+      pct: {
+        value: "ha_pct",
+        label: "% of area",
+      },
+      group: {
+        value: "sub_group",
+        label: "Group",
+      },
+      admin0: {
+        value: (d) => _lang(iso3ToTranslation[d.iso3]),
+        label: "Country",
+      },
+    },
+    tip: {
+      pct: true,
+      group: true,
+      admin0: true,
+    },
   });
 };
 ```
@@ -1088,10 +1170,32 @@ povBar_keyFacts = () => {
     },
     fillLabelFormatter: (d) => (d) => d.toUpperCase(),
     title: "Poverty Rates",
-    caption: multiLineText([
-      "Data uses purchasing power parity (PPP) values for 2023. Poverty threshold is $4.20 USD/day.",
-      "Source: World Bank GSAP 2025.",
-    ]),
+    caption: multiLineText(
+      [
+        "Data uses purchasing power parity (PPP) values for 2023. Poverty threshold is $4.20 USD/day.",
+        "Source: World Bank GSAP 2025.",
+      ],
+      "atlasFigCaption",
+    ),
+    channels: {
+      rate: {
+        value: (d) => d.pov_rate + "%",
+        label: "% of populatio,n",
+      },
+      group: {
+        value: "group",
+        label: "Group",
+      },
+      admin0: {
+        value: (d) => _lang(iso3ToTranslation[d.iso3]),
+        label: "Country",
+      },
+    },
+    tip: {
+      rate: true,
+      group: true,
+      admin0: true,
+    },
   });
 };
 ```
@@ -1455,6 +1559,7 @@ stackbars_hazardExposure = () => {
   // --- Assign category to each crop (same as first chart) ---
   const dataWithCategory = hazardExposure_plotData.map((row) => {
     const category = cropCategoryMap.get(row.crop) || "other";
+    if (category === "other") console.log(row.crop);
 
     return { ...row, category };
   });
@@ -1470,33 +1575,30 @@ stackbars_hazardExposure = () => {
   // --- Apply prod_type logic (same as first chart) ---
   let dataForAggregation;
   if (!prod_type) {
-    // Aggregate hazards by category (not crop)
-    dataForAggregation = Array.from(
-      d3.rollup(
-        baseFiltered,
-        (v) => d3.sum(v, (d) => d.value),
-        (d) => d.adminName,
-        (d) => d.category,
-        (d) => d.timeframe,
-        (d) => d.scenario,
-        (d) => d.hazard,
-      ),
-      ([adminName, catMap]) =>
-        Array.from(catMap, ([category, tMap]) =>
-          Array.from(tMap, ([timeframe, sMap]) =>
-            Array.from(sMap, ([scenario, hMap]) =>
-              Array.from(hMap, ([hazard, value]) => ({
-                adminName,
-                crop: category,
-                timeframe,
-                scenario,
-                hazard,
-                value,
-              })),
-            ),
-          ),
-        ),
-    ).flat(4);
+    const grouped = d3.rollup(
+      baseFiltered,
+      (v) => ({
+        value: d3.sum(v, (d) => d.value),
+        iso3: v[0].iso3,
+        admin1_name: v[0].admin1_name,
+      }),
+      (d) =>
+        `${d.adminName}|${d.category}|${d.timeframe}|${d.scenario}|${d.hazard}`,
+    );
+
+    dataForAggregation = Array.from(grouped, ([key, data]) => {
+      const [adminName, category, timeframe, scenario, hazard] = key.split("|");
+      return {
+        adminName,
+        iso3: data.iso3,
+        admin1_name: data.admin1_name,
+        crop: category,
+        timeframe,
+        scenario,
+        hazard,
+        value: data.value,
+      };
+    });
   } else {
     // Filter to only the selected category
     dataForAggregation = baseFiltered.filter((d) => d.category === prod_type);
@@ -1534,6 +1636,7 @@ stackbars_hazardExposure = () => {
   // --- 6. Final hazard plot by category (or filtered category) ---
   return Plot.plot({
     width,
+    height: 400,
     marginLeft: 100,
 
     color: {
@@ -1555,6 +1658,12 @@ stackbars_hazardExposure = () => {
       ticks: 1,
       axis: "top",
       grid: true,
+      label: "Value",
+    },
+
+    y: {
+      label: null,
+      tickFormat: (d) => wrapTickLabel(_lang(cropTranslations[d])),
     },
 
     facet: {
@@ -1565,21 +1674,6 @@ stackbars_hazardExposure = () => {
     },
 
     marks: [
-      Plot.axisY({ tickSize: 0 }),
-      Plot.axisY(
-        Plot.pointerY({
-          fill: "white",
-          textStroke: "white",
-          textStrokeWidth: 2,
-          tickSize: 0,
-        }),
-      ),
-      Plot.axisY(
-        Plot.pointerY({
-          fontWeight: "bold",
-          tickSize: 0,
-        }),
-      ),
       Plot.barX(
         dataForAggregation,
         Plot.stackX(
@@ -1590,7 +1684,36 @@ stackbars_hazardExposure = () => {
             fill: "hazard",
             stroke: "#fff",
             strokeWidth: 0.25,
-            tip: true,
+            channels: {
+              crop: {
+                label: "Crop",
+                value: (d) => _lang(cropTranslations[d.crop]),
+              },
+              a1: {
+                label: "Region",
+                value: "admin1_name",
+              },
+              a0: {
+                label: "Country",
+                value: (d) => _lang(iso3ToTranslation[d.iso3]),
+              },
+              scenario: {
+                lable: "Scenario",
+                value: (d) => d.scenario,
+              },
+            },
+            tip: {
+              format: {
+                a0: true,
+                a1: true,
+                crop: true,
+                x: formatUSD(),
+                fill: false,
+                y: false,
+                fy: false,
+                fx: false,
+              },
+            },
           },
         ),
       ),
