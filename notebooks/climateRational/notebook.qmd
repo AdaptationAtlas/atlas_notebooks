@@ -67,6 +67,26 @@ viewof prod_type = Inputs.select([null, ...Object.keys(exposure_groups)], {
 exposureBars_keyFacts();
 ```
 
+```{ojs}
+keyFactsInsight = () => {
+  const country_insights = admin0Iso3
+    .map(
+      (c) => `
+**${_lang(iso3ToTranslation[c])}**
+
+${agInsight(c)}
+  `,
+    )
+    .join("\n\n");
+
+  return md`${country_insights}`;
+};
+```
+
+### `{ojs} _lang(nbText.general.quickInsight)`
+
+`{ojs} keyFactsInsight()`
+
 `{ojs} downloadButton(exposure_plotData, "commodityProduction")`
 
 # `{ojs} heading3` {#recentChanges}
@@ -433,7 +453,10 @@ landuse_plotData = {
       "group",
       year,
       ha,
-      ha_pct
+      ROUND(
+         ha / SUM(ha) OVER (PARTITION BY iso3, year),
+         4
+        ) * 100 as ha_pct
     FROM a0_landuse
     WHERE iso3 in ${sqlList(admin0Iso3)}
     AND year = 2021
@@ -537,32 +560,32 @@ recentChanges_plotData = {
   const _season = seasonSelect.season;
   const _variable = climateVarSelect.id;
 
+//TODO: uncomment the sql table after section 1 dev
+
   const resp = await db.query(`
-  SELECT
-    iso3,
-    admin0_name,
-    admin1_name,
-    season,
-    year,
-    hazard,
-    mean,
-    mean_anomaly
-  FROM historic_climate_timeseries
-    WHERE 1=1
-    AND iso3 in ${sqlList(admin0Iso3)}
-    AND (
-     admin1_name in ${sqlList(admin1Names)}
-     OR admin1_name IS NULL
-    )
-    ${sqlWhereNull({ field: "season", value: _season })}
-    ${sqlWhereNull({ field: "hazard", value: _variable })}
+    SELECT
+      iso3,
+      admin0_name,
+      admin1_name,
+      season,
+      year,
+      hazard,
+      mean,
+      mean_anomaly
+    -- FROM historic_climate_timeseries
+      WHERE 1=1
+      AND iso3 in ${sqlList(admin0Iso3)}
+      AND (
+       admin1_name in ${sqlList(admin1Names)}
+       OR admin1_name IS NULL
+      )
+      ${sqlWhereNull({ field: "season", value: _season })}
+      ${sqlWhereNull({ field: "hazard", value: _variable })}
   `);
 
   document.body.style.cursor = "";
   return withAdminName(resp);
 }
-
-recentChanges_plotData
 ```
 
 #### data - futureProjections
@@ -711,6 +734,7 @@ extremeEvents_plotData = {
 
 ```{ojs}
 hazardExposure_plotData = {
+//TODO: remove comment after section 1 insights
   const resp = await db.query(`
   SELECT
     iso3,
@@ -721,7 +745,7 @@ hazardExposure_plotData = {
     timeframe,
     scenario,
     value
-  FROM hazard_exposure
+   -- FROM hazard_exposure
     where 1=1
     AND admin2_name IS NULL
     AND hazard_vars in ('NDWS+NTx35+NDWL0', 'NDWS+THI-max+NDWL0')
@@ -838,9 +862,54 @@ climateForm = () => {
 climateForm();
 ```
 
+## Quick Insights
+
+### Insights - Key Facts
+
+```{ojs}
+povInsight = async () => {};
+
+agInsight = (iso3) => {
+  const _agGDP = gdp_plotData
+    .filter((d) => d.iso3 === iso3 && d.sector === "agriculture")
+    .reduce(
+      (acc, d) => ({
+        pct: acc.pct + d.pct_of_total,
+        total: acc.total + d.gdp_usd2015,
+      }),
+      { pct: 0, total: 0 },
+    );
+
+  const _agLandUse = landuse_plotData
+    .filter((row) => row.iso3 === iso3 && row.group === "Agriculture")
+    .reduce(
+      (acc, row) => ({
+        pct: acc.pct + row.ha_pct,
+        total: acc.total + row.ha,
+      }),
+      { pct: 0, total: 0 },
+    );
+
+  const country = _lang(iso3ToTranslation[iso3]);
+  const template = _lang(
+    nbText.sections.keyFacts.quickInsight.gdpLandUse.country,
+  );
+  const items = [
+    { name: "country", value: country },
+    { name: "pctAgGDP", value: _agGDP.pct.toFixed(2) },
+    { name: "agGDP", value: formatUSD()(_agGDP.total) },
+    { name: "pctAgLandUse", value: _agLandUse.pct.toFixed(2) },
+    { name: "LandUse", value: formatNumCompactShort()(_agLandUse.total) },
+  ];
+  return Lang.reduceReplaceTemplateItems(template, items);
+};
+
+exposureInsight = async () => {};
+```
+
 ## Figures
 
-### Key facts
+### Figures - Key facts
 
 ```{ojs}
 exposureBars_keyFacts = function () {
