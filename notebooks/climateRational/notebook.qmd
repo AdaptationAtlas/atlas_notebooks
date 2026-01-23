@@ -57,7 +57,16 @@ povBar_keyFacts();
 gdpBar_keyFacts();
 
 areaBar_keyFacts();
+```
 
+### `{ojs} _lang(nbText.general.quickInsight)`
+
+```{ojs}
+createCountryInsights([agInsight, povInsight]);
+```
+
+
+```{ojs}
 viewof prod_type = Inputs.select([null, ...Object.keys(exposure_groups)], {
   format: (d) => d || "All Commodities",
   value: null,
@@ -67,26 +76,11 @@ viewof prod_type = Inputs.select([null, ...Object.keys(exposure_groups)], {
 exposureBars_keyFacts();
 ```
 
-```{ojs}
-keyFactsInsight = () => {
-  const country_insights = admin0Iso3
-    .map(
-      (c) => `
-**${_lang(iso3ToTranslation[c])}**
-
-${agInsight(c)} \n
-${povInsight(c)}
-  `,
-    )
-    .join("\n\n");
-
-  return md`${country_insights}`;
-};
-```
-
 ### `{ojs} _lang(nbText.general.quickInsight)`
 
-`{ojs} keyFactsInsight()`
+```{ojs}
+createCountryInsights([exposureInsight]);
+```
 
 `{ojs} downloadButton(exposure_plotData, "commodityProduction")`
 
@@ -494,10 +488,9 @@ pov_plotData = {
      OR admin1_name IS NULL
     )
   `);
+
   return withAdminName(resp)
 }
-
-pov_plotData
 ```
 
 ```{ojs}
@@ -516,7 +509,12 @@ exposure_plotData = {
      OR admin1_name IS NULL
     )
   `);
-  return withAdminName(resp)
+  const cropData = resp.map((row) => {
+    const category = cropCategoryMap.get(row.crop) || "other";
+    return { ...row, category };
+  });
+
+  return withAdminName(cropData)
 }
 
 exposureMap = new Map(
@@ -525,6 +523,8 @@ exposureMap = new Map(
     d.value
   ])
 );
+
+exposure_plotData
 ```
 
 ```{ojs}
@@ -863,6 +863,23 @@ climateForm();
 
 ## Quick Insights
 
+```{ojs}
+createCountryInsights = (insightFunctions) => {
+  const country_insights = admin0Iso3
+    .map((c) => {
+      const countryName = `**${_lang(iso3ToTranslation[c])}**`;
+      const insights = insightFunctions
+        .map((fn) => fn(c))
+        .filter(Boolean)
+        .join("\n");
+      return `${countryName}  \n ${insights}`;
+    })
+    .join("\n\n");
+
+  return md`${country_insights}`;
+};
+```
+
 ### Insights - Key Facts
 
 ```{ojs}
@@ -940,7 +957,83 @@ agInsight = (iso3) => {
   return Lang.reduceReplaceTemplateItems(template, items);
 };
 
-exposureInsight = () => {};
+keyFactsInsight = () => {
+  const country_insights = admin0Iso3
+    .map(
+      (c) => `
+**${_lang(iso3ToTranslation[c])}**
+
+${agInsight(c)} \n
+${povInsight(c)}
+  `,
+    )
+    .join("\n\n");
+
+  return md`${country_insights}`;
+};
+```
+```{ojs}
+exposureInsight = (iso3) => {
+  const insightBase = nbText.sections.keyFacts.quickInsight.production;
+  const allTemplate = _lang(insightBase.allAdmins);
+  const template = _lang(insightBase.topAdmin);
+  const directions = nbText.general.direction;
+  const country = _lang(iso3ToTranslation[iso3]);
+
+  const getTopCategory = (data) => {
+    const categoryTotals = data.reduce((acc, d) => {
+      acc[d.category] = (acc[d.category] || 0) + d.value;
+      return acc;
+    }, {});
+
+    return Object.entries(categoryTotals).reduce(
+      (max, [category, total]) =>
+        total > max.total ? { category, total } : max,
+      { category: null, total: 0 },
+    );
+  };
+
+  const createAllInsight = (data, adminName) => {
+    const topGroup = getTopCategory(data);
+    const topCrop = data.reduce((max, d) => (d.value > max.value ? d : max), {
+      crop: null,
+      value: 0,
+    });
+
+    return Lang.reduceReplaceTemplateItems(allTemplate, [
+      { name: "admin", value: adminName },
+      { name: "group", value: _lang(cropTranslations[topGroup.category]) },
+      { name: "groupValue", value: formatUSD()(topGroup.total) },
+      { name: "topCommodity", value: _lang(cropTranslations[topCrop.crop]) },
+      { name: "topValue", value: formatUSD()(topCrop.value) },
+    ]);
+  };
+
+  const _countryData = exposure_plotData.filter(
+    (d) => d.iso3 === iso3 && !d.admin1_name,
+  );
+  const _countryInsight = createAllInsight(_countryData, country);
+
+  const _adminData = exposure_plotData.filter(
+    (d) => d.iso3 === iso3 && d.admin1_name,
+  );
+
+  const _adminInsights =
+    _adminData.length > 0
+      ? [...new Set(_adminData.map((d) => d.admin1_name))]
+          .map((admin1Name) => {
+            const admin1Data = _adminData.filter(
+              (d) => d.admin1_name === admin1Name,
+            );
+            return `- ${createAllInsight(admin1Data, admin1Name, allTemplate)}`;
+          })
+          .join("\n")
+      : "";
+
+  return _adminInsights
+    ? `${_countryInsight}\n${_adminInsights}`
+    : _countryInsight;
+};
 ```
 
 ## Figures
@@ -949,10 +1042,7 @@ exposureInsight = () => {};
 
 ```{ojs}
 exposureBars_keyFacts = function () {
-  const dataCategories = exposure_plotData.map((row) => {
-    const category = cropCategoryMap.get(row.crop) || "other";
-    return { ...row, category };
-  });
+  const dataCategories = exposure_plotData;
 
   let _data;
   // If no prod_type, aggregate by category
@@ -1018,7 +1108,6 @@ exposureBars_keyFacts = function () {
     x: {
       axis: "bottom",
       grid: true,
-      percent: true,
       label: "Value of Production",
       tickFormat: formatUSD(),
     },
@@ -1065,7 +1154,7 @@ exposureBars_keyFacts = function () {
             a0: true,
             a1: true,
             crop: (d) => _lang(cropTranslations[d]),
-            x: formatUSD(),
+            // x: formatUSD(),
             fill: false,
             y: false,
             fx: false,
