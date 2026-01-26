@@ -1,0 +1,76 @@
+// The Standard Map for the Atlas
+
+function makeChoropleth({
+  features, // Already joined geo+data features
+  width,
+  height = 550,
+  caption,
+  valueAccessor,
+  color, // Color configuration for the data
+  adminHighlight,
+  tooltip
+}) {
+  // Check if we have valid data for coloring
+  const hasData = color?.dataColumn && color?.domain;
+
+  // Configure color scale only if we have data
+  const colorConfig = hasData ? {
+    legend: true,
+    range: color.domain,
+    label: color.label,
+    type: color.type, // e.g., 'linear', 'categorical', etc.
+    scheme: color.scheme, // e.g., 'blues', 'reds', etc.
+    ...color // spread any other Plot color options
+  } : undefined;
+
+  // Define fill accessor
+  const fillAccessor = hasData
+    ? valueAccessor ?? ((d) => d.properties.data?.[color.dataColumn])
+    : null;
+
+  return Plot.plot({
+    caption,
+    width,
+    height,
+    marginBottom: 20,
+    projection: {
+      type: "azimuthal-equal-area",
+      domain: features,
+    },
+    color: colorConfig,
+    marks: [
+      // Base map
+      Plot.geo(features, {
+        fill: hasData ? fillAccessor : "#e0e0e0",
+        stroke: "#fff",
+        strokeWidth: 0.5
+      }),
+      
+      // Admin highlight overlay
+      ...(adminHighlight ? [
+        Plot.geo(
+          features.filter(adminHighlight.filter),
+          {
+            fill: null,
+            stroke: "#333",
+            strokeWidth: 1.5
+          }
+        )
+      ] : []),
+      
+      // Hover effect
+      Plot.geo(features, Plot.pointer(Plot.centroid({
+        stroke: "#333",
+        strokeWidth: 1.5
+      }))),
+      
+      // Tooltip (only if data exists)
+      ...(hasData && tooltip ? [
+        Plot.tip(features, Plot.pointer(Plot.centroid({
+          lineWidth: Infinity,
+          ...tooltip
+        })))
+      ] : [])
+    ]
+  });
+}
