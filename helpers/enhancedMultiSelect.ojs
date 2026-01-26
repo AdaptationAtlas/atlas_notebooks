@@ -19,6 +19,7 @@
  * @param {object} [config] - Configuration options for the toggle component.
  * @param {?number} [config.maxSelections=null] - The maximum number of items that can be selected. Null means no limit.
  * @param {boolean} [config.requireAtLeastOne=true] - If true, prevents the user from deselecting the last selected item.
+ * @param {boolean} [config.enableSelectAll=false] - If true, displays Select All / Deselect All buttons in the dropdown.
  * @returns {HTMLElement} An html element, but in OJS the initial select should be returned
  *
  * @example
@@ -27,18 +28,30 @@
  *      multiple: true,
  *      label: "pretty multi-select"
  *    });
- *  enhancedMultiSelect(input, { maxSelections: 3, requireAtLeastOne: false });
+ *  enhancedMultiSelect(input, {
+ *    maxSelections: 3,
+ *    requireAtLeastOne: false,
+ *    enableSelectAll: true
+ *  });
  *  return input;
  * }
  */
 function enhancedMultiSelect(
   viewofSelect,
-  { maxSelections = Infinity, requireAtLeastOne = true } = {}
+  {
+    maxSelections = null,
+    requireAtLeastOne = true,
+    enableSelectAll = false
+  } = {}
 ) {
   const select = viewofSelect.querySelector("select") || viewofSelect;
 
   if (!select || !select.multiple) {
-    throw new Error("enableClickToggle: requires a multiple=true select");
+    throw new Error("Inputs.select() requires a multiple=true select");
+  }
+
+  if(enableSelectAll && maxSelections) {
+    throw new Error("Cannot enable select all while also specifying a max number of selections")
   }
 
   // --- Styles Configuration ---
@@ -49,7 +62,7 @@ function enhancedMultiSelect(
       background: white; border: 2px solid #d1d5db; border-radius: 6px;
       cursor: pointer; font-size: 14px; font-weight: 500;
       text-align: left; display: flex; justify-content: space-between;
-      align-items: center; transition: all 0.2s ease;
+      align-items: center; transition: all 0.2s ease; color: #111;
     `,
     list: `
       display: none; min-width: 360px;
@@ -57,6 +70,16 @@ function enhancedMultiSelect(
       z-index: 10; top: 100%; position: absolute;
       max-height: 240px; overflow-y: auto; margin-top: 4px;
       box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+    `,
+    buttonContainer: `
+      display: flex; gap: 8px; padding: 8px 12px;
+      border-bottom: 2px solid #e5e7eb; background: #f9fafb;
+      position: sticky; top: 0; z-index: 1;
+    `,
+    actionBtn: `
+      flex: 1; padding: 6px 12px; font-size: 12px; font-weight: 500;
+      border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;
+      background: white; transition: all 0.15s ease;
     `,
     option: `
       padding: 8px 12px; cursor: pointer; display: flex;
@@ -150,11 +173,96 @@ function enhancedMultiSelect(
 
     // Update List Checkmarks and Backgrounds
     Array.from(list.children).forEach((div, i) => {
-      const isSelected = select.options[i].selected;
+      // Skip the button container if present
+      if (div.classList.contains("button-container")) return;
+
+      const optionIndex = enableSelectAll ? i - 1 : i;
+      if (optionIndex < 0 || optionIndex >= select.options.length) return;
+
+      const isSelected = select.options[optionIndex].selected;
       const check = div.querySelector("span");
       if (check) check.textContent = isSelected ? "✔" : "";
       div.style.backgroundColor = isSelected ? "#f9fafb" : "white";
     });
+  }
+
+  // --- Select/Deselect All Buttons ---
+  if (enableSelectAll) {
+    const buttonContainer = document.createElement("div");
+    applyStyle(buttonContainer, styles.buttonContainer);
+    buttonContainer.classList.add("button-container");
+
+    // Select All Button
+    const selectAllBtn = document.createElement("button");
+    applyStyle(selectAllBtn, styles.actionBtn);
+    selectAllBtn.textContent = "Select All";
+
+    selectAllBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const maxAllowed =
+        maxSelections === null ? select.options.length : maxSelections;
+
+      let selectedCount = 0;
+      Array.from(select.options).forEach((opt) => {
+        if (selectedCount < maxAllowed) {
+          opt.selected = true;
+          selectedCount++;
+        }
+      });
+
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      updateUI();
+    });
+
+    selectAllBtn.addEventListener("mouseenter", () => {
+      selectAllBtn.style.background = "#f3f4f6";
+      selectAllBtn.style.borderColor = "#2E7636";
+      selectAllBtn.style.color = "black";
+    });
+
+    selectAllBtn.addEventListener("mouseleave", () => {
+      selectAllBtn.style.background = "white";
+      selectAllBtn.style.borderColor = "#d1d5db";
+    });
+
+    // Deselect All Button
+    const deselectAllBtn = document.createElement("button");
+    applyStyle(deselectAllBtn, styles.actionBtn);
+    deselectAllBtn.textContent = "Deselect All";
+
+    deselectAllBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (requireAtLeastOne) {
+        shake(buttonContainer);
+        return;
+      }
+
+      Array.from(select.options).forEach((opt) => {
+        opt.selected = false;
+      });
+
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      updateUI();
+    });
+
+    deselectAllBtn.addEventListener("mouseenter", () => {
+      deselectAllBtn.style.background = "#f3f4f6";
+      deselectAllBtn.style.borderColor = "#2E7636";
+      deselectAllBtn.style.color = "black";
+    });
+
+    deselectAllBtn.addEventListener("mouseleave", () => {
+      deselectAllBtn.style.background = "white";
+      deselectAllBtn.style.borderColor = "#d1d5db";
+    });
+
+    buttonContainer.appendChild(selectAllBtn);
+    buttonContainer.appendChild(deselectAllBtn);
+    list.appendChild(buttonContainer);
   }
 
   // --- Option Rendering ---
@@ -167,26 +275,30 @@ function enhancedMultiSelect(
     applyStyle(check, styles.check);
     div.appendChild(check);
 
-    // Hover
-    div.addEventListener("mouseover", () => {
-      div.style.color = "#111";  // Prevents the global button styles from breakign it
+    // Hover Events
+    div.addEventListener("mouseenter", () => {
+      div.style.color = "#111";
       div.style.background = opt.selected ? "#f9fafb" : "#f3f4f6";
     });
 
-    div.addEventListener("mouseout", () => {
+    div.addEventListener("mouseleave", () => {
       div.style.color = "#111";
       div.style.background = opt.selected ? "#f9fafb" : "white";
     });
 
-    // Click
-    div.onmousedown = (e) => {
+    // Click Event
+    div.addEventListener("mousedown", (e) => {
       e.preventDefault();
       const selectedCount = Array.from(select.options).filter(
         (o) => o.selected
       ).length;
 
       // Max limit check
-      if (maxSelections && !opt.selected && selectedCount >= maxSelections) {
+      if (
+        maxSelections !== null &&
+        !opt.selected &&
+        selectedCount >= maxSelections
+      ) {
         shake(div);
         return;
       }
@@ -201,7 +313,7 @@ function enhancedMultiSelect(
       opt.selected = !opt.selected;
       select.dispatchEvent(new Event("input", { bubbles: true }));
       updateUI();
-    };
+    });
 
     list.appendChild(div);
   });
@@ -209,15 +321,23 @@ function enhancedMultiSelect(
   // --- Event Handlers ---
 
   // Collapse Toggle
-  btn.onclick = () => (isCollapsed ? expandList() : collapseList());
+  btn.addEventListener("click", () =>
+    isCollapsed ? expandList() : collapseList()
+  );
 
   // Button Hover
-  btn.onmouseenter = () => {
+  btn.addEventListener("mouseenter", () => {
     btn.style.borderColor = "#2E7636";
     btn.style.color = "#111";
-  };
-  btn.onmouseleave = () => (btn.style.borderColor = "#d1d5db");
-  btn.onfocus = () => (btn.style.borderColor = "#2E7636");
+  });
+
+  btn.addEventListener("mouseleave", () => {
+    btn.style.borderColor = "#d1d5db";
+  });
+
+  btn.addEventListener("focus", () => {
+    btn.style.borderColor = "#2E7636";
+  });
 
   // External Click Handler (Closes list if click is outside the wrapper)
   const outsideClickListener = (event) => {
@@ -243,14 +363,12 @@ function enhancedMultiSelect(
     const isAttached = document.body.contains(wrapper);
     if (!isAttached) {
       clearInterval(poll);
-      // Clean up the global listener
       document.removeEventListener("click", outsideClickListener);
       return;
     }
 
     const currentIndices = getSelectedIndices();
 
-    // Check for changes (efficient Set comparison)
     let changed = currentIndices.size !== lastIndices.size;
     if (!changed) {
       for (let i of currentIndices) {
@@ -267,6 +385,5 @@ function enhancedMultiSelect(
     }
   }, 100);
 
-  /// return wrapper;
-  return viewofSelect
+  return viewofSelect;
 }
