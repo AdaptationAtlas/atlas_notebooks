@@ -65,10 +65,9 @@ areaBar_keyFacts();
 createCountryInsights([agInsight, povInsight]);
 ```
 
-
 ```{ojs}
 viewof prod_type = Inputs.select([null, ...Object.keys(exposure_groups)], {
-  format: (d) => d || "All Commodities",
+  format: (d) => _lang(cropTranslations[d]) || "All Commodities",
   value: null,
   label: "Production Type",
 });
@@ -160,6 +159,7 @@ inputTemplate()([section3A0, section3A1]);
 
 ```{ojs}
 climateForm();
+scenarioForm();
 viewof viewFutureChanges = Inputs.radio(["plot", "table"], {
   label: "View Type",
   value: "plot",
@@ -190,6 +190,11 @@ section4A1 = renderA1Multi({ maxSelections: 3 });
 inputTemplate()([section4A0, section4A1]);
 
 climateForm();
+scenarioForm();
+viewof viewExtremeEvents = Inputs.radio(["plot", "table"], {
+  label: "View Type",
+  value: "plot",
+});
 ```
 
 ```{ojs}
@@ -200,7 +205,8 @@ loaderDiv("plotExtremeEvents");
 //| output: false
 {
   renderToDiv("plotExtremeEvents", () => {
-    return bars_extremeEvents();
+    if (viewExtremeEvents === "plot") return bars_extremeEvents();
+    return dataTable(extremeEvents_plotData);
   });
 }
 ```
@@ -389,7 +395,7 @@ NavbarLangSelector(languages, masterLanguage)
 
 ```{ojs}
 data_obj = {
-  const obj = await FileAttachment("/data/climateRationale/nbData.json").json();
+  const obj = await FileAttachment("/data/climateRationale/nbData_local.json").json();
   return obj.data
 }
 db = await generateDB(
@@ -401,15 +407,24 @@ db = await generateDB(
 ```{ojs}
 dbFutureHive = {
     const fut = data_obj.filter((d) => d.sections.includes("futureProjections"));
-    // const _db = await DuckDBClient.of();
+    const _db = await DuckDBClient.of();
     await _db.query(`SET enable_object_cache = true;`)
     await _db.query(`SET enable_http_metadata_cache = true;`)
-     
+    const paths = fut.map((d) => {
+      let p
+      if (d.local_path) {
+        p = "http://localhost:4040" + d.local_path
+      } else {
+        p = d.s3_path
+      }
+      return `'${p}'`
+
+    }) // `'${||d.s3_path}'
     await _db.query(`
       CREATE VIEW futureProjections as
         SELECT *, period as timeperiod
         FROM parquet_scan([
-          ${fut.map((d) => `'${d.s3_path}'`).join(", ")}
+          ${paths.join(", ")}
         ],filename=true, hive_partitioning = 1)
     `)
   return _db
@@ -559,8 +574,6 @@ recentChanges_plotData = {
   const _season = seasonSelect.season;
   const _variable = climateVarSelect.id;
 
-//TODO: uncomment the sql table after section 1 dev
-
   const resp = await db.query(`
     SELECT
       iso3,
@@ -571,7 +584,7 @@ recentChanges_plotData = {
       hazard,
       mean,
       mean_anomaly
-    -- FROM historic_climate_timeseries
+      FROM historic_climate_timeseries
       WHERE 1=1
       AND iso3 in ${sqlList(admin0Iso3)}
       AND (
@@ -620,8 +633,8 @@ futureProjections_plotData = {
     )
     ${sqlWhereNull({ field: "season", value: _season })}
     ${sqlWhereNull({ field: "hazard", value: _variable })}
-    AND timeperiod in ${sqlList(["2021-2040"])}
-    AND scenario in ${sqlList(["ssp245", "ssp585"])}
+    AND timeperiod = '${futurePeriodSelect}'
+    AND scenario in ${sqlList(futureScenarioSelect.map((d) => d.toLowerCase()))}
   `);
 
   document.body.style.cursor = "";
@@ -694,6 +707,7 @@ function aggregateEvents(data, scenario_name) {
 extremeEvents_plotData = {
   const historicZ = addZScores(recentChanges_plotData, [
     "iso3",
+    "admin0_name",
     "admin1_name",
     "season",
     "hazard",
@@ -702,6 +716,7 @@ extremeEvents_plotData = {
   
   const futureZ = addZScores(futureProjections_plotData, [
     "iso3",
+    "admin0_name",
     "admin1_name",
     "season",
     "hazard",
@@ -718,11 +733,14 @@ extremeEvents_plotData = {
       unusual_high: d.unusual_high,
       extreme_high: d.extreme_high
     }).map(([category, value]) => ({
+      iso3: d.iso3,
+      admin0_name: d.admin0,
+      admin1_name: d.admin1,
       scenario: d.scenario,
       adminName: d.adminName,
       hazard: d.hazard,
       category,
-      value
+      num_events: value
     }))
   );
   return longData
@@ -733,7 +751,6 @@ extremeEvents_plotData = {
 
 ```{ojs}
 hazardExposure_plotData = {
-//TODO: remove comment after section 1 insights
   const resp = await db.query(`
   SELECT
     iso3,
@@ -744,7 +761,7 @@ hazardExposure_plotData = {
     timeframe,
     scenario,
     value
-   -- FROM hazard_exposure
+    FROM hazard_exposure
     where 1=1
     AND admin2_name IS NULL
     AND hazard_vars in ('NDWS+NTx35+NDWL0', 'NDWS+THI-max+NDWL0')
@@ -861,6 +878,56 @@ climateForm = () => {
 climateForm();
 ```
 
+```{ojs}
+futurePeriods = [
+  "2021-2040",
+  "2041-2060",
+  "2061-2081",
+  "2080-2100"
+]
+
+viewof futurePeriodSelect = Inputs.input(futurePeriods[0]);
+
+scenarioColors = new Object({
+  SSP126: "#4FB5B7",
+  SSP245: "#F4BB21",
+  SSP370: "#EE624F",
+  SSP585: "#B34E65",
+});
+
+scenarioNames = Object.keys(scenarioColors);
+
+viewof futureScenarioSelect = Inputs.input([scenarioNames[1], scenarioNames[3]]);
+
+scenarioNames
+```
+
+```{ojs}
+scenarioForm = () => {
+  const futurePeriod = Inputs.bind(
+    Inputs.select(futurePeriods, {
+      label: _lang(general_translations.timeperiod),
+    }),
+    viewof futurePeriodSelect
+  );
+
+  const futureScenario = Inputs.bind(
+    Inputs.checkbox(scenarioNames, {
+      label: _lang(general_translations.scenario),
+    }),
+    viewof futureScenarioSelect
+  );
+
+  return Inputs.form(
+    [futurePeriod, futureScenario],
+    {
+      template: inputTemplate()
+    }
+  );
+
+}
+```
+
 ## Quick Insights
 
 ```{ojs}
@@ -957,6 +1024,7 @@ agInsight = (iso3) => {
   return Lang.reduceReplaceTemplateItems(template, items);
 };
 ```
+
 ```{ojs}
 exposureInsight = (iso3) => {
   const insightBase = nbText.sections.keyFacts.quickInsight.production;
@@ -1571,13 +1639,6 @@ warmingStripes_recentChanges = () => {
 ### futureProjections
 
 ```{ojs}
-scenarioColors = new Object({
-  SSP126: "#4FB5B7",
-  SSP245: "#F4BB21",
-  SSP370: "#EE624F",
-  SSP585: "#B34E65",
-});
-
 timeseries_futureProjections = () => {
   const _data = futureProjections_plotData;
   const _season = seasonSelect.season_string;
@@ -1697,38 +1758,99 @@ bars_extremeEvents = () => {
     "unusual_high",
     "extreme_high",
   ];
+
   const interp = (t) => d3.interpolateRdBu(1 - t);
   const colors = categories.map((_, i) => interp(i / (categories.length - 1)));
-  const colorScale = d3.scaleOrdinal(categories, colors);
+
   const _data = extremeEvents_plotData;
 
   return Plot.plot({
-    width: 750,
-    height: 420,
+    width,
+    height: 500,
     marginLeft: 60,
-    marginBottom: 50,
+    marginBottom: 60,
+
     facet: {
       data: _data,
-      x: "adminName",
     },
+
+    fy: {
+      label: null,
+    },
+
     x: {
       domain: ["historical", "ssp245", "ssp585"],
+      label: "Scenario",
     },
+
+    fx: {
+      domain: categories,
+      label: "Category",
+    },
+
+    y: {
+      label: "Number of events",
+      grid: true,
+    },
+
     color: {
       legend: true,
       domain: categories,
       range: colors,
+      label: "Category",
     },
+
     marks: [
       Plot.barY(_data, {
         x: "scenario",
-        y: "value",
-        fill: (d) => colorScale(d.category),
+        fx: "category",
+        fy: "adminName",
+        y: "num_events",
+        fill: "category",
         tip: true,
       }),
     ],
   });
 };
+// bars_extremeEvents = () => {
+//   const categories = [
+//     "extreme_low",
+//     "unusual_low",
+//     "unusual_high",
+//     "extreme_high",
+//   ];
+//   const interp = (t) => d3.interpolateRdBu(1 - t);
+//   const colors = categories.map((_, i) => interp(i / (categories.length - 1)));
+//   const colorScale = d3.scaleOrdinal(categories, colors);
+//   const _data = extremeEvents_plotData;
+//
+//   return Plot.plot({
+//     width,
+//     height: 420,
+//     marginLeft: 60,
+//     marginBottom: 50,
+//     facet: {
+//       data: _data,
+//       x: "adminName",
+//     },
+//     x: {
+//       domain: ["historical", "ssp245", "ssp585"],
+//     },
+//     color: {
+//       legend: true,
+//       domain: categories,
+//       range: colors,
+//     },
+//     marks: [
+//       Plot.barY(_data, {
+//         x: "scenario",
+//         y: "num_events",
+//         fill: (d) => colorScale(d.category),
+//         tip: true,
+//       }),
+//     ],
+//   });
+// };
 ```
 
 ### hazardExposure
@@ -1838,6 +1960,7 @@ stackbars_hazardExposure = () => {
       axis: "top",
       grid: true,
       label: "Value",
+      tickFormat: formatUSD(),
     },
 
     y: {
