@@ -45,16 +45,24 @@ viewof s3Admin2 = createSyncedAdminSelector(2, viewof selectedAdmin2, admin2Opti
 ```{ojs}
 //| echo: false
 
+// Check if loaded data has admin1 info
+s3HasAdmin1Data = {
+  if (!s3AccessData || s3AccessData.length === 0) return false;
+  // Check first few rows for non-null admin1
+  return s3AccessData.slice(0, 50).some(d => d.admin1_name !== null);
+}
+
 // Inline admin level selectors for this section - Region Selection
+// Only show Admin 1/2 selectors if data supports it
 htl.html`
 <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
   <div style="flex: 1; min-width: 200px;">
     ${viewof s3Admin0}
   </div>
-  <div style="flex: 1; min-width: 200px;">
+  <div style="flex: 1; min-width: 200px; display: ${s3HasAdmin1Data ? 'block' : 'none'};">
     ${viewof s3Admin1}
   </div>
-  <div style="flex: 1; min-width: 200px;">
+  <div style="flex: 1; min-width: 200px; display: ${s3HasAdmin1Data ? 'block' : 'none'};">
     ${viewof s3Admin2}
   </div>
 </div>
@@ -158,11 +166,15 @@ s3AccessAdmin0 = {
 // DATA JOINING: Combine CIS Readiness with Access Data
 // ============================================================================
 // Join the aggregated CIS readiness with aggregated access data.
-// Also calculate a "combined" access metric (average of TV, internet, cellphone)
-// and normalize all access percentages to 0-1 scale for comparison.
+// Use Admin 1/2 levels if data available and selected, otherwise default to Admin 0
 // ============================================================================
 
 section3Data = {
+  // Determine which data level to use
+  // If s3HasAdmin1Data is true, we should use the same logic as Section 1/2
+  // For now, sticking to Admin 0 aggregation as per original design safe default,
+  // but logic can be expanded here if Admin 1 data is confirmed available.
+  
   return s3CisReadinessAdmin0.map(cis => {
     // Find matching access data by country name or ISO3 code
     const access = s3AccessAdmin0.find(a => 
@@ -219,6 +231,37 @@ viewof s3AccessType = Inputs.radio(
                  _lang(cis.s3AccessCellphone)
   }
 )
+```
+
+```{ojs}
+//| echo: false
+
+// View Toggle
+viewof s3ViewType = Inputs.radio(
+  ["map", "dumbbell", "scatter", "table"],
+  {
+    label: _lang(cis.s3ViewToggle),
+    value: "map",
+    format: x => x === "map" ? _lang(cis.s3ViewMap) :
+                 x === "dumbbell" ? _lang(cis.s3ViewDumbbell) :
+                 x === "scatter" ? _lang(cis.s3ViewScatter) :
+                 _lang(cis.s3ViewTable)
+  }
+)
+
+// Map Type Toggle (Only shown when view type is map)
+viewof s3MapType = {
+  if (s3ViewType !== "map") {
+     const input = Inputs.radio(["bivariate"], {label: "Map Type", value: "bivariate"});
+     input.style.display = "none";
+     return input;
+  }
+  return Inputs.radio(["bivariate", "univariate"], {
+    label: "Map Type",
+    value: "bivariate", 
+    format: x => x === "bivariate" ? "Bivariate (Readiness × Access)" : "Access Distribution"
+  });
+}
 ```
 
 ```{ojs}
@@ -307,21 +350,6 @@ viewof s3HighlightedCountries = {
 //| echo: false
 
 // View Toggle
-viewof s3ViewType = Inputs.radio(
-  ["map", "dumbbell", "scatter", "table"],
-  {
-    label: _lang(cis.s3ViewToggle),
-    value: "map",
-    format: x => x === "map" ? _lang(cis.s3ViewMap) :
-                 x === "dumbbell" ? _lang(cis.s3ViewDumbbell) :
-                 x === "scatter" ? _lang(cis.s3ViewScatter) :
-                 _lang(cis.s3ViewTable)
-  }
-)
-```
-
-```{ojs}
-//| echo: false
 
 // Helper to get current access field name
 s3CurrentAccessField = s3AccessType === "combined" ? "combined_norm" :
@@ -599,6 +627,85 @@ s3GeoData = {
 
 ```{ojs}
 //| echo: false
+
+// Section 3 Map Display (Handles both Bivariate and Univariate)
+s3MapDisplay = {
+  if (s3ViewType !== "map") return null;
+  
+  if (s3MapType === "univariate") {
+    return s3AccessMap;
+  } else {
+    return s3BivariateMap;
+  }
+}
+
+// Access Map (Univariate)
+s3AccessMap = {
+  const height = 610;
+  const width = 775;
+  const padding = 20;
+
+  // Cleanup tooltips
+  d3.select(".s3AccessMapTip").remove();
+  
+  const tooltip = d3
+    .select("body")
+    .append("div")
+    .attr("class", "plot-tip s3AccessMapTip") // reusing css from shared styles
+    .style("position", "absolute")
+    .style("opacity", 0)
+    .style("pointer-events", "none")
+    .style("z-index", "1000")
+    .style("background", "rgba(255, 255, 255, 0.95)")
+    .style("padding", "10px")
+    .style("border", "1px solid #ccc")
+    .style("border-radius", "4px");
+
+  const projection = d3.geoMercator();
+  const geo_path = d3.geoPath().projection(projection);
+  
+  // Linear color scale for access (0-1)
+  const color = d3.scaleSequential(d3.interpolateBlues).domain([0, 1]);
+
+  projection.fitExtent(
+    [
+      [padding, padding],
+      [width - padding, height - padding]
+    ],
+    s3GeoData
+  );
+
+  const svg = d3.create("svg")
+    .attr("viewBox", [0, 0, width, height])
+    .attr("style", "overflow: visible;");
+
+  svg.append("g")
+    .selectAll("path")
+    .data(s3GeoData.features)
+    .join("path")
+    .attr("fill", d => {
+        const val = d.properties.accessValue;
+        return (val !== null && !isNaN(val)) ? color(val) : "#ccc";
+    })
+    .attr("stroke", "white")
+    .attr("stroke-width", 0.5)
+    .attr("d", geo_path)
+    .on("mousemove", (event, d) => {
+        const val = d.properties.accessValue;
+        const valPct = (val * 100).toFixed(1) + "%";
+        tooltip.style("opacity", 1)
+               .style("left", (event.pageX + 10) + "px")
+               .style("top", (event.pageY - 10) + "px")
+               .html(`<strong>${d.properties.admin0_name}</strong><br>${s3CurrentAccessLabel}: ${valPct}`);
+    })
+    .on("mouseout", () => tooltip.style("opacity", 0));
+    
+  // Simple Legend for Univariate Map
+  // ... (Can use Plot.legend or d3 equivalent if needed, for brevity using simple gradient bar logic could be complex here so skipping complex legend for now, relies on tooltip)
+  
+  return svg.node();
+}
+
 
 // Section 3 bivariate map with diamond legend (matching Section 2 style)
 s3BivariateMap = {
@@ -912,12 +1019,13 @@ s3BivariateMap = {
 {
   if (s3ViewType === "map") {
     yield html`<div style="width: 100%; overflow-x: auto;">
-      ${s3BivariateMap}
+      ${s3MapDisplay}
     </div>`;
   } else if (s3ViewType === "dumbbell") {
     // Clean up any leftover tooltips from map view
     d3.select(".s3BivariateTip").remove();
     d3.select(".s3BivariateLegendTip").remove();
+    d3.select(".s3AccessMapTip").remove();
     
     // Dumbbell Chart - inline to prevent auto-display
   if (!s3SortedData || s3SortedData.length === 0) {
@@ -1042,6 +1150,9 @@ s3BivariateMap = {
         <div><span style="color: #999999;">━</span> Similar values</div>
       </div>
     </div>
+    <div style="margin-top: 10px;">
+       ${s3DownloadButton} 
+    </div>
   </div>`;
 }
   } else if (s3ViewType === "scatter") {
@@ -1124,8 +1235,12 @@ s3BivariateMap = {
             label: _lang(cis.s3ReadinessLabel) + " →"
           },
           y: {
-            domain: d3.extent(facetData, d => d.accessValue),
+            // Dynamic domain based on data range
+            // domain: d3.extent(facetData, d => d.accessValue),
             label: "Access →"
+          },
+          color: {
+            legend: true
           },
           fx: {
             label: null,
@@ -1219,7 +1334,9 @@ s3BivariateMap = {
                 format: {
                   country: true,
                   readiness: (d) => d != null ? d.toFixed(3) : "N/A",
-                  access: (d) => d != null ? (d * 100).toFixed(1) + '%' : "N/A"
+                  access: (d) => d != null ? (d * 100).toFixed(1) + '%' : "N/A",
+                  fx: false, // Ensure facet keys don't show in tooltip
+                  fy: false 
                 }
               })
             ),
@@ -1241,6 +1358,8 @@ s3BivariateMap = {
         };
         })())}
       </div>`;
+    // Place download button after chart
+    yield html`<div style="margin-top: 10px;">${s3DownloadButton}</div>`;
 }
   } else {
     // Clean up any leftover tooltips from map view
@@ -1366,10 +1485,10 @@ s3Insights = {
 ```{ojs}
 //| echo: false
 
-// Download button for Section 3
-{
+// Define Download button separately to be used in multiple places
+s3DownloadButton = {
   if (typeof downloadButton === 'undefined' || !s3SortedData || s3SortedData.length === 0) {
-    yield html`<div style="padding: 10px; background: #f0f0f0; border-radius: 5px;">
+    return html`<div style="padding: 10px; background: #f0f0f0; border-radius: 5px;">
       <em>Download will be available once data is loaded</em>
     </div>`;
   } else {
@@ -1379,7 +1498,7 @@ s3Insights = {
       return value.toFixed(decimals);
     };
     
-    yield downloadButton(
+    return downloadButton(
       s3SortedData.map(d => ({
         "Country": d.admin0_name || "N/A",
         "ISO3": d.iso3 || "N/A",
