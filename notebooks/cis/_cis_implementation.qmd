@@ -771,9 +771,10 @@ s3BivariateMap = {
   
   // Create bi_legend function (diamond shape - matching Section 2)
   function bi_legend(selection) {
-  const size = 40;
-  const gap = 2;
-  const classes = ["Low", "Moderate", "High"];
+    const size = 40;
+    const gap = 2;
+    // Order classes High -> Low to place High-High at Top (0,0) and Low-Low at Bottom (2,2)
+    const classes = ["High", "Moderate", "Low"];
     const totalWidth = size * 3 + gap * 2;
     const totalHeight = size * 3 + gap * 2;
     const centerX = totalWidth / 2;
@@ -783,6 +784,7 @@ s3BivariateMap = {
     const legendContent = selection.append("g");
     
     // Legend squares with hover tooltips
+    // i = rows (Access), j = cols (Readiness)
     classes.forEach((accessClass, i) => {
       classes.forEach((readinessClass, j) => {
         const key = `${readinessClass} × ${accessClass}`;
@@ -794,17 +796,20 @@ s3BivariateMap = {
           .attr("y", i * (size + gap))
           .attr("width", size)
           .attr("height", size)
-          .attr("fill", s3BivariateColors[key] || "#cccccc")
+          //.attr("fill", s3BivariateColors[key] || "#cccccc") // Use helper or global
+          .attr("fill", (d) => {
+             return s3BivariateColors[key] || "#cccccc";
+          })
           .attr("stroke", isPriority ? "#000" : "#999")
           .attr("stroke-width", isPriority ? "2.5" : "0.5")
           .style("cursor", "pointer");
         
-        // Add hover tooltip - matching Plot.tip pattern
+        // Add hover tooltip
         rect
           .on("mousemove", (event) => {
             const tooltipHtml = `
               <table>
-                <tr><th>${_lang(cis.s3ReadinessLabel)}</th><td>${readinessClass}</td></tr>
+                <tr><th>CIS Readiness</th><td>${readinessClass}</td></tr>
                 <tr><th>${s3CurrentAccessLabel}</th><td>${accessClass}</td></tr>
                 <tr><th>Category</th><td>${key}</td></tr>
               </table>
@@ -821,43 +826,70 @@ s3BivariateMap = {
       });
     });
     
-    // Rotate the entire legend 45 degrees to make it a diamond
+    // Axes and Labels
+    
+    // Readiness Arrow (Along Bottom Edge: Right -> Left)
+    legendContent.append("line")
+      .attr("x1", totalWidth)
+      .attr("y1", totalHeight + 8)
+      .attr("x2", 0)
+      .attr("y2", totalHeight + 8)
+      .attr("stroke", "#333")
+      .attr("stroke-width", 1.5)
+      .attr("marker-end", "url(#arrowhead)");
+
+    // Readiness Label
+    legendContent.append("text")
+      .attr("x", totalWidth / 2)
+      .attr("y", totalHeight + 22)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "11px")
+      .attr("font-weight", "bold")
+      .attr("fill", "#333")
+      .text("CIS Readiness");
+
+    // Access Arrow (Along Right Edge: Bottom -> Top)
+    legendContent.append("line")
+      .attr("x1", totalWidth + 8)
+      .attr("y1", totalHeight)
+      .attr("x2", totalWidth + 8)
+      .attr("y2", 0)
+      .attr("stroke", "#333")
+      .attr("stroke-width", 1.5)
+      .attr("marker-end", "url(#arrowhead)");
+
+    // Access Label (using s3CurrentAccessLabel for dynamic type)
+    legendContent.append("text")
+      .attr("x", totalWidth + 22)
+      .attr("y", totalHeight / 2)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "11px")
+      .attr("font-weight", "bold")
+      .attr("fill", "#333")
+      .attr("transform", `rotate(-90, ${totalWidth + 22}, ${totalHeight / 2})`)
+      .text(s3AccessType === "combined" ? "Combined Access" : s3CurrentAccessLabel);
+
+    // Reuse arrow marker (assumed defined in main SVG or duplicated here if scope issues)
+    // To be safe, adding defs here too
+    const defs = selection.append("defs");
+    defs.append("marker")
+      .attr("id", "arrowhead")
+      .attr("viewBox", "0 0 10 10")
+      .attr("refX", 8)
+      .attr("refY", 5)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path")
+      .attr("d", "M 0 0 L 10 5 L 0 10 z")
+      .attr("fill", "#333");
+
+    // Rotate the entire legend 45 degrees
     legendContent.attr("transform", `rotate(45, ${centerX}, ${centerY})`);
-    
-    // Calculate the rotated diamond corners for proper label positioning
-    // After 45° rotation, the diamond extends from the center by totalWidth/2 * sqrt(2)
-    const diagonalOffset = (totalWidth / 2) * Math.sqrt(2);
-    
-    // CIS Readiness label - along Top-RIGHT edge (starts at top, goes down-right)
-    // Anchored at top corner, rotated 45 degrees
-    selection
-      .append("text")
-      .attr("x", centerX + 10)
-      .attr("y", centerY - diagonalOffset - 5)
-      .attr("font-size", "11")
-      .attr("fill", "#333")
-      .attr("font-weight", "600")
-      .attr("text-anchor", "start")
-      .attr("dominant-baseline", "auto") // text sits above the line
-      .attr("transform", `rotate(45, ${centerX + 10}, ${centerY - diagonalOffset - 5})`)
-      .text(_lang(cis.s3ReadinessLabel) + " →");
-    
-    // Access label - along Top-LEFT edge (starts at top, goes down-left)
-    // Anchored at top corner, rotated -45 degrees
-    selection
-      .append("text")
-      .attr("x", centerX - 10)
-      .attr("y", centerY - diagonalOffset - 5)
-      .attr("font-size", "11")
-      .attr("fill", "#333")
-      .attr("font-weight", "600")
-      .attr("text-anchor", "end")
-      .attr("dominant-baseline", "auto") // text sits above the line
-      .attr("transform", `rotate(-45, ${centerX - 10}, ${centerY - diagonalOffset - 5})`)
-      .text(s3CurrentAccessLabel + " →");
     
     return selection;
   }
+        
   
   // Add legend to SVG - positioned at bottom-left to match Section 2
   const legendX = 80;
