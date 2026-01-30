@@ -1,76 +1,82 @@
 // The Standard Map for the Atlas
+//
+//
 
 function makeChoropleth({
   features, // Already joined geo+data features
   width,
   height = 550,
   caption,
-  valueAccessor,
+  fill, // Can be accessor function, property name, or undefined
   color, // Color configuration for the data
   adminHighlight,
-  tooltip
+  channels,
+  tooltip,
+  projection = "azimuthal-equal-area"
 }) {
   // Check if we have valid data for coloring
-  const hasData = color?.dataColumn && color?.domain;
+  const hasData = color && fill;
 
+  const noDataColor = "#e0e0e0"
+  
   // Configure color scale only if we have data
   const colorConfig = hasData ? {
     legend: true,
-    range: color.domain,
     label: color.label,
-    type: color.type, // e.g., 'linear', 'categorical', etc.
-    scheme: color.scheme, // e.g., 'blues', 'reds', etc.
+    type: color.type,
+    scheme: color.scheme,
+    domain: color.domain,
+    range: color.range,
     ...color // spread any other Plot color options
   } : undefined;
 
-  // Define fill accessor
-  const fillAccessor = hasData
-    ? valueAccessor ?? ((d) => d.properties.data?.[color.dataColumn])
-    : null;
-
+  const highlights = adminHighlight
+  ? Array.isArray(adminHighlight)
+    ? adminHighlight
+    : [adminHighlight]
+  : [];
+  
   return Plot.plot({
     caption,
     width,
     height,
-    marginBottom: 20,
+    marginBottom: 10,
     projection: {
-      type: "azimuthal-equal-area",
+      type: projection,
       domain: features,
     },
     color: colorConfig,
     marks: [
       // Base map
       Plot.geo(features, {
-        fill: hasData ? fillAccessor : "#e0e0e0",
+        fill: hasData ? fill : noDataColor,
         stroke: "#fff",
-        strokeWidth: 0.5
+        strokeWidth: 0.5,
       }),
       
       // Admin highlight overlay
-      ...(adminHighlight ? [
+      ...highlights.flatMap(h => [
         Plot.geo(
-          features.filter(adminHighlight.filter),
           {
-            fill: null,
-            stroke: "#333",
-            strokeWidth: 1.5
+            type: "FeatureCollection",
+            features: features.features.filter(h.filter)
+          },
+          {
+            fill: h.fill || null,
+            stroke: h.stroke || "#333",
+            strokeWidth: h.strokeWidth ?? 1.5,
+            strokeDasharray: h.strokeDasharray,
           }
         )
-      ] : []),
+      ]),
       
       // Hover effect
       Plot.geo(features, Plot.pointer(Plot.centroid({
         stroke: "#333",
-        strokeWidth: 1.5
+        strokeWidth: 1.5,
+        channels: channels || {},
+        tip: tooltip
       }))),
-      
-      // Tooltip (only if data exists)
-      ...(hasData && tooltip ? [
-        Plot.tip(features, Plot.pointer(Plot.centroid({
-          lineWidth: Infinity,
-          ...tooltip
-        })))
-      ] : [])
     ]
   });
 }

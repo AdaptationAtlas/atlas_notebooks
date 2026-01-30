@@ -27,61 +27,427 @@ atlasTOC({
 });
 ```
 
-# `{ojs} heading1` {#genderHotspots}
-
 ```{ojs}
 import { makeChoropleth, renderGeoMap } from "/helpers/plot.ojs";
 boundaries = getAdminBoundaries([0, 1]);
 
-boundaries;
+function filterGeojson(geojson, property, value) {
+  return {
+    ...geojson,
+    features: geojson.features.filter(
+      (feature) => feature.properties?.[property] === value,
+    ),
+  };
+}
+
+filteredBounds = () => {
+  if (!admin0Select.iso3c) {
+    return boundaries.admin0;
+  } else {
+    return filterGeojson(boundaries.admin1, "iso3", admin0Select.iso3c);
+  }
+};
+```
+
+# `{ojs} heading1` {#genderHotspots}
+
+Climate change does not affect all agricultural regions—or all people within
+them—equally. In many contexts, climate hazards intersect with patterns of
+agricultural livelihoods and entrenched gender inequalities in ways that
+heighten risks for women and men differently.
+
+This section identifies climate–agriculture–gender inequality hotspots:
+geographic areas where
+
+1. climate hazards are pronounced,
+2. agricultural livelihoods are highly exposed, and
+3. gender inequalities limit adaptive capacity.
+
+Rather than isolating any single factor, the hotspot framework highlights where
+these dimensions converge, helping to prioritize regions where climate risks are
+likely to exacerbate existing gender inequalities in food systems.
+
+```{ojs}
+admin01Form(true);
+
+viewof numHotspots = Inputs.range([1, 10], { label: "Number of Hotspots", step: 1 });
 ```
 
 ```{ojs}
-makeChoropleth({
-  features: boundaries.admin1,
-});
+{
+  const geoData = mergeDataToBoundaries({
+    boundaries: filteredBounds(),
+    data: hotspotData,
+    boundaryKey: (f) =>
+      `${f.properties.iso3}|${f.properties.admin0_name}|${f.properties.admin1_name}`,
+    dataKey: (d) => `${d.iso3}|${d.admin0_name}|${d.admin1_name}`,
+  });
+
+  return makeChoropleth({
+    features: geoData,
+    fill: d => d.properties.data?.hotspotIndex ?? null,
+    color: {
+      label: "Hotspot Index",
+      range: ['#216729', '#F7D732']
+      // scheme: "BuRd"
+    },
+    channels: {
+      admin0_name: {
+        value: d => d.properties.admin0_name,
+        label: "Country"
+      },
+      admin1_name: {
+        value: d => d.properties.admin1_name,
+        label: "Region"
+      },
+      hotspot: {
+        value: d => d.properties.data?.hotspotIndex ?? null,
+        label: "Index Value"
+      },
+      rank: {
+        value: d => d.properties.data?.rank ?? null,
+        label: "Rank"
+      }
+    },
+    tooltip: {
+      admin0_name: true,
+      admin1_name: true,
+      hotspot: true,
+      rank: true
+    },
+    adminHighlight: [
+      admin1_highlight,
+      {
+        filter: (d) => d.properties.data?.rank <= numHotspots,
+        stroke: "red",
+        strokeWidth: 2,
+      }
+    ],
+    caption: "Total crop exposure",
+    width
+  });
+}
+
+generateHotspotInsight(hotspotData, numHotspots);
 ```
 
-```{ojs}
-admin01Form(true, masterLanguage.key);
-
-admin1Select;
-admin0Select;
-```
-
-{{< lipsum 2 >}}
+Continue below to examine what drives these hotspots.
 
 # `{ojs} heading2` {#example-heading2}
+
+This section examines where climate hazards most strongly intersect with
+agricultural production systems. The focus here is on exposure: the extent to
+which agricultural livelihoods are located in areas affected by climate hazards,
+and the scale of production that is potentially at risk.
+
+For the current version of this notebook, exposure is assessed for present-day
+conditions. This allows comparison with observed livelihood patterns and
+existing gender inequalities, and provides a baseline for understanding where
+climate risks are already shaping agricultural outcomes.
+
+Climate hazards are considered in aggregate (any hazard). This reflects the
+reality that agricultural producers often experience multiple, overlapping
+climate stresses, and that livelihood disruption is rarely attributable to a
+single hazard in isolation.
 
 ```{ojs}
 import {
   selectCommodity,
   cropTranslations,
   prod_type,
+  getHistoricalHazExposure,
+  aggregateExposure,
+  generateExposureText,
 } from "./hazExposure.ojs";
 ```
 
 ```{ojs}
-prod_type;
-cropTranslations;
+admin01Form(true);
 selectCommodity();
 ```
 
-{{< lipsum 2 >}}
+```{ojs}
+haz_exposure = getHistoricalHazExposure(admin0Select.iso3c, admin1Select.admin1_name);
+
+admin01Form(true);
+
+exposure_groups = aggregateExposure(haz_exposure.filter(filterAtlasCountries), prod_type);
+
+exposure_groups;
+
+{
+  const geoData = mergeDataToBoundaries({
+    boundaries: filteredBounds(),
+    data: exposure_groups.filter((d) => d.category === null),
+    boundaryKey: (f) =>
+      `${f.properties.iso3}|${f.properties.admin0_name}|${f.properties.admin1_name}`,
+    dataKey: (d) => `${d.iso3}|${d.admin0_name}|${d.admin1_name}`,
+  });
+
+  return makeChoropleth({
+    features: geoData,
+    fill: d => d.properties.data?.pct_exposed ?? null,
+    color: {
+      label: "% of production exposed",
+      range: ['#216729', '#F7D732']
+    },
+    channels: {
+      admin0_name: {
+        value: d => d.properties.admin0_name,
+        label: "Country"
+      },
+      admin1_name: {
+        value: d => d.properties.admin1_name,
+        label: "Region"
+      },
+      total_prod: {
+        value: d => d.properties.data?.total_prod ?? null,
+        label: "Total production"
+      },
+      pct_exposed:{
+        value: d => d.properties.data?.pct_exposed ?? null,
+        label: "% exposed"
+      }
+    },
+    tooltip: {
+      admin0_name: true,
+      admin1_name: true,
+      total_prod: true,
+      pct_exposed: true
+    },
+    adminHighlight: [
+      admin1_highlight
+    ],
+    caption: "Total crop exposure",
+    width
+  });
+}
+
+generateExposureText(
+  exposure_groups,
+  prod_type,
+  5
+)
+```
 
 # `{ojs} heading3` {#example-heading3}
 
-{{< lipsum 1 >}}
+This section focuses on female participation in agriculture, examining where
+women are highly represented in agricultural livelihoods and how participation
+patterns vary across regions.
+
+Participation refers to women’s involvement in agricultural work and food system
+activities, rather than ownership, control of income, or decision-making power.
+High levels of participation do not necessarily imply empowerment or lower
+vulnerability. Instead, participation shapes who is directly affected when
+climate hazards disrupt agricultural production, and whose labor, time, and
+livelihoods are most exposed to climate-related shocks.
+
+```{ojs}
+genderDB = DuckDBClient.of({
+  pct_agri: FileAttachment("/data/gender/gaul24_female-agri-pct.parquet"),
+  femi: FileAttachment("/data/gender/gaul24_femi.parquet"),
+});
+
+womenInAgri = {
+  let adminQuery = admin0Select.iso3c ? `WHERE iso3 = '${admin0Select.iso3c}' AND admin1_name IS NOT NULL` : "WHERE admin1_name IS NULL";
+  const resp = await genderDB.query("SELECT * FROM pct_agri " + adminQuery);
+  return resp.filter(filterAtlasCountries);
+}
+
+admin01Form(true);
+
+{
+  const geoData = mergeDataToBoundaries({
+    boundaries: filteredBounds(),
+    data: womenInAgri,
+    boundaryKey: (f) =>
+      `${f.properties.iso3}|${f.properties.admin0_name}|${f.properties.admin1_name}`,
+    dataKey: (d) => `${d.iso3}|${d.admin0_name}|${d.admin1_name}`,
+  });
+
+  return makeChoropleth({
+    features: geoData,
+    fill: d => d.properties.data?.WK_working_agri_p_latest ?? null,
+    color: {
+      label: "% of women in agriculture",
+      range: ['#216729', '#F7D732']
+    },
+    channels: {
+      admin0_name: {
+        value: d => d.properties.admin0_name,
+        label: "Country"
+      },
+      admin1_name: {
+        value: d => d.properties.admin1_name,
+        label: "Region"
+      },
+      agri_pct: {
+        value: d => d.properties.data?.WK_working_agri_p_latest ?? null,
+        label: "% in Agriculture"
+      },
+    },
+    tooltip: {
+      admin0_name: true,
+      admin1_name: true,
+      agri_pct: true,
+    },
+    adminHighlight: [
+      admin1_highlight
+    ],
+    width
+  });
+}
+
+generateAgriWorkInsight(womenInAgri, numHotspots);
+
+womenInAgri
+```
 
 # `{ojs} heading4` {#example-heading4}
 
-{{< lipsum 1 >}}
+This section examines gender inequalities that influence vulnerability in food
+systems, focusing on structural and social conditions that constrain women’s
+adaptive capacity.
+
+The indicators shown here capture dimensions of gender inequality such as
+disparities in education, health, access to assets and services, and other
+social and institutional factors. These indicators are not measures of climate
+impacts themselves, but of the conditions that influence how climate risks are
+experienced and managed.
+
+Importantly, this section is descriptive and diagnostic. Exploring individual
+indicators here does not alter the hotspot identification shown in Section 1,
+which is based on a composite framework. Instead, this section helps unpack why
+certain regions emerge as hotspots by examining the underlying gender
+inequalities that may amplify vulnerability.
+
+```{ojs}
+femi = {
+  let adminQuery = admin0Select.iso3c ? `WHERE iso3 = '${admin0Select.iso3c}' AND admin1_name IS NOT NULL` : "WHERE admin1_name IS NULL";
+  const resp = await genderDB.query("SELECT * FROM femi " + adminQuery);
+  return resp.filter(filterAtlasCountries);
+}
+
+femiVars = new Object({
+  decisions_2015: "Decision Making Power",
+  DV_2015: "Domestic Violence (inverted)",
+  edu_2015: "Education",
+  employment_2015: "Employment",
+  index_2015: "Index",
+  familyPlanning_2015: "Family Planning",
+  reproHealth_2015: "Reproductive Health",
+})
+
+viewof femiVar = Inputs.select(
+  Object.keys(femiVars),
+  {
+    format: (d) => femiVars[d],
+    label: "Vulnerability Indicator",
+    value: "index_2015"
+  })
+```
+
+```{ojs}
+{
+  const geoData = mergeDataToBoundaries({
+    boundaries: filteredBounds(),
+    data: femi,
+    boundaryKey: (f) =>
+      `${f.properties.iso3}|${f.properties.admin0_name}|${f.properties.admin1_name}`,
+    dataKey: (d) => `${d.iso3}|${d.admin0_name}|${d.admin1_name}`,
+  });
+
+  return makeChoropleth({
+    features: geoData,
+    fill: d => d.properties.data?.[femiVar] ?? null,
+    color: {
+      label: femiVars[femiVar] + "Index",
+      range: ['#F7D732', '#216729']
+    },
+    channels: {
+      admin0_name: {
+        value: d => d.properties.admin0_name,
+        label: "Country"
+      },
+      admin1_name: {
+        value: d => d.properties.admin1_name,
+        label: "Region"
+      },
+      indicator: {
+        value: d => d.properties.data?.[femiVar] ?? null,
+        label: femiVars[femiVar]
+      },
+    },
+    tooltip: {
+      admin0_name: true,
+      admin1_name: true,
+      indicator: true,
+    },
+    adminHighlight: [
+      admin1_highlight
+    ],
+    width
+  });
+}
+
+femi;
+
+generateEmpowermentInsight(femi, numHotspots);
+```
 
 # `{ojs} nbSummary` {#summary}
 
-{{< lipsum 1 >}}
+This notebook highlights where climate hazards, agricultural livelihoods, and
+gender inequalities intersect to shape uneven climate risks in food systems. By
+combining hotspot mapping with deeper analysis of exposure, female
+participation, and structural gender inequalities, it shows that climate risk is
+influenced not only by environmental stress, but also by social and
+institutional conditions.
+
+The results are intended as entry points for prioritization and further inquiry,
+not as predictions of impact. They point to regions where climate adaptation in
+agriculture is most likely to require gender-responsive approaches, and where
+addressing underlying inequalities may be critical for building resilience.
+
+As a work in progress, the Atlas will continue to evolve, incorporating
+additional data and perspectives to support more equitable and effective climate
+adaptation in food systems.
 
 # `{ojs} appendix` {#appendix}
+
+## Methods and Sources
+
+This notebook applies a hotspot framework based on the **IFPRI / CGIAR
+methodology for identifying climate–agriculture–gender inequality hotspots**,
+which conceptualizes risk as the convergence of climate hazards, agricultural
+exposure, and gender-related vulnerability.
+
+Climate hazard and agricultural exposure indicators are derived from the **Atlas
+climate and exposure datasets**, which combine spatial climate hazard layers
+with data on agricultural production to capture livelihood-based exposure.
+
+Female participation in agriculture is primarily sourced from **LivWell**, a
+subnational database on women’s living conditions and well-being (Belmin et al.,
+2022):
+
+- Belmin, C., Hoffmann, R., Elkasabi, M., & Pichler, P.-P. (2022). _LivWell: a
+  sub-national database on the Living conditions of Women and their Well-being
+  for 52 countries (v1)_. Zenodo.
+  [https://doi.org/10.5281/zenodo.7277104](https://doi.org/10.5281/zenodo.7277104)
+
+To improve country coverage and comparability, gaps are filled using **ILO
+modelled estimates** and **World Bank employment statistics** on female
+agricultural employment:
+
+- [https://data.worldbank.org/indicator/SL.AGR.EMPL.FE.ZS](https://data.worldbank.org/indicator/SL.AGR.EMPL.FE.ZS)
+
+Indicators of gender-related vulnerability draw on data from the **Adaptation
+Atlas** and the **Female Empowerment Index**, which capture structural
+dimensions of inequality relevant to adaptive capacity:
+
+- Female Empowerment Index:
+  [https://dataverse.harvard.edu/citation?persistentId=doi:10.7910/DVN/8GJKYW](https://dataverse.harvard.edu/citation?persistentId=doi:10.7910/DVN/8GJKYW)
 
 # Source code {#source-code .hidden}
 
@@ -101,30 +467,21 @@ nbTitle = _lang({
   fr: "Ceci est un modèle pour construire des notebooks Atlas",
 });
 // key_insights = _lang({en: "Key Insights", fr: "Résumé"})
-heading1 = _lang({ en: "Heading 1", fr: "Titre 1" });
-heading2 = _lang({ en: "Heading 2", fr: "Titre 2" });
-heading3 = _lang({ en: "Heading 3", fr: "Titre 3" });
-heading4 = _lang({ en: "Heading 4", fr: "Titre 4" });
+heading1 = _lang({
+  en: "Where are the climate–agriculture–gender inequality hotspots?",
+  fr: "Titre 1",
+});
+heading2 = _lang({
+  en: "Diving deeper: Climate Hazard Exposure",
+  fr: "Titre 2",
+});
+heading3 = _lang({
+  en: "Diving deeper: Female participation in agri-food systems ",
+  fr: "Titre 3",
+});
+heading4 = _lang({ en: "Diving Deeper: Gender Inequalities", fr: "Titre 4" });
 nbSummary = _lang({ en: "Summary", fr: "Résumé" });
 appendix = _lang(general_translations.appendix);
-```
-
-```{ojs}
-mutable hoverCountry = "SSA" // This mutable is defined here and updated in _template_plot.qmd. It should only be defined once.
-
-keyInsights = {
-  let template = _lang({
-        en: `This is where some key insights should go, they will be dynamic based on the selections such as country (**:::country:::**) and crop type (**:::cropType:::**)`,
-        fr: `Ceci est là où les résumés clés devraient être, ils seront dynamiques en fonction des sélections comme pays (**:::country:::**) et type de culture (**:::cropType:::**)`
-  })
-  
-  let fill_items = [
-      { name: "country", value: hoverCountry },
-      { name: "cropType", value: _lang({en: 'potatoes', fr: 'pomme de terre'}) }
-    ]
-  let keyText =  md`${Lang.reduceReplaceTemplateItems(template, fill_items)}`
-  return keyText
-}
 ```
 
 {{< include /components/_lang.qmd >}}
@@ -132,127 +489,227 @@ keyInsights = {
 <!-- This ^ defines _lang, the general translations, and the masterLanguage selector. -->
 
 ```{ojs}
-// import { NavbarLangSelector } from "/helpers/uiComponents.ojs"
-function NavbarLangSelector(language_obj, masterLanguage) {
-  let navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
-  if (navEnd) {
-    let existingLangSelector = document.getElementById("nav-lang-selector");
-    if (!existingLangSelector) {
-      let lang_sel = Inputs.bind(
-        Inputs.radio(language_obj, {
-          label: "",
-          format: (d) => d.label
-        }),
-        viewof masterLanguage
-      );
-      lang_sel.id = "nav-lang-selector";
-      
-      // Hack the css together for the observable inputs
-      lang_sel.style.display = "flex";
-      lang_sel.style.alignItems = "center";
-      lang_sel.style.marginLeft = "10px";
-      let lang_div = lang_sel.querySelector("div");
-      lang_div.style.display = "flex";
-      lang_div.style.flexDirection = "column";
-
-      // Insert the new item after the GitHub icon and other elements
-      navEnd.parentNode.appendChild(lang_sel);
-    }
-  }
-}
-
-NavbarLangSelector(languages, masterLanguage)
+admin1_highlight = new Object({
+  filter: (d) => d.properties.admin1_name === admin1Select.admin1_name,
+  stroke: "#000",
+  strokeWidth: 2,
+});
 ```
 
 ```{ojs}
-prettyLanguageView = {
-  return Inputs.bind(
-    Inputs.radio(languages, {
-      label: _lang(general_translations.language),
-      format: (d) => d.label
+filterAtlasCountries = {
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
+  //TODO: Add sudan to not include list in json
+
+  const removeCountries = country_list.filter((c) => !c.include || c.iso3c === "SDN");
+  const iso3Set = new Set(removeCountries.map((d) => d.iso3c));
+  return (d) => !iso3Set.has(d.iso3);
+}
+```
+
+```{ojs}
+function mergeDataToBoundaries({
+  boundaries,
+  data,
+  boundaryKey,
+  dataKey,
+  dataProp = "data",
+  defaultValue = null,
+}) {
+  const index = new Map(data.map((d) => [dataKey(d), d]));
+
+  return {
+    type: "FeatureCollection",
+    features: boundaries.features.map((feature) => {
+      const key = boundaryKey(feature);
+      return {
+        ...feature,
+        properties: {
+          ...feature.properties,
+          [dataProp]: index.get(key) ?? defaultValue,
+        },
+      };
     }),
-    viewof masterLanguage
-  );
+  };
 }
 ```
 
-<!--
-
-# Prototypes for future use to hack a sidebar into notebooks:
-
-{.column-margin}
+## Index Creation
 
 ```{ojs}
-htl.html`
-<style>
-.sticky-margin-div {
-  position: fixed;
-  }
-@media (max-width: 768px) {
-  .sticky-margin-div {
-    position: static;
-    }
+function zScore(values) {
+  const mean = d3.mean(values);
+  const sd = d3.deviation(values);
+  return values.map((v) => (v - mean) / sd);
 }
-</style>
 
-<div class = "sticky-margin-div">
-    <div>
-      ${Inputs.radio(languages, {
-        label: "Main language toggle",
-        format: (d) => d.key,
-        value: languages.find((x) => x.key === defaultLangKey),
-      })}
-    </div>
-  </div>`
-```
+hotspotData = {
 
-:-::
+  const hotspotRows = exposure_groups
+    .filter((d) => d.category === null)
+    .map((d) => {
+      const e = womenInAgri.find(
+        (w) => w.iso3 === d.iso3 && w.admin1_name === d.admin1_name,
+      );
+      const v = femi.find(
+        (w) => w.iso3 === d.iso3 && w.admin1_name === d.admin1_name,
+      );
 
--->
+      if (!e || !v) return null;
 
-<!-- Floating Sidebar: Self-contained HTML, CSS, and JS -->
-<!--
-<div id="floating-sidebar">
+      return {
+        iso3: d.iso3,
+        admin0_name: d.admin0_name,
+        admin1_name: d.admin1_name,
+        hazard: d.pct_exposed,
+        exposure: e.WK_working_agri_p_latest,
+        vulnerability: 1 - v.index_2015,
+      };
+    })
+    .filter(Boolean);
 
-</div>
+  const zH = zScore(hotspotRows.map((d) => d.hazard));
+  const zE = zScore(hotspotRows.map((d) => d.exposure));
+  const zV = zScore(hotspotRows.map((d) => d.vulnerability));
 
-<style>
-  #floating-sidebar {
-    position: fixed;
-    top: 150px;           /* Distance from top of the page */
-    left: 20px;          /* Distance from left of the page */
-    width: 260px;        /* Sidebar width */
-    min-height: 400px;   /* Minimum height */
-    max-height: 80vh;    /* Max height relative to viewport */
-    background: #ffffff;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-    border-radius: 8px;
-    padding: 20px;
-    overflow-y: auto;
-    z-index: 9999;
-    transition: box-shadow 0.2s;
-  }
-  #floating-sidebar:hover {
-    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-  }
-  /* Responsive: hide on small screens */
-  @media (max-width: 800px) {
-    #floating-sidebar {
-      display: none;
-    }
-  }
-</style>
-
-<script>
-  // Optional: Add any JS for interactivity here
-  // Example: Toggle sidebar visibility with a keyboard shortcut (Ctrl+B)
-  document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.key === 'b') {
-      const sidebar = document.getElementById('floating-sidebar');
-      sidebar.style.display = (sidebar.style.display === 'none') ? 'block' : 'none';
-    }
+  hotspotRows.forEach((d, i) => {
+    d.hazardIndex = zH[i];
+    d.exposureIndex = zE[i];
+    d.vulnerabilityIndex = zV[i];
+    d.hotspotIndex = (zH[i] + zE[i] + zV[i]) / 3;
   });
-</script> -->
 
+  hotspotRows
+    .sort((a, b) => b.hotspotIndex - a.hotspotIndex)
+    .forEach((d, i) => {
+      d.rank = i + 1;
+    });
+
+  return hotspotRows;
+}
+
+hotspotData;
 ```
+
+## Insights
+
+### Insights - Hotspots
+
+```{ojs}
+function generateHotspotInsight(data, topN = 5) {
+  const topHotspots = [...data].sort((a, b) => a.rank - b.rank).slice(0, topN);
+
+  // Parent logic: if more than one admin0, parent = SSA
+  const admin0Set = new Set(topHotspots.map((d) => d.admin0_name));
+  const parent = admin0Set.size > 1 ? "SSA" : [...admin0Set][0];
+
+  const getLocationName = (d) =>
+    d.admin1_name && d.admin1_name.trim() !== ""
+      ? d.admin1_name
+      : d.admin0_name;
+
+  const getMainDriver = (d) => {
+    const drivers = {
+      exposure: d.exposureIndex,
+      vulnerability: d.vulnerabilityIndex,
+      hazard: d.hazardIndex,
+    };
+
+    return Object.entries(drivers).reduce((a, b) =>
+      Math.abs(b[1]) > Math.abs(a[1]) ? b : a,
+    )[0];
+  };
+
+  const lines = topHotspots.map((d, i) => {
+    const location = getLocationName(d);
+    const driver = getMainDriver(d);
+
+    return `- **${location}**, driven largely by ${driver}`;
+  });
+
+  return md`In ${parent}, the ${topN} Gender hotspots are:\n${lines.join("\n")}`;
+}
+```
+
+### Insights - Exposure
+
+```{ojs}
+function generateAgriWorkInsight(data, topN = 5) {
+  // Check if admin1 exists
+  const admin1Values = data
+    .filter((d) => d.admin1_name !== null && d.admin1_name !== "")
+    .map((d) => d.WK_working_agri_p_latest);
+
+  // If admin1 exists but all values are identical → national-only message
+  if (admin1Values.length > 0 && new Set(admin1Values).size === 1) {
+    const country = data[0].admin0_name;
+    return `For ${country}, only national-level data was available for women working in agriculture.`;
+  }
+
+  const topRows = [...data]
+    .sort((a, b) => b.WK_working_agri_p_latest - a.WK_working_agri_p_latest)
+    .slice(0, topN);
+
+  // Parent logic
+  const admin0Set = new Set(topRows.map((d) => d.admin0_name));
+  const parent = admin0Set.size > 1 ? "SSA" : [...admin0Set][0];
+
+  const getLocationName = (d) =>
+    d.admin1_name && d.admin1_name.trim() !== ""
+      ? d.admin1_name
+      : d.admin0_name;
+
+  const lines = topRows.map((d) => {
+    const location = getLocationName(d);
+    const value = d.WK_working_agri_p_latest.toFixed(1);
+
+    return `- **${location}**: ${value}%`;
+  });
+
+  return md`In ${parent}, the ${topN} regions with the greatest % of women working in agriculture are:\n${lines.join("\n")}`;
+}
+```
+
+### Insights - Vulnerability
+
+```{ojs}
+function generateEmpowermentInsight(data, topN = 5) {
+  const topRows = [...data]
+    .sort((a, b) => a.index_2015 - b.index_2015) // lowest index = worst
+    .slice(0, topN);
+
+  // Parent logic
+  const admin0Set = new Set(topRows.map((d) => d.admin0_name));
+  const parent = admin0Set.size > 1 ? "SSA" : [...admin0Set][0];
+
+  const getLocationName = (d) =>
+    d.admin1_name && d.admin1_name.trim() !== ""
+      ? d.admin1_name
+      : d.admin0_name;
+
+  const getMainConstraint = (d) => {
+    const dimensions = {
+      decisions_2015: d.decisions_2015,
+      DV_2015: d.DV_2015,
+      edu_2015: d.edu_2015,
+      employment_2015: d.employment_2015,
+      familyPlanning_2015: d.familyPlanning_2015,
+      reproHealth_2015: d.reproHealth_2015,
+    };
+
+    // lowest value = biggest constraint
+    return Object.entries(dimensions).reduce((a, b) =>
+      b[1] < a[1] ? b : a,
+    )[0];
+  };
+
+  const lines = topRows.map((d) => {
+    const location = getLocationName(d);
+    const constraint = getMainConstraint(d);
+
+    return `- **${location}**, constrained largely by ${femiVars[constraint]}`;
+  });
+
+  return md`In ${parent}, the ${topN} lowest-performing Gender Empowerment areas are:\n${lines.join("\n")}`;
+}
 ```

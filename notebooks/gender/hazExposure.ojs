@@ -1,3 +1,6 @@
+import { formatUSD } from "/helpers/std.ojs";
+
+
 // Observable JS code to render hazard exposure section
 mapSpamCrops = await FileAttachment("/data/shared/MapSpamCrops.json").json();
 
@@ -21,7 +24,7 @@ cropCategoryMap = new Map(
   ),
 );
 
-viewof prod_type = Inputs.input([null])
+viewof prod_type = Inputs.input(null)
 
 selectCommodity = () => {
   return Inputs.bind(
@@ -34,3 +37,247 @@ selectCommodity = () => {
   viewof prod_type,
   );
 };
+
+// Data Loading
+
+hazExposureDb = { 
+  // TODO: temporary for the prototype as we will switch to the API in the future
+  const _db = await DuckDBClient.of()
+  _db.query(`
+    CREATE view historic_hazExposure AS
+    SELECT *
+    FROM "s3://digital-atlas/domain=hazard_exposure/source=atlas_cmip6/region=ssa/processing=hazard-risk-exposure/variable=vop_usd15/period=annual/model=historic/severity=severe/interaction.parquet"
+    WHERE admin2_name IS NULL
+    AND hazard = 'any'
+    AND hazard_vars in ('NDWS+NTx35+NDWL0', 'NDWS+THI-max+NDWL0')
+  `)
+  _db.query(`
+    CREATE view historic_exposure AS
+    SELECT *
+    FROM "s3://digital-atlas/domain=exposure/type=combined/source=glw4-2020_spam2020AA/region=ssa/processing=atlas-harmonized/variable=vop_nominal-usd-2015.parquet"
+    WHERE admin2_name IS NULL
+    AND (tech = 'all' OR tech IS NULL)
+  `)
+  return _db
+}
+
+getHistoricalHazExposure = async (admin0_iso3, admin1_names) => {
+
+  let adminQuery
+
+  if (admin0_iso3) {
+      adminQuery = `e.iso3 = '${admin0_iso3}' and e.admin1_name IS NOT NULL`
+    } else {
+      adminQuery = `e.admin1_name IS NULL`
+    }
+
+  const resp = await hazExposureDb.query(`
+    SELECT
+      e.iso3,
+      e.admin0_name,
+      e.admin1_name,
+      e.crop,
+      CASE
+        WHEN isfinite(h.value) THEN h.value
+        ELSE 0
+      END AS exposed_value,
+      CASE
+        WHEN isfinite(e.value) THEN e.value
+        ELSE 0
+      END AS total_value
+    FROM historic_exposure e
+    LEFT JOIN historic_hazExposure h
+      ON e.iso3 = h.iso3
+     AND e.admin0_name = h.admin0_name
+     AND e.admin1_name IS NOT DISTINCT FROM h.admin1_name
+     AND e.crop = h.crop
+    WHERE 1=1 
+      AND ${adminQuery}
+  `)
+
+  const cropData = resp.map((row) => {
+    const category = cropCategoryMap.get(row.crop) || "other";
+    return { ...row, category };
+  });
+
+  return cropData
+
+  }
+
+function aggregateAllCategories(data) {
+  const byCategory = {};
+  const adminKey = (d) => `${d.iso3}|${d.admin0_name}|${d.admin1_name}`;
+
+  const initRecord = (d, category) => ({
+    iso3: d.iso3,
+    admin0_name: d.admin0_name,
+    admin1_name: d.admin1_name,
+    category,
+    exposed_value: 0,
+    total_value: 0
+  });
+
+  for (const d of data) {
+    const admin = adminKey(d);
+    
+    // Category totals
+    const catKey = `${admin}|${d.category}`;
+    byCategory[catKey] ??= initRecord(d, d.category);
+    byCategory[catKey].exposed_value += d.exposed_value;
+    byCategory[catKey].total_value += d.total_value;
+    
+    // All categories total
+    const allKey = `${admin}|allProduction`;
+    byCategory[allKey] ??= initRecord(d, null);
+    byCategory[allKey].exposed_value += d.exposed_value;
+    byCategory[allKey].total_value += d.total_value;
+  }
+
+  return Object.values(byCategory).map(r => ({
+      ...r,
+      pct_exposed: r.total_value ? r.exposed_value / r.total_value : 0
+    }));
+}
+
+function aggregateCategoryWithCrops(data, prod_type) {
+  const adminKey = (d) => `${d.iso3}|${d.admin0_name}|${d.admin1_name}`;
+  const filtered = data.filter(d => d.category === prod_type);
+  
+  const categoryTotals = {};
+  const cropTotals = {};
+  
+  const initRecord = (d, category = null) => ({
+    iso3: d.iso3,
+    admin0_name: d.admin0_name,
+    admin1_name: d.admin1_name,
+    category: category,
+    exposed_value: 0,
+    total_value: 0
+  });
+  
+  for (const d of filtered) {
+    const admin = adminKey(d);
+    
+    // Category total (category: null)
+    categoryTotals[admin] ??= initRecord(d, null);
+    categoryTotals[admin].exposed_value += d.exposed_value;
+    categoryTotals[admin].total_value += d.total_value;
+    
+    // Crop total (category: crop name)
+    const cropKey = `${admin}|${d.crop}`;
+    cropTotals[cropKey] ??= initRecord(d, d.crop);
+    cropTotals[cropKey].exposed_value += d.exposed_value;
+    cropTotals[cropKey].total_value += d.total_value;
+  }
+  
+  const addPctExposed = (r) => ({
+    ...r,
+    pct_exposed: r.total_value ? r.exposed_value / r.total_value : 0
+  });
+  
+  // Combine: category totals first, then their crops
+  const result = [];
+  for (const admin of Object.keys(categoryTotals)) {
+    // Add category total with category: null
+    result.push(addPctExposed(categoryTotals[admin]));
+    
+    // Add all crops for this admin with category: crop_name
+    const adminCrops = Object.values(cropTotals)
+      .filter(ct => adminKey(ct) === admin)
+      .map(addPctExposed);
+    result.push(...adminCrops);
+  }
+  
+  return result;
+}
+
+function aggregateExposure(data, prod_type = null) {
+  const normalized = data.map(d => ({
+    ...d,
+    exposed_value: d.exposed_value ?? 0,
+    total_value: d.total_value ?? 0
+  }));
+  
+  return prod_type == null
+    ? aggregateAllCategories(normalized)
+    : aggregateCategoryWithCrops(normalized, prod_type);
+}
+
+
+// Quick insights
+function generateExposureText(data, commodityGroup, numHotspots = 5) {
+  // --- Group by geographic unit (admin1 if exists, else admin0)
+  const groupKey = d => d.admin1_name ?? d.iso3;
+
+  const grouped = data.reduce((acc, row) => {
+    const key = groupKey(row);
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+
+  // --- Extract overall exposure rows (category === null)
+  const overallRows = Object.values(grouped)
+    .map(rows => rows.find(r => r.category === null))
+    .filter(Boolean)
+    .sort((a, b) => b.pct_exposed - a.pct_exposed)
+    .slice(0, numHotspots);
+
+  // --- Determine geographic scope text
+  const hasAdmin1 = overallRows.some(r => r.admin1_name !== null);
+  
+  const commodity = cropTranslations[commodityGroup]?.en ?? "All Commodities";
+
+  const intro = hasAdmin1
+    ? `In ${overallRows[0].admin0_name}, the ${numHotspots} climate exposure hotspots for ${commodity.toLowerCase()} are`
+    : `In SSA, the ${numHotspots} climate exposure hotspots for ${commodity.toLowerCase()} are`;
+
+  // --- Build hotspot descriptions
+  const hotspotDescriptions = overallRows.map(overall => {
+    const rows = grouped[groupKey(overall)];
+
+    const topCategory = rows
+      .filter(r => r.category !== null)
+      .sort((a, b) => b.pct_exposed - a.pct_exposed)[0];
+
+    const locationName = overall.admin1_name ?? overall.admin0_name;
+
+    return `
+- ${locationName}:
+ where ${(topCategory.pct_exposed * 100).toFixed(0)}% of ${cropTranslations[topCategory.category]?.en} production is exposed to severe climate hazards 
+ (${formatUSD()(topCategory.exposed_value)})`;
+  });
+
+  // --- Final sentence
+  return md`${intro}:  \n
+${hotspotDescriptions.join("  \n")}`;
+}
+
+
+// Individual queries:
+//
+// hazExposureDb.query(`
+// SELECT 
+//   iso3,
+//   admin0_name,
+//   admin1_name,
+//   crop,
+//   value as exposed_value
+// FROM historic_hazExposure
+// WHERE 1=1
+//   AND admin0_name in ('${admin0_names.join("', '")}')
+//   AND admin1_name in ('${admin1_names.join("', '")}')
+// `)
+
+// hazExposureDb.query(`
+//   SELECT 
+//     iso3,
+//     admin0_name,
+//     admin1_name,
+//     crop,
+//     value as total_value
+//   FROM historic_exposure
+//   WHERE 1=1
+//     AND admin0_name in ('${admin0_names.join("', '")}')
+//     AND admin1_name in ('${admin1_names.join("', '")}')
+// `)
