@@ -1078,15 +1078,108 @@ htl.html`
 
 ```{ojs}
 // Section 1.3 Controls
-viewof s13ViewType = Inputs.radio(["Chart", "Table"], {
+viewof s13ViewType = Inputs.radio(["Map", "Chart", "Table"], {
   label: _lang(cis.viewTypeLabel),
-  value: "Chart"
+  value: "Map"
 })
 
-viewof s13SortBy = Inputs.radio(["Short-term skill", "Long-term skill", "Difference (Δ)"], {
-  label: _lang(cis.sortByLabel),
-  value: "Short-term skill"
-})
+viewof s13SortBy = {
+  // Only show sort-by when Chart view is selected
+  if (s13ViewType !== "Chart") {
+    const input = Inputs.radio(["Short-term skill", "Long-term skill", "Difference (Δ)"], {
+      label: _lang(cis.sortByLabel),
+      value: "Short-term skill"
+    });
+    input.style.display = "none";
+    return input;
+  }
+  return Inputs.radio(["Short-term skill", "Long-term skill", "Difference (Δ)"], {
+    label: _lang(cis.sortByLabel),
+    value: "Short-term skill"
+  });
+}
+```
+
+
+```{ojs}
+// Section 1.3 Map Data Preparation
+s13MapData = {
+  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
+                     currentAdminLevel === 1 ? admin1Boundaries :
+                     admin0Boundaries;
+  
+  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul0_code';
+  
+  // Filter boundaries based on current selection
+  let filteredBoundaries = boundaries;
+  if (currentAdminLevel === 2) {
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
+        return matchesData || (matchesAdmin0 && matchesAdmin1);
+      })
+    };
+  } else if (currentAdminLevel === 1) {
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        return matchesData || matchesAdmin0;
+      })
+    };
+  }
+  
+  const features = filteredBoundaries.features.map(feature => {
+    const gaulCode = feature.properties[gaulCodeField];
+    let dataRow = filteredData.find(d => d[gaulCodeField] === gaulCode);
+    
+    // Fallback: try matching by admin names if GAUL code fails
+    if (!dataRow && currentAdminLevel === 2) {
+      dataRow = filteredData.find(d => 
+        d.admin0_name === feature.properties.admin0_name &&
+        d.admin1_name === feature.properties.admin1_name &&
+        d.admin2_name === feature.properties.admin2_name
+      );
+    } else if (!dataRow && currentAdminLevel === 1) {
+      dataRow = filteredData.find(d => 
+        d.admin0_name === feature.properties.admin0_name &&
+        d.admin1_name === feature.properties.admin1_name
+      );
+    }
+    
+    const shortTerm = dataRow ? dataRow["short-term_frcst_skill"] : null;
+    const longTerm = dataRow ? dataRow["seasonal_frcst_skill"] : null;
+    const delta = (shortTerm != null && longTerm != null) ? longTerm - shortTerm : null;
+    
+    // Check if this admin2 region is highlighted
+    const isHighlighted = currentAdminLevel === 2 && 
+                          highlightedAdmin2.length > 0 && 
+                          highlightedAdmin2.includes(feature.properties.admin2_name);
+    
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        shortTerm: shortTerm,
+        longTerm: longTerm,
+        delta: delta,
+        isHighlighted: isHighlighted
+      }
+    };
+  }).filter(f => f.properties.shortTerm != null || f.properties.longTerm != null);
+  
+  return { type: "FeatureCollection", features };
+}
 ```
 
 ```{ojs}
@@ -1128,9 +1221,164 @@ s13Data = {
 ```
 
 ```{ojs}
-// Section 1.3 Chart/Table
+// Section 1.3 Map/Chart/Table
 {
-  if (s13ViewType === "Chart") {
+  if (s13ViewType === "Map") {
+    // 3-panel map visualization for forecast skill
+    const shortTermMap = Plot.plot({
+      width: 400,
+      height: 450,
+      projection: {type: "mercator", domain: s13MapData},
+      color: {
+        type: "linear",
+        domain: [0, 1],
+        scheme: "RdYlGn",
+        legend: true,
+        label: "RPSS"
+      },
+      marks: [
+        Plot.geo(s13MapData.features, {
+          fill: d => d.properties.shortTerm,
+          stroke: d => d.properties.isHighlighted ? "#000" : "#fff",
+          strokeWidth: d => d.properties.isHighlighted ? 2.5 : 0.5
+        }),
+        Plot.tip(
+          s13MapData.features,
+          Plot.pointer(
+            Plot.centroid({
+              fontSize: 14,
+              channels: {
+                region: {
+                  label: "Region",
+                  value: (d) => {
+                    const regionName = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
+                    const country = d.properties.admin0_name;
+                    return regionName === country ? regionName : `${regionName}, ${country}`;
+                  }
+                },
+                shortTerm: {
+                  label: "Short-term RPSS",
+                  value: (d) => d.properties.shortTerm
+                }
+              },
+              format: {
+                region: true,
+                shortTerm: (d) => d != null ? d.toFixed(3) : "N/A"
+              }
+            })
+          )
+        )
+      ]
+    });
+    
+    const longTermMap = Plot.plot({
+      width: 400,
+      height: 450,
+      projection: {type: "mercator", domain: s13MapData},
+      color: {
+        type: "linear",
+        domain: [0, 1],
+        scheme: "RdYlGn",
+        legend: true,
+        label: "RPSS"
+      },
+      marks: [
+        Plot.geo(s13MapData.features, {
+          fill: d => d.properties.longTerm,
+          stroke: d => d.properties.isHighlighted ? "#000" : "#fff",
+          strokeWidth: d => d.properties.isHighlighted ? 2.5 : 0.5
+        }),
+        Plot.tip(
+          s13MapData.features,
+          Plot.pointer(
+            Plot.centroid({
+              fontSize: 14,
+              channels: {
+                region: {
+                  label: "Region",
+                  value: (d) => {
+                    const regionName = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
+                    const country = d.properties.admin0_name;
+                    return regionName === country ? regionName : `${regionName}, ${country}`;
+                  }
+                },
+                longTerm: {
+                  label: "Long-term RPSS",
+                  value: (d) => d.properties.longTerm
+                }
+              },
+              format: {
+                region: true,
+                longTerm: (d) => d != null ? d.toFixed(3) : "N/A"
+              }
+            })
+          )
+        )
+      ]
+    });
+    
+    const deltaMap = Plot.plot({
+      width: 400,
+      height: 450,
+      projection: {type: "mercator", domain: s13MapData},
+      color: {
+        type: "diverging",
+        domain: [-0.5, 0.5],
+        scheme: "RdBu",
+        legend: true,
+        label: "Δ (Long − Short)"
+      },
+      marks: [
+        Plot.geo(s13MapData.features, {
+          fill: d => d.properties.delta,
+          stroke: d => d.properties.isHighlighted ? "#000" : "#fff",
+          strokeWidth: d => d.properties.isHighlighted ? 2.5 : 0.5
+        }),
+        Plot.tip(
+          s13MapData.features,
+          Plot.pointer(
+            Plot.centroid({
+              fontSize: 14,
+              channels: {
+                region: {
+                  label: "Region",
+                  value: (d) => {
+                    const regionName = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
+                    const country = d.properties.admin0_name;
+                    return regionName === country ? regionName : `${regionName}, ${country}`;
+                  }
+                },
+                delta: {
+                  label: "Δ (Long − Short)",
+                  value: (d) => d.properties.delta
+                }
+              },
+              format: {
+                region: true,
+                delta: (d) => d != null ? d.toFixed(3) : "N/A"
+              }
+            })
+          )
+        )
+      ]
+    });
+    
+    return htl.html`<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-top: 20px;">
+      <div style="text-align: center;">
+        <h4 style="margin-bottom: 10px; font-size: 14px;">Short-term Forecast Skill (1–2 mo)</h4>
+        ${shortTermMap}
+      </div>
+      <div style="text-align: center;">
+        <h4 style="margin-bottom: 10px; font-size: 14px;">Long-term Forecast Skill (11–12 mo)</h4>
+        ${longTermMap}
+      </div>
+      <div style="text-align: center;">
+        <h4 style="margin-bottom: 10px; font-size: 14px;">Difference (Long − Short)</h4>
+        ${deltaMap}
+      </div>
+    </div>`;
+  } else if (s13ViewType === "Chart") {
+
     // Prepare data in the format expected by the chart
     const data = s13Data.map(d => {
       const short = d.shortTerm != null ? parseFloat(d.shortTerm) : null;
