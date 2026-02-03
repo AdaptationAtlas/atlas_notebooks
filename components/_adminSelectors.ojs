@@ -1,0 +1,154 @@
+import { lang as Lang } from "/helpers/lang.js";
+
+adminDB = await DuckDBClient.of({
+  admin_lookup: await FileAttachment(
+    "/data/shared/gaul24_africa_lookup.parquet",
+  ),
+});
+
+adminTranslations = new Object({
+  country: {en: "Country", fr: "Pays"},
+  region: {en: "Region", fr: "Région"},
+  province: {en: "District", fr: "Province"},
+})
+
+countries = {
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const filteredCountries = country_list
+    .filter((c) => c.include && c.iso3c !== "SDN")
+    .map(({ include, ...rest }) => rest);
+  return filteredCountries;
+};
+
+ssaObj = new Object({
+  admin0_name: null,
+  admin1_name: null,
+  iso3: null,
+  translation: {
+    en: "Sub-Saharan Africa", 
+    fr: "Afrique subsaharienne",
+  }
+})
+
+viewof admin0Select = Inputs.input(ssaObj)
+
+dataAdmin1 = {
+  const regions = await adminDB.query(`
+    SELECT DISTINCT admin0_name, admin1_name, iso3
+    FROM admin_lookup
+    WHERE iso3 = '${admin0Select.iso3c}'
+  `);
+  
+  return [
+    {
+      admin0_name: admin0Select.admin0_name,
+      admin1_name: null,
+      iso3: admin0Select.iso3c
+    },
+    ...regions
+  ]
+}
+
+// viewof admin1Select = Inputs.input([])
+  //
+viewof admin1Select = Inputs.select(dataAdmin1)
+
+dataAdmin2 = await adminDB.query(`
+  SELECT DISTINCT admin0_name, admin1_name, admin2_name, iso3
+  FROM admin_lookup
+  WHERE iso3 = '${admin0Select.iso3c}'
+  AND admin1_name = '${admin1Select.admin1_name}'
+`)
+
+viewof admin2Select = Inputs.select(dataAdmin2)
+
+// Admin form generator
+admin01Form = (langKey) => {
+  const _lang = Lang.lg(langKey || "en")
+  const countryArray = [ssaObj, ...countries]
+  const admin0 = Inputs.bind(
+    Inputs.select(
+        countryArray,
+        {
+          label: _lang(adminTranslations.country),
+          format: (d) => _lang(d.translation),
+        }
+      ),
+    viewof admin0Select
+  )
+
+  const admin1 = Inputs.bind(
+    Inputs.select(
+        dataAdmin1,
+        {
+          label: _lang(adminTranslations.region),
+          format: (d) => d.admin1_name,
+        }
+      ),
+    viewof admin1Select
+  )
+
+  return Inputs.form(
+    [
+      admin0,
+      admin1
+    ],
+    {
+      template: (inputs) =>
+        html`<div style="display: flex; gap: 2em;">${inputs}</div>`,
+    }
+  )
+}
+
+admin012Form = (langKey) => {
+  const _lang = Lang.lg(langKey || "en")
+  const countryArray = [ssaObj, ...countries]
+  const admin0 = Inputs.bind(
+    Inputs.select(
+        countryArray,
+        {
+          label: _lang(adminTranslations.country),
+          format: (d) => _lang(d.translation),
+        }
+      ),
+    viewof admin0Select
+  )
+
+  const admin1 = Inputs.bind(
+    Inputs.select(
+        dataAdmin1,
+        {
+          label: _lang(adminTranslations.region),
+          format: (d) => d.admin1_name,
+        }
+      ),
+    viewof admin1Select
+  )
+
+  const admin2 = Inputs.bind(
+    Inputs.select(
+        dataAdmin2,
+        {
+          label: _lang(adminTranslations.district),
+          format: (d) => d.admin2_name,
+        }
+      ),
+    viewof admin2Select
+  )
+
+  return Inputs.form(
+    [
+      admin0,
+      admin1,
+      admin2
+    ],
+    {
+      template: (inputs) =>
+        html`<div style="display: flex; gap: 2em;">${inputs}</div>`,
+    }
+  )
+}
+
+
+
+
