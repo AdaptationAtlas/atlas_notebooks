@@ -147,6 +147,14 @@ loaderDiv("plotRecentChanges");
 
 `{ojs} downloadButton(recentChanges_plotData, "recentChanges")`
 
+### `{ojs} _lang(nbText.general.quickInsight)`
+
+```{ojs}
+seasonInsight();
+
+createCountryInsights([climateInsight]);
+```
+
 # `{ojs} heading4` {#futureProjections}
 
 `{ojs} _lang(nbText.sections.futureProjections.introText)`
@@ -182,7 +190,16 @@ loaderDiv("plotFutureProjections");
 
 `{ojs} downloadButton(futureProjections_plotData, "futureProjections")`
 
+### `{ojs} _lang(nbText.general.quickInsight)`
+
+```{ojs}
+seasonInsight();
+createCountryInsights([climateProjectionInsight]);
+```
+
 # `{ojs} heading5` {#extremeEvents}
+
+`{ojs} _lang(nbText.sections.extremeEvents.introText)`
 
 ```{ojs}
 section4A0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
@@ -222,6 +239,8 @@ section5A0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
 section5A1 = renderA1Multi({ maxSelections: 3 });
 inputTemplate()([section5A0, section5A1]);
 
+scenarioForm();
+
 Inputs.bind(
   Inputs.select([null, ...Object.keys(exposure_groups)], {
   format: (d) => d || "All Commodities",
@@ -250,16 +269,10 @@ loaderDiv("plotHazardExposure");
 # `{ojs} appendix` {#appendix}
 
 ```{ojs}
-toc_bottom = atlasTOC({
+atlasTOC({
   skip: ["notebook-title", "appendix", "source-code"], // These should be the section headings in the {# headings}
   heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
 });
-
-htl.html`
-  <div class='floating-toc'>
-    ${toc_bottom}
-  </div>
-`;
 ```
 
 ## `{ojs} methodsData` {#methodsData}
@@ -395,7 +408,7 @@ NavbarLangSelector(languages, masterLanguage)
 
 ```{ojs}
 data_obj = {
-  const obj = await FileAttachment("/data/climateRationale/nbData_local.json").json();
+  const obj = await FileAttachment("/data/climateRationale/nbData.json").json();
   return obj.data
 }
 db = await generateDB(
@@ -412,11 +425,11 @@ dbFutureHive = {
     await _db.query(`SET enable_http_metadata_cache = true;`)
     const paths = fut.map((d) => {
       let p
-      if (d.local_path) {
-        p = "http://localhost:4040" + d.local_path
-      } else {
-        p = d.s3_path
-      }
+      // if (d.local_path) {
+      //   p = "http://localhost:4040" + d.local_path
+      // } else {
+      p = d.s3_path
+      // }
       return `'${p}'`
 
     }) // `'${||d.s3_path}'
@@ -569,10 +582,9 @@ cropCategoryMap = new Map(
 #### data - recentChanges
 
 ```{ojs}
-recentChanges_plotData = {
-  document.body.style.cursor = "wait";
+recentChanges_data = {
   const _season = seasonSelect.season;
-  const _variable = climateVarSelect.id;
+  // const _variable = climateVarSelect.id;
 
   const resp = await db.query(`
     SELECT
@@ -592,21 +604,18 @@ recentChanges_plotData = {
        OR admin1_name IS NULL
       )
       ${sqlWhereNull({ field: "season", value: _season })}
-      ${sqlWhereNull({ field: "hazard", value: _variable })}
   `);
-
-  document.body.style.cursor = "";
   return withAdminName(resp);
 }
+
+recentChanges_plotData = recentChanges_data.filter((d) => d.hazard === climateVarSelect.id)
 ```
 
 #### data - futureProjections
 
 ```{ojs}
-futureProjections_plotData = {
-  document.body.style.cursor = "wait";
+futureProjections_data = {
   const _season = seasonSelect.season;
-  const _variable = climateVarSelect.id;
 
   const resp = await dbFutureHive.query(`
   SELECT
@@ -632,14 +641,16 @@ futureProjections_plotData = {
      OR admin1_name IS NULL
     )
     ${sqlWhereNull({ field: "season", value: _season })}
-    ${sqlWhereNull({ field: "hazard", value: _variable })}
     AND timeperiod = '${futurePeriodSelect}'
     AND scenario in ${sqlList(futureScenarioSelect.map((d) => d.toLowerCase()))}
   `);
 
-  document.body.style.cursor = "";
   return withAdminName(resp);
 }
+
+futureProjections_data;
+
+futureProjections_plotData = futureProjections_data.filter((d) => d.hazard === climateVarSelect.id)
 ```
 
 #### data - extremeEvents
@@ -772,6 +783,8 @@ hazardExposure_plotData = {
      admin1_name in ${sqlList(admin1Names)}
      OR admin1_name IS NULL
     )
+    AND timeframe in ('1995-2014', '${futurePeriodSelect}')
+    AND scenario in ${sqlList(['historic', ...futureScenarioSelect.map((d) => d.toLowerCase())])}
   `);
 
   // Add in total production not exposed
@@ -898,8 +911,6 @@ scenarioColors = new Object({
 scenarioNames = Object.keys(scenarioColors);
 
 viewof futureScenarioSelect = Inputs.input([scenarioNames[1], scenarioNames[3]]);
-
-scenarioNames
 ```
 
 ```{ojs}
@@ -944,6 +955,19 @@ createCountryInsights = (insightFunctions) => {
     .join("\n\n");
 
   return md`${country_insights}`;
+};
+
+seasonInsight = () => {
+  const seasonTemplate = _lang(
+    nbText.sections.recentChanges.quickInsight.season,
+  );
+  const seasonInsight = Lang.reduceReplaceTemplateItems(seasonTemplate, [
+    {
+      name: "season",
+      value: seasonSelect.season_string,
+    },
+  ]);
+  return md`_${seasonInsight}_`;
 };
 ```
 
@@ -1086,6 +1110,438 @@ exposureInsight = (iso3) => {
   return _adminInsights
     ? `${_countryInsight}\n${_adminInsights}`
     : _countryInsight;
+};
+```
+
+### Insights - recentChanges
+
+```{ojs}
+climateInsight = (iso3) => {
+  const climateTemplates = {
+    temperature: _lang(nbText.sections.recentChanges.quickInsight.temp),
+    precipitation: _lang(nbText.sections.recentChanges.quickInsight.precip),
+  };
+  const climateData = recentChanges_data;
+  const country = _lang(iso3ToTranslation[iso3]);
+
+  const countryData = climateData.filter(
+    (d) => d.iso3 === iso3 && !d.admin1_name,
+  );
+
+  const adminData = climateData.filter((d) => d.iso3 === iso3 && d.admin1_name);
+
+  const buildInsight = (data, adminName) => {
+    const tempData = data.filter((d) => d.hazard === "TAVG");
+    const precipData = data.filter((d) => d.hazard === "PTOT");
+
+    const tempTrend = climateDataTools.getTrend(tempData);
+    const precipTrend = climateDataTools.getTrend(precipData);
+
+    const parts = [];
+
+    if (tempTrend) {
+      parts.push(
+        Lang.reduceReplaceTemplateItems(climateTemplates.temperature, [
+          { name: "admin", value: adminName },
+          {
+            name: "tempChange",
+            value: Math.abs(tempTrend.totalChange).toFixed(2),
+          },
+          { name: "startYear", value: tempTrend.startYear },
+          { name: "endYear", value: tempTrend.endYear },
+          {
+            name: "tempPerDecade",
+            value: Math.abs(tempTrend.perDecade).toFixed(2),
+          },
+        ]),
+      );
+    }
+
+    if (precipTrend) {
+      parts.push(
+        Lang.reduceReplaceTemplateItems(climateTemplates.precipitation, [
+          { name: "admin", value: adminName },
+          {
+            name: "precipPerDecade",
+            value: Math.abs(precipTrend.perDecade).toFixed(1),
+          },
+          {
+            name: "precipDirection",
+            value:
+              precipTrend.perDecade < 0
+                ? _lang(general_translations.less)
+                : _lang(general_translations.more),
+          },
+        ]),
+      );
+    }
+
+    return parts.join(" ");
+  };
+
+  const countryInsight = buildInsight(countryData, country);
+
+  const adminInsights =
+    adminData.length > 0
+      ? [...new Set(adminData.map((d) => d.admin1_name))]
+          .map((admin1Name) => {
+            const admin1Data = adminData.filter(
+              (d) => d.admin1_name === admin1Name,
+            );
+            return `- ${buildInsight(admin1Data, admin1Name)}`;
+          })
+          .join("\n")
+      : "";
+
+  return adminInsights
+    ? `${countryInsight}\n\n${adminInsights}`
+    : countryInsight;
+};
+```
+
+```{ojs}
+climateDataTools = {
+  const getTrend = (data) => {
+    if (data.length < 2) return null;
+
+    const sorted = [...data].sort((a, b) => a.year - b.year);
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+
+    const years = last.year - first.year;
+    const totalChange = last.mean - first.mean;
+    const perDecade = (totalChange / years) * 10;
+
+    return {
+      startYear: first.year,
+      endYear: last.year,
+      totalChange,
+      perDecade,
+    };
+  };
+  return {
+    getTrend
+  }
+}
+```
+
+### Insights - futureProjections
+
+```{ojs}
+climateProjectionInsight = (iso3) => {
+  /* ================================
+   * Templates
+   * ================================ */
+
+  const temperatureTemplate =
+    ":::admin::: is projected to warm by :::tempChange:::°C between :::startYear::: and :::endYear::: under a :::scenarioLabel::: scenario (:::scenario:::), corresponding to :::tempPerDecade:::°C per decade. :::tempComparison::: Model uncertainty remains substantial, with warming projections ranging from :::minAnomaly:::°C (coolest) to :::maxAnomaly:::°C (warmest).";
+
+  const precipitationTemplate =
+    "Precipitation projections under :::scenario::: indicate a change of :::precipChange::: mm per year between :::startYear::: and :::endYear::: on average across :::admin:::. :::precipComparison::: Precipitation uncertainty remains, with projections ranging from :::minPrecip::: to :::maxPrecip::: mm per year across models.";
+
+  const tempComparisonTemplate =
+    "By :::midYear:::, projected warming under :::compareScenario::: is :::diffValue:::°C :::diffDirection::: than under :::baseScenario:::.";
+
+  const precipComparisonTemplate =
+    "Compared to :::baseScenario:::, precipitation change under :::compareScenario::: differs by :::precipDiff::: mm per year by :::midYear:::.";
+
+  const adminSummaryTemplate =
+    "**:::admin:::**: +:::tempChange:::°C (:::tempPerDecade:::°C/decade), :::compareHigh:::–:::compareLow::: difference: :::tempDiff:::°C; precipitation: :::precipChange::: mm/yr.";
+
+  /* ================================
+   * Helpers
+   * ================================ */
+
+  const scenarioLabels = {
+    ssp126: "very stringent mitigation",
+    ssp245: "moderately stringent mitigation",
+    ssp370: "high-emissions",
+  };
+
+  const getMidYear = (timeperiod) => {
+    const [start, end] = timeperiod.split("-").map(Number);
+    return Math.round((start + end) / 2);
+  };
+
+  const selectScenarioComparison = (scenarios) => {
+    if (scenarios.length === 2) return scenarios;
+
+    if (scenarios.includes("ssp245") && scenarios.includes("ssp370")) {
+      return ["ssp245", "ssp370"];
+    }
+
+    if (scenarios.includes("ssp245") && scenarios.includes("ssp585")) {
+      return ["ssp245", "ssp585"];
+    }
+
+    // fallback: lowest vs highest forcing
+    const sorted = [...scenarios].sort();
+    return [sorted[0], sorted[sorted.length - 1]];
+  };
+
+  const buildTempComparison = ({ comparePair, byScenario }) => {
+    if (!comparePair) return "";
+
+    const [base, compare] = comparePair;
+    const diff =
+      byScenario[compare][0].mean_anomaly - byScenario[base][0].mean_anomaly;
+
+    return Lang.reduceReplaceTemplateItems(tempComparisonTemplate, [
+      { name: "midYear", value: getMidYear(byScenario[base][0].timeperiod) },
+      { name: "compareScenario", value: compare.toUpperCase() },
+      { name: "baseScenario", value: base.toUpperCase() },
+      { name: "diffValue", value: Math.abs(diff).toFixed(2) },
+      { name: "diffDirection", value: diff > 0 ? "higher" : "lower" },
+    ]);
+  };
+
+  const buildPrecipComparison = ({ comparePair, byScenario }) => {
+    if (!comparePair) return "";
+
+    const [base, compare] = comparePair;
+
+    const baseTrend = climateDataTools.getTrend(
+      byScenario[base].filter((d) => d.hazard === "PTOT"),
+    );
+    const compTrend = climateDataTools.getTrend(
+      byScenario[compare].filter((d) => d.hazard === "PTOT"),
+    );
+
+    if (!baseTrend || !compTrend) return "";
+
+    return Lang.reduceReplaceTemplateItems(precipComparisonTemplate, [
+      { name: "baseScenario", value: base.toUpperCase() },
+      { name: "compareScenario", value: compare.toUpperCase() },
+      {
+        name: "precipDiff",
+        value: (compTrend.perDecade - baseTrend.perDecade).toFixed(1),
+      },
+      {
+        name: "midYear",
+        value: getMidYear(byScenario[base][0].timeperiod),
+      },
+    ]);
+  };
+
+  /* ================================
+   * Data prep
+   * ================================ */
+
+  const data = futureProjections_data;
+  const country = _lang(iso3ToTranslation[iso3]);
+
+  const countryData = data.filter((d) => d.iso3 === iso3 && !d.admin1_name);
+  const adminData = data.filter((d) => d.iso3 === iso3 && d.admin1_name);
+
+  /* ================================
+   * Country-level narrative
+   * ================================ */
+
+  const buildCountryInsight = (rows, adminName) => {
+    if (!rows.length) return null;
+
+    // group by scenario
+    const byScenario = rows.reduce((acc, d) => {
+      acc[d.scenario] = acc[d.scenario] || [];
+      acc[d.scenario].push(d);
+      return acc;
+    }, {});
+
+    const scenarios = Object.keys(byScenario);
+    if (!scenarios.length) return null;
+
+    // comparison logic (shared everywhere)
+    const comparePair =
+      scenarios.length >= 2 ? selectScenarioComparison(scenarios) : null;
+
+    // primary scenario = higher forcing if comparison exists
+    const primaryScenario = comparePair ? comparePair[1] : scenarios[0];
+
+    /* ================================
+     * Temperature paragraph
+     * ================================ */
+
+    const tempData = byScenario[primaryScenario].filter(
+      (d) => d.hazard === "HSH-max",
+    );
+    const tempTrend = climateDataTools.getTrend(tempData);
+    if (!tempTrend) return null;
+
+    const tempComparison = buildTempComparison({ comparePair, byScenario });
+
+    const uTemp = byScenario[comparePair ? comparePair[1] : primaryScenario][0];
+
+    const temperatureParagraph = Lang.reduceReplaceTemplateItems(
+      temperatureTemplate,
+      [
+        { name: "admin", value: adminName },
+        { name: "scenario", value: primaryScenario.toUpperCase() },
+        {
+          name: "scenarioLabel",
+          value: scenarioLabels[primaryScenario] || "climate",
+        },
+        {
+          name: "tempChange",
+          value: Math.abs(tempTrend.totalChange).toFixed(2),
+        },
+        { name: "startYear", value: tempTrend.startYear },
+        { name: "endYear", value: tempTrend.endYear },
+        {
+          name: "tempPerDecade",
+          value: Math.abs(tempTrend.perDecade).toFixed(2),
+        },
+        { name: "tempComparison", value: tempComparison },
+        {
+          name: "minAnomaly",
+          value: Math.abs(uTemp.min_anomaly).toFixed(2),
+        },
+        {
+          name: "maxAnomaly",
+          value: Math.abs(uTemp.max_anomaly).toFixed(2),
+        },
+      ],
+    );
+
+    /* ================================
+     * Precipitation paragraph
+     * ================================ */
+
+    const precipData = byScenario[primaryScenario].filter(
+      (d) => d.hazard === "PTOT",
+    );
+    const precipTrend = climateDataTools.getTrend(precipData);
+
+    let precipitationParagraph = null;
+
+    if (precipTrend) {
+      const precipComparison = buildPrecipComparison({
+        comparePair,
+        byScenario,
+      });
+
+      const uPrecipData = byScenario[
+        comparePair ? comparePair[1] : primaryScenario
+      ].filter((d) => d.hazard === "PTOT");
+
+      precipitationParagraph = Lang.reduceReplaceTemplateItems(
+        precipitationTemplate,
+        [
+          { name: "admin", value: adminName },
+          { name: "scenario", value: primaryScenario.toUpperCase() },
+          {
+            name: "precipChange",
+            value: precipTrend.perDecade.toFixed(1),
+          },
+          { name: "startYear", value: precipTrend.startYear },
+          { name: "endYear", value: precipTrend.endYear },
+          { name: "precipComparison", value: precipComparison },
+          {
+            name: "minPrecip",
+            value: Math.min(...uPrecipData.map((d) => d.mean)).toFixed(1),
+          },
+          {
+            name: "maxPrecip",
+            value: Math.max(...uPrecipData.map((d) => d.mean)).toFixed(1),
+          },
+        ],
+      );
+    }
+
+    /* ================================
+     * Final output (2 paragraphs max)
+     * ================================ */
+
+    return precipitationParagraph
+      ? `${temperatureParagraph}\n\n${precipitationParagraph}`
+      : temperatureParagraph;
+  };
+  /* ================================
+   * Admin-level compact summaries
+   * ================================ */
+
+  const buildAdminSummary = (rows, adminName) => {
+    if (!rows.length) return null;
+
+    const byScenario = rows.reduce((acc, d) => {
+      acc[d.scenario] = acc[d.scenario] || [];
+      acc[d.scenario].push(d);
+      return acc;
+    }, {});
+
+    const scenarios = Object.keys(byScenario);
+    const comparePair =
+      scenarios.length >= 2 ? selectScenarioComparison(scenarios) : null;
+
+    const primaryScenario = comparePair
+      ? comparePair[1] // higher forcing
+      : scenarios[0];
+
+    // temperature trend
+    const tempTrend = climateDataTools.getTrend(
+      byScenario[primaryScenario].filter((d) => d.hazard === "HSH-max"),
+    );
+    if (!tempTrend) return null;
+
+    // precipitation trend (optional)
+    const precipTrend = climateDataTools.getTrend(
+      byScenario[primaryScenario].filter((d) => d.hazard === "PTOT"),
+    );
+
+    // temperature difference (mean anomaly only)
+    let tempDiff = "n/a";
+    if (comparePair) {
+      const [base, compare] = comparePair;
+      const baseVal = byScenario[base][0].mean_anomaly;
+      const compVal = byScenario[compare][0].mean_anomaly;
+      tempDiff = Math.abs(compVal - baseVal).toFixed(2);
+    }
+
+    const [compareLow, compareHigh] = comparePair ?? [];
+
+    return Lang.reduceReplaceTemplateItems(adminSummaryTemplate, [
+      { name: "admin", value: adminName },
+      {
+        name: "tempChange",
+        value: Math.abs(tempTrend.totalChange).toFixed(2),
+      },
+      {
+        name: "tempPerDecade",
+        value: Math.abs(tempTrend.perDecade).toFixed(2),
+      },
+      { name: "tempDiff", value: tempDiff },
+      { name: "compareLow", value: compareLow?.toUpperCase() || "—" },
+      { name: "compareHigh", value: compareHigh?.toUpperCase() || "—" },
+      {
+        name: "precipChange",
+        value: precipTrend ? precipTrend.perDecade.toFixed(1) : "n/a",
+      },
+    ]);
+  };
+
+  /* ================================
+   * Assemble output
+   * ================================ */
+
+  const countryInsight = buildCountryInsight(countryData, country);
+
+  const adminInsights =
+    adminData.length > 0
+      ? [
+          "**Subnational patterns**",
+          ...[...new Set(adminData.map((d) => d.admin1_name))].map(
+            (admin1Name) => {
+              const rows = adminData.filter(
+                (d) => d.admin1_name === admin1Name,
+              );
+              return `- ${buildAdminSummary(rows, admin1Name)}`;
+            },
+          ),
+        ].join("\n")
+      : "";
+
+  return adminInsights
+    ? `${countryInsight}\n\n${adminInsights}`
+    : countryInsight;
 };
 ```
 
@@ -1779,7 +2235,6 @@ bars_extremeEvents = () => {
     },
 
     x: {
-      domain: ["historical", "ssp245", "ssp585"],
       label: "Scenario",
     },
 
@@ -1812,6 +2267,7 @@ bars_extremeEvents = () => {
     ],
   });
 };
+
 // bars_extremeEvents = () => {
 //   const categories = [
 //     "extreme_low",
