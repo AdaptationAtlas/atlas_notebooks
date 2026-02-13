@@ -42,7 +42,7 @@ style="width: 20px; height: 20px; display: block">
 </svg>`;
 
 // Function to make atlas hero image
-export const heroImage = (title, bg_image, group = "data exploration") => {
+export const heroImage = (title, bg_image, group = "") => {
   return `<div id="hero-image" style="position: relative; width: 100%; height: 500px; display: flex; justify-content: center; align-items: center;">
     <img 
         src="${bg_image}" 
