@@ -43,16 +43,6 @@ export function avlossCalc(
     return out;
   };
 
-  // Not as fast but cleaner & can add seed w/ https://observablehq.com/@d3/random-source
-  // const rnorm = (n, sd) => {
-  //   const randNormal = d3.randomNormal(1, sd);
-  //   const out = new Float64Array(n);
-  //   for (let i = 0; i < n; i++) {
-  //     out[i] = randNormal();
-  //   }
-  //   return out;
-  // };
-
   const withArr = rnorm(reps, sd_with);
   const withoutArr = rnorm(reps, sd_without);
 
@@ -124,4 +114,179 @@ export function npvDiscreteCumulative(values, discountRate) {
       .slice(0, i + 1)
       .reduce((acc, val, j) => acc + val / Math.pow(1 + discountRate, j), 0),
   );
+}
+
+function quantileSummary(values, qLow = 0.1, qMid = 0.5, qHigh = 0.9) {
+  const sorted = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  return {
+    p10: d3.quantileSorted(sorted, qLow) ?? null,
+    p50: d3.quantileSorted(sorted, qMid) ?? null,
+    p90: d3.quantileSorted(sorted, qHigh) ?? null,
+    mean: sorted.length ? d3.mean(sorted) : null,
+    n: sorted.length,
+  };
+}
+
+function sampleTriangular(low, mode, high) {
+  if (!(low <= mode && mode <= high)) return mode;
+  const u = Math.random();
+  const c = (mode - low) / (high - low || 1);
+  if (u < c) return low + Math.sqrt(u * (high - low) * (mode - low));
+  return high - Math.sqrt((1 - u) * (high - low) * (high - mode));
+}
+
+/**
+ * Run avlossCalc repeatedly to get uncertainty bounds for avloss itself.
+ * Useful for numerical jitter checks and as an avloss input sampler.
+ */
+export function avlossCalcUncertainty(
+  cv,
+  change,
+  {
+    runs = 9,
+    reps = 200000,
+    approx = true,
+    qLow = 0.1,
+    qMid = 0.5,
+    qHigh = 0.9,
+  } = {},
+) {
+  const samples = Array.from({ length: runs }, () =>
+    Math.abs(avlossCalc(cv, change, false, reps, approx) ?? 0),
+  );
+  return {
+    ...quantileSummary(samples, qLow, qMid, qHigh),
+    samples,
+  };
+}
+
+/**
+ * Uncertainty simulation using notebook cashflow rows directly.
+ * With benefitScale/costScale fixed at 1, this should align with the deterministic notebook outputs.
+ */
+export function runSimulationFromCashflowRows(
+  cashflowRows,
+  {
+    simulations = 2000,
+    yearKey = "year",
+    benefitKey = "project_benefit",
+    costKey = "cost",
+    discountRate = null,
+    benefitScale = { low: 1, mode: 1, high: 1 },
+    costScale = { low: 1, mode: 1, high: 1 },
+    qLow = 0.1,
+    qMid = 0.5,
+    qHigh = 0.9,
+  } = {},
+) {
+  if (!Array.isArray(cashflowRows) || cashflowRows.length === 0) {
+    return {
+      simulations: 0,
+      yearly: [],
+      final: {
+        npv: quantileSummary([], qLow, qMid, qHigh),
+        irr: quantileSummary([], qLow, qMid, qHigh),
+        mirr: quantileSummary([], qLow, qMid, qHigh),
+        bcr: quantileSummary([], qLow, qMid, qHigh),
+        probNpvPositive: null,
+        probBcrAbove1: null,
+      },
+    };
+  }
+
+  const rows = [...cashflowRows]
+    .filter((r) => Number.isFinite(r?.[yearKey]))
+    .sort((a, b) => a[yearKey] - b[yearKey]);
+
+  const rate =
+    discountRate ??
+    rows.find((r) => Number.isFinite(r.discount_rate))?.discount_rate ??
+    0.12;
+
+  const paths = [];
+  for (let s = 0; s < simulations; s++) {
+    const drawBenefitScale = sampleTriangular(
+      benefitScale.low,
+      benefitScale.mode,
+      benefitScale.high,
+    );
+    const drawCostScale = sampleTriangular(
+      costScale.low,
+      costScale.mode,
+      costScale.high,
+    );
+
+    const benefitSeries = rows.map(
+      (r) => (Number(r[benefitKey]) || 0) * drawBenefitScale,
+    );
+    const costSeries = rows.map(
+      (r) => (Number(r[costKey]) || 0) * drawCostScale,
+    );
+    const cashflowSeries = benefitSeries.map((b, i) => b - costSeries[i]);
+
+    const npvSeries = npvDiscreteCumulative(cashflowSeries, rate);
+    const benefitNpvSeries = npvDiscreteCumulative(benefitSeries, rate);
+    const costNpvSeries = npvDiscreteCumulative(costSeries, rate);
+    const bcrSeries = benefitNpvSeries.map((b, i) => {
+      const c = costNpvSeries[i];
+      return c === 0 ? null : b / c;
+    });
+    const irrSeries = cashflowSeries.map((_, i) => {
+      const irr = calcIRR(cashflowSeries.slice(0, i + 1));
+      return irr == null ? null : irr * 100;
+    });
+    const mirrSeries = cashflowSeries.map((_, i) => {
+      const mirr = calcMIRR(cashflowSeries.slice(0, i + 1), rate, rate);
+      return mirr == null ? null : mirr * 100;
+    });
+
+    paths.push({
+      npvSeries,
+      bcrSeries,
+      irrSeries,
+      mirrSeries,
+      irrFinal: calcIRR(cashflowSeries),
+      mirrFinal: calcMIRR(cashflowSeries, rate, rate),
+    });
+  }
+
+  const yearly = rows.map((r, i) => {
+    const npvVals = paths.map((p) => p.npvSeries[i]).filter(Number.isFinite);
+    const bcrVals = paths.map((p) => p.bcrSeries[i]).filter(Number.isFinite);
+    const irrVals = paths.map((p) => p.irrSeries[i]).filter(Number.isFinite);
+    const mirrVals = paths.map((p) => p.mirrSeries[i]).filter(Number.isFinite);
+    return {
+      year: r[yearKey],
+      npv: quantileSummary(npvVals, qLow, qMid, qHigh),
+      bcr: quantileSummary(bcrVals, qLow, qMid, qHigh),
+      irr: quantileSummary(irrVals, qLow, qMid, qHigh),
+      mirr: quantileSummary(mirrVals, qLow, qMid, qHigh),
+    };
+  });
+
+  const npvFinal = paths.map((p) => p.npvSeries.at(-1)).filter(Number.isFinite);
+  const irrFinal = paths
+    .map((p) => (p.irrFinal == null ? null : p.irrFinal * 100))
+    .filter(Number.isFinite);
+  const mirrFinal = paths
+    .map((p) => (p.mirrFinal == null ? null : p.mirrFinal * 100))
+    .filter(Number.isFinite);
+  const bcrFinal = paths.map((p) => p.bcrSeries.at(-1)).filter(Number.isFinite);
+
+  return {
+    simulations,
+    yearly,
+    final: {
+      npv: quantileSummary(npvFinal, qLow, qMid, qHigh),
+      irr: quantileSummary(irrFinal, qLow, qMid, qHigh),
+      mirr: quantileSummary(mirrFinal, qLow, qMid, qHigh),
+      bcr: quantileSummary(bcrFinal, qLow, qMid, qHigh),
+      probNpvPositive: npvFinal.length
+        ? npvFinal.filter((x) => x > 0).length / npvFinal.length
+        : null,
+      probBcrAbove1: bcrFinal.length
+        ? bcrFinal.filter((x) => x > 1).length / bcrFinal.length
+        : null,
+    },
+  };
 }

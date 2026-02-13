@@ -296,6 +296,42 @@ options_econPerfWalkthrough = {
 
 ```{ojs}
 {
+  const formBenefitScale = Inputs.form(
+    {
+      low: Inputs.range([0.5, 1], {
+        step: 0.01,
+        label: "Benefit Scale Low",
+        value: 0.85,
+      }),
+      high: Inputs.range([1, 1.6], {
+        step: 0.01,
+        label: "Benefit Scale High",
+        value: 1.15,
+      }),
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
+
+  const formCostScale = Inputs.form(
+    {
+      low: Inputs.range([0.5, 1], {
+        step: 0.01,
+        label: "Cost Scale Low",
+        value: 0.9,
+      }),
+      high: Inputs.range([1, 1.8], {
+        step: 0.01,
+        label: "Cost Scale High",
+        value: 1.2,
+      }),
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
+
   const _discountLabel = makeTooltipLabel({
     labelText: "Discount Rate",
     tooltipText: "The Discount rate is...",
@@ -320,9 +356,29 @@ options_econPerfWalkthrough = {
         [0.5, 2],
         {step: 0.01, label: _roiLabel, value: 1.62} 
       ), viewof bcr
-    )
+    ),
+    `<b>Model Uncertainty</b>`,
+    Inputs.bind(formBenefitScale, viewof uncertaintyBenefitScale),
+    Inputs.bind(formCostScale, viewof uncertaintyCostScale)
   )
 }
+```
+
+```{ojs}
+uncertainty = runSimulationFromCashflowRows(recipe_dataCashflow, {
+  simulations: 250,
+  discountRate: discountRate,
+  benefitScale: {
+    low: uncertaintyBenefitScale.low,
+    mode: 1.0,
+    high: uncertaintyBenefitScale.high,
+  },
+  costScale: {
+    low: uncertaintyCostScale.low,
+    mode: 1.0,
+    high: uncertaintyCostScale.high,
+  },
+});
 ```
 
 # `{ojs} heading2` {#investment-returns}
@@ -408,9 +464,7 @@ indicatorSelector = {
 
 # `{ojs} appendix` {#appendix}
 
-# Source code {#source-code}
-
-<!--TODO: Add .hidden in bracket to hide for production -->
+# Source code {#source-code .hidden}
 
 ## Data import and cleaning
 
@@ -432,7 +486,7 @@ db = {
         SUM(value) AS value
       FROM read_parquet("s3://digital-atlas/domain=exposure/type=combined/source=glw4-2020_spam2020AA/region=ssa/processing=atlas-harmonized/variable=vop_nominal-usd-2021.parquet")
       WHERE
-        admin2_name IS NULL
+        admin2_name IS NULL AND admin1_name IS NOT NULL
         AND (tech = 'all' OR tech IS NULL)
         AND isfinite(value)
         AND crop !~ '(^other-|rest-of|temperate-fruit|tropical-fruit|vegetables)'
@@ -596,8 +650,6 @@ viewof select_region = {
 
   return debounce(input, 1000);
 }
-
-select_region
 ```
 
 ```{ojs}
@@ -728,10 +780,7 @@ render_econPerfWalkthrough = () => {
       inputCisImpact,
     },
     {
-      template: (inputs) =>
-        htl.html`<div style="display: flex; gap: 3em">${Object.values(
-          inputs,
-        )}</div>`,
+      template: inputTemplate({ gap: "3em" }),
     },
   );
 };
@@ -742,6 +791,38 @@ render_econPerfWalkthrough = () => {
 ```{ojs}
 viewof discountRate = Inputs.range([0, 1],{step: 0.01, format: x => (x * 100), label : "Discount Rate", value: 0.12} ) // 0-1 as a pct
 viewof bcr = Inputs.range([0.5, 2], {step: 0.01, label: "BCR", value: 1.62} )
+
+viewof uncertaintyBenefitScale = Inputs.form(
+    {
+      low: Inputs.range([0.5, 1], {
+        step: 0.01,
+        value: 0.9,
+      }),
+      high: Inputs.range([1, 1.8], {
+        step: 0.01,
+        value: 1.2,
+      }),
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
+
+viewof uncertaintyCostScale = Inputs.form(
+    {
+      low: Inputs.range([0.5, 1], {
+        step: 0.01,
+        value: 0.9,
+      }),
+      high: Inputs.range([1, 1.8], {
+        step: 0.01,
+        value: 1.2,
+      }),
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
 ```
 
 ### Other Selections
@@ -767,39 +848,6 @@ dropdownCSS;
 ```
 
 ## Helper Functions
-
-```{ojs}
-// Formatting
-function formatUSD({ locale = "en-US" } = {}) {
-  const formatter = formatNumCompactShort({ locale });
-
-  return (number) => {
-    const formattedNum = formatter(number);
-    return "$" + formattedNum;
-  };
-}
-
-// format number, short notation
-formatNumCompactShort = ({ locale = "en-US" } = {}) =>
-  new Intl.NumberFormat(locale, {
-    notation: "compact",
-    compactDisplay: "short",
-  }).format;
-
-function formatCurrencyAuto(value, precision = 1) {
-  const absVal = Math.abs(value);
-
-  if (absVal >= 1e9) {
-    return `$${(value / 1e9).toFixed(precision)}B`;
-  } else if (absVal >= 1e6) {
-    return `$${(value / 1e6).toFixed(precision)}M`;
-  } else if (absVal >= 1e3) {
-    return `$${(value / 1e3).toFixed(precision)}K`;
-  } else {
-    return `$${value.toFixed(1)}`;
-  }
-}
-```
 
 ```{ojs}
 debounce = (input, delay = 500) => {
@@ -898,18 +946,6 @@ function NavbarLangSelector(language_obj, masterLanguage) {
 NavbarLangSelector(languages, masterLanguage)
 ```
 
-```{ojs}
-prettyLanguageView = {
-  return Inputs.bind(
-    Inputs.radio(languages, {
-      label: _lang(general_translations.language),
-      format: (d) => d.label
-    }),
-    viewof masterLanguage
-  );
-}
-```
-
 ### Markdown notebook text
 
 ```{ojs}
@@ -955,7 +991,7 @@ dataPickMetric = {
         interpret: _lang(nbText.indicators.npv.info.interpret),
         tell: _lang(nbText.indicators.npv.info.tell)
       },
-       yFormat: (d) => formatCurrencyAuto(d, 1)
+       yFormat: (d) => formatUSD()(d)
     },
     {
       key: "bcr",
@@ -1187,15 +1223,7 @@ bigNumbersResults = () => {
 
 ```{ojs}
 resultTable = () => {
-  function formatAbbreviatedNumber(num) {
-    if (num == null || isNaN(num)) return "—";
-
-    const absNum = Math.abs(num);
-    if (absNum >= 1e9) return (num / 1e9).toFixed(1) + "B";
-    if (absNum >= 1e6) return (num / 1e6).toFixed(1) + "M";
-    if (absNum >= 1e3) return (num / 1e3).toFixed(1) + "K";
-    return num.toString();
-  }
+  const fmtUSD = formatUSD({ locale: language.locale });
   const selectedYear = projectYears;
   const enriched = (walkthroughEconomicIndicators?.enriched ?? []).filter(
     (d) => d.year <= selectedYear,
@@ -1265,12 +1293,12 @@ resultTable = () => {
 
             return html`<tr class=${isFinal ? "final-row" : ""}>
               <td class="year-col">${d.year}</td>
-              <td>${d.project_benefit != null ? `$${Math.round(d.project_benefit).toLocaleString()}` : "—"}</td>
-              <td>${d.cost != null ? `$${Math.round(d.cost).toLocaleString()}` : "—"}</td>
-              <td>${d.cashflow != null ? `$${Math.round(d.cashflow).toLocaleString()}` : "—"}</td>
-              <td>${d.discounted_benefit_cum != null ? `$${Math.round(d.discounted_benefit_cum).toLocaleString()}` : "—"}</td>
-              <td>${d.discounted_cost_cum != null ? `$${Math.round(d.discounted_cost_cum).toLocaleString()}` : "—"}</td>
-              <td>${npv_i != null ? `$${Math.round(npv_i).toLocaleString()}` : "—"}</td>
+              <td>${d.project_benefit != null ? fmtUSD(d.project_benefit) : "—"}</td>
+              <td>${d.cost != null ? fmtUSD(d.cost) : "—"}</td>
+              <td>${d.cashflow != null ? fmtUSD(d.cashflow) : "—"}</td>
+              <td>${d.discounted_benefit_cum != null ? fmtUSD(d.discounted_benefit_cum) : "—"}</td>
+              <td>${d.discounted_cost_cum != null ? fmtUSD(d.discounted_cost_cum) : "—"}</td>
+              <td>${npv_i != null ? fmtUSD(npv_i) : "—"}</td>
               <td>${d.discounted_bcr != null ? d.discounted_bcr.toFixed(2) : "—"}</td>
               <td>${d.irr != null ? `${(d.irr).toFixed(2)}%` : "—"}</td>
               <td>${d.mirr != null ? `${(d.mirr).toFixed(2)}%` : "—"}</td>
@@ -1288,13 +1316,27 @@ resultPlot = () => {
   const projectYearCutoff = walkthroughSelections.project_years;
   const selector = pickMetricWalkthrough;
   const plotData = walkthroughEconomicIndicators?.enriched ?? [];
+  const uncertaintyYearly = uncertainty?.yearly ?? [];
 
   // Always include all years for consistent x-axis
-  const fullYears = d3.range(0, 9); // 0 to 8 inclusive
+  const fullYears = d3.range(0, projectYears + 1); // 0 to 8 inclusive
   const completePlotData = fullYears.map((y) => {
     const row = plotData.find((d) => d.year === y);
     return row ?? { year: y };
   });
+
+  const bandData = (() => {
+    const metricKey = selector.key;
+    return fullYears
+      .map((year) => {
+        const row = uncertaintyYearly.find((d) => d.year === year);
+        const low = row?.[metricKey]?.p10;
+        const high = row?.[metricKey]?.p90;
+        if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+        return { year, low, high };
+      })
+      .filter((d) => d != null);
+  })();
 
   const ruleYValue = selector.key === "bcr" ? 1 : 0;
 
@@ -1329,6 +1371,14 @@ resultPlot = () => {
       Plot.ruleY([ruleYValue], {
         stroke: "#333",
         strokeDasharray: [3],
+      }),
+
+      Plot.areaY(bandData, {
+        x: "year",
+        y1: "low",
+        y2: "high",
+        fill: "#2c7fb8",
+        fillOpacity: 0.16,
       }),
 
       // line
@@ -1391,12 +1441,12 @@ admin0_names = {
 // Module Imports for the calculation of ROI data
 import {
   avlossCalc,
+  avlossCalcUncertainty,
   calcMIRR,
   calcIRR,
   npvDiscreteCumulative,
+  runSimulationFromCashflowRows,
 } from "/notebooks/roi/roi_tools.js";
-
-irrnpv = import("https://cdn.skypack.dev/irr-npv@1.0.1?min");
 ```
 
 ```{ojs}
@@ -1711,39 +1761,9 @@ walkthroughEconomicIndicators = {
     enriched: enrichedData
   };
 }
-
-walkthroughEconomicIndicators;
 ```
 
 #### Calculate final values
-
-```{ojs}
-recipe_dataFinancialValues = recipe_dataCashflow.map((d, i, arr) => {
-  const cashflowArray = arr
-    .filter(
-      (x) =>
-        x.adoption === d.adoption &&
-        x.prod_impact === d.prod_impact &&
-        x.cis_impact === d.cis_impact &&
-        x.bcr === d.bcr &&
-        x.discount_rate === d.discount_rate &&
-        x.year <= d.year,
-    )
-    .map((x) => x.cashflow);
-
-  const proj_npv = irrnpv.npv(cashflowArray, d.discount_rate);
-
-  return {
-    ...d,
-    cashflowArray,
-    proj_irr: irrnpv.irr(cashflowArray),
-    proj_npv,
-    proj_bcr: proj_npv / d.cost_cum,
-  };
-});
-
-recipe_dataFinancialValues;
-```
 
 At this point, following the recipe, we have the timeseries for the selected
 parameters, with financial values calculated. Specifically:
