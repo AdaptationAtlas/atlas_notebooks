@@ -7,38 +7,131 @@ nb-authors:
 date-created: "2025-02-19"
 date-edited: today
 ---
-{{< include /components/_lang.qmd >}}
 
 ```{ojs}
-//| output: false
-import { atlasTOC, atlasHero } from "/helpers/uiComponents.ojs";
-import { enahncedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
+import {
+  atlasHero,
+  downloadButton,
+  multiLineText,
+  loaderDiv,
+} from "/helpers/uiComponents.ojs";
+import { filterableDataTable as hz_atlasTable } from "/components/_atlasTable.ojs";
 
-hero_url = "./../../images/default_crop.webp";
-// This ^^ must be relative path due to an issue
-// with how Quarto resolves certain paths if local image.
-// It can also be a url.
-nbTitle = _lang({
-  en: "Atlas Hazard Exposure Explorer",
-  fr: "Explorateur d’exposition aux aléas de l’Atlas",
-});
+import { cleanAdminInput_SQL } from "/helpers/data.js";
 
+import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
+
+import { inputTemplate } from "/helpers/std.ojs";
+
+import { atlasTOC } from "/helpers/toc.ojs";
+
+atlasHero(nbTitle, "../../images/default_crop.webp");
 ```
+
 
 ```{ojs}
-//| output: false
-import { Inputs } from "@observablehq/inputs"
-import { DuckDBClient } from "@observablehq/duckdb"
+ //| output: false
+ hz_harmonizeNativeInputs = {
+  const ENHANCED_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif'
+  const ARROW_SVG = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 8l4 4 4-4'/></svg>"
+
+  const isHidden = (el) => {
+    try {
+      if (el.hidden) return true
+      const cs = getComputedStyle(el)
+      return (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0")
+    } catch { return false }
+  }
+
+  const styleSelect = (el) => {
+    if (!el || el.tagName !== "SELECT") return
+    if (el.multiple) return
+    if (isHidden(el)) return
+
+    el.style.fontFamily = ENHANCED_FONT
+    el.style.fontSize = "14px"
+    el.style.fontWeight = "500"
+    el.style.width = "100%"
+    el.style.minWidth = "0"
+    el.style.boxSizing = "border-box"
+    el.style.padding = "10px"
+    el.style.paddingRight = "38px"
+    el.style.backgroundColor = "white"
+    el.style.color = "#111"
+    el.style.border = "2px solid #d1d5db"
+    el.style.borderRadius = "6px"
+    el.style.cursor = "pointer"
+    el.style.lineHeight = "1.2"
+    el.style.transition = "all 0.2s ease"
+    el.style.webkitAppearance = "none"
+    el.style.mozAppearance = "none"
+    el.style.appearance = "none"
+    el.style.backgroundImage = 'url("' + ARROW_SVG + '")'
+    el.style.backgroundRepeat = "no-repeat"
+    el.style.backgroundPosition = "right 12px center"
+    el.style.backgroundSize = "14px 14px"
+  }
+
+  const styleTextInput = (el) => {
+    if (!el) return
+    if (isHidden(el)) return
+    el.style.fontFamily = ENHANCED_FONT
+    el.style.fontSize = "14px"
+    el.style.fontWeight = "500"
+    el.style.width = "100%"
+    el.style.minWidth = "0"
+    el.style.boxSizing = "border-box"
+    el.style.padding = "10px"
+    el.style.backgroundColor = "white"
+    el.style.color = "#111"
+    el.style.border = "2px solid #d1d5db"
+    el.style.borderRadius = "6px"
+    el.style.lineHeight = "1.2"
+    el.style.transition = "all 0.2s ease"
+  }
+
+  const styleInnerLabel = (label) => {
+    if (!label || label.tagName !== "LABEL") return
+    if (!label.querySelector("select")) return
+    label.style.fontFamily = ENHANCED_FONT
+    label.style.fontSize = "12px"
+    label.style.fontWeight = "700"
+    label.style.letterSpacing = "0.02em"
+    label.style.display = "grid"
+    label.style.gap = "0.35rem"
+    label.style.margin = "0"
+    label.style.textTransform = "uppercase"
+  }
+
+  const apply = () => {
+    try {
+      const roots = [
+        ...document.querySelectorAll(".hz-controlsCompact"),
+        ...document.querySelectorAll('[id^="observablehq-viewof-"]')
+      ]
+      roots.forEach(root => {
+        root.querySelectorAll("label").forEach(styleInnerLabel)
+        root.querySelectorAll("select").forEach(styleSelect)
+        root.querySelectorAll('input[type="text"], input[type="number"], input[type="search"], textarea').forEach(styleTextInput)
+      })
+    } catch (e) { /* no-op */ }
+  }
+
+  apply()
+  const mo = new MutationObserver(() => apply())
+  mo.observe(document.body, { childList: true, subtree: true })
+  invalidation.then(() => mo.disconnect())
+  return null
+}
 ```
+
 {{< include /components/_atlasBoundaries.qmd >}}
 
-
 ```{ojs}
 //| output: false
-// Observable Plot (ESM) + CSV parser (ESM)
+// Observable Plot
 // Use dynamic import 
 Plot = await import("https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6.14/+esm")
-csvParse = (await import("https://cdn.jsdelivr.net/npm/d3-dsv@3/+esm")).csvParse
 ```
 
 ```{ojs}
@@ -90,7 +183,6 @@ hz_resolvePath = (entry) => {
   return { ok: false, raw: null, url: null, source: "missing" }
 }
 
-// Quick URL sanity check: helps avoid confusing DuckDB errors when a URL returns
 hz_validateParquetUrl = async (url) => {
   const u = String(url ?? "").trim()
   if (!u || !hz_isHttpUrl(u)) return { ok: true }
@@ -130,7 +222,6 @@ fmtSigned = (v) => {
   const s = x > 0 ? "+" : ""
   return s + hz_formatNumber(x, { digits: 2, compact: true })
 }
-
 
 hz_titleCase = (s) =>
 
@@ -216,7 +307,6 @@ hz_db = DuckDBClient.of()
 
 ```{ojs}
 //| output: false
-// Normalize DuckDB query results across runtimes.
 hz_rows = {
   function rows(res) {
     if (!res) return []
@@ -241,1141 +331,270 @@ hz_query = async (sql) => {
 }
 ```
 
-```{ojs}
-//| output: false
-hz_hero = atlasHero(nbTitle, hero_url)
-```
-
-
-```{ojs}
-//| output: false
-// Hero is mounted into #hz-hero by the final bootstrap cell.
-null
-```
-
 ```{=html}
 <style>
-html, body{
-overflow-x: hidden;
-}
+  .atlasFigCaption {
+    position: relative;
+    z-index: -1;
+  }
 
-.page-columns, .content{
-overflow-x: hidden;
-}
+  .hz-card,
+  .hz-question,
+  .hz-controlsPanel,
+  .hz-qToolbar {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0 0 1.25rem 0;
+  }
 
-:root{
---card-bg:#fff;
-  --card-bd:rgba(0,0,0,.08);
-  --muted:rgba(0,0,0,.65);
-  --muted2:rgba(0,0,0,.52);
-  --shadow:0 10px 26px rgba(0,0,0,.07);
-  --radius:16px;
-}
+  .hz-card__title {
+    font-weight: 600;
+    font-size: 1.1rem;
+    line-height: 1.3;
+    margin: 0.25rem 0;
+  }
 
-.hero{
-display:grid;
-  grid-template-columns:1.2fr .8fr;
-  gap:18px;
-  align-items:stretch;
-  background:linear-gradient(180deg, rgba(0,0,0,.035), rgba(0,0,0,.015));
-  border:1px solid var(--card-bd);
-  border-radius:var(--radius);
-  padding:16px;
-  box-shadow:var(--shadow);
-  margin:10px 0 18px 0;
-}
+  .hz-card__sub,
+  .hz-muted,
+  .hz-loading {
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.95rem;
+  }
 
-.chip{
-display:inline-flex; align-items:center; gap:6px;
-  padding:6px 10px;
-  border-radius:999px;
-  border:1px solid var(--card-bd);
-  background:rgba(255,255,255,.75);
-  font-size:.86rem;
-}
+  .hz-chip {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    margin: 0.125rem 0.25rem 0.125rem 0;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    border-radius: 999px;
+    font-size: 0.9rem;
+  }
 
-.card{
-background:var(--card-bg);
-  border:1px solid var(--card-bd);
-  border-radius:var(--radius);
-  padding:14px;
-  box-shadow:var(--shadow);
-}
+  .hz-chartWrap,
+  .hz-grid,
+  .hz-mount {
+    width: 100%;
+  }
 
-.card h3{
-margin:0 0 6px 0; font-weight:800; font-size:1.05rem;
-}
-
-.card .sub{
-color:var(--muted); margin:0 0 10px 0; font-size:.9rem;
-}
-
-.grid2{
-display:grid; grid-template-columns:1fr 1fr; gap:12px;
-}
-
-@media (max-width: 900px){
-.grid2{
-grid-template-columns:1fr;
-}
-}
-
-.kpi .k{
-font-size:.82rem; color:var(--muted2);
-}
-
-.kpi .v{
-font-size:1.05rem; font-weight:800; margin-top:2px; overflow:hidden; text-overflow:ellipsis;
-}
-
-.warn{
-border:1px solid rgba(220,53,69,.35);
-  background:rgba(220,53,69,.06);
-  border-radius:14px;
-  padding:10px 12px;
-}
-
-.ok{
-border:1px solid rgba(25,135,84,.35);
-  background:rgba(25,135,84,.06);
-  border-radius:14px;
-  padding:10px 12px;
-}
-
-.hz-card{
-background:var(--card-bg);
-  border:1px solid var(--card-bd);
-  border-radius:18px;
-  box-shadow:var(--shadow);
-  padding:14px 14px 12px 14px;
-}
-
-.hz-card__head{
-display:flex;
-  gap:12px;
-  align-items:flex-start;
-  justify-content:space-between;
-  padding-bottom:10px;
-  border-bottom:1px solid rgba(0,0,0,.06);
-  margin-bottom:12px;
-}
-
-.hz-card__title{
-font-weight:900; font-size:1.05rem; line-height:1.1;
-}
-
-.hz-card__sub{
-color:var(--muted); font-size:.88rem; margin-top:2px;
-}
-
-.hz-pill{
-padding:6px 10px;
-  border-radius:999px;
-  border:1px solid rgba(0,0,0,.08);
-  background:rgba(0,0,0,.02);
-  font-size:.82rem;
-  white-space:nowrap;
-  display:inline-flex;
-  align-items:center;
-  gap:8px;
-}
-
-.hz-pill--error{
-  background:rgba(220,38,38,.10);
-  border-color:rgba(220,38,38,.25);
-  color:rgba(185,28,28,1);
-}
-.hz-pill--loading{
-  background:rgba(59,130,246,.10);
-  border-color:rgba(59,130,246,.25);
-  color:rgba(30,64,175,1);
-}
-
-.hz-tabs{
-display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-  margin-top:10px;
-  align-items:center;
-}
-
-.hz-tabs--small{
-gap:6px; margin-top:6px;
-}
-
-.hz-tab{
-appearance:none;
-  cursor:pointer;
-  border:1px solid rgba(15,23,42,.14);
-  background:rgba(255,255,255,.85);
-  color:#0f172a;
-  padding:8px 12px;
-  border-radius:999px;
-  font-weight:800;
-  font-size:.84rem;
-  line-height:1;
-  letter-spacing:.01em;
-  transition:transform .06s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;
-}
-
-.hz-tab:hover{
-background:rgba(2,132,199,.06); border-color:rgba(2,132,199,.35);
-}
-
-.hz-tab:active{
-transform:translateY(1px);
-}
-
-.hz-tab.is-active{
-background:rgba(2,132,199,.12);
-  border-color:rgba(2,132,199,.55);
-  box-shadow:0 1px 0 rgba(2,132,199,.18);
-}
+  .hz-grid {
+    overflow-x: auto;
+  }
 
 
-
-/* View toggle (segmented control) — visually distinct from the Q1/Q2/Q3/Q4 tabs */
-.hz-viewToggle{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  margin-left:auto;
-}
-.hz-viewToggle__label{
-  font-weight:900;
-  font-size:.78rem;
-  color:rgba(15,23,42,.72);
-  letter-spacing:.02em;
-  text-transform:uppercase;
-}
-.hz-viewToggle__group{
-  display:inline-flex;
-  align-items:stretch;
-  border:1px solid rgba(15,23,42,.16);
-  background:rgba(255,255,255,.72);
-  border-radius:999px;
-  overflow:hidden;
-  box-shadow:0 8px 18px rgba(0,0,0,.04);
-}
-.hz-viewBtn{
-  appearance:none;
-  border:0;
-  background:transparent;
-  padding:7px 10px;
-  display:inline-flex;
-  align-items:center;
-  gap:7px;
-  cursor:pointer;
-  font-weight:850;
-  font-size:.82rem;
-  color:#0f172a;
-  line-height:1;
-  transition:background .15s ease, transform .06s ease, box-shadow .15s ease;
-}
-.hz-viewBtn + .hz-viewBtn{
-  border-left:1px solid rgba(15,23,42,.12);
-}
-.hz-viewBtn__ic{
-  font-size:.95rem;
-  opacity:.9;
-}
-.hz-viewBtn.is-active{
-  background:rgba(2,132,199,.14);
-  box-shadow:inset 0 0 0 1px rgba(2,132,199,.22);
-}
-.hz-viewBtn:active{
-  transform:translateY(1px);
-}
-.hz-viewBtn:focus{
-  outline:none;
-  box-shadow:0 0 0 3px rgba(2,132,199,.18);
+.hz-grid2{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
 }
 @media (max-width: 992px){
+  .hz-grid2{ grid-template-columns: 1fr; }
+}
+
+  .hz-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+
+  .hz-controlsCompact .hz-controlsRows{
+    display:flex;
+    flex-direction:column;
+    gap:0.75rem;
+  }
+  .hz-controlsCompact .hz-row{
+    display:grid;
+    gap:0.75rem;
+    align-items:end;
+  }
+  .hz-controlsCompact .hz-row--2{
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hz-controlsCompact .hz-row--3{
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  
+  .hz-controlsCompact .hz-row--3.hz-row--grow{
+    grid-template-columns: minmax(190px, 1fr) minmax(280px, 2fr) minmax(190px, 1fr);
+  }
+  .hz-controlsCompact .hz-field{ min-width:0; }
+
+  @media (max-width: 992px){
+    .hz-controlsCompact .hz-row--3{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .hz-controlsCompact .hz-row--3.hz-row--grow{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 576px){
+    .hz-controlsCompact .hz-row--2,
+    .hz-controlsCompact .hz-row--3{
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Q1 toolbar (Chart/Table + toggles) */
+  .hz-qToolbar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:0.75rem;
+    align-items:flex-end;
+    justify-content:space-between;
+    margin-bottom:0.75rem;
+  }
   .hz-viewToggle{
-    width:100%;
-    margin-left:0;
-    justify-content:space-between;
+    display:flex;
+    gap:0.75rem;
+    align-items:center;
+    flex-wrap:wrap;
   }
-  .hz-viewToggle__group{
-    flex:1;
-    justify-content:space-between;
+  .hz-inlineToggles{
+    display:flex;
+    gap:0.75rem;
+    align-items:flex-end;
+    flex-wrap:wrap;
   }
-  .hz-viewBtn{
-    flex:1;
-    justify-content:center;
+  .hz-miniSetting{
+    display:flex;
+    gap:0.4rem;
+    align-items:center;
   }
-  .hz-viewBtn__tx{
-    display:none; /* icons-only on small screens */
+  .hz-miniSetting > span{
+    color: var(--bs-secondary-color, #6c757d);
+    font-size: 0.9rem;
+    white-space:nowrap;
   }
+  .hz-miniSetting--range input[type="range"]{
+    min-width: 180px;
+  }
+  @media (max-width: 576px){
+    .hz-miniSetting{
+      width:100%;
+      justify-content:space-between;
+    }
+  }
+
+.hidden { display: none !important; }
+
+
+.hz-controlsCompact{
+  font-family: var(--bs-body-font-family, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif);
+  font-size: 14px;
+}
+.hz-controlsCompact .form-select,
+.hz-controlsCompact .form-control,
+.hz-controlsCompact .form-range,
+.hz-controlsCompact .form-check-input,
+.hz-controlsCompact select,
+.hz-controlsCompact input,
+.hz-controlsCompact textarea,
+.hz-controlsCompact button{
+  font-family: inherit !important;
+  font-size: inherit !important;
+}
+
+.hz-controlsCompact .choices,
+.hz-controlsCompact .choices *{
+  font-family: inherit !important;
+  font-size: inherit !important;
 }
 
 
-/* Navigation bar: makes “Breakdown” tabs and “View” toggle feel distinct and intuitive */
-.hz-navBar{
-  display:flex;
-  gap:14px;
-  align-items:flex-end;
-  flex-wrap:wrap;
-  margin-top:10px;
-}
-.hz-navBar__group{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-  min-width:0;
-}
-.hz-navBar__group--right{
-  margin-left:auto;
-  align-items:flex-end;
-}
-.hz-navBar__label{
-  font-weight:950;
-  font-size:.76rem;
-  color:rgba(15,23,42,.70);
-  letter-spacing:.03em;
-  text-transform:uppercase;
-}
-
-/* Make the question tabs look like a “tab strip” instead of another segmented control */
-.hz-tabs{
-  margin-top:0;
-  gap:6px;
-  padding:6px;
-  border-radius:14px;
-  border:1px solid rgba(15,23,42,.10);
-  background:rgba(15,23,42,.04);
-}
-.hz-tab{
-  border:0;
-  background:transparent;
-  padding:8px 10px;
-  border-radius:12px;
-  font-weight:900;
-  font-size:.82rem;
-}
-.hz-tab.is-active{
-  background:rgba(255,255,255,.92);
-  box-shadow:0 1px 0 rgba(15,23,42,.12);
-  outline:1px solid rgba(2,132,199,.28);
-}
-.hz-tab:hover{
-  background:rgba(255,255,255,.75);
-}
-
-/* Make view toggle slightly more compact so it reads like a toolbar */
-.hz-viewToggle{
-  margin-left:0;
-}
-.hz-viewToggle__group{
-  border-radius:14px;
-}
-.hz-viewBtn{
-  font-size:.80rem;
-  padding:7px 9px;
-}
-
-/* On small screens, stack nicely */
-@media (max-width: 680px){
-  .hz-navBar__group--right{ width:100%; align-items:flex-start; }
-  .hz-viewToggle{ width:100%; justify-content:space-between; }
-  .hz-viewToggle__group{ width:100%; justify-content:space-between; }
-  .hz-viewBtn{ flex:1; justify-content:center; }
-}
-.hz-tab:focus{
-outline:none; box-shadow:0 0 0 3px rgba(2,132,199,.20);
-}
-
-.hz-grid2{
-display:grid;grid-template-columns:1fr 1fr;gap:12px
-}
-
-@media (max-width: 900px){
-.hz-grid2{
-grid-template-columns:1fr
-}
-}
-
-.hz-legendRow{
-display:flex;
-  justify-content:flex-end;
-  align-items:center;
-  margin:6px 0 10px;
-}
-
-.hz-legendRow .plot-legend{
-font-size:.82rem;
-}
-
-.hz-grid2--equal{
-align-items:start;
-}
-
-.hz-mini{
-background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:12px
-}
-
-.hz-mini__title{
-font-size:12px;color:#cbd5e1;margin:0 0 8px 2px;font-weight:600;letter-spacing:.02em;text-transform:uppercase
-}
-
-.hz-card__tabs{
-margin-top:8px
-}
-
-.hz-pill{
-display:inline-flex; align-items:center; gap:8px; position:relative;
-}
-
-.hz-pill__spin{
-width:12px; height:12px; border-radius:999px;
-  border:2px solid rgba(0,0,0,.18);
-  border-top-color: rgba(0,0,0,.55);
-  animation: hzSpin .8s linear infinite;
-  flex:0 0 auto;
-}
-
-@keyframes hzSpin{
-to{
-transform: rotate(360deg);
-}
-}
-
-.hz-chartWrap{
-position:relative; min-height:340px;
-}
-
-.hz-chartWrap--busy::before{
-content:"";
-  position:absolute; inset:0;
-  background:rgba(255,255,255,.62);
+.hz-chartWrap { position: relative; min-height: 340px; }
+.hz-chartWrap--busy::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.62);
   backdrop-filter: blur(2px);
-  border-radius:14px;
+  border-radius: 14px;
   z-index: 10;
 }
-
-.hz-chartWrap--busy::after{
-content:"Updating chart…";
-  position:absolute; left:50%; top:50%;
-  transform:translate(-50%,-50%);
-  padding:10px 14px;
-  border-radius:999px;
-  border:1px solid rgba(0,0,0,.12);
-  background:rgba(255,255,255,.9);
-  box-shadow:0 10px 26px rgba(0,0,0,.10);
-  font-weight:900;
-  font-size:.9rem;
+.hz-chartWrap--busy::after {
+  content: "Updating chart…";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.10);
+  font-weight: 900;
+  font-size: 0.9rem;
   z-index: 11;
-}
-
-.hz-grid{
-display:grid; gap:14px;
-}
-
-.hz-grid--2{
-grid-template-columns:1fr 1fr;
-}
-
-@media (max-width: 980px){
-.hz-grid--2{
-grid-template-columns:1fr;
-}
-}
-
-.hz-grid--auto{
-grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items:end;
-}
-
-.hz-grid--tight{
-gap:10px;
-}
-
-.hz-subtitle{
-font-weight:900; font-size:.82rem; color:rgba(0,0,0,.72); margin: 10px 0 6px 0;
-}
-
-.hz-geoInline{
-margin-top:10px; padding-top:10px; border-top:1px dashed rgba(0,0,0,.12);
-}
-
-.hz-section{
-border:1px solid rgba(0,0,0,.06);
-  background:rgba(0,0,0,.012);
-  border-radius:16px;
-  padding:12px;
-}
-
-.hz-section__title{
-font-weight:900;
-  font-size:.92rem;
-  margin:0 0 8px 0;
-}
-
-.hz-field{
-margin:8px 0;
-}
-
-.hz-muted{
-color:var(--muted); font-size:.86rem; margin-top:8px;
-}
-
-.hz-card select, .hz-card input[type="text"], .hz-card input[type="number"]{
-width:100%;
-  max-width:100%;
-  box-sizing:border-box;
-}
-
-.hz-card select{
-border:1px solid rgba(0,0,0,.12);
-  border-radius:12px;
-  padding:8px 10px;
-  background:#fff;
-}
-
-.hz-card select[multiple]{
-min-height:180px;
-  max-height:260px;
-  overflow:auto;
-}
-
-.hz-card input[type="text"], .hz-card input[type="number"]{
-border:1px solid rgba(0,0,0,.12);
-  border-radius:12px;
-  padding:8px 10px;
-}
-
-.hz-btn{
-border:1px solid rgba(0,0,0,.12);
-  background:rgba(0,0,0,.02);
-  border-radius:999px;
-  padding:8px 12px;
-  font-weight:800;
-  cursor:pointer;
-}
-
-.hz-btn:hover{
-background:rgba(0,0,0,.04);
-}
-
-
-.hz-btn--sm{
-  padding:6px 10px;
-  font-size:12px;
-}
-
-.hz-select{
-  border:1px solid rgba(0,0,0,.12);
-  background:rgba(255,255,255,.85);
-  border-radius:999px;
-  padding:6px 10px;
-  font-weight:800;
-  font-size:12px;
-}
-
-.hz-select:focus{
-  outline:none;
-  box-shadow:0 0 0 3px rgba(59,130,246,.18);
-}
-
-.hz-recordsBar{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:12px;
-  margin:10px 0 10px 0;
-  flex-wrap:wrap;
-}
-
-.hz-recordsBar__left{
-  display:flex;
-  gap:8px;
-  align-items:center;
-  flex-wrap:wrap;
-}
-
-.hz-recordsBar__right{
-  display:flex;
-  gap:8px;
-  align-items:center;
-}
-
-.hz-pager{
-  display:flex;
-  gap:8px;
-  align-items:center;
-}
-
-.hz-pager__label{
-  font-weight:900;
-  font-size:12px;
-  color:rgba(0,0,0,.72);
-}
-
-
-.hz-split{
-display:grid; grid-template-columns: 1fr 1fr; gap:12px;
-}
-
-@media (max-width: 900px){
-.hz-split{
-grid-template-columns: 1fr;
-}
-}
-
-.hz-sideCard{
-border:1px solid var(--card-bd);
-  border-radius:14px;
-  padding:12px;
-  background:rgba(255,255,255,.7);
-}
-
-.hz-sideCard__title{
-font-weight:700; font-size:13px; margin-bottom:8px;
-}
-
-.hz-sideCard__sub{
-color:var(--muted); font-size:12px; margin-top:6px;
-}
-
-.hz-sideCard__kv{
-display:grid; grid-template-columns: 96px 1fr; gap:6px 10px; margin-top:8px;
-}
-
-.hz-sideCard__kv .k{
-color:var(--muted); font-size:12px;
-}
-
-.hz-sideCard__kv .v{
-font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
-
-.hz-card select, .hz-card input[type="text"], .hz-card input[type="search"], .hz-card input[type="url"]{
-width:100% !important;
-  max-width:100%;
-}
-
-.hz-ms{
-display:flex; flex-direction:column; gap:10px;
-}
-
-.hz-ms__top{
-display:flex; gap:8px; align-items:center; flex-wrap:nowrap;
-}
-
-@media (max-width: 900px){
-.hz-ms__top{
-flex-wrap:wrap;
-}
-}
-
-.hz-ms__search{
-flex:1;
-  min-width: 180px;
-  padding:10px 12px;
-  border:1px solid var(--card-bd);
-  border-radius:12px;
-  background:#fff;
-}
-
-.hz-btn{
-border:1px solid var(--card-bd);
-  background:rgba(0,0,0,.02);
-  border-radius:12px;
-  padding:8px 10px;
-  cursor:pointer;
-}
-
-.hz-btn:hover{
-box-shadow:0 2px 10px rgba(0,0,0,.06);
-}
-
-.hz-ms__chips{
-display:flex; gap:6px; flex-wrap:wrap;
-}
-
-.hz-chip{
-display:inline-flex; align-items:center; gap:6px;
-  padding:6px 10px;
-  border-radius:999px;
-  border:1px solid var(--card-bd);
-  background:rgba(255,255,255,.9);
-  font-size:12px;
-}
-
-.hz-chip button{
-border:none; background:transparent; cursor:pointer;
-  font-size:14px; line-height:1; padding:0 2px; opacity:.7;
-}
-
-.hz-chip button:hover{
-opacity:1;
-}
-
-.hz-ms__list{
-border:1px solid var(--card-bd);
-  border-radius:14px;
-  padding:8px;
-  max-height: 260px;
-  overflow:auto;
-  background:#fff;
-}
-
-.hz-ms__item{
-display:flex; align-items:center; gap:10px;
-  padding:8px 8px;
-  border-radius:10px;
-  cursor:pointer;
-}
-
-.hz-ms__item:hover{
-background:rgba(0,0,0,.03);
-}
-
-.hz-ms__item input{
-width:16px; height:16px;
-}
-
-.hz-ms__meta{
-color:var(--muted); font-size:12px; margin-left:auto;
-}
-
-.hz-ms__empty{
-color:var(--muted); padding:10px;
-}
-
-.hz-width-sensor{
-width:100%; height:0; overflow:hidden;
-}
-
-html, body{
-max-width:100%; overflow-x:hidden;
-}
-
-main.content, .content{
-max-width:100%;
-}
-
-.app{
-max-width: min(1240px, 100%);
-  margin: 0 auto;
-  padding: 0 14px;
-}
-
-.app__stack{
-display:flex; flex-direction:column; gap:14px;
-}
-
-.hz-card, .card{
-max-width:100%; min-width:0;
-}
-
-.hz-grid, .hz-split{
-min-width:0;
-}
-
-.hz-grid--2{
-grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.hz-split{
-display:grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap:12px;
-}
-
-@media (max-width: 980px){
-.hero{
-grid-template-columns: 1fr;
-}
-
-.hz-grid--2{
-grid-template-columns: 1fr;
-}
-
-.hz-split{
-grid-template-columns: 1fr;
-}
-}
-
-.hz-width-sensor{
-width:100%; height:1px;
-}
-
-pre, code{
-max-width:100%;
-}
-
-pre{
-overflow:auto;
-}
-
-.hz-sideCard__kv code, .hz-kv__v code{
-word-break: break-word; white-space: normal;
-}
-
-.hz-topnav{
-position: sticky;
-  top: 0;
-  z-index: 50;
-  display:flex;
-  gap:10px;
-  align-items:center;
-  padding:10px 12px;
-  margin: 0 0 12px 0;
-  background: rgba(255,255,255,.82);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--card-bd);
-  border-radius: 999px;
-  box-shadow: 0 8px 18px rgba(0,0,0,.06);
-}
-
-.hz-topnav a{
-text-decoration:none;
-  font-weight:600;
-  font-size:13px;
-  color: rgba(0,0,0,.78);
-  padding:8px 10px;
-  border-radius:999px;
-}
-
-.hz-topnav a:hover{
-background: rgba(0,0,0,.05);
-}
-
-.hz-topnav .hz-topnav__spacer{
-flex:1;
-}
-
-.hz-topnav .hz-pill{
-margin-left:auto;
-}
-
-.hz-ms{
-border:1px solid var(--card-bd);
-  background: rgba(255,255,255,.75);
-  border-radius: 14px;
-  padding:10px;
-}
-
-.hz-ms__top{
-display:flex;
-  gap:8px;
-  align-items:center;
-  flex-wrap:nowrap;
-}
-
-@media (max-width: 900px){
-.hz-ms__top{
-flex-wrap:wrap;
-}
-}
-
-.hz-ms__search{
-flex: 1 1 260px;
-  padding:10px 12px;
-  border-radius: 12px;
-  border: 1px solid var(--card-bd);
-  background: #fff;
-}
-
-.hz-ms__search:focus{
-outline: 2px solid rgba(0,0,0,.18); outline-offset: 2px;
-}
-
-.hz-ms__chips{
-display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-  margin-top:10px;
-}
-
-.hz-chip{
-display:inline-flex;
-  align-items:center;
-  gap:10px;
-  padding:8px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--card-bd);
-  background: rgba(0,0,0,.03);
-}
-
-.hz-chip button{
-border:none;
-  background: rgba(0,0,0,.08);
-  width:22px; height:22px;
-  border-radius: 999px;
-  cursor:pointer;
-}
-
-.hz-chip button:hover{
-background: rgba(0,0,0,.14);
-}
-
-.hz-ms__list{
-margin-top:10px;
-  border-top: 1px dashed rgba(0,0,0,.12);
-  padding-top:10px;
-  max-height: 260px;
-  overflow:auto;
-}
-
-.hz-ms__item{
-display:flex;
-  align-items:center;
-  gap:10px;
-  padding:8px 8px;
-  border-radius: 10px;
-}
-
-.hz-ms__item:hover{
-background: rgba(0,0,0,.04);
-}
-
-.hz-ms__item input{
-transform: scale(1.05);
-}
-
-:root{
---hz-font-sm: 12.5px;
-  --hz-font-md: 13.5px;
-  --hz-font-lg: 14.5px;
-  --hz-control-pad-y: 8px;
-  --hz-control-pad-x: 10px;
-}
-
-.hz-field form{
-width:100%;
-}
-
-.hz-field form > label,
-.hz-field label{
-display:block;
-  font-size: var(--hz-font-sm);
-  font-weight: 800;
-  letter-spacing: .01em;
-  color: rgba(0,0,0,.72);
-  margin: 0 0 6px 0;
-}
-
-.hz-field select,
-.hz-field input[type="text"],
-.hz-field input[type="search"],
-.hz-field input[type="number"]{
-width: 100%;
-  font-size: var(--hz-font-md);
-  line-height: 1.25;
-  padding: var(--hz-control-pad-y) var(--hz-control-pad-x);
-  border-radius: 14px;
-  border: 1px solid rgba(0,0,0,.12);
-  background: rgba(255,255,255,.9);
-}
-
-.hz-field select{
-appearance: none;
-  background-image:
-    linear-gradient(45deg, transparent 50%, rgba(0,0,0,.55) 50%),
-    linear-gradient(135deg, rgba(0,0,0,.55) 50%, transparent 50%);
-  background-position:
-    calc(100% - 16px) calc(50% - 2px),
-    calc(100% - 11px) calc(50% - 2px);
-  background-size: 6px 6px, 6px 6px;
-  background-repeat: no-repeat;
-  padding-right: 30px;
-}
-
-.hz-field select option{
-font-size: var(--hz-font-md);
-}
-
-.hz-ms{
-font-size: var(--hz-font-md);
-}
-
-.hz-ms__top{
-gap: 8px;
-}
-
-.hz-ms__label{
-font-size: var(--hz-font-sm);
-  font-weight: 800;
-  color: rgba(0,0,0,.72);
-}
-
-.hz-ms__search{
-font-size: var(--hz-font-md);
-  padding: var(--hz-control-pad-y) var(--hz-control-pad-x);
-  border-radius: 14px;
-}
-
-.hz-ms__btns{
-gap: 8px;
-}
-
-.hz-btn{
-font-size: var(--hz-font-sm);
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,.12);
-  background: rgba(255,255,255,.9);
-}
-
-.hz-btn:hover{
-filter: brightness(0.98);
-}
-
-.hz-btn:active{
-transform: translateY(1px);
-}
-
-.hz-ms__chips{
-display:flex;
-  flex-wrap:wrap;
-  gap: 6px;
-  padding: 6px 6px;
-  margin-top: 8px;
-  border-radius: 14px;
-  border: 1px dashed rgba(0,0,0,.16);
-  background: rgba(255,255,255,.7);
-  min-height: 34px;
-  max-height: 92px;
-  overflow:auto;
-}
-
-.hz-chip{
-font-size: 11.5px;
-  padding: 6px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,.10);
-  background: rgba(0,0,0,.04);
-}
-
-.hz-chip button{
-width: 18px;
-  height: 18px;
-  border-radius: 999px;
-}
-
-.hz-ms__list{
-margin-top: 10px;
-  padding: 8px;
-  border-radius: 16px;
-}
-
-.hz-ms__item{
-padding: 6px 6px;
-  border-radius: 12px;
-  font-size: var(--hz-font-md);
-}
-
-.hz-ms__item input{
-width: 16px;
-  height: 16px;
-}
-
-@media (min-width: 980px){
-.hz-ms__list{
-display:grid;
-    grid-template-columns: repeat(2, minmax(220px, 1fr));
-    gap: 6px 12px;
-    align-items:start;
-}
-
-.hz-ms__item{
-margin: 0;
-}
-}
-
-.hz-card__sub{
-font-size: 13px;
-}
-
-
-
-/* --- Dashboard tabs row (Question tabs + View mode) --- */
-.hz-card__tabs--row{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  flex-wrap:wrap;
-}
-.hz-tabsWrap{display:flex; align-items:center;}
-.hz-tabsWrap--right{justify-content:flex-end;}
-
-/* --- Wider split for Chart + Table --- */
-.hz-split--wide{
-  grid-template-columns: 1.35fr 1fr;
-}
-
-/* --- Table host --- */
-.hz-tableWrap{
-  position:relative;
-  min-height: 560px;
-  padding: 6px;
-}
-.hz-tableWrap--busy::before{
-  content:"";
-  position:absolute; inset:0;
-  background:rgba(255,255,255,.62);
+  white-space: nowrap;
+}
+
+.hz-tableWrap { position: relative; min-height: 560px; padding: 6px; font-size: 12px; }
+.hz-tableWrap--busy::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.62);
   backdrop-filter: blur(2px);
-  border-radius:14px;
+  border-radius: 14px;
   z-index: 10;
 }
-.hz-tableWrap--busy::after{
-  content:"Updating table…";
-  position:absolute;
-  top:14px; right:14px;
-  background:rgba(15,23,42,.85);
-  color:#fff;
-  font-size:12px;
-  font-weight:800;
-  padding:6px 10px;
-  border-radius:999px;
+.hz-tableWrap--busy::after {
+  content: "Updating table…";
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 6px 10px;
+  border-radius: 999px;
   z-index: 11;
+  white-space: nowrap;
 }
 
-/* Grid.js tweaks (subtle) */
-.hz-tableWrap .gridjs-container{
-  box-shadow:none;
-}
-.hz-tableWrap .gridjs-head{
-  background:rgba(248,250,252,.8);
-}
-
-.hz-stack{
-  display:flex;
-  flex-direction:column;
-  gap:12px;
-}
-
-.hz-tableWrap{
-  font-size:12px;
-}
-.hz-tableWrap .gridjs-table th,
-.hz-tableWrap .gridjs-table td{
-  font-size:12px;
-  line-height:1.25;
-  padding:6px 8px;
-}
-.hz-tableWrap .gridjs-search input,
-.hz-tableWrap .gridjs-pagination,
-.hz-tableWrap .gridjs-summary{
-  font-size:12px;
+@media (prefers-color-scheme: dark) {
+  .hz-chartWrap--busy::before,
+  .hz-tableWrap--busy::before {
+    background: rgba(0, 0, 0, 0.35);
+  }
+  .hz-chartWrap--busy::after {
+    background: rgba(17, 24, 39, 0.9);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  }
+  .hz-tableWrap--busy::after {
+    background: rgba(17, 24, 39, 0.9);
+  }
 }
 
-/* Map view */
-.hz-mapWrap { min-height: 460px; }
-.hz-mapWrap--busy { opacity: 0.7; }
-.hz-mapPlot { width: 100%; overflow: hidden; }
-.hz-mapPlot svg { max-width: 100%; height: auto; display: block; }
-.hz-mapMetric { display: inline-flex; align-items: center; gap: 8px; }
-.hz-mapSub { margin-top: -2px; margin-bottom: 10px; }
-.hz-miniControls .observablehq--inspect { display: none; }
 
+.hz-qHeading{
+  margin: 0 0 .5rem 0;
+}
 </style>
 ```
 
+# `{ojs} heading1` {#overview}
+
+```{ojs}
+md`${_lang(nbText.sections.intro.text)}`;
+```
+
+# `{ojs} q1Title` {#q1}
+
+```{ojs}
+md`${_lang(nbText.sections.q1.introText)}`;
+```
+
 ```{=html}
-<div id="hz-app"></div>
+<div id="hz-dashboard"></div>
 ```
 
 ```{ojs}
@@ -1607,8 +826,6 @@ hz_nbMeta.ok
     </div>`
 ```
 
-
-
 ```{ojs}
 //| output: false
 // Build a lookup map for fast key -> entry access
@@ -1728,7 +945,6 @@ hz_varLabel = (() => {
   return hz_formatVarShort(s)
 })()
 
-
 // Absolute axis label used by charts (when not in Relative % mode)
 hz_varLabelAbs = (() => {
   const base = String(hz_varLabel ?? '').trim()
@@ -1771,6 +987,12 @@ hz_defaultSeverity = hz_severities.find(s => String(s).toLowerCase() === "severe
 
 hz_defaultModel1 = hz_models.find(m => /historic/i.test(String(m))) ?? hz_models[0] ?? null
 hz_defaultModel2 = hz_models.find(m => /ensemble/i.test(String(m))) ?? hz_models.find(m => String(m) !== String(hz_defaultModel1)) ?? hz_defaultModel1
+hz_defaultScen1 = (hz_scenXTime ?? []).includes("historic") ? "historic" : ((hz_scenXTime ?? [])[0] ?? null)
+hz_defaultScen2 = {
+  const xs = hz_scenXTime ?? []
+  const left = hz_defaultScen1
+  return xs.find(d => String(d) !== String(left)) ?? left ?? null
+}
 
 ({
   varShorts: hz_varShorts,
@@ -1778,6 +1000,12 @@ hz_defaultModel2 = hz_models.find(m => /ensemble/i.test(String(m))) ?? hz_models
   models: hz_models,
   severities: hz_severities
 })
+```
+
+```{ojs}
+//| output: false
+// Label used in compact summaries / headers
+hz_periodLabel = (typeof hz_formatPeriod === 'function') ? hz_formatPeriod(hz_period) : String(hz_period ?? '')
 ```
 
 ```{ojs}
@@ -1806,6 +1034,13 @@ viewof hz_severity = Inputs.select(hz_severities, {
   format: hz_formatSeverity,
   value: hz_defaultSeverity
 })
+```
+
+```{ojs}
+//| output: false
+hz_severityLabel = (typeof hz_formatSeverity === "function")
+  ? hz_formatSeverity(hz_severity)
+  : String(hz_severity ?? "")
 ```
 
 ```{ojs}
@@ -1862,12 +1097,12 @@ hz_scenXTime = [
 ```{ojs}
 //| output: false
 // Chart toggles
-viewof hz_relative = Inputs.toggle({ label: "Show % (relative values)", value: false })
+viewof hz_relative = Inputs.toggle({ label: "", value: false })
 ```
 
 ```{ojs}
 //| output: false
-viewof hz_difference = Inputs.toggle({ label: "Show difference (Right − Left)", value: false })
+viewof hz_difference = Inputs.toggle({ label: "", value: false })
 ```
 
 ```{ojs}
@@ -1880,7 +1115,7 @@ hz_methodLabel = (v) => ({
   crop_specific: "Crop-specific (SPAM crops + GLW livestock)"
 }[v] ?? v)
 
-viewof hz_method = Inputs.radio(hz_methodOptions, {
+viewof hz_method = Inputs.select(hz_methodOptions, {
   label: "Hazard method:",
   value: "generic",
   format: hz_methodLabel
@@ -1888,65 +1123,55 @@ viewof hz_method = Inputs.radio(hz_methodOptions, {
 ```
 
 ```{ojs}
-//| output: false
-// Commodity metadata from SPAM (crops) and GLW4 (livestock)
-hz_spamCodesUrl = "https://raw.githubusercontent.com/AdaptationAtlas/hazards_prototype/main/metadata/SpamCodes.csv"
+ //| output: false
 
-hz_spamCodes = {
-  try {
-    const txt = await (await fetch(hz_spamCodesUrl)).text()
-    const rows = csvParse(txt)
+ hz_spamCropsMapUrl = "/data/shared/MapSpamCrops.json"
+ hz_spamCropsMap = await (await fetch(hz_spamCropsMapUrl)).json()
 
-    const norm = (s) => String(s ?? "")
-      .trim()
-      .toLowerCase()
-      .replaceAll("/", "-")
-      .replaceAll("&", "and")
-      .replaceAll(" ", "-")
-      .replaceAll("--", "-")
+ 
+ hz_spamCodes = {
+   const j = hz_spamCropsMap ?? {}
 
-    const crops = rows
-      .map(r => r.Fullname ?? r.fullname ?? r.NAME ?? r.name ?? "")
-      .filter(Boolean)
-      .map(norm)
+   const collectIds = (key) => (j?.[key]?.items ?? [])
+     .map(d => String(d?.id ?? "").trim())
+     .filter(Boolean)
 
-    // A light categorization
-    const cereals = new Set([
-      "maize","rice","wheat","barley","sorghum","millet","oats","rye","triticale","teff"
-    ])
-    const legumes = new Set([
-      "beans","cowpea","chickpea","lentil","pigeonpea","soybean","groundnuts","peas","bambara-beans"
-    ])
-    const rootsTubers = new Set([
-      "cassava","potato","sweet-potato","yam","taro","cocoyam"
-    ])
+   // "crops" = all non-livestock categories in this JSON
+   const cropCats = ["cereals", "legumes", "rootsTuber", "fruitVeg", "nonEdible"]
+   const crops = cropCats.flatMap(collectIds)
 
-    const group = (name) => (c) => {
-      if (name === "cereals") return cereals.has(c)
-      if (name === "legumes") return legumes.has(c)
-      if (name === "roots_tubers") return rootsTubers.has(c)
-      return true
-    }
+   // Groups used by the UI ("roots_tubers" naming kept for compatibility)
+   const groups = {
+     cereals: collectIds("cereals"),
+     legumes: collectIds("legumes"),
+     roots_tubers: collectIds("rootsTuber")
+   }
 
-    return {
-      ok: true,
-      crops: Array.from(new Set(crops)).sort(),
-      groups: {
-        cereals: Array.from(new Set(crops.filter(group("cereals")))).sort(),
-        legumes: Array.from(new Set(crops.filter(group("legumes")))).sort(),
-        roots_tubers: Array.from(new Set(crops.filter(group("roots_tubers")))).sort()
-      }
-    }
-  } catch (e) {
-    hz_addError("Load SpamCodes.csv", e)
-    return { ok:false, crops: [], groups: { cereals: [], legumes: [], roots_tubers: [] } }
-  }
-}
+   // Labels lookup: id -> localized label (falls back to en / fr / id)
+   const labels = {}
+   for (const v of Object.values(j)) {
+     for (const it of (v?.items ?? [])) {
+       const id = String(it?.id ?? "").trim()
+       if (!id) continue
+       const lab = it?.label ?? {}
+       const label = (typeof _lang === "function")
+         ? _lang(lab)
+         : (lab?.en ?? lab?.fr ?? id)
+       labels[id] = label
+     }
+   }
 
-// GLW4 livestock list 
-hz_livestock = [
-  "cattle","chicken","duck","goat","pig","sheep"
-]
+   return {
+     crops: [...new Set(crops)],
+     groups,
+     labels
+   }
+ }
+
+ // Livestock list (from same JSON)
+ hz_livestock = (hz_spamCropsMap?.livestock?.items ?? [])
+   .map(d => String(d?.id ?? "").trim())
+   .filter(Boolean)
 ```
 
 ```{ojs}
@@ -1974,7 +1199,7 @@ hz_commodityGroupLabel = (v) => ({
   custom: "Custom (pick manually)"
 }[v] ?? v)
 
-viewof hz_commodityGroup = Inputs.select(hz_commodityGroupOptions, {
+viewof hz_commodityGroup = Inputs.select(hz_commodityGroupOptions ?? [], {
   label: "Group",
   value: "crops",
   format: hz_commodityGroupLabel
@@ -1990,138 +1215,72 @@ hz_selectedCommodGroup = hz_commodityGroup
 //| output: false
 hz_commodityOptions = {
   const g = hz_commodityGroup
-  if (g === "livestock") return hz_livestock
-  if (g === "crops") return hz_spamCodes.crops
-  if (g === "cereals") return hz_spamCodes.groups.cereals
-  if (g === "legumes") return hz_spamCodes.groups.legumes
-  if (g === "roots_tubers") return hz_spamCodes.groups.roots_tubers
+  if (g === "livestock") return hz_livestock ?? []
+  if (g === "crops") return (hz_spamCodes?.crops ?? [])
+  if (g === "cereals") return (hz_spamCodes?.groups?.cereals ?? [])
+  if (g === "legumes") return (hz_spamCodes?.groups?.legumes ?? [])
+  if (g === "roots_tubers") return (hz_spamCodes?.groups?.roots_tubers ?? [])
   // default list for "all" and "custom"
-  return [...hz_spamCodes.crops, ...hz_livestock].filter(Boolean).sort()
+  return [...(hz_spamCodes?.crops ?? []), ...(hz_livestock ?? [])].filter(Boolean).sort()
 }
 
-hz_commodityLabelOf = (v) => hz_titleCase(v)
+hz_commodityLabelOf = (v) => {
+  const id = String(v ?? "").trim()
+  const label = hz_spamCodes?.labels?.[id]
+  return label ?? hz_titleCase(id.replaceAll("-", " "))
+}
 
-//multi-select: search + chips + checklist
+// multi-select (enhanced): filter + chips + checklist (shared component)
 viewof hz_commodities = {
   const disabled = (hz_commodityGroup === "all")
-  const options = (hz_commodityOptions ?? []).map(v => ({
-    value: v,
-    label: hz_commodityLabelOf(v)
-  }))
 
-  const form = html`<form class="hz-ms">
-    <div class="hz-ms__top">
-      <input class="hz-ms__search" type="search" placeholder="Search commodities (e.g., maize, cattle, cassava)..." ${disabled ? "disabled" : ""}/>
-      <button class="hz-btn" type="button" data-act="all" ${disabled ? "disabled" : ""}>Select all</button>
-      <button class="hz-btn" type="button" data-act="none" ${disabled ? "disabled" : ""}>Clear</button>
-    </div>
-    <div class="hz-ms__chips"></div>
-    <div class="hz-ms__list"></div>
-    ${disabled ? html`<div class="hz-muted">All commodities selected. Choose a commodity group other than “All” to filter.</div>` : ""}
-  </form>`
-
-  const $search = form.querySelector(".hz-ms__search")
-  const $chips = form.querySelector(".hz-ms__chips")
-  const $list = form.querySelector(".hz-ms__list")
-  const $btnAll = form.querySelector('[data-act="all"]')
-  const $btnNone = form.querySelector('[data-act="none"]')
-
-  let selected = new Set([])
-
-  const emit = () => {
-    form.value = Array.from(selected)
-    form.dispatchEvent(new Event("input", { bubbles: true }))
-  }
-
-  const renderChips = () => {
-    $chips.replaceChildren()
-    if (selected.size === 0) return
-
-    for (const v of Array.from(selected)) {
-      const chip = html`<span class="hz-chip">
-        <span>${hz_commodityLabelOf(v)}</span>
-        <button type="button" aria-label="Remove">×</button>
-      </span>`
-      chip.querySelector("button").onclick = () => {
-        selected.delete(v)
-        render()
-        emit()
-      }
-      $chips.appendChild(chip)
+  // Normalize option values to strings to avoid showing [object Object]
+  const norm = (v) => {
+    if (v == null) return null
+    if (typeof v === "string" || typeof v === "number") return String(v)
+    if (typeof v === "object") {
+      return String(v.code ?? v.value ?? v.id ?? v.name ?? v.label ?? v.crop ?? v.commodity ?? "")
     }
+    return null
   }
 
-  const renderList = () => {
-    const q = String($search?.value ?? "").trim().toLowerCase()
-    const filtered = !q ? options : options.filter(o =>
-      o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)
-    )
+  const options = (hz_commodityOptions ?? [])
+    .map(norm)
+    .map(s => String(s ?? "").trim())
+    .filter(Boolean)
 
-    $list.replaceChildren()
+  const label = (typeof _lang === "function")
+    ? _lang({ en: "Commodities", fr: "Produits" })
+    : "Commodities"
 
-    if (filtered.length === 0) {
-      $list.appendChild(html`<div class="hz-ms__empty">No matches.</div>`)
-      return
-    }
+  // Avoid self-reference (circular definition) by not reading hz_commodities here.
+  const initial = disabled ? [] : []
 
-    for (const o of filtered) {
-      const checked = selected.has(o.value)
-      const row = html`<div class="hz-ms__item">
-        <input type="checkbox" ${checked ? "checked" : ""}/>
-        <div>${o.label}</div>
-      </div>`
+  const viewofSelect = Inputs.select(options, {
+    label,
+    multiple: true,
+    value: initial,
+    disabled,
+    format: hz_commodityLabelOf
+  })
 
-      const cb = row.querySelector("input")
-      const toggle = () => {
-        if (cb.checked) selected.add(o.value)
-        else selected.delete(o.value)
-        renderChips()
-        emit()
-      }
-      cb.onchange = toggle
-      row.onclick = (e) => {
-        if (e.target === cb) return
-        cb.checked = !cb.checked
-        toggle()
-      }
+  // enhancedMultiSelect expects the *view element* as the first argument.
+  const enhanced = enhancedMultiSelect(viewofSelect, {
+placeholder: "Search commodities…",
+    requireAtLeastOne: false,
+    maxHeight: 200,
+    width: "100%"
+  })
 
-      $list.appendChild(row)
-    }
-  }
+  // Ensure truly empty-by-default (no implicit first selection)
+  try {
+    const sel = enhanced.querySelector("select") || enhanced
+    Array.from(sel.options).forEach((o) => (o.selected = false))
+    sel.selectedIndex = -1
+    sel.dispatchEvent(new Event("input", { bubbles: true }))
+  } catch (_) {}
 
-  const render = () => {
-    if (disabled) {
-      selected = new Set([])
-      renderChips()
-      renderList()
-      emit()
-      return
-    }
-    renderChips()
-    renderList()
-  }
-
-  if ($btnAll) $btnAll.onclick = () => {
-    const q = String($search?.value ?? "").trim().toLowerCase()
-    const filtered = !q ? options : options.filter(o =>
-      o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)
-    )
-    for (const o of filtered) selected.add(o.value)
-    render()
-    emit()
-  }
-
-  if ($btnNone) $btnNone.onclick = () => {
-    selected.clear()
-    render()
-    emit()
-  }
-
-  if ($search) $search.oninput = () => renderList()
-
-  render()
-  emit()
-  return form
+  return enhanced
 }
 ```
 
@@ -2129,23 +1288,66 @@ viewof hz_commodities = {
 //| output: false
 // Final set of commodities used in SQL filter (array of crop strings)
 hz_selectedCommodities = {
+  // If user picks nothing, we still apply the selected Group as the default
+  // (e.g., Group = cereals => all cereals). This keeps the UI empty-by-default,
+  // but makes the query semantics match the group selection.
   const g = hz_commodityGroup
-  const picked = (hz_commodities ?? []).filter(Boolean)
 
-  if (g === "all") return hz_allCommodities
+  const opts = (hz_commodityOptions ?? [])
+    .map((v) => String(v).trim())
+    .filter(Boolean)
+  const optSet = new Set(opts)
 
-  // If user picked explicitly (custom / or after toggling group), trust that.
+  const pickedRaw = (hz_commodities ?? [])
+    .filter(Boolean)
+    .map((v) => String(v).trim())
+    .filter(Boolean)
+
+  // Prevent stale picks when changing groups (only keep picks in current options)
+  const picked = pickedRaw.filter((v) => optSet.has(v))
+
+  // User override
   if (picked.length) return picked
 
-  // Group defaults when nothing is manually picked
-  if (g === "livestock") return hz_livestock
-  if (g === "crops") return hz_spamCodes.crops
-  if (g === "cereals") return hz_spamCodes.groups.cereals
-  if (g === "legumes") return hz_spamCodes.groups.legumes
-  if (g === "roots_tubers") return hz_spamCodes.groups.roots_tubers
+  // Group defaults
+  if (g === "livestock") return (hz_livestock ?? []).slice()
+  if (g === "crops") return (hz_spamCodes?.crops ?? []).slice()
+  if (g === "cereals") return (hz_spamCodes?.groups?.cereals ?? []).slice()
+  if (g === "legumes") return (hz_spamCodes?.groups?.legumes ?? []).slice()
+  if (g === "roots_tubers") return (hz_spamCodes?.groups?.roots_tubers ?? []).slice()
 
-  // Custom with nothing picked → all commodities
-  return hz_allCommodities
+  // "all" with no picks => include everything
+  if (g === "all") return hz_allCommodities ?? []
+
+  // "custom" with no picks => no filter (empty selection)
+  if (g === "custom") return []
+
+  // fallback
+  return hz_allCommodities ?? []
+}
+```
+
+```{ojs}
+//| output: false
+hz_selectedCommoditiesForReq = {
+  const g = hz_commodityGroup
+  const picked = (hz_selectedCommodities ?? []).filter(Boolean)
+  if (g === "custom" && picked.length === 0) return ["all"]
+  return picked
+}
+```
+
+```{ojs}
+//| output: false
+hz_commoditiesUI = viewof hz_commodities
+```
+
+```{ojs}
+//| output: false
+hz_previewList = (arr, max = 4) => {
+  const xs = Array.isArray(arr) ? arr.filter(Boolean) : []
+  if (xs.length <= max) return xs.join(", ")
+  return xs.slice(0, max).join(", ") + ` +${xs.length - max}`
 }
 ```
 
@@ -2186,16 +1388,31 @@ viewof hz_topN = Inputs.range([5, 50], { label: "Top items (Top N):", step: 1, v
 viewof hz_groupOther = Inputs.toggle({ label: 'Group remaining hazards into "Other" (Q1)', value: false })
 viewof hz_rel = Inputs.toggle({ label: "Relative (%)", value: false })
 hz_isRelative = !!hz_rel
-viewof hz_chartHeight = Inputs.range([360, 900], { label: "Chart height:", step: 10, value: 520 })
+viewof hz_q1ChartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
+hz_chartHeight = hz_q1ChartHeight
 ```
-
-
 
 ```{ojs}
 //| output: false
+hz_stripIso = (v) => String(v ?? "").replace(/\s*\([A-Z]{2,3}\)\s*$/, "")
+
+// Cleaned geo filter for API payloads and UI labels
+hz_geoFilterApi = {
+  const g = hz_geoFilter ?? {}
+  return {
+    ...g,
+    admin0: (g.admin0 ?? []).map(hz_stripIso),
+    admin1: (g.admin1 ?? []).map(hz_stripIso),
+    admin2: (g.admin2 ?? []).map(hz_stripIso),
+    admin0_name: (g.admin0_name ?? []).map(hz_stripIso),
+    admin1_name: (g.admin1_name ?? []).map(hz_stripIso),
+    admin2_name: (g.admin2_name ?? []).map(hz_stripIso)
+  }
+}
+
 // Friendly labels for the UI
 hz_geoLabel = {
-  const gf = hz_geoFilter ?? {}
+  const gf = hz_geoFilterApi ?? {}
   const a0 = Array.isArray(gf.admin0) ? gf.admin0.filter(Boolean) : []
   const a1 = Array.isArray(gf.admin1) ? gf.admin1.filter(Boolean) : []
   const a2 = Array.isArray(gf.admin2) ? gf.admin2.filter(Boolean) : []
@@ -2215,13 +1432,16 @@ hz_geoLabel = {
 
 hz_commodityLabel = {
   const g = hz_commodityGroup
-  const picked = (hz_commodities ?? []).filter(Boolean)
+  const pickedUI = (hz_commodities ?? []).filter(Boolean)
   const n = (hz_selectedCommodities ?? []).length
+
+  // Custom + empty => no commodity filter
+  if (g === "custom" && pickedUI.length === 0) return "Commodities: custom (no filter)"
 
   if (g === "all") return `Commodities: all (${n})`
   if (g === "crops") return `Commodities: crops (${n})`
   if (g === "livestock") return `Commodities: livestock (${n})`
-  if (g === "custom") return picked.length ? `Commodities: custom (${n})` : `Commodities: custom (all) (${n})`
+  if (g === "custom") return `Commodities: custom (${n})`
 
   const label = hz_commodityGroupOptions?.[g] ?? String(g)
   return `Commodities: ${label} (${n})`
@@ -2338,100 +1558,47 @@ null
 
 ```{ojs}
 //| output: false
-// Controls panel UI
+// Controls panel (collapsible) — summary reflects current selections.
+hz_controlsPanelSummary = {
+  const parts = []
+  if (hz_varShort) parts.push(`Hazard: ${hz_varShort}`)
+  if (hz_period) parts.push(`Period: ${hz_period}`)
+  if (hz_severity) parts.push(`Severity: ${hz_severity}`)
+  if (hz_method) parts.push(`Method: ${hz_method}`)
+  if (hz_commodityLabel) parts.push(hz_commodityLabel)
+  if (hz_geoLabel) parts.push(hz_geoLabel)
+  return parts.filter(Boolean).join(" · ")
+}
+
 hz_controlsPanelReal = html`
-  <div class="hz-card">
-    <div class="hz-card__head">
-      <div>
-        <div class="hz-card__title">Controls</div>
-        <div class="hz-card__sub">
-          ${hz_geoLabel} · ${hz_commodityLabel}
-        </div>
-      </div>
-      <div class="hz-pill">Method: <b>${hz_method}</b></div>
-    </div>
-
-    <section class="hz-section">
-      <div class="hz-section__title">Dataset · Commodities · Geography</div>
-
-      <div class="hz-subtitle">Dataset</div>
-      <div class="hz-grid hz-grid--auto hz-grid--tight">
+  <div class="hz-controlsCompact hz-controlsPanel">
+    <div class="hz-controlsRows">
+      <div class="hz-row hz-row--3">
         <div class="hz-field">${viewof hz_varShort}</div>
         <div class="hz-field">${viewof hz_period}</div>
         <div class="hz-field">${viewof hz_severity}</div>
-        <div class="hz-field">${viewof hz_method}</div>
       </div>
 
-      <div class="hz-subtitle">Commodities</div>
-      <div class="hz-grid hz-grid--2 hz-grid--tight">
-        <div class="hz-field">${viewof hz_commodityGroup}</div>
-        <div class="hz-field">${viewof hz_commodities}</div>
+      <div class="hz-row hz-row--3 hz-row--grow">
+        <div class="hz-field hz-field--sm">${viewof hz_commodityGroup}</div>
+        <div class="hz-field hz-field--grow">${hz_commoditiesUI}</div>
+        <div class="hz-field hz-field--sm">${viewof hz_method}</div>
       </div>
 
-      <div class="hz-subtitle">Geography</div>
-      <div class="hz-grid hz-grid--auto hz-grid--tight">
+      <div class="hz-row hz-row--3">
         <div class="hz-field">${viewof hz_admin0}</div>
         <div class="hz-field">${viewof hz_admin1}</div>
         <div class="hz-field">${viewof hz_admin2}</div>
       </div>
 
-      <div class="hz-muted hz-geoInline">
-        <b>Resolved:</b> ${hz_geoResolvedLevel} · <b>Selections:</b> ${hz_geoSelectionCount}<br/>
-        <b>Selected:</b>
-        ${(Array.isArray(hz_admin0) && (hz_admin0.length === 0 || hz_admin0.includes("all"))) ? "All countries" : (hz_admin0 ?? []).join(", ")}
-        ${(hz_admin1 ?? []).length ? html`<br/><b>Admin1:</b> ${(hz_admin1 ?? []).join(", ")}` : ""}
-        ${(hz_admin2 ?? []).length ? html`<br/><b>Admin2:</b> ${(hz_admin2 ?? []).join(", ")}` : ""}
+      <div class="hz-row hz-row--2">
+        <div class="hz-field">${viewof hz_scen1}</div>
+        <div class="hz-field">${viewof hz_scen2}</div>
       </div>
-    </section>
-
-    <section class="hz-section">
-      <div class="hz-section__title">Scenario comparison</div>
-      <div class="hz-split">
-        <div class="hz-sideCard">
-          <div class="hz-sideCard__head">
-            <div class="hz-sideCard__title">Left (A)</div>
-            <div class="hz-sideCard__sub">Baseline / Scenario A</div>
-          </div>
-          <div class="hz-field">${viewof hz_scen1}</div>
-          <div class="hz-field"></div>
-          <div class="hz-sideCard__kv">
-            <div class="k">Key</div><div class="v"><code>${hz_key1Resolved}</code></div>
-          </div>
-        </div>
-
-        <div class="hz-sideCard">
-          <div class="hz-sideCard__head">
-            <div class="hz-sideCard__title">Right (B)</div>
-            <div class="hz-sideCard__sub">Future / Scenario B</div>
-          </div>
-          <div class="hz-field">${viewof hz_scen2}</div>
-          <div class="hz-field"></div>
-          <div class="hz-sideCard__kv">
-            <div class="k">Key</div><div class="v"><code>${hz_key2Resolved}</code></div>
-          </div>
-        </div>
-      </div>
-
-    </section>
-
-    <section class="hz-section">
-      <div class="hz-section__title">Chart</div>
-
-    <div class=\"hz-muted\" style=\"margin-top:8px;\"></div>
-
-    <div class=\"hz-grid hz-grid--2\">
-        <div class="hz-field">${viewof hz_relative}</div>
-        <div class="hz-field">${viewof hz_difference}</div>
-        <div class="hz-field">${viewof hz_topN}</div>
-        <div class="hz-field">${viewof hz_groupOther}</div>
-      </div>
-      <div class="hz-field">${viewof hz_chartHeight}</div>
-    </section>
+    </div>
   </div>
 `;
 ```
-
-
 
 ```{ojs}
 //| output: false
@@ -2640,87 +1807,47 @@ hz_makeMultiSelect = ({
 
 ```{ojs}
 //| output: false
-viewof hz_admin0 = hz_makeMultiSelect({
-  label: "Admin0 (country)",
-  options: hz_admin0Choices,
-  value: ["Kenya"],
-  placeholder: "Search countries…",
-  actions: [
-    { id: "all", label: "All" },
-    { id: "none", label: "Clear" }
-  ],
-  exclusive: "all",
-  maxHeight: 260,
-  maxRender: 400
-})
+// Geography selectors (standard Atlas boundary UI)
+viewof hz_admin0 = renderA0Multi({ key: "q1", maxSelections: 8, requireAtLeastOne: true })
+viewof hz_admin1 = renderA1Multi({ key: "q1", a0: viewof hz_admin0, maxSelections: 12 })
+viewof hz_admin2 = renderA2Multi({ key: "q1", a0: viewof hz_admin0, a1: viewof hz_admin1, maxSelections: 20 })
+
+// Render the 3 selectors with the shared input template
+hz_geoUI = html`<div class="hz-geoRow">${inputTemplate({ gap: "10px" })([viewof hz_admin0, viewof hz_admin1, viewof hz_admin2])}</div>`
 ```
 
 ```{ojs}
 //| output: false
-hz_admin1Choices = {
-  const isErr = hz_adminNames?.[0]?.error
-  if (isErr) return []
-  const a0 = new Set(hz_admin0 ?? [])
-  if (a0.size === 1 && a0.has("all")) return []
-  return Array.from(new Set(
-    hz_adminNames
-      .filter(d => a0.has(d.admin0_name))
-      .map(d => d.admin1_name)
-      .filter(v => v != null && v !== "")
-  )).sort()
+hz_normSel = (xs) => {
+  const arr = Array.isArray(xs) ? xs : []
+  return arr
+    .map((d) => {
+      if (d == null) return ""
+      if (typeof d === "string" || typeof d === "number") return String(d)
+
+      // Admin selector objects from /components/_adminSelectorsMulti.qmd:
+      // - admin0 objects have admin0_name (and iso3c)
+      // - admin1 objects have admin1_name (and admin0_name, iso3)
+      // - admin2 objects have admin2_name (and admin1_name, admin0_name, iso3)
+      // We must send clean names to the API (no “(ISO)” label strings) and
+      // treat “Full Country” rows (admin1_name/admin2_name == null) as “no filter”.
+      if (typeof d === "object") {
+        if ("admin2_name" in d) return d.admin2_name == null ? "" : String(d.admin2_name)
+        if ("admin1_name" in d) return d.admin1_name == null ? "" : String(d.admin1_name)
+        if ("admin0_name" in d) return d.admin0_name == null ? "" : String(d.admin0_name)
+        return String(d.value ?? d.name ?? d.label ?? d.id ?? "")
+      }
+
+      return String(d)
+    })
+    .map((s) => String(s).trim())
+    .filter((s) => s.length > 0)
 }
-```
 
-```{ojs}
-//| output: false
-viewof hz_admin1 = hz_makeMultiSelect({
-  label: "Admin1 (optional)",
-  options: hz_admin1Choices,
-  value: [],
-  placeholder: hz_admin1Choices.length ? "Search admin1…" : "Select Admin0 first…",
-  actions: [{ id: "none", label: "Clear" }],
-  disabled: hz_admin1Choices.length === 0,
-  maxHeight: 260,
-  maxRender: 500
-})
-```
-
-```{ojs}
-//| output: false
-hz_admin2Choices = {
-  const isErr = hz_adminNames?.[0]?.error
-  if (isErr) return []
-  const a0 = new Set((hz_admin0 ?? []).filter((d) => d !== "all"))
-  const a1 = new Set((hz_admin1 ?? []).filter(Boolean))
-  if (a0.size === 0) return []
-  if (a1.size === 0) return []
-  const rows = hz_adminNames.filter((d) => a0.has(d.admin0_name) && a1.has(d.admin1_name))
-  return Array.from(new Set(
-    rows.map((d) => d.admin2_name).filter((v) => v != null && String(v).trim() !== "")
-  )).sort()
-}
-```
-
-```{ojs}
-//| output: false
-viewof hz_admin2 = hz_makeMultiSelect({
-  label: "Admin2 (optional)",
-  options: hz_admin2Choices,
-  value: [],
-  placeholder: hz_admin2Choices.length ? "Search admin2…" : "Select Admin1 first…",
-  actions: [{ id: "none", label: "Clear" }],
-  disabled: hz_admin2Choices.length === 0,
-  maxHeight: 260,
-  maxRender: 600
-})
-```
-
-```{ojs}
-//| output: false
 hz_geoFilter = ({
-  admin0: (hz_admin0 ?? []),
-  admin1: (hz_admin1 ?? []),
-  admin2: (hz_admin2 ?? [])
+  admin0: hz_normSel(hz_admin0),
+  admin1: hz_normSel(hz_admin1),
+  admin2: hz_normSel(hz_admin2)
 })
 
 hz_geoResolvedLevel = {
@@ -2784,9 +1911,9 @@ hz_geoPanelReal = html`
       <div class="hz-card__head">
         <div>
           <div class="hz-card__title">Geography</div>
-          <div class="hz-card__sub">Geography selection is in <a href="#controls">Controls</a>. This section shows a summary.</div>
+          <div class="hz-card__sub">Geography selection is in <a href="#q1">Q1 Controls</a>. This section shows a summary.</div>
         </div>
-        <a class="hz-pill" href="#controls" style="text-decoration:none">Change selection</a>
+        <a class="hz-pill" href="#q1" style="text-decoration:none">Change selection</a>
       </div>
       <div class="hz-muted">Tip: If you need to confirm what’s being queried, use the chips below (resolved level + selected admin names).</div>
     </div>
@@ -2909,8 +2036,6 @@ hz_scenWhere = (sc) => {
 viewof hz_loadSchema = Inputs.toggle(false, { label: "Load schema tables (debug, slower)" })
 ```
 
-
-
 ```{ojs}
 //| output: false
 // -----------------------------
@@ -3020,7 +2145,6 @@ viewof hz_mapMetric = {
   return root
 }
 
-
 hz_mapMetricEff = hz_mapMetric || ((hz_compareMode === "diff") ? "delta" : "right")
 
 hz_mapReqExtra = ({ group_child: true })
@@ -3113,8 +2237,6 @@ hz_mapPlot = {
     const p = f?.properties ?? {}
     return (nameKey && p[nameKey] != null) ? String(p[nameKey]) : ""
   }
-
-
 
 // Scope features to the user's geographic selection (more intuitive than filtering by join results)
 const a0 = (hz_geoFilter?.admin0 ?? []).filter(Boolean).filter(x => String(x).toLowerCase() !== "all")
@@ -3238,7 +2360,13 @@ hz_apiDebouncedCached = async (groupKey, path, body, { ttlMs = 60000, debounceMs
         if (hz_apiState.tokens.get(groupKey) !== token) return resolve([])
 
         // UI: show an 'Updating…' overlay ONLY when the network call actually starts.
-        try { globalThis.__ATLAS_HZ_UI__?.setBusy?.(true) ; busyOn = true } catch (_) { busyOn = false }
+        try { const __ui = globalThis.__ATLAS_HZ_UI__
+    if (__ui?.setBusyFor) {
+      __ui.setBusyFor(groupKey, true)
+    } else if (String(groupKey || "").startsWith("q1")) {
+      __ui?.setBusy?.(true)
+    }
+    busyOn = true } catch (_) { busyOn = false }
 
         const out = await hz_apiPostJson(path, body, { signal: ac.signal })
         // Only accept latest
@@ -3249,7 +2377,14 @@ hz_apiDebouncedCached = async (groupKey, path, body, { ttlMs = 60000, debounceMs
         resolve({ ok: false, error: String(e) })
       } finally {
         // Always clear the busy overlay if we turned it on.
-        try { if (busyOn) globalThis.__ATLAS_HZ_UI__?.setBusy?.(false) } catch (_) {}
+        try { if (busyOn) {
+      const __ui = globalThis.__ATLAS_HZ_UI__
+      if (__ui?.setBusyFor) {
+        __ui.setBusyFor(groupKey, false)
+      } else if (String(groupKey || "").startsWith("q1")) {
+        __ui?.setBusy?.(false)
+      }
+    } } catch (_) {}
         hz_apiState.inflight.delete(key)
       }
     }, debounceMs)
@@ -3286,8 +2421,8 @@ hz_q1Req = (() => {
   const left = {
     dataset_url: hz_src1.url,
     scen: { scenario: hz_s1?.scenario, timeframe: hz_s1?.timeframe },
-    geo: hz_geoFilter,
-    commodities: hz_selectedCommodities ?? [],
+    geo: hz_geoFilterApi,
+    commodities: hz_selectedCommoditiesForReq ?? [],
     hazard_vars: null,
     hazards: null,
     method: hz_method,
@@ -3297,8 +2432,8 @@ hz_q1Req = (() => {
   const right = {
     dataset_url: hz_src2.url,
     scen: { scenario: hz_s2?.scenario, timeframe: hz_s2?.timeframe },
-    geo: hz_geoFilter,
-    commodities: hz_selectedCommodities ?? [],
+    geo: hz_geoFilterApi,
+    commodities: hz_selectedCommoditiesForReq ?? [],
     hazard_vars: null,
     hazards: null,
     method: hz_method,
@@ -3313,11 +2448,44 @@ return { ok: true, body: { left, right, denom } }
 
 ```{ojs}
 //| output: false
+// Question routing (stacked Q1–Q4). For incremental dev, Q1 is the only wired question for now.
+hz_activeQuestion = "q1"
+
+hz_dashTitle = ({
+  q1: "Total exposure by hazard",
+  q2: "Total exposure by crop",
+  q3: "Hazard composition by crop",
+  q4: "Exposure by administrative area"
+})[hz_activeQuestion] || "Dashboard"
+
+hz_dashSub = ({
+  q1: "Compare Left vs Right (side-by-side or Δ). Filters: scenarios, geography, commodities.",
+  q2: "Compare Left vs Right. Filters: scenarios, geography, commodities.",
+  q3: "Compare Left vs Right. Filters: scenarios, geography, commodities.",
+  q4: "Compare Left vs Right. Filters: scenarios, geography, commodities."
+})[hz_activeQuestion] || ""
+
+// Common request payload for single-side endpoints (used by map + other side queries)
+hz_sideReq = (src, scen, extra = {}) => ({
+  dataset_url: src?.url,
+  scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
+  geo: hz_geoFilterApi,
+  commodities: hz_selectedCommoditiesForReq ?? [],
+  hazard_vars: null,
+  hazards: null,
+  method: hz_method,
+  commodity_group: hz_selectedCommodGroup,
+  ...extra
+})
+```
+
+```{ojs}
+//| output: false
 // Call the API (debounced + cached)
 
-hz_q1Resp = (hz_activeQuestion === "q1" && hz_q1Req?.ok)
+hz_q1Resp = (hz_q1Req?.ok)
   ? await hz_apiDebouncedCached("q1", "/api/v1/hz/q1", hz_q1Req.body, { ttlMs: 60000, debounceMs: 250 })
-  : { ok: false, error: hz_q1Req?.error || "Inactive", left: [], right: [], merged: [], denom: { ok: false, denom: null }, relative_label: "% of hazard sum" }
+  : { ok: false, error: hz_q1Req?.error || "Invalid request", left: [], right: [], merged: [], denom: { ok: false, denom: null }, relative_label: "% of hazard sum" }
 
 // Expose the same variables the rest of the notebook already expects
 hz_tot1 = hz_q1Resp?.left ?? []
@@ -3333,7 +2501,6 @@ hz_q1Meta = ({
   t_ms: Number(hz_q1Resp?.t_ms || 0),
   error: hz_q1Resp?.error || null
 })
-
 
 // Normalize + rank rows for chart/table (Q1)
 hz_chartRows = {
@@ -3419,7 +2586,7 @@ hz_q1Chart = {
   const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
   const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
 
-  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
+  const subtitle = `${hz_q3_geoLabel} • ${hz_q3_commodityLabel} • Left: ${hz_q3_s1.label} • Right: ${hz_q3_s2.label}`
 
   if (!hz_difference) {
     const side = data.flatMap(d => ([
@@ -3499,96 +2666,685 @@ hz_q1Chart = {
 
 ```{ojs}
 //| output: false
-// Dashboard question selector (tabs)
-viewof hz_question = {
-  const options = [
-    { value: "q1", label: "Hazards" },
-    { value: "q2", label: "Commodities" },
-    { value: "q3", label: "Hazard × commodity" },
-    { value: "q4", label: "Geography" }
-  ];
+// ----------------------------
+// Q2 — totals by crop (independent inputs)
+// ----------------------------
 
-  const root = document.createElement("div");
-  root.className = "hz-tabs";
+// Parse scenarios (Q2-specific)
+hz_q2_s1 = (() => hz_parseScenarioPick(hz_q2_scen1))()
+hz_q2_s2 = (() => hz_parseScenarioPick(hz_q2_scen2))()
 
-  const buttons = new Map();
-  const paint = (v) => {
-    for (const [val, btn] of buttons.entries()) btn.classList.toggle("is-active", val === v);
-  };
+// Resolve dataset URLs (Q2-specific)
+hz_q2_keyCandidates1 = hz_keyCandidatesFor({
+  varShort: hz_q2_varShort,
+  period: hz_q2_period,
+  model: hz_q2_s1?.model,
+  severity: hz_q2_severity,
+  method: hz_q2_method
+})
+hz_q2_keyCandidates2 = hz_keyCandidatesFor({
+  varShort: hz_q2_varShort,
+  period: hz_q2_period,
+  model: hz_q2_s2?.model,
+  severity: hz_q2_severity,
+  method: hz_q2_method
+})
 
-  const set = (v, { silent = false } = {}) => {
-    if (root.value === v) return; // prevents duplicate requests on re-click
-    root.value = v;
-    paint(v);
-    if (!silent) root.dispatchEvent(new Event("input", { bubbles: true }));
-  };
+hz_q2_src1 = hz_resolveFromCandidates(hz_q2_keyCandidates1)
+hz_q2_src2 = hz_resolveFromCandidates(hz_q2_keyCandidates2)
 
-  for (const opt of options) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "hz-tab";
-    b.textContent = opt.label;
-    b.onclick = () => set(opt.value);
-    root.appendChild(b);
-    buttons.set(opt.value, b);
-  }
-
-  // Initial value is set WITHOUT emitting an input event.
-  // Observable reads the initial value from root.value when the view is created.
-  root.value = "q1";
-  paint("q1");
-
-  return root;
+// Commodities payload (Q2-specific)
+hz_q2_selectedCommoditiesForReq = {
+  const picked = (hz_q2_commodities ?? []).filter(Boolean)
+  return picked.length ? picked : ["all"]
 }
 
+// Geo payload (Q2-specific)
+hz_q2_geoFilterApi = {
+  const g = hz_q2_geoFilter ?? {}
+  return {
+    ...g,
+    admin0: (g.admin0 ?? []).map(hz_stripIso),
+    admin1: (g.admin1 ?? []).map(hz_stripIso),
+    admin2: (g.admin2 ?? []).map(hz_stripIso)
+  }
+}
+// ----------------------------
+// Q3 — hazard-by-crop (independent inputs)
+// ----------------------------
 
-viewof hz_viewMode = {
-  const options = [
-    { value: "chart",   label: "Chart",       icon: "📈", hint: "Interactive charts & comparisons" },
-    { value: "both",    label: "Dashboard",   icon: "▤",  hint: "Chart + summary table (grouped totals)" },
-    { value: "table",   label: "Summary",     icon: "▦",  hint: "Aggregated totals (paginated)" },
-    { value: "map",     label: "Map",         icon: "🗺️", hint: "Choropleth by admin area (uses current filters)" },
-    { value: "records", label: "Raw records", icon: "🧾", hint: "Row-level values (paginated)" }
-  ]
+// Parse scenarios (Q3-specific)
+hz_q3_s1 = (() => hz_parseScenarioPick(hz_q3_scen1))()
+hz_q3_s2 = (() => hz_parseScenarioPick(hz_q3_scen2))()
 
-  const root = document.createElement("div")
-  root.className = "hz-viewToggle"
-  root.value = "chart"
+// Resolve dataset URLs (Q3-specific)
+hz_q3_keyCandidates1 = hz_keyCandidatesFor({
+  varShort: hz_q3_varShort,
+  period: hz_q3_period,
+  model: hz_q3_s1?.model,
+  severity: hz_q3_severity,
+  method: hz_q3_method
+})
+hz_q3_keyCandidates2 = hz_keyCandidatesFor({
+  varShort: hz_q3_varShort,
+  period: hz_q3_period,
+  model: hz_q3_s2?.model,
+  severity: hz_q3_severity,
+  method: hz_q3_method
+})
 
-  const lab = document.createElement("div")
-  lab.className = "hz-viewToggle__label"
-  lab.textContent = "View"
+hz_q3_src1 = hz_resolveFromCandidates(hz_q3_keyCandidates1)
+hz_q3_src2 = hz_resolveFromCandidates(hz_q3_keyCandidates2)
 
-  const grp = document.createElement("div")
-  grp.className = "hz-viewToggle__group"
+// Commodities payload (Q3-specific)
+hz_q3_selectedCommoditiesForReq = {
+  const picked = (hz_q3_commodities ?? []).filter(Boolean)
+  return picked.length ? picked : ["all"]
+}
 
-  const btns = options.map(op => {
-    const b = document.createElement("button")
-    b.type = "button"
-    b.className = "hz-viewBtn"
-    b.dataset.value = op.value
-    b.title = op.hint || op.label
-    b.innerHTML = `<span class="hz-viewBtn__icon" aria-hidden="true">${op.icon || ""}</span><span class="hz-viewBtn__txt">${op.label}</span>`
-    b.onclick = () => {
-      if (root.value === op.value) return
-      root.value = op.value
-      paint()
-      root.dispatchEvent(new Event("input", { bubbles: true }))
-    }
-    return b
+// Geo payload (Q3-specific)
+hz_q3_geoFilterApi = {
+  const g = hz_q3_geoFilter ?? {}
+  return {
+    ...g,
+    admin0: (g.admin0 ?? []).map(hz_stripIso),
+    admin1: (g.admin1 ?? []).map(hz_stripIso),
+    admin2: (g.admin2 ?? []).map(hz_stripIso)
+  }
+}
+
+// Guard: require Admin0 and resolved datasets (Q3)
+hz_q3ReqOk = (() => {
+  if (hz_isBroadGeo?.(hz_q3_geoFilter)) {
+    return { ok: false, error: "Select at least an Admin0 for Q3 (broad selection blocked for speed)." }
+  }
+  if (!(hz_q3_src1?.ok && hz_q3_src2?.ok)) {
+    return { ok: false, error: "Q3 dataset URLs not resolved yet." }
+  }
+  return { ok: true, error: null }
+})()
+
+hz_q3_sideReq = (src, scen, extra) => ({
+  dataset_url: src?.url,
+  // API schema expects these nested keys (same style as Q2)
+  scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
+  geo: hz_q3_geoFilterApi,
+  commodities: hz_q3_selectedCommoditiesForReq ?? [],
+  hazard_vars: null,
+  hazards: null,
+  method: hz_q3_method,
+  commodity_group: hz_q3_commodityGroup,
+  ...(extra ?? {})
+})
+
+// Guard: require Admin0 and resolved datasets
+hz_q2ReqOk = (() => {
+  if (hz_isBroadGeo?.(hz_q2_geoFilter)) {
+    return { ok: false, error: "Select at least an Admin0 for Q2 (broad selection blocked for speed)." }
+  }
+  if (!(hz_q2_src1?.ok && hz_q2_src2?.ok)) {
+    return { ok: false, error: "Q2 dataset URLs not resolved yet." }
+  }
+  return { ok: true, error: null }
+})()
+
+hz_q2_sideReq = (src, scen) => ({
+  dataset_url: src?.url,
+  scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
+  geo: hz_q2_geoFilterApi,
+  commodities: hz_q2_selectedCommoditiesForReq ?? [],
+  hazard_vars: null,
+  hazards: null,
+  method: hz_q2_method,
+  commodity_group: hz_q2_commodityGroup
+})
+
+// API calls (no hz_activeQuestion gate)
+hz_q2RespL = hz_q2ReqOk.ok
+  ? await hz_apiDebouncedCached("q2L", "/api/v1/hz/totals-by-crop", hz_q2_sideReq(hz_q2_src1, hz_q2_s1), { ttlMs: 300000, debounceMs: 250 })
+  : { ok: false, error: hz_q2ReqOk.error, data: [] }
+
+hz_q2RespR = hz_q2ReqOk.ok
+  ? await hz_apiDebouncedCached("q2R", "/api/v1/hz/totals-by-crop", hz_q2_sideReq(hz_q2_src2, hz_q2_s2), { ttlMs: 300000, debounceMs: 250 })
+  : { ok: false, error: hz_q2ReqOk.error, data: [] }
+
+hz_q2DataL = hz_q2RespL?.data ?? []
+hz_q2DataR = hz_q2RespR?.data ?? []
+
+hz_q2Meta = ({
+  ok: !!(hz_q2RespL?.ok && hz_q2RespR?.ok),
+  cached: !!(hz_q2RespL?.cached && hz_q2RespR?.cached),
+  t_ms: Math.max(Number(hz_q2RespL?.t_ms || 0), Number(hz_q2RespR?.t_ms || 0)),
+  error: hz_q2RespL?.error || hz_q2RespR?.error || null
+})
+
+// Merge + rank (Top N from Q2 slider)
+hz_q2Rows = {
+  const mapL = new Map(hz_q2DataL.map(d => [d.crop, Number(d.total)]))
+  const mapR = new Map(hz_q2DataR.map(d => [d.crop, Number(d.total)]))
+  const crops = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
+
+  const rows = crops.map(crop => ({
+    crop,
+    total1: mapL.get(crop) || 0,
+    total2: mapR.get(crop) || 0
+  }))
+
+  rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
+  return rows.slice(0, Number(hz_q2_topN || 25))
+}
+
+// Labels (Q2-specific)
+hz_q2_geoLabel = hz_makeGeoLabel(hz_q2_geoFilter)
+hz_q2_commodityLabel = hz_makeComLabel(hz_q2_selectedCommoditiesForReq ?? [])
+
+// Labels (Q3-specific)
+hz_q3_geoLabel = hz_makeGeoLabel(hz_q3_geoFilter)
+hz_q3_commodityLabel = hz_makeComLabel(hz_q3_selectedCommoditiesForReq ?? [])
+
+// Q3 absolute axis label
+hz_q3_varLabelAbs = (() => {
+  const s = String(hz_q3_varShort ?? "")
+  const varLabel =
+    (s === "intld15") ? "International Dollars (2015)" :
+    (s === "usd15") ? "USD (2015)" :
+    (s === "people") ? "People" :
+    hz_formatVarShort(s)
+  const base = String(varLabel ?? '').trim()
+  if (!base) return 'Exposure'
+  if (/exposure/i.test(base)) return base
+  return `Exposure (${base})`
+})()
+
+// Chart (Q2-specific)
+hz_q2Chart = {
+  const rows = hz_q2Rows ?? []
+  const labelAbs = hz_varLabelAbs
+  const xLabel = hz_q2_relative ? "Percent of side total (%)" : labelAbs
+
+  const subtitle = `${hz_q2_geoLabel} • ${hz_q2_commodityLabel} • Left: ${hz_q2_s1.label} • Right: ${hz_q2_s2.label}`
+
+  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
+
+  const sum1 = rows.reduce((s,r) => s + (r.total1 || 0), 0)
+  const sum2 = rows.reduce((s,r) => s + (r.total2 || 0), 0)
+
+  const v1 = (d) => hz_q2_relative ? (sum1 ? (100 * d.total1 / sum1) : 0) : d.total1
+  const v2 = (d) => hz_q2_relative ? (sum2 ? (100 * d.total2 / sum2) : 0) : d.total2
+
+  if (hz_q2_difference) {
+    const diff = rows.map(d => ({ crop: d.crop, delta: v2(d) - v1(d) }))
+    return Plot.plot({
+      height: Math.max(280, diff.length * 22, Number(hz_q2_chartHeight ?? 520)),
+      marginLeft: 160,
+      x: { grid: true, label: hz_q2_relative ? "Δ percentage points (Right − Left)" : "Δ exposure (Right − Left)" },
+      y: { domain: diff.map(d => d.crop) },
+      caption: subtitle,
+      marks: [Plot.ruleX([0]), Plot.barX(diff, { x: "delta", y: "crop", tip: true })]
+    })
+  }
+
+  const crops = rows.map(d => d.crop)
+  const left = rows.map(d => ({ crop: d.crop, value: v1(d) }))
+  const right = rows.map(d => ({ crop: d.crop, value: v2(d) }))
+
+  const plotSide = (data, title) => html`
+    <div class="hz-mini">
+      <div class="hz-mini__title">${title}</div>
+      ${Plot.plot({
+        height: Math.max(280, crops.length * 22, Number(hz_q2_chartHeight ?? 520)),
+        marginLeft: 160,
+        x: { grid: true, label: xLabel },
+        y: { domain: crops },
+        caption: subtitle,
+        marks: [Plot.barX(data, { x: "value", y: "crop", tip: true }), Plot.ruleX([0])]
+      })}
+    </div>
+  `
+
+  return html`<div class="hz-grid2">${plotSide(left, "Left")}${plotSide(right, "Right")}</div>`
+}
+```
+
+```{ojs}
+//| output: false
+// ----------------------------
+// Q2 — summary table (AtlasTable, same style as Q1)
+// ----------------------------
+hz_q2TableView = {
+  const rows = Array.isArray(hz_q2Rows) ? hz_q2Rows : []
+  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
+
+  const sum1 = rows.reduce((s,r) => s + (r.total1 || 0), 0)
+  const sum2 = rows.reduce((s,r) => s + (r.total2 || 0), 0)
+
+  const showPct = !!hz_q2_relative
+
+  const fmtAbsFull = (v) => hz_formatNumber(v, { digits: 2, compact: false })
+  const fmtPct = (v) => {
+    const x = Number(v)
+    if (!Number.isFinite(x)) return "—"
+    return `${hz_formatNumber(x, { digits: 2, compact: false })}%`
+  }
+
+  const fmtPP = (v) => {
+    const x = Number(v)
+    if (!Number.isFinite(x)) return "—"
+    const sign = x > 0 ? "+" : ""
+    return `${sign}${hz_formatNumber(x, { digits: 2, compact: false })} pp`
+  }
+
+  const tableData = rows.map((r) => {
+    const p1 = sum1 ? (100 * r.total1 / sum1) : 0
+    const p2 = sum2 ? (100 * r.total2 / sum2) : 0
+    return ({
+      "Crop": r.crop,
+      "Left (abs)": r.total1,
+      "Right (abs)": r.total2,
+      "Δ (abs)": (r.total2 - r.total1),
+      "Left (%)": p1,
+      "Right (%)": p2,
+      "Δ (pp)": (p2 - p1)
+    })
   })
 
-  const paint = () => {
-    for (const b of btns) b.classList.toggle("is-active", b.dataset.value === root.value)
+  return hz_atlasTable(tableData, {
+    columns: showPct
+      ? ["Crop", "Left (%)", "Right (%)", "Δ (pp)"]
+      : ["Crop", "Left (abs)", "Right (abs)", "Δ (abs)"],
+    format: {
+      "Left (abs)": fmtAbsFull,
+      "Right (abs)": fmtAbsFull,
+      "Δ (abs)": fmtAbsFull,
+      "Left (%)": fmtPct,
+      "Right (%)": fmtPct,
+      "Δ (pp)": fmtPP
+    },
+    rows: 12,
+    height: "540px",
+    width: {
+      "Crop": 240,
+      "Left (abs)": 140,
+      "Right (abs)": 140,
+      "Δ (abs)": 140,
+      "Left (%)": 120,
+      "Right (%)": 120,
+      "Δ (pp)": 120
+    }
+  })
+}
+```
+
+```{ojs}
+//| output: false
+// ----------------------------
+// Q3 — summary table (AtlasTable, hazards ranked)
+// ----------------------------
+hz_q3Rows = {
+  const L = Array.isArray(hz_q3DataL) ? hz_q3DataL : []
+  const R = Array.isArray(hz_q3DataR) ? hz_q3DataR : []
+
+  const haz = new Set([...L.map(d => d.hazard), ...R.map(d => d.hazard)])
+  const mapL = new Map()
+  const mapR = new Map()
+  const topCropR = new Map() // hazard -> { crop, v }
+
+  for (const d of L) {
+    const h = d.hazard
+    mapL.set(h, (mapL.get(h) || 0) + Number(d.total || 0))
+  }
+  for (const d of R) {
+    const h = d.hazard
+    const v = Number(d.total || 0)
+    mapR.set(h, (mapR.get(h) || 0) + v)
+    const prev = topCropR.get(h)
+    if (!prev || v > prev.v) topCropR.set(h, { crop: d.crop, v })
   }
 
-  btns.forEach(b => grp.appendChild(b))
-  paint()
+  const rows = Array.from(haz).map(h => {
+    const total1 = mapL.get(h) || 0
+    const total2 = mapR.get(h) || 0
+    const tc = topCropR.get(h)
+    const topCrop = tc?.crop ?? "—"
+    const topShare = total2 ? (100 * (tc?.v || 0) / total2) : 0
+    return ({ hazard: h, total1, total2, delta: (total2 - total1), topCrop, topShare })
+  })
 
-  root.append(lab, grp)
-  return root
+  rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
+
+  // Keep the same magnitude as the API selection (top_hazards)
+  const k = Math.max(5, Number(hz_q3ReqExtra?.top_hazards || 10))
+  return rows.slice(0, k)
 }
 
+hz_q3TableView = {
+  const rows = Array.isArray(hz_q3Rows) ? hz_q3Rows : []
+  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
+
+  const fmtAbsFull = (v) => hz_formatNumber(v, { digits: 2, compact: false })
+  const fmtPct = (v) => {
+    const x = Number(v)
+    if (!Number.isFinite(x)) return "—"
+    return `${hz_formatNumber(x, { digits: 2, compact: false })}%`
+  }
+
+  const tableData = rows.map((r) => ({
+    "Hazard": r.hazard,
+    "Left (abs)": r.total1,
+    "Right (abs)": r.total2,
+    "Δ (abs)": r.delta,
+    "Top crop (Right)": r.topCrop,
+    "Top crop share (Right %)": r.topShare
+  }))
+
+  return hz_atlasTable(tableData, {
+    columns: ["Hazard", "Left (abs)", "Right (abs)", "Δ (abs)", "Top crop (Right)", "Top crop share (Right %)"],
+    format: {
+      "Left (abs)": fmtAbsFull,
+      "Right (abs)": fmtAbsFull,
+      "Δ (abs)": fmtAbsFull,
+      "Top crop share (Right %)": fmtPct
+    },
+    rows: 12,
+    height: "540px",
+    width: {
+      "Hazard": 200,
+      "Left (abs)": 140,
+      "Right (abs)": 140,
+      "Δ (abs)": 140,
+      "Top crop (Right)": 240,
+      "Top crop share (Right %)": 170
+    }
+  })
+}
+```
+
+```{ojs}
+//| output: false
+// ----------------------------
+// Q3 — hazard by crop
+// ----------------------------
+hz_q3ReqExtra = ({ top_hazards: Number(hz_q3_topHazards || 10), top_crops: Number(hz_q3_topCrops || 12) })
+
+hz_q3RespL = hz_q3ReqOk.ok
+  ? await hz_apiDebouncedCached("q3L", "/api/v1/hz/hazard-by-crop", hz_q3_sideReq(hz_q3_src1, hz_q3_s1, hz_q3ReqExtra), { ttlMs: 300000, debounceMs: 250 })
+  : { ok: false, error: hz_q3ReqOk.error, data: [] }
+
+hz_q3RespR = hz_q3ReqOk.ok
+  ? await hz_apiDebouncedCached("q3R", "/api/v1/hz/hazard-by-crop", hz_q3_sideReq(hz_q3_src2, hz_q3_s2, hz_q3ReqExtra), { ttlMs: 300000, debounceMs: 250 })
+  : { ok: false, error: hz_q3ReqOk.error, data: [] }
+
+hz_q3DataL = hz_q3RespL?.data ?? []
+hz_q3DataR = hz_q3RespR?.data ?? []
+
+hz_q3Meta = ({
+  ok: !!(hz_q3RespL?.ok && hz_q3RespR?.ok),
+  cached: !!(hz_q3RespL?.cached && hz_q3RespR?.cached),
+  t_ms: Math.max(Number(hz_q3RespL?.t_ms || 0), Number(hz_q3RespR?.t_ms || 0)),
+  error: hz_q3RespL?.error || hz_q3RespR?.error || null
+})
+
+hz_q3Chart = {
+  const L = hz_q3DataL ?? []
+  const R = hz_q3DataR ?? []
+  if (!L.length && !R.length) return html`<div class="hz-muted">No data.</div>`
+
+  const subtitle = `${hz_q3_geoLabel} • ${hz_q3_commodityLabel} • Left: ${hz_q3_s1.label} • Right: ${hz_q3_s2.label}`
+  const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
+
+  // ----------------------------
+  // Δ mode (hazard-ranked)
+  // ----------------------------
+  if ((hz_q3_compareMode || "side") === "diff") {
+    const rows = Array.isArray(hz_q3Rows) ? hz_q3Rows : []
+    if (!rows.length) return html`<div class="hz-muted">No data.</div>`
+
+    const hazards = rows.map(r => r.hazard)
+    const height = Math.max(280, hazards.length * 26, Number(hz_q3_chartHeight ?? 520))
+
+    return Plot.plot({
+      height,
+      marginLeft: 200,
+      marginRight: 18,
+      marginTop: 10,
+      marginBottom: 28,
+      x: { grid: true, label: "Δ exposure (Right − Left)" },
+      y: { domain: hazards, label: null },
+      caption: subtitle,
+      marks: [
+        Plot.barX(rows, {
+          x: "delta",
+          y: "hazard",
+          tip: {
+            format: {
+              hazard: true,
+              delta: fmtAbs,
+              total1: fmtAbs,
+              total2: fmtAbs,
+              topCrop: true,
+              topShare: (v) => `${hz_formatNumber(v, { digits: 2, compact: false })}%`
+            }
+          }
+        }),
+        Plot.ruleX([0])
+      ]
+    })
+  }
+
+  // ----------------------------
+  // Side-by-side mode (crop-ranked, hazard-stacked)
+  // ----------------------------
+
+  // Top crops by combined exposure (Left + Right)
+  const cropTotals = new Map()
+  const bump = (crop, v) => cropTotals.set(crop, (cropTotals.get(crop) || 0) + Number(v || 0))
+  for (const d of R) bump(d.crop, d.total)
+  for (const d of L) bump(d.crop, d.total)
+
+  const maxCrops = Math.min(25, Number(hz_q3ReqExtra?.top_crops || 12))
+  const crops = Array.from(cropTotals.entries())
+    .sort((a,b) => b[1] - a[1])
+    .slice(0, maxCrops)
+    .map(([c]) => c)
+
+  const hazards = Array.from(new Set([...L.map(d => d.hazard), ...R.map(d => d.hazard)])).sort()
+
+  const filter = (data) =>
+    data
+      .filter(d => crops.includes(d.crop) && hazards.includes(d.hazard))
+      .map(d => ({ crop: d.crop, hazard: d.hazard, total: Number(d.total || 0) }))
+
+  // Shared categorical color scale (keeps left/right colors aligned)
+  const color = { type: "categorical", domain: hazards, scheme: "tableau10", legend: false }
+  const legend = Plot.legend({ color: { domain: hazards, scheme: "tableau10" }, columns: 3 })
+
+  const plotStack = (data, title) => html`
+    <div class="hz-mini hz-mini--stack">
+      <div class="hz-mini__title">${title}</div>
+      ${Plot.plot({
+        height: Math.max(320, crops.length * 26, Number(hz_q3_chartHeight ?? 520)),
+        marginLeft: 160,
+        marginRight: 18,
+        marginTop: 10,
+        marginBottom: 28,
+        x: { label: (hz_q3_varLabelAbs ?? "Exposure"), grid: true },
+        y: { domain: crops, label: null },
+        color,
+        caption: subtitle,
+        marks: [
+          Plot.barX(filter(data), {
+            ...Plot.stackX({ x: "total", y: "crop", fill: "hazard" }),
+            tip: {
+              format: {
+                crop: true,
+                hazard: true,
+                total: fmtAbs
+              }
+            }
+          }),
+          Plot.ruleX([0])
+        ]
+      })}
+    </div>
+  `
+
+  return html`
+    <div class="hz-legendRow">${legend}</div>
+    <div class="hz-grid2 hz-grid2--equal">
+      ${plotStack(L, "Left")}
+      ${plotStack(R, "Right")}
+    </div>
+  `
+}
+
+```
+
+```{ojs}
+//| output: false
+// ----------------------------
+// Q4 — totals by admin area
+// ----------------------------
+hz_q4ReqExtra = ({ group_child: false })
+
+hz_q4RespL = await hz_apiDebouncedCached("q4L", "/api/v1/hz/by-admin", hz_sideReq(hz_src1, hz_s1, hz_q4ReqExtra), { ttlMs: 300000, debounceMs: 250 })
+
+hz_q4RespR = await hz_apiDebouncedCached("q4R", "/api/v1/hz/by-admin", hz_sideReq(hz_src2, hz_s2, hz_q4ReqExtra), { ttlMs: 300000, debounceMs: 250 })
+
+hz_q4DataL = hz_q4RespL?.data ?? []
+hz_q4DataR = hz_q4RespR?.data ?? []
+
+hz_q4Meta = ({
+  ok: !!(hz_q4RespL?.ok && hz_q4RespR?.ok),
+  cached: !!(hz_q4RespL?.cached && hz_q4RespR?.cached),
+  t_ms: Math.max(Number(hz_q4RespL?.t_ms || 0), Number(hz_q4RespR?.t_ms || 0)),
+  error: hz_q4RespL?.error || hz_q4RespR?.error || null
+})
+
+hz_q4Rows = {
+  const mapL = new Map(hz_q4DataL.map(d => [(d.admin_name ?? d.admin), Number(d.total)]))
+  const mapR = new Map(hz_q4DataR.map(d => [(d.admin_name ?? d.admin), Number(d.total)]))
+  const names = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
+  const rows = names.map(name => ({ name, total1: mapL.get(name) || 0, total2: mapR.get(name) || 0 }))
+  rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
+  return rows.slice(0, hz_topN)
+}
+
+hz_q4Chart = {
+  const rows = hz_q4Rows ?? []
+  const xLabel = hz_rel ? "Percent of side total (%)" : hz_varLabelAbs
+
+  const subtitle = `${hz_q3_geoLabel} • ${hz_q3_commodityLabel} • Left: ${hz_q3_s1.label} • Right: ${hz_q3_s2.label}`
+
+  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
+
+  const sum1 = rows.reduce((s,r) => s + (r.total1 || 0), 0)
+  const sum2 = rows.reduce((s,r) => s + (r.total2 || 0), 0)
+
+  const v1 = (d) => hz_rel ? (sum1 ? (100 * d.total1 / sum1) : 0) : d.total1
+  const v2 = (d) => hz_rel ? (sum2 ? (100 * d.total2 / sum2) : 0) : d.total2
+
+  if (hz_compareMode === "diff") {
+    const diff = rows.map(d => ({ name: d.name, delta: v2(d) - v1(d) }))
+    return Plot.plot({
+      height: Math.max(280, diff.length * 22, Number(hz_q3_chartHeight ?? 520)),
+      marginLeft: 180,
+      x: { grid: true, label: hz_rel ? "Δ percentage points (Right − Left)" : "Δ exposure (Right − Left)" },
+      y: { domain: diff.map(d => d.name) },
+      caption: subtitle,
+      marks: [
+        Plot.ruleX([0]),
+        Plot.barX(diff, { x: "delta", y: "name", tip: true })
+      ]
+    })
+  }
+
+  const names = rows.map(d => d.name)
+  const left = rows.map(d => ({ name: d.name, value: v1(d) }))
+  const right = rows.map(d => ({ name: d.name, value: v2(d) }))
+
+  const plotSide = (data, title) => html`
+    <div class="hz-mini">
+      <div class="hz-mini__title">${title}</div>
+      ${Plot.plot({
+        height: Math.max(280, names.length * 22, Number(hz_q3_chartHeight ?? 520)),
+        marginLeft: 180,
+        x: { grid: true, label: xLabel },
+        y: { domain: names },
+        caption: subtitle,
+        marks: [
+          Plot.barX(data, { x: "value", y: "name", tip: true }),
+          Plot.ruleX([0])
+        ]
+      })}
+    </div>
+  `
+  return html`<div class="hz-grid2">${plotSide(left, "Left")}${plotSide(right, "Right")}</div>`
+}
+```
+
+```{ojs}
+//| output: false
+
+// ------------------------------------------------------------
+// View mode toggle (Chart / Dashboard / Summary / Map / Raw records)
+// (Copied from original hazardExposure.qmd to restore missing cell)
+// ------------------------------------------------------------
+viewof hz_viewMode = {
+  // Q1 only: Chart + Summary table
+  const form = Inputs.radio(
+    ["chart", "table"],
+    {
+      label: "",
+      value: "chart",
+      format: (v) => ({ chart: "Chart", table: "Summary table" }[v] ?? v),
+    }
+  )
+
+  form.classList.add("hz-viewToggle")
+
+  const getScroller = () =>
+    document.scrollingElement ||
+    document.querySelector("#quarto-content") ||
+    document.documentElement ||
+    document.body
+
+  const preserveAnchor = () => {
+    const sc = getScroller()
+    const y0 = sc.scrollTop
+    const anchor = document.getElementById("q1")
+    const a0 = anchor ? anchor.getBoundingClientRect().top : 0
+
+    const restore = () => {
+      const sc2 = getScroller()
+      const anchor2 = document.getElementById("q1")
+      const a1 = anchor2 ? anchor2.getBoundingClientRect().top : 0
+      sc2.scrollTop = y0 + (a1 - a0)
+    }
+
+    // Restore after reactive reflow
+    setTimeout(() => {
+      restore()
+      requestAnimationFrame(restore)
+      requestAnimationFrame(restore)
+    }, 0)
+  }
+
+  form.addEventListener(
+    "change",
+    () => {
+      try {
+        document.activeElement?.blur?.()
+      } catch (_) {}
+      preserveAnchor()
+    },
+    true
+  )
+
+  return form
+}
+// ------------------------------------------------------------
+// Records-view controls (pager + sort). (Copied from the stable v3 notebook.)
+// ------------------------------------------------------------
 viewof hz_recordsSide = {
   const options = [
     { value: "left",  label: "Left" },
@@ -3683,324 +3439,57 @@ viewof hz_recordsPage = {
   root.appendChild(next);
 
   paint();
-
-  globalThis.__ATLAS_HZ_REC_PAGER__ = { prev, next, label, set };
   return root;
 }
-
-
-hz_activeQuestion = (hz_question ?? "q1")
-
-hz_dashTitle = ({
-  q1: "Total exposure by hazard",
-  q2: "Total exposure by crop",
-  q3: "Hazard composition by crop",
-  q4: "Exposure by administrative area"
-})[hz_activeQuestion] || "Dashboard"
-
-hz_dashSub = ({
-  q1: "Compare Left vs Right (side-by-side or Δ). Filters: scenarios, geography, commodities, severity.",
-  q2: "Which commodities contribute most to exposure in the selected geography?",
-  q3: "For the top crops, how is exposure split across hazards? (stacked)",
-  q4: "Which admin areas contribute most to exposure under the current geography?"
-})[hz_activeQuestion] || ""
-// Common request payload for single-side endpoints
-hz_sideReq = (src, scen, extra = {}) => ({
-  dataset_url: src?.url,
-  scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
-  geo: hz_geoFilter,
-  commodities: hz_selectedCommodities ?? [],
-  hazard_vars: null,
-  hazards: null,
-  method: hz_method,
-  commodity_group: hz_selectedCommodGroup,
-  ...extra
-})
 ```
-
-```{ojs}
-//| output: false
-// ----------------------------
-// Q2 — totals by crop
-// ----------------------------
-hz_q2RespL = (hz_activeQuestion === "q2")
-  ? await hz_apiDebouncedCached("q2L", "/api/v1/hz/totals-by-crop", hz_sideReq(hz_src1, hz_s1), { ttlMs: 300000, debounceMs: 250 })
-  : null
-
-hz_q2RespR = (hz_activeQuestion === "q2")
-  ? await hz_apiDebouncedCached("q2R", "/api/v1/hz/totals-by-crop", hz_sideReq(hz_src2, hz_s2), { ttlMs: 300000, debounceMs: 250 })
-  : null
-
-hz_q2DataL = hz_q2RespL?.data ?? []
-hz_q2DataR = hz_q2RespR?.data ?? []
-
-hz_q2Meta = ({
-  ok: !!(hz_q2RespL?.ok && hz_q2RespR?.ok),
-  cached: !!(hz_q2RespL?.cached && hz_q2RespR?.cached),
-  t_ms: Math.max(Number(hz_q2RespL?.t_ms || 0), Number(hz_q2RespR?.t_ms || 0)),
-  error: hz_q2RespL?.error || hz_q2RespR?.error || null
-})
-
-hz_q2Rows = {
-  const mapL = new Map(hz_q2DataL.map(d => [d.crop, Number(d.total)]))
-  const mapR = new Map(hz_q2DataR.map(d => [d.crop, Number(d.total)]))
-  const crops = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
-  const rows = crops.map(crop => ({ crop, total1: mapL.get(crop) || 0, total2: mapR.get(crop) || 0 }))
-  rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
-  return rows.slice(0, hz_topN)
-}
-
-hz_q2Chart = {
-  const rows = hz_q2Rows ?? []
-  const labelAbs = hz_varLabelAbs
-  const xLabel = hz_rel ? "Percent of side total (%)" : labelAbs
-
-  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
-
-  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
-
-  const sum1 = rows.reduce((s,r) => s + (r.total1 || 0), 0)
-  const sum2 = rows.reduce((s,r) => s + (r.total2 || 0), 0)
-
-  const v1 = (d) => hz_rel ? (sum1 ? (100 * d.total1 / sum1) : 0) : d.total1
-  const v2 = (d) => hz_rel ? (sum2 ? (100 * d.total2 / sum2) : 0) : d.total2
-
-  if (hz_compareMode === "diff") {
-    const diff = rows.map(d => ({ crop: d.crop, delta: v2(d) - v1(d) }))
-    return Plot.plot({
-      height: Math.max(280, diff.length * 22, Number(hz_chartHeight ?? 520)),
-      marginLeft: 160,
-      x: { grid: true, label: hz_rel ? "Δ percentage points (Right − Left)" : "Δ exposure (Right − Left)" },
-      y: { domain: diff.map(d => d.crop) },
-      caption: subtitle,
-      marks: [
-        Plot.ruleX([0]),
-        Plot.barX(diff, { x: "delta", y: "crop", tip: true })
-      ]
-    })
-  }
-
-  const crops = rows.map(d => d.crop)
-  const left = rows.map(d => ({ crop: d.crop, value: v1(d) }))
-  const right = rows.map(d => ({ crop: d.crop, value: v2(d) }))
-
-  const plotSide = (data, title) => html`
-    <div class="hz-mini">
-      <div class="hz-mini__title">${title}</div>
-      ${Plot.plot({
-        height: Math.max(280, crops.length * 22, Number(hz_chartHeight ?? 520)),
-        marginLeft: 160,
-        x: { grid: true, label: xLabel },
-        y: { domain: crops },
-        caption: subtitle,
-        marks: [
-          Plot.barX(data, { x: "value", y: "crop", tip: true }),
-          Plot.ruleX([0])
-        ]
-      })}
-    </div>
-  `
-
-  return html`<div class="hz-grid2">${plotSide(left, "Left")}${plotSide(right, "Right")}</div>`
-}
-```
-
-```{ojs}
-//| output: false
-// ----------------------------
-// Q3 — hazard by crop
-// ----------------------------
-hz_q3ReqExtra = ({ top_hazards: 10, top_crops: 12 })
-
-hz_q3RespL = (hz_activeQuestion === "q3")
-  ? await hz_apiDebouncedCached("q3L", "/api/v1/hz/hazard-by-crop", hz_sideReq(hz_src1, hz_s1, hz_q3ReqExtra), { ttlMs: 300000, debounceMs: 250 })
-  : null
-
-hz_q3RespR = (hz_activeQuestion === "q3")
-  ? await hz_apiDebouncedCached("q3R", "/api/v1/hz/hazard-by-crop", hz_sideReq(hz_src2, hz_s2, hz_q3ReqExtra), { ttlMs: 300000, debounceMs: 250 })
-  : null
-
-hz_q3DataL = hz_q3RespL?.data ?? []
-hz_q3DataR = hz_q3RespR?.data ?? []
-
-hz_q3Meta = ({
-  ok: !!(hz_q3RespL?.ok && hz_q3RespR?.ok),
-  cached: !!(hz_q3RespL?.cached && hz_q3RespR?.cached),
-  t_ms: Math.max(Number(hz_q3RespL?.t_ms || 0), Number(hz_q3RespR?.t_ms || 0)),
-  error: hz_q3RespL?.error || hz_q3RespR?.error || null
-})
-
-hz_q3Chart = {
-  const L = hz_q3DataL ?? []
-  const R = hz_q3DataR ?? []
-  if (!L.length && !R.length) return html`<div class="hz-muted">No data.</div>`
-
-  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
-  const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
-
-
-  // Top crops by combined exposure (Left + Right)
-  const cropTotals = new Map()
-  const bump = (crop, v) => cropTotals.set(crop, (cropTotals.get(crop) || 0) + Number(v || 0))
-  for (const d of R) bump(d.crop, d.total)
-  for (const d of L) bump(d.crop, d.total)
-
-  const maxCrops = Math.min(10, Number(hz_topN || 10))
-  const crops = Array.from(cropTotals.entries())
-    .sort((a,b) => b[1] - a[1])
-    .slice(0, maxCrops)
-    .map(([c]) => c)
-
-  const hazards = Array.from(new Set([...L.map(d => d.hazard), ...R.map(d => d.hazard)])).sort()
-
-  const filter = (data) =>
-    data
-      .filter(d => crops.includes(d.crop) && hazards.includes(d.hazard))
-      .map(d => ({ crop: d.crop, hazard: d.hazard, total: Number(d.total || 0) }))
-
-  // Shared categorical color scale (keeps left/right colors aligned)
-  const color = { type: "categorical", domain: hazards, scheme: "tableau10", legend: false }
-  const legend = Plot.legend({ color: { domain: hazards, scheme: "tableau10" }, columns: 3 })
-
-  const plotStack = (data, title) => html`
-    <div class="hz-mini hz-mini--stack">
-      <div class="hz-mini__title">${title}</div>
-      ${Plot.plot({
-        height: Math.max(320, crops.length * 26, Number(hz_chartHeight ?? 520)),
-        marginLeft: 160,
-        marginRight: 18,
-        marginTop: 10,
-        marginBottom: 28,
-        x: { label: (hz_varLabelAbs ?? "Exposure"), grid: true },
-        y: { domain: crops, label: null },
-        color,
-        caption: subtitle,
-        marks: [
-          Plot.barX(filter(data), {
-            ...Plot.stackX({ x: "total", y: "crop", fill: "hazard" }),
-            tip: {
-              format: {
-                crop: true,
-                hazard: true,
-                total: fmtAbs
-              }
-            }
-          }),
-          Plot.ruleX([0])
-        ]
-      })}
-    </div>
-  `
-
-  return html`
-    <div class="hz-legendRow">${legend}</div>
-    <div class="hz-grid2 hz-grid2--equal">
-      ${plotStack(L, "Left")}
-      ${plotStack(R, "Right")}
-    </div>
-  `
-}
-
-```
-
-```{ojs}
-//| output: false
-// ----------------------------
-// Q4 — totals by admin area
-// ----------------------------
-hz_q4ReqExtra = ({ group_child: false })
-
-hz_q4RespL = (hz_activeQuestion === "q4")
-  ? await hz_apiDebouncedCached("q4L", "/api/v1/hz/by-admin", hz_sideReq(hz_src1, hz_s1, hz_q4ReqExtra), { ttlMs: 300000, debounceMs: 250 })
-  : null
-
-hz_q4RespR = (hz_activeQuestion === "q4")
-  ? await hz_apiDebouncedCached("q4R", "/api/v1/hz/by-admin", hz_sideReq(hz_src2, hz_s2, hz_q4ReqExtra), { ttlMs: 300000, debounceMs: 250 })
-  : null
-
-hz_q4DataL = hz_q4RespL?.data ?? []
-hz_q4DataR = hz_q4RespR?.data ?? []
-
-hz_q4Meta = ({
-  ok: !!(hz_q4RespL?.ok && hz_q4RespR?.ok),
-  cached: !!(hz_q4RespL?.cached && hz_q4RespR?.cached),
-  t_ms: Math.max(Number(hz_q4RespL?.t_ms || 0), Number(hz_q4RespR?.t_ms || 0)),
-  error: hz_q4RespL?.error || hz_q4RespR?.error || null
-})
-
-hz_q4Rows = {
-  const mapL = new Map(hz_q4DataL.map(d => [(d.admin_name ?? d.admin), Number(d.total)]))
-  const mapR = new Map(hz_q4DataR.map(d => [(d.admin_name ?? d.admin), Number(d.total)]))
-  const names = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
-  const rows = names.map(name => ({ name, total1: mapL.get(name) || 0, total2: mapR.get(name) || 0 }))
-  rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
-  return rows.slice(0, hz_topN)
-}
-
-hz_q4Chart = {
-  const rows = hz_q4Rows ?? []
-  const xLabel = hz_rel ? "Percent of side total (%)" : hz_varLabelAbs
-
-  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
-
-  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
-
-  const sum1 = rows.reduce((s,r) => s + (r.total1 || 0), 0)
-  const sum2 = rows.reduce((s,r) => s + (r.total2 || 0), 0)
-
-  const v1 = (d) => hz_rel ? (sum1 ? (100 * d.total1 / sum1) : 0) : d.total1
-  const v2 = (d) => hz_rel ? (sum2 ? (100 * d.total2 / sum2) : 0) : d.total2
-
-  if (hz_compareMode === "diff") {
-    const diff = rows.map(d => ({ name: d.name, delta: v2(d) - v1(d) }))
-    return Plot.plot({
-      height: Math.max(280, diff.length * 22, Number(hz_chartHeight ?? 520)),
-      marginLeft: 180,
-      x: { grid: true, label: hz_rel ? "Δ percentage points (Right − Left)" : "Δ exposure (Right − Left)" },
-      y: { domain: diff.map(d => d.name) },
-      caption: subtitle,
-      marks: [
-        Plot.ruleX([0]),
-        Plot.barX(diff, { x: "delta", y: "name", tip: true })
-      ]
-    })
-  }
-
-  const names = rows.map(d => d.name)
-  const left = rows.map(d => ({ name: d.name, value: v1(d) }))
-  const right = rows.map(d => ({ name: d.name, value: v2(d) }))
-
-  const plotSide = (data, title) => html`
-    <div class="hz-mini">
-      <div class="hz-mini__title">${title}</div>
-      ${Plot.plot({
-        height: Math.max(280, names.length * 22, Number(hz_chartHeight ?? 520)),
-        marginLeft: 180,
-        x: { grid: true, label: xLabel },
-        y: { domain: names },
-        caption: subtitle,
-        marks: [
-          Plot.barX(data, { x: "value", y: "name", tip: true }),
-          Plot.ruleX([0])
-        ]
-      })}
-    </div>
-  `
-  return html`<div class="hz-grid2">${plotSide(left, "Left")}${plotSide(right, "Right")}</div>`
-}
-```
-
-
 
 ```{ojs}
 //| output: false
 // Render main shell
-hz_controlsMount = html`<div class=\"hz-mount\"><div class=\"hz-loading\">Loading controls…</div></div>`
-hz_dashMount = html`<div class=\"hz-mount\"><div class=\"hz-loading\">Loading dashboard…</div></div>`
+hz_controlsMount = html`<div class="hz-mount"><div class="hz-loading">Loading controls…</div></div>`
+hz_dashMount = html`<div class="hz-mount"><div class="hz-loading">Loading dashboard…</div></div>`
 
-hz_statusPill = html`<span class=\"hz-pill\">Loading…</span>`
 hz_chartHost  = html`<div class="hz-chartWrap"><div class="hz-loading">Loading chart…</div></div>`
+hz_q2_chartHost  = html`<div class="hz-chartWrap"><div class="hz-loading">Loading chart…</div></div>`
+hz_q2_tableHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading table…</div></div>`
 hz_tableActionsHost = html`<div class="hz-actions"></div>`
+hz_q3_chartHost  = html`<div class="hz-chartWrap"><div class="hz-loading">Loading chart…</div></div>`
+hz_q3_tableHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading table…</div></div>`
+hz_q3_tableActionsHost = html`<div class="hz-actions"></div>`
+
+hz_q1_downloadMount = {
+  try {
+    const rows = Array.isArray(hz_chartRows) ? hz_chartRows : []
+    const data = rows.map((r) => ({
+      "Hazard": r?.hazard ?? "",
+      "Historic (Total)": r?.total1 ?? null,
+      "Scenario (Total)": r?.total2 ?? null,
+      "Difference (Total)": r?.total_diff ?? null,
+      "Historic (%)": r?.perc1 ?? null,
+      "Scenario (%)": r?.perc2 ?? null,
+      "Difference (%)": r?.pct_diff ?? null
+    }))
+    hz_tableActionsHost.replaceChildren(downloadButton(data, "hazardExposure_q1_summary"))
+  } catch (_) {}
+  return null
+}
+
+hz_q3_downloadMount = {
+  try {
+    const rows = Array.isArray(hz_q3Rows) ? hz_q3Rows : []
+    const data = rows.map((r) => ({
+      "Hazard": r?.hazard ?? "",
+      "Left (abs)": r?.total1 ?? null,
+      "Right (abs)": r?.total2 ?? null,
+      "Δ (abs)": r?.delta ?? null,
+      "Top crop (Right)": r?.topCrop ?? "",
+      "Top crop share (Right %)": r?.topShare ?? null
+    }))
+    hz_q3_tableActionsHost.replaceChildren(downloadButton(data, "hazardExposure_q3_summary"))
+  } catch (_) {}
+  return null
+}
+
 hz_tableHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading table…</div></div>`
 hz_mapHost  = html`<div class="hz-mapWrap"><div class="hz-loading">Loading map…</div></div>`
 hz_recordsActionsHost = html`<div class="hz-actions"></div>`
@@ -4009,145 +3498,743 @@ hz_debugHost  = html``
 hz_pathHost   = html``
 hz_schemaHost = html``
 
-
 // Register UI elements for cross-cell updates
 hz_registerUi = {
   const ui = (globalThis.__ATLAS_HZ_UI__ ??= {})
-  ui.statusPill = hz_statusPill
+  // Q1 mounts
   ui.chartWrap = hz_chartHost
   ui.tableWrap = hz_tableHost
   ui.mapWrap = hz_mapHost
   ui.recordsWrap = hz_recordsHost
 
-  ui._busyCount = ui._busyCount ?? 0
-  ui.setBusy = (on, msg = "Updating…") => {
-    try {
-      if (!ui.statusPill) return
+  // Q2 mounts
+  ui.q2_chartWrap = hz_q2_chartHost
+  ui.q2_tableWrap = hz_q2_tableHost
 
-      if (on) {
-        ui._busyCount += 1
-        // pill: spinner + label
-        ui.statusPill.replaceChildren(
-          html`<span class="hz-pill__spin" aria-hidden="true"></span><span>${msg || "Updating…"}</span>`
-        )
-        try { ui.chartWrap?.classList?.add?.("hz-chartWrap--busy") } catch (_) {}
-        try { ui.tableWrap?.classList?.add?.("hz-tableWrap--busy") } catch (_) {}
-        try { ui.recordsWrap?.classList?.add?.("hz-tableWrap--busy") } catch (_) {}
-        try { ui.mapWrap?.classList?.add?.("hz-mapWrap--busy") } catch (_) {}
-        return
-      }
+  // Q3 mounts (chart + table hosts exist; table wiring comes in later patches)
+  ui.q3_chartWrap = hz_q3_chartHost
+  ui.q3_tableWrap = hz_q3_tableHost
 
-      ui._busyCount = Math.max(0, ui._busyCount - 1)
-      if (ui._busyCount === 0) {
-        try { ui.chartWrap?.classList?.remove?.("hz-chartWrap--busy") } catch (_) {}
-        try { ui.tableWrap?.classList?.remove?.("hz-tableWrap--busy") } catch (_) {}
-        try { ui.recordsWrap?.classList?.remove?.("hz-tableWrap--busy") } catch (_) {}
-        try { ui.mapWrap?.classList?.remove?.("hz-mapWrap--busy") } catch (_) {}
-      }
-    } catch (e) {}
+  ui._busyCounts = ui._busyCounts ?? {}
+
+  ui.setBusyFor = (groupKey, on) => {
+    const g = String(groupKey || "")
+    const target =
+      g.startsWith("q2") ? "q2" :
+      g.startsWith("q3") ? "q3" :
+      g.startsWith("q4") ? "q4" :
+      "q1"
+
+    ui._busyCounts[target] = Math.max(0, (ui._busyCounts[target] || 0) + (on ? 1 : -1))
+    const busy = ui._busyCounts[target] > 0
+
+    const pick = (k) => ({
+      q1: { chart: ui.chartWrap, table: ui.tableWrap },
+      q2: { chart: ui.q2_chartWrap, table: ui.q2_tableWrap },
+      q3: { chart: ui.q3_chartWrap, table: ui.q3_tableWrap },
+      q4: { chart: ui.q4_chartWrap, table: ui.q4_tableWrap }
+    }[k] ?? { chart: ui.chartWrap, table: ui.tableWrap })
+
+    const { chart: chartWrap, table: tableWrap } = pick(target)
+
+    try { chartWrap?.classList.toggle("hz-chartWrap--busy", busy) } catch (_) {}
+    try { tableWrap?.classList.toggle("hz-tableWrap--busy", busy) } catch (_) {}
+
+    // Only Q1 has map/records mounts today
+    if (target === "q1") {
+      try { ui.mapWrap?.classList.toggle("hz-mapWrap--busy", busy) } catch (_) {}
+      try { ui.recordsWrap?.classList.toggle("hz-tableWrap--busy", busy) } catch (_) {}
+    }
   }
+
+  // Backwards-compatible: default busy targets Q1
+  ui.setBusy = (on) => ui.setBusyFor("q1", on)
 
   return null
 }
+// Dashboard UI (static shell) — avoid re-rendering the whole card on view toggle.
+hz_q1_settingsWrap = {
+  const el = html`
+  <div class="hz-qToolbar__right">
+    <div class="hz-inlineToggles">
+      <div class="hz-miniSetting"><span>Show %</span>${viewof hz_relative}</div>
+      <div class="hz-miniSetting"><span>Difference</span>${viewof hz_difference}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q1ChartHeight}</div>
+    </div>
+  </div>
+`;
+  try { el.style.visibility = "visible" } catch (_) {}
+  return el
+}
 
-// Dashboard shell renders immediately (chart + heavy queries mount later)
+hz_q1_chartCard = html`<div class="hz-sideCard">
+  <div class="hz-sideCard__header">
+    <div class="hz-sideCard__title">Chart</div>
+  </div>
+  <div class="hz-sideCard__body">${hz_chartHost}</div>
+</div>`
+
+hz_q1_tableCard = {
+  const el = html`<div class="hz-sideCard">
+  <div class="hz-sideCard__header">
+    <div class="hz-sideCard__title">Summary table</div>
+    <div class="hz-sideCard__right">${hz_tableActionsHost}</div>
+  </div>
+  <div class="hz-sideCard__body">${hz_tableHost}</div>
+</div>`;
+  try { el.style.display = "none" } catch (_) {}
+  return el
+}
+
+// Wrap both result cards; we toggle visibility (display) instead of swapping nodes.
+hz_q1_resultsWrap = {
+  const wrap = html`<div class="hz-qResults"></div>`
+  wrap.append(hz_q1_chartCard, hz_q1_tableCard)
+  return wrap
+}
+
+// Apply current view mode without rebuilding the whole Q1 card.
+hz_q1_applyView = {
+  const mode = (hz_viewMode || "chart")
+  try { hz_q1_chartCard.style.display = (mode === "chart") ? "" : "none" } catch (_) {}
+  try { hz_q1_tableCard.style.display = (mode === "table") ? "" : "none" } catch (_) {}
+  try { hz_q1_settingsWrap.style.visibility = (mode === "chart") ? "visible" : "hidden" } catch (_) {}
+  return null
+}
+
+// Dashboard shell renders once; inner parts update via hz_q1_applyView + mount cells.
 hz_dashboardShell = html`
-  <div>
-    ${viewof hz_plotWidth}
-    <div class=\"hz-card\">
-      <div class=\"hz-card__head\">
-        <div>
-          <div class=\"hz-card__title\">${hz_dashTitle}</div>
-          <div class=\"hz-card__sub\">${hz_dashSub}</div>
-          <div class="hz-navBar">
-            <div class="hz-navBar__group">
-              <div class="hz-navBar__label">Breakdown</div>
-              <div class="hz-navBar__control">${viewof hz_question}</div>
-            </div>
-            <div class="hz-navBar__group hz-navBar__group--right">
-              <div class="hz-navBar__control">${viewof hz_viewMode}</div>
-            </div>
-          </div>
-        </div>
-        ${hz_statusPill}
+  <div class="hz-card">
+    <div class="hz-card__body">
+      <div class="hz-qOverview">${q1DetailText}</div>
+
+      ${hz_controlsPanelReal}
+
+      <div class="hz-qToolbar">
+        <div class="hz-qToolbar__left">${viewof hz_viewMode}</div>
+        ${hz_q1_settingsWrap}
       </div>
 
+      <div class="hz-vizWrap">
+        ${hz_q1_resultsWrap}
+      </div>
+    </div>
+  </div>
+`;
+
+// --------------------------
+// Q2–Q4: independent controls
+// --------------------------
+// (These are not yet connected to queries/outputs; they exist now so each question has its own state.)
+
+viewof hz_q2_viewMode = Inputs.radio(["chart", "table"], {
+  label: "",
+  value: "chart",
+  format: (v) => ({ chart: "Chart", table: "Summary table" }[v] ?? v)
+})
+hz_q2_viewMode.classList?.add?.("hz-viewToggle")
+
+viewof hz_q2_relative = Inputs.toggle({ label: "", value: false })
+viewof hz_q2_difference = Inputs.toggle({ label: "", value: false })
+viewof hz_q2_topN = Inputs.range([5, 50], { label: "", step: 1, value: 25 })
+
+viewof hz_q2_chartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
+
+viewof hz_q3_chartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
+viewof hz_q3_topHazards = Inputs.range([5, 30], { label: "", step: 1, value: 10 })
+viewof hz_q3_topCrops = Inputs.range([5, 30], { label: "", step: 1, value: 12 })
+
+viewof hz_q4_viewMode = Inputs.radio(["chart", "both", "table", "map"], {
+  label: "",
+  value: "both",
+  format: (v) => ({ chart: "Chart", both: "Dashboard", table: "Summary", map: "Map" }[v] ?? v)
+})
+viewof hz_q4_chartHeight = Inputs.range([360, 900], { label: "Chart height:", step: 10, value: 520 })
+
+// Dataset / scenarios (independent per question; use same primitive option lists as Q1)
+viewof hz_q2_varShort = Inputs.select(hz_varShorts ?? [], {
+  label: "Exposure value:",
+  format: hz_formatVarShort,
+  value: hz_defaultVarShort ?? (hz_varShorts ?? [])[0] ?? null
+})
+
+viewof hz_q2_period = Inputs.select(hz_periods ?? [], {
+  label: "Period:",
+  format: hz_formatPeriod,
+  value: hz_defaultPeriod ?? (hz_periods ?? [])[0] ?? null
+})
+
+viewof hz_q2_severity = Inputs.select(hz_severities ?? [], {
+  label: "Severity:",
+  format: hz_formatSeverity,
+  value: hz_defaultSeverity ?? (hz_severities ?? [])[0] ?? null
+})
+
+viewof hz_q2_method = Inputs.select(hz_methodOptions ?? ["generic","auto"], {
+  label: "Hazard method:",
+  value: "generic",
+  format: hz_methodLabel
+})
+
+viewof hz_q2_scen1 = Inputs.select(hz_scenXTime ?? [], {
+  label: "Scenario A:",
+  format: hz_formatScenXTime,
+  value: "historic"
+})
+
+viewof hz_q2_scen2 = Inputs.select(hz_scenXTime ?? [], {
+  label: "Scenario B:",
+  format: hz_formatScenXTime,
+  value: (hz_scenXTime ?? []).find(d => d !== "historic") ?? "historic"
+})
+
+// Commodities (enhanced multiselect, climateRationale-style)
+viewof hz_q2_commodityGroup = Inputs.select(hz_commodityGroupOptions ?? [], { label: "Group", value: "crops", format: hz_commodityGroupLabel })
+hz_q2_commodityOptions = {
+  const g = hz_q2_commodityGroup
+  if (g === "livestock") return hz_livestock ?? []
+  if (g === "crops") return (hz_spamCodes?.crops ?? [])
+  if (g === "cereals") return (hz_spamCodes?.groups?.cereals ?? [])
+  if (g === "legumes") return (hz_spamCodes?.groups?.legumes ?? [])
+  if (g === "roots_tubers") return (hz_spamCodes?.groups?.roots_tubers ?? [])
+  return [...(hz_spamCodes?.crops ?? []), ...(hz_livestock ?? [])].filter(Boolean).sort()
+}
+
+hz_safeEnhancedMultiSelect = (options, cfg = {}) => {
+  const label = cfg.label ?? "Select"
+  const placeholder = cfg.placeholder ?? "Search…"
+  const disabled = !!cfg.disabled
+
+  // Normalize selected values to plain strings
+  const value = (Array.isArray(cfg.value) ? cfg.value : [])
+    .map(v => (v && typeof v === "object") ? (v.value ?? v.name ?? v.label ?? v.id ?? v) : v)
+    .map(v => String(v ?? "").trim())
+    .filter(Boolean)
+
+  // Normalize options into {value,label} with *string* values.
+  const rows = (options ?? [])
+    .map((o) => {
+      if (o == null) return null
+      if (typeof o === "string" || typeof o === "number") {
+        const v = String(o).trim()
+        if (!v) return null
+        const lbl = (typeof cfg.format === "function") ? String(cfg.format(v)) : v
+        return { value: v, label: lbl }
+      }
+      if (typeof o === "object") {
+        const v = String(o.value ?? o.id ?? o.key ?? o.name ?? "").trim()
+        if (!v) return null
+        const lbl = String(o.label ?? o.name ?? o.value ?? v)
+        return { value: v, label: lbl }
+      }
+      return null
+    })
+    .filter(Boolean)
+
+  const map = new Map(rows.map(r => [r.value, r.label]))
+  const values = Array.from(new Set(rows.map(r => r.value)))
+
+  const format = (v) => map.get(String(v)) ?? String(v)
+
+  const viewofSelect = Inputs.select(values, {
+    label,
+    multiple: true,
+    value,
+    disabled,
+    format
+  })
+
+  return enhancedMultiSelect(viewofSelect, {
+    placeholder,
+    requireAtLeastOne: false,
+    maxHeight: cfg.maxHeight ?? 200,
+    width: cfg.width ?? "100%"
+  })
+}
+
+viewof hz_q2_commodities = hz_safeEnhancedMultiSelect(
+  (hz_q2_commodityOptions ?? []).map(v => ({ value: v, label: hz_commodityLabelOf(v) })),
+  { label: "Commodities", value: [] , placeholder: "Search commodities…" }
+)
+
+// Geography UI (exact Atlas boundary UI)
+viewof hz_q2_admin0 = renderA0Multi({ key: "q2", maxSelections: 8, requireAtLeastOne: true })
+viewof hz_q2_admin1 = renderA1Multi({ key: "q2", a0: viewof hz_q2_admin0, maxSelections: 12 })
+viewof hz_q2_admin2 = renderA2Multi({ key: "q2", a0: viewof hz_q2_admin0, a1: viewof hz_q2_admin1, maxSelections: 20 })
+hz_q2_geoUI = inputTemplate()([viewof hz_q2_admin0, viewof hz_q2_admin1, viewof hz_q2_admin2])
+
+hz_normSel2 = (x) => {
+  const arr = x == null ? [] : (Array.isArray(x) ? x : [x])
+  const toStr = (d) => {
+    if (d == null) return ""
+    if (typeof d === "string" || typeof d === "number") return String(d)
+    if (typeof d === "object") {
+      if ("admin2_name" in d) return d.admin2_name == null ? "" : String(d.admin2_name)
+      if ("admin1_name" in d) return d.admin1_name == null ? "" : String(d.admin1_name)
+      if ("admin0_name" in d) return d.admin0_name == null ? "" : String(d.admin0_name)
+      return String(d.value ?? d.name ?? d.label ?? d.id ?? "")
+    }
+    return String(d)
+  }
+  return arr.map(toStr).map((s) => String(s).trim()).filter((s) => s.length > 0)
+}
+hz_q2_geoFilter = ({ admin0: hz_normSel2(hz_q2_admin0), admin1: hz_normSel2(hz_q2_admin1), admin2: hz_normSel2(hz_q2_admin2) })
+
+hz_makeGeoLabel = (gf) => {
+  const a0 = Array.isArray(gf?.admin0) ? gf.admin0.filter(Boolean) : []
+  const a1 = Array.isArray(gf?.admin1) ? gf.admin1.filter(Boolean) : []
+  const a2 = Array.isArray(gf?.admin2) ? gf.admin2.filter(Boolean) : []
+  const hasAll = a0.length === 0 || a0.includes("all")
+  const fmt = (arr, max = 2) => {
+    const xs = arr.slice(0, max)
+    const more = arr.length > max ? ` +${arr.length - max}` : ""
+    return xs.join(", ") + more
+  }
+  if (hasAll) return "All"
+  if (a2.length) return `ADM2: ${fmt(a2)}`
+  if (a1.length) return `ADM1: ${fmt(a1)}`
+  return `ADM0: ${fmt(a0)}`
+}
+
+hz_makeComLabel = (arr) => {
+  const xs = (arr ?? []).map(v => (v?.value ?? v)).filter(Boolean)
+  if (!xs.length) return "All"
+  const head = xs.slice(0, 2).map(hz_commodityLabelOf).join(", ")
+  const more = xs.length > 2 ? ` +${xs.length - 2}` : ""
+  return head + more
+}
+
+// ------------------------------------------------------------
+// Q3/Q4 dataset + commodities + geography (independent controls)
+// ------------------------------------------------------------
+viewof hz_q3_varShort = Inputs.select(hz_varShorts ?? [], {
+  label: "Exposure value:",
+  format: hz_formatVarShort,
+  value: hz_defaultVarShort ?? (hz_varShorts ?? [])[0] ?? null
+})
+viewof hz_q3_period = Inputs.select(hz_periods ?? [], {
+  label: "Period:",
+  format: hz_formatPeriod,
+  value: (hz_periods ?? [])[0] ?? null
+})
+viewof hz_q3_severity = Inputs.select(hz_severities ?? [], {
+  label: "Severity:",
+  format: hz_formatSeverity,
+  value: hz_defaultSeverity ?? (hz_severities ?? [])[0] ?? null
+})
+viewof hz_q3_scen1 = Inputs.select(hz_scenXTime ?? [], {
+  label: "Left:",
+  format: hz_formatScenXTime,
+  value: hz_defaultScen1 ?? (hz_scenXTime ?? [])[0] ?? null
+})
+viewof hz_q3_scen2 = Inputs.select(hz_scenXTime ?? [], {
+  label: "Right:",
+  format: hz_formatScenXTime,
+  value: hz_defaultScen2 ?? (hz_scenXTime ?? [])[1] ?? (hz_scenXTime ?? [])[0] ?? null
+})
+viewof hz_q3_compareMode = Inputs.radio(["side", "diff"], {
+  label: "Compare:",
+  value: "side",
+  format: (v) => ({ side: "Side-by-side", diff: "Δ (Right − Left)" }[v] ?? v)
+})
+viewof hz_q3_method = Inputs.select(hz_methodOptions ?? [], {
+  label: "Method:",
+  value: "generic"
+})
+
+viewof hz_q3_commodityGroup = Inputs.select(hz_commodityGroupOptions ?? [], {
+  label: "Group:",
+  value: "crops",
+  format: hz_commodityGroupLabel
+})
+
+hz_q3_commodityOptions = {
+  const g = hz_q3_commodityGroup
+  if (g === "livestock") return hz_livestock ?? []
+  if (g === "crops") return (hz_spamCodes?.crops ?? [])
+  if (g === "cereals") return (hz_spamCodes?.groups?.cereals ?? [])
+  if (g === "legumes") return (hz_spamCodes?.groups?.legumes ?? [])
+  if (g === "roots_tubers") return (hz_spamCodes?.groups?.roots_tubers ?? [])
+  if (g === "all") return (hz_spamCodes?.all ?? hz_spamCodes?.crops ?? [])
+  return (hz_spamCodes?.crops ?? [])
+}
+
+viewof hz_q3_commodities = hz_safeEnhancedMultiSelect(
+  (hz_q3_commodityOptions ?? []).map(v => ({ value: v, label: hz_commodityLabelOf(v) })),
+  { label: "Commodities", value: [], placeholder: "Search commodities…" }
+)
+
+viewof hz_q3_admin0 = renderA0Multi({ key: "q3", maxSelections: 10, requireAtLeastOne: true })
+viewof hz_q3_admin1 = renderA1Multi({ key: "q3", a0: viewof hz_q3_admin0, maxSelections: 20 })
+viewof hz_q3_admin2 = renderA2Multi({ key: "q3", a0: viewof hz_q3_admin0, a1: viewof hz_q3_admin1, maxSelections: 50 })
+
+hz_q3_geoUI = inputTemplate()([viewof hz_q3_admin0, viewof hz_q3_admin1, viewof hz_q3_admin2])
+hz_q3_geoFilter = ({ admin0: hz_normSel2(hz_q3_admin0), admin1: hz_normSel2(hz_q3_admin1), admin2: hz_normSel2(hz_q3_admin2) })
+
+viewof hz_q4_varShort = Inputs.select(hz_varShortOptions ?? [], { label: "Hazard variable", value: (hz_varShortOptions ?? [])[0], format: hz_formatVarShort })
+viewof hz_q4_period = Inputs.select(hz_periodOptions ?? [], { label: "Period", value: (hz_periodOptions ?? [])[0], format: hz_formatPeriod })
+viewof hz_q4_severity = Inputs.select(hz_severityOptions ?? [], { label: "Severity", value: (hz_severityOptions ?? [])[0], format: hz_formatSeverity })
+viewof hz_q4_scen1 = Inputs.select(hz_scenOptions ?? [], { label: "Left", value: (hz_scenOptions ?? [])[0], format: hz_formatScenXTime })
+viewof hz_q4_scen2 = Inputs.select(hz_scenOptions ?? [], { label: "Right", value: (hz_scenOptions ?? [])[1] ?? (hz_scenOptions ?? [])[0], format: hz_formatScenXTime })
+viewof hz_q4_compareMode = Inputs.radio(["side", "diff"], { label: "Compare", value: "side", format: (v) => ({ side: "Side-by-side", diff: "Δ (Right − Left)" }[v] ?? v) })
+viewof hz_q4_method = Inputs.select(hz_methodOptions ?? [], { label: "Method", value: (hz_methodOptions ?? [])[0] ?? "auto" })
+
+viewof hz_q4_commodityGroup = Inputs.select(hz_commodityGroupOptions ?? [], { label: "Group", value: "crops", format: hz_commodityGroupLabel })
+hz_q4_commodityOptions = {
+  const g = hz_q4_commodityGroup
+  if (g === "livestock") return hz_livestock ?? []
+  if (g === "crops") return (hz_spamCodes?.crops ?? [])
+  if (g === "cereals") return (hz_spamCodes?.groups?.cereals ?? [])
+  if (g === "legumes") return (hz_spamCodes?.groups?.legumes ?? [])
+  if (g === "roots_tubers") return (hz_spamCodes?.groups?.roots_tubers ?? [])
+  return [...(hz_spamCodes?.crops ?? []), ...(hz_livestock ?? [])].filter(Boolean).sort()
+}
+viewof hz_q4_commodities = hz_safeEnhancedMultiSelect(
+  (hz_q4_commodityOptions ?? []).map(v => ({ value: v, label: hz_commodityLabelOf(v) })),
+  { label: "Commodities", value: [], placeholder: "Search commodities…" }
+)
+
+viewof hz_q4_admin0 = renderA0Multi({ key: "q4", maxSelections: 8 })
+viewof hz_q4_admin1 = renderA1Multi({ key: "q4", a0: viewof hz_q4_admin0, maxSelections: 12 })
+viewof hz_q4_admin2 = renderA2Multi({ key: "q4", a0: viewof hz_q4_admin0, a1: viewof hz_q4_admin1, maxSelections: 20 })
+hz_q4_geoUI = inputTemplate()([viewof hz_q4_admin0, viewof hz_q4_admin1, viewof hz_q4_admin2])
+hz_q4_geoFilter = ({ admin0: hz_normSel2(hz_q4_admin0), admin1: hz_normSel2(hz_q4_admin1), admin2: hz_normSel2(hz_q4_admin2) })
+
+hz_q2_controlsSummary = {
+  const left = hz_parseScenarioPick(hz_q2_scen1)?.label ?? String(hz_q2_scen1 ?? "")
+  const right = hz_parseScenarioPick(hz_q2_scen2)?.label ?? String(hz_q2_scen2 ?? "")
+  const geo = hz_makeGeoLabel(hz_q2_geoFilter)
+  const com = hz_makeComLabel(hz_q2_commodities ?? [])
+  return `${hz_formatVarShort(hz_q2_varShort)} · ${hz_formatPeriod(hz_q2_period)} · ${hz_formatSeverity(hz_q2_severity)} · ${left} vs ${right} · Geo: ${geo} · Com: ${com}`
+}
+
+hz_q2_controlsPanel = html`
+  <div class="hz-controlsCompact hz-controlsPanel">
+    <div class="hz-controlsRows">
+      <div class="hz-row hz-row--3">
+        <div class="hz-field">${viewof hz_q2_varShort}</div>
+        <div class="hz-field">${viewof hz_q2_period}</div>
+        <div class="hz-field">${viewof hz_q2_severity}</div>
+      </div>
+
+      <div class="hz-row hz-row--3 hz-row--grow">
+        <div class="hz-field hz-field--sm">${viewof hz_q2_commodityGroup}</div>
+        <div class="hz-field hz-field--grow">${viewof hz_q2_commodities}</div>
+        <div class="hz-field hz-field--sm">${viewof hz_q2_method}</div>
+      </div>
+
+      <div class="hz-row hz-row--3">
+        <div class="hz-field">${viewof hz_q2_admin0}</div>
+        <div class="hz-field">${viewof hz_q2_admin1}</div>
+        <div class="hz-field">${viewof hz_q2_admin2}</div>
+      </div>
+
+      <div class="hz-row hz-row--2">
+        <div class="hz-field">${viewof hz_q2_scen1}</div>
+        <div class="hz-field">${viewof hz_q2_scen2}</div>
+      </div>
+    </div>
+  </div>
+`;
+
+hz_q2_settingsWrap = html`
+  <div class="hz-qToolbar__right">
+    <div class="hz-inlineToggles">
+      <div class="hz-miniSetting"><span>Show %</span>${viewof hz_q2_relative}</div>
+      <div class="hz-miniSetting"><span>Difference</span>${viewof hz_q2_difference}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Number of commodities</span>${viewof hz_q2_topN}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q2_chartHeight}</div>
+    </div>
+  </div>
+`;
+
+hz_q2_chartCard = html`<div class="hz-sideCard">
+  <div class="hz-sideCard__header"><div class="hz-sideCard__title">Chart</div></div>
+  <div class="hz-sideCard__body">${hz_q2_chartHost}</div>
+</div>`;
+
+hz_q2_tableCard = html`<div class="hz-sideCard">
+  <div class="hz-sideCard__header"><div class="hz-sideCard__title">Summary table</div></div>
+  <div class="hz-sideCard__body">${hz_q2_tableHost}</div>
+</div>`;
+
+hz_q2_render = {
+  // Chart content
+  try { hz_q2_chartHost.replaceChildren(hz_q2Chart) } catch (e) {
+    try { hz_q2_chartHost.replaceChildren(html`<div class="warn"><b>Plot error</b><br/><div class="hz-muted">${String(e)}</div></div>`) } catch (_) {}
+  }
+  // Table content
+  try { hz_q2_tableHost.replaceChildren(hz_q2TableView) } catch (e) {
+    try { hz_q2_tableHost.replaceChildren(html`<div class="warn"><b>Table error</b><br/><div class="hz-muted">${String(e)}</div></div>`) } catch (_) {}
+  }
+  return null
+};
+
+hz_q2_applyView = {
+  const mode = (hz_q2_viewMode || "chart");
+  try { hz_q2_chartCard.style.display = (mode === "chart") ? "" : "none"; } catch (_) {}
+  try { hz_q2_tableCard.style.display = (mode === "table") ? "" : "none"; } catch (_) {}
+  try { hz_q2_settingsWrap.style.visibility = (mode === "chart") ? "visible" : "hidden"; } catch (_) {}
+  return null;
+};
+
+hz_q2_dashboardCard = html`
+<div class="hz-card">
+  <div class="hz-card__body">
+    <h1 class="anchored hz-qHeading">${q2Title}</h1>
+    <div class="hz-qOverview">${q2DetailText}</div>
+
+    ${hz_q2_controlsPanel}
+
+    <div class="hz-qToolbar">
+      <div class="hz-qToolbar__left">${viewof hz_q2_viewMode}</div>
+      ${hz_q2_settingsWrap}
+    </div>
+
+    <div class="hz-vizWrap">
+      <div class="hz-qResults">
+        ${hz_q2_chartCard}
+        ${hz_q2_tableCard}
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+// ------------------------------------------------------------
+// Q3/Q4 Controls (incremental dev placeholders)
+// ------------------------------------------------------------
+hz_q3_controlsPanel = html`
+  <div class="hz-controlsCompact hz-controlsPanel">
+    <div class="hz-controlsRows">
+      <div class="hz-row hz-row--3">
+        <div class="hz-field">${viewof hz_q3_varShort}</div>
+        <div class="hz-field">${viewof hz_q3_period}</div>
+        <div class="hz-field">${viewof hz_q3_severity}</div>
+      </div>
+
+      <div class="hz-row hz-row--3 hz-row--grow">
+        <div class="hz-field hz-field--sm">${viewof hz_q3_commodityGroup}</div>
+        <div class="hz-field hz-field--grow">${viewof hz_q3_commodities}</div>
+        <div class="hz-field hz-field--sm">${viewof hz_q3_method}</div>
+      </div>
+
+      <div class="hz-row hz-row--3">
+        <div class="hz-field">${viewof hz_q3_admin0}</div>
+        <div class="hz-field">${viewof hz_q3_admin1}</div>
+        <div class="hz-field">${viewof hz_q3_admin2}</div>
+      </div>
+
+      <div class="hz-row hz-row--3">
+        <div class="hz-field">${viewof hz_q3_scen1}</div>
+        <div class="hz-field">${viewof hz_q3_scen2}</div>
+        <div class="hz-field">${viewof hz_q3_compareMode}</div>
+      </div>
+    </div>
+  </div>
+`;
+
+hz_q4_controlsPanel = html`
+  <div class="hz-controlsCompact hz-controlsPanel">
+    <div class="hz-controlsGrid2">
+      <div class="hz-field">${viewof hz_q4_varShort}</div>
+      <div class="hz-field">${viewof hz_q4_period}</div>
+
+      <div class="hz-field">${viewof hz_q4_severity}</div>
+      <div class="hz-field">${viewof hz_q4_method}</div>
+
+      <div class="hz-field">${viewof hz_q4_scen1}</div>
+      <div class="hz-field">${viewof hz_q4_scen2}</div>
+
+      <div class="hz-field">${viewof hz_q4_compareMode}</div>
+      <div class="hz-field"></div>
+
+      <div class="hz-field hz-field--full">
+        <div class="hz-inlineRow hz-inlineRow--commodities">
+          <div class="hz-inlineRow__small">${viewof hz_q4_commodityGroup}</div>
+          <div class="hz-inlineRow__grow">${viewof hz_q4_commodities}</div>
+        </div>
+      </div>
+      <div class="hz-field hz-field--full">${hz_q4_geoUI}</div>
+    </div>
+  </div>
+`;
+
+hz_q3_settingsWrap = html`
+  <div class="hz-qToolbar__right">
+    <div class="hz-inlineToggles">
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Number of hazards</span>${viewof hz_q3_topHazards}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Number of crops</span>${viewof hz_q3_topCrops}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q3_chartHeight}</div>
+    </div>
+  </div>
+`;
+hz_q3_chartCard = html`<div class="hz-sideCard">
+  <div class="hz-sideCard__header"><div class="hz-sideCard__title">Chart</div></div>
+  <div class="hz-sideCard__body">${hz_q3_chartHost}</div>
+</div>`;
+
+hz_q3_tableCard = html`<div class="hz-sideCard">
+  <div class="hz-sideCard__header">
+    <div class="hz-sideCard__title">Summary table</div>
+    <div class="hz-sideCard__right">${hz_q3_tableActionsHost}</div>
+  </div>
+  <div class="hz-sideCard__body">${hz_q3_tableHost}</div>
+</div>`;
+
+hz_q3_render = {
+
+  if (hz_q3ReqOk && !hz_q3ReqOk.ok) {
+    const msg = hz_q3ReqOk.error || "Please adjust your Q3 selections."
+    try {
+      hz_q3_chartHost.replaceChildren(html`<div class="warn"><b>Selection required</b><br/><div class="hz-muted">${msg}</div></div>`)
+    } catch (_) {}
+    try {
+      hz_q3_tableHost.replaceChildren(html`<div class="warn"><b>Selection required</b><br/><div class="hz-muted">${msg}</div></div>`)
+    } catch (_) {}
+    return null
+  }
+
+  // Chart content
+  try { hz_q3_chartHost.replaceChildren(hz_q3Chart) } catch (e) {
+    try { hz_q3_chartHost.replaceChildren(html`<div class="warn"><b>Plot error</b><br/><div class="hz-muted">${String(e)}</div></div>`) } catch (_) {}
+  }
+
+  // Table content (AtlasTable)
+  try { hz_q3_tableHost.replaceChildren(hz_q3TableView) } catch (e) {
+    try { hz_q3_tableHost.replaceChildren(html`<div class="warn"><b>Table error</b><br/><div class="hz-muted">${String(e)}</div></div>`) } catch (_) {}
+  }
+
+  return null
+};
+
+viewof hz_q3_viewMode = Inputs.radio(["chart", "table"], {
+  label: "",
+  value: "chart",
+  format: (v) => ({ chart: "Chart", table: "Summary" }[v] ?? v)
+})
+
+hz_q3_applyView = {
+  const mode = (hz_q3_viewMode || "chart");
+  try { hz_q3_chartCard.style.display = (mode === "chart") ? "" : "none"; } catch (_) {}
+  try { hz_q3_tableCard.style.display = (mode === "table") ? "" : "none"; } catch (_) {}
+  try { hz_q3_settingsWrap.style.visibility = (mode === "chart") ? "visible" : "hidden"; } catch (_) {}
+  return null;
+};
+
+hz_q3_dashboardCard = html`
+<div class="hz-card">
+  <div class="hz-card__body">
+    <h1 class="anchored hz-qHeading">${q3Title}</h1>
+    <div class="hz-qOverview">
+      <div>${q3DetailText}</div>
+      <div class="hz-muted" style="margin-top:.5rem">
+        This view is useful when:
+        <ul style="margin:.35rem 0 0 1.2rem">
+          <li>You want to prioritize hazard-specific actions (e.g. drought resilience).</li>
+          <li>You’re interested in which crops dominate exposure to dry, heat, or compound hazards.</li>
+        </ul>
+      </div>
+    </div>
+
+    ${hz_q3_controlsPanel}
+
+    <div class="hz-qToolbar">
+      <div class="hz-qToolbar__left">${viewof hz_q3_viewMode}</div>
+      ${hz_q3_settingsWrap}
+    </div>
+
+    <div class="hz-vizWrap">
+      <div class="hz-qResults">
+        ${hz_q3_chartCard}
+        ${hz_q3_tableCard}
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+hz_q4_dashboardCard = html`
+<div class="hz-card">
+  <div class="hz-card__head">
+    <div>
+      <div class="hz-card__title">Q4 — Scenario comparison</div>
+    </div>
+  </div>
+
+  <div class="hz-card__body">
+    <div class="hz-qOverview">
+      Side-by-side scenario differences for the selected dataset and commodities. (Outputs will be wired after Q1 layout and controls are final.)
+    </div>
+
+    ${hz_q4_controlsPanel}
+
+    <div class="hz-qToolbar">
+      <div class="hz-qToolbar__left">
+        ${viewof hz_q4_viewMode}
+      </div>
       ${
-        (hz_viewMode === "records")
-          ? html`<div class="hz-sideCard">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
-                <div class="hz-sideCard__title" style="margin:0">Raw records</div>
-                ${hz_recordsActionsHost}
-              </div>
-              <div class="hz-recordsBar">
-                <div class="hz-recordsBar__left">
-                  ${viewof hz_recordsSide}
-                  ${viewof hz_recordsSort}
-                  ${viewof hz_recordsPageSize}
-                </div>
-                <div class="hz-recordsBar__right">
-                  ${viewof hz_recordsPage}
-                </div>
-              </div>
-              ${hz_recordsHost}
-            </div>`
-          : (hz_viewMode === "map")
-            ? html`<div class="hz-sideCard">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
-                  <div class="hz-sideCard__title" style="margin:0">Map</div>
-                  <div class="hz-miniControls">${viewof hz_mapMetric}</div>
-                </div>
-                <div class="hz-muted hz-mapSub">${hz_mapSub}</div>
-                ${hz_mapHost}
-              </div>`
-            : (hz_viewMode === "chart")
-              ? html`<div class="hz-sideCard">${hz_chartHost}</div>`
-              : (hz_viewMode === "table")
-                ? html`<div class="hz-sideCard">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">
-                      <div class="hz-sideCard__title" style="margin:0">Summary table</div>
-                      ${hz_tableActionsHost}
-                    </div>
-                    ${hz_tableHost}
-                  </div>`
-                : html`<div class="hz-stack">
-                    <div class="hz-sideCard">
-                      <div class="hz-sideCard__title">Chart</div>
-                      ${hz_chartHost}
-                    </div>
-                    <div class="hz-sideCard">
-                      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-                        <div class="hz-sideCard__title" style="margin:0">Summary table</div>
-                        ${hz_tableActionsHost}
-                      </div>
-                      ${hz_tableHost}
-                    </div>
-                  </div>`
+        (hz_q4_viewMode === "chart" || hz_q4_viewMode === "both")
+          ? html`<div class="hz-qToolbar__right"><div class="hz-inlineRange">${viewof hz_q4_chartHeight}</div></div>`
+          : ""
       }
     </div>
+
+    <div class="hz-sideCard">
+      <div class="hz-sideCard__header"><div class="hz-sideCard__title">Placeholder</div></div>
+      <div class="hz-sideCard__body"><div class="hz-muted">Q4 chart/table/map will render here.</div></div>
+    </div>
+  </div>
+</div>
+`;
+
+// Q1 wrapper: controls live in the Q1 section (not in a global Controls panel)
+hz_q1_block = html`<section id="q1" class="hz-question">${hz_dashboardShell}</section>`
+hz_questionsStack = html`
+  <div class="hz-stack hz-stack--questions">
+    ${hz_q1_block}
+    <section id="q2" class="hz-question">${hz_q2_dashboardCard}</section>
+    <section id="q3" class="hz-question">${hz_q3_dashboardCard}</section>
+    <section id="q4" class="hz-question">$</section>
   </div>
 `
 
-hz_mountControls = {
-  try {
-    hz_controlsMount.replaceChildren(hz_controlsPanelReal)
-  } catch (e) {
-    hz_controlsMount.replaceChildren(html`<div class=\"warn\"><b>Controls failed to render:</b><br>${String(e)}</div>`)
-  }
-  return html``
-}
-
-
 hz_mountDash = {
   try {
-    hz_dashMount.replaceChildren(hz_dashboardShell)
+    // Preserve scroll position even if Quarto makes a wrapper scroll container.
+    const scroller =
+      document.scrollingElement ||
+      document.querySelector("#quarto-content") ||
+      document.querySelector(".page-columns") ||
+      document.documentElement ||
+      document.body
+
+    const y = scroller?.scrollTop ?? window.scrollY
+    const x = scroller?.scrollLeft ?? window.scrollX
+
+    // Avoid focus-driven jump when the radio/checkbox inputs are recreated.
+    try { document.activeElement?.blur?.() } catch (e) {}
+
+    hz_dashMount.replaceChildren(hz_questionsStack)
+
+    const restore = () => {
+      if (scroller) {
+        scroller.scrollTop = y
+        scroller.scrollLeft = x
+      } else {
+        window.scrollTo(x, y)
+      }
+    }
+
+    requestAnimationFrame(() => {
+      restore()
+      requestAnimationFrame(restore)
+    })
   } catch (e) {
-    hz_dashMount.replaceChildren(html`<div class=\"warn\"><b>Dashboard failed to render:</b><br>${String(e)}</div>`)
+    hz_dashMount.replaceChildren(html`<div class="warn"><b>Dashboard failed to render:</b><br>${String(e)}</div>`)
   }
   return html``
 }
-
-
 
 // ------------------------------------------------------------
 // Table rendering (Grid.js) + CSV export
@@ -4214,7 +4301,6 @@ hz_mountGrid = (host, key, cfg) => {
 }
 
 
-// Build chart *safely* (catch DuckDB/Arrow/Plot errors so UI still renders)
 hz_updateChart = {
   const q = (hz_activeQuestion || "q1")
   const view = (hz_viewMode || "both")
@@ -4227,24 +4313,11 @@ hz_updateChart = {
   if (wantsRecords) {
     const r = hz_recordsResp
     if (!r) {
-      hz_statusPill.textContent = "Loading"
-      hz_statusPill.classList.add("hz-pill--loading")
-      hz_statusPill.classList.remove("hz-pill--error")
-    hz_statusPill.classList.remove("hz-pill--loading")
       return html``
     }
     if (!r.ok) {
-      hz_statusPill.textContent = "Error"
-      hz_statusPill.classList.add("hz-pill--error")
-    hz_statusPill.classList.remove("hz-pill--loading")
-      hz_statusPill.classList.remove("hz-pill--loading")
       return html``
     }
-    hz_statusPill.classList.remove("hz-pill--error")
-    hz_statusPill.classList.remove("hz-pill--loading")
-    const tag = r.cached ? "Cached" : "Ready"
-    const ms = Number.isFinite(r.t_ms) ? ` (${r.t_ms} ms)` : ""
-    hz_statusPill.textContent = tag + ms
     return html``
   }
 
@@ -4254,28 +4327,21 @@ hz_updateChart = {
 
     // Loading
     if (meta.loading) {
-      hz_statusPill.className = "hz-pill hz-pill--loading"
-      hz_statusPill.textContent = "Loading…"
-      hz_mapHost.replaceChildren(html`<div class=\"hz-loading\">Loading map…</div>`)
+      hz_mapHost.replaceChildren(html`<div class="hz-loading">Loading map…</div>`)
       return html``
     }
 
     // Error
     if (!meta.ok) {
-      hz_statusPill.className = "hz-pill hz-pill--error"
-      hz_statusPill.textContent = "Error"
-      const err = html`<div class=\"warn\"><b>Map error:</b><br>${String(meta.error || "Map query failed")}</div>`
+      const err = html`<div class="warn"><b>Map error:</b><br>${String(meta.error || "Map query failed")}</div>`
       hz_mapHost.replaceChildren(err)
       return html``
     }
 
     // Ready
-    hz_statusPill.className = "hz-pill hz-pill--ready"
-    hz_statusPill.textContent = "Ready"
     hz_mapHost.replaceChildren(hz_mapPlot)
     return html``
   }
-
 
   const pick = () => {
     if (q === "q1") return { meta: hz_q1Meta, chart: hz_q1Chart }
@@ -4293,13 +4359,9 @@ hz_updateChart = {
 
   // Status pill
   if (errors.length) {
-    hz_statusPill.textContent = "Error"
-    hz_statusPill.classList.add("hz-pill--error")
   } else {
-    hz_statusPill.classList.remove("hz-pill--error")
     const tag = meta?.cached ? "Cached" : "Ready"
     const ms = Number.isFinite(meta?.t_ms) ? ` (${meta.t_ms} ms)` : ""
-    hz_statusPill.textContent = tag + ms
   }
 
   // Chart area
@@ -4412,13 +4474,13 @@ hz_updateChart = {
       for (const d of R) bump(d.crop, d.total)
       for (const d of L) bump(d.crop, d.total)
 
-      const maxCrops = Math.min(10, Number(hz_topN || 10))
+      const maxCrops = Math.min(25, Number(hz_q3ReqExtra?.top_crops || 12))
       const crops = Array.from(cropTotals.entries())
         .sort((a,b) => b[1] - a[1])
         .slice(0, maxCrops)
         .map(([c]) => c)
 
-      // Top hazards by combined total (keeps table compact)
+     
       const hazTotals = new Map()
       const bumpH = (haz, v) => hazTotals.set(haz, (hazTotals.get(haz) || 0) + Number(v || 0))
       for (const d of R) bumpH(d.hazard, d.total)
@@ -4507,7 +4569,55 @@ hz_updateChart = {
 
   hz_tableActionsHost.replaceChildren(actionsWrap)
 
-  // Mount Grid
+  if (q === "q1") {
+    const rows = Array.isArray(hz_chartRows) ? hz_chartRows : []
+
+    const fmtPP = (v) => {
+      const x = Number(v)
+      if (!Number.isFinite(x)) return "—"
+      const sign = x > 0 ? "+" : ""
+      return `${sign}${hz_formatNumber(x, { digits: 2, compact: false })} pp`
+    }
+
+    const tableData = rows.map((r) => ({
+      "Hazard": r.hazard,
+      "Left (abs)": r.total1,
+      "Right (abs)": r.total2,
+      "Δ (abs)": r.total_diff,
+      "Left (%)": r.perc1,
+      "Right (%)": r.perc2,
+      "Δ (pp)": r.pct_diff
+    }))
+
+    const view = hz_atlasTable(tableData, {
+      columns: showPct
+        ? ["Hazard", "Left (%)", "Right (%)", "Δ (pp)"]
+        : ["Hazard", "Left (abs)", "Right (abs)", "Δ (abs)"],
+      format: {
+        "Left (abs)": fmtAbsFull,
+        "Right (abs)": fmtAbsFull,
+        "Δ (abs)": fmtAbsFull,
+        "Left (%)": fmtPct,
+        "Right (%)": fmtPct,
+        "Δ (pp)": fmtPP
+      },
+      rows: 12,
+      height: "540px",
+      width: {
+        "Hazard": 240,
+        "Left (abs)": 140,
+        "Right (abs)": 140,
+        "Δ (abs)": 140,
+        "Left (%)": 120,
+        "Right (%)": 120,
+        "Δ (pp)": 120
+      }
+    })
+
+    hz_tableHost.replaceChildren(view)
+    return html``
+  }
+
   const tableDiv = document.createElement("div")
   hz_tableHost.replaceChildren(tableDiv)
   hz_mountGrid(tableDiv, "hz_table", {
@@ -4523,11 +4633,6 @@ hz_updateChart = {
   return html``
 }
 
-
-
-
-
-
 // ------------------------------------------------------------
 // Raw records (paged) — server-backed
 // ------------------------------------------------------------
@@ -4542,8 +4647,8 @@ hz_recordsReq = {
   const req = {
     dataset_url: src?.url,
     scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
-    geo: hz_geoFilter,
-    commodities: hz_selectedCommodities ?? [],
+    geo: hz_geoFilterApi,
+    commodities: hz_selectedCommoditiesForReq ?? [],
     hazard_vars: null,
     method: hz_method,
     commodity_group: hz_selectedCommodGroup,
@@ -4716,9 +4821,7 @@ hz_updateRecords = {
 
   return html``
 }
-// Bootstrap cell: forces mounts + updates to execute without blocking hz_main.
 hz_bootstrap = {
-  hz_mountControls
   hz_mountDash
   hz_registerUi
   hz_recordsPagerSync
@@ -4729,28 +4832,21 @@ hz_bootstrap = {
 }
 
 hz_main = html`
-  <div class=\"app\">
-    <nav class=\"hz-topnav\" aria-label=\"Quick navigation\">
-      <a href=\"#controls\">Controls</a>
-            <a href=\"#dashboard\">Dashboard</a>
-      <span class=\"hz-topnav__spacer\"></span>
-      <span class=\"hz-pill\">Atlas Hazard Exposure</span>
-    </nav>
-    <div class=\"app__stack\">
-      ${hz_hero}
-      <div id=\"controls\">${hz_controlsMount}</div>
-            <div id=\"dashboard\">${hz_dashMount}</div>
-    </div>
+  <div class="hz-stack hz-stack--page">
+    ${hz_dashMount}
   </div>
 `;
-// Mount the app into the markdown placeholder (keeps the page free of Observable inspector "HTMLElement {}" output)
 hz_renderApp = {
-  const host = document.getElementById("hz-app")
-  if (host) host.replaceChildren(hz_main)
+  const host = document.getElementById("hz-dashboard")
+  if (!host) return null
+  const ui = (globalThis.__ATLAS_HZ_UI__ ??= {})
+  if (ui.__appMounted) return null
+
+  host.replaceChildren(hz_main)
+  ui.__appMounted = true
   return null
 }
 
-// Bootstrap: mount sub-panels and update the chart (debounced/cached API)
 hz_run = {
   hz_renderApp
   await hz_bootstrap
@@ -4759,3 +4855,96 @@ hz_run = {
 
 hz_run
 ```
+
+
+
+<!-- Add .hidden back in to hide -->
+
+
+::: {.hidden}
+{{< include /components/_lang.qmd >}}
+:::
+
+
+
+```{ojs}
+function NavbarLangSelector(language_obj, masterLanguage) {
+  const existing = document.getElementById("nav-lang-selector");
+  if (existing) return;
+
+  const lang_sel = Inputs.bind(
+    Inputs.radio(language_obj, {
+      label: "",
+      format: (d) => d.label
+    }),
+    viewof masterLanguage
+  );
+  lang_sel.id = "nav-lang-selector";
+
+  lang_sel.style.display = "flex";
+  lang_sel.style.alignItems = "center";
+  lang_sel.style.marginLeft = "10px";
+  const lang_div = lang_sel.querySelector("div");
+  if (lang_div) {
+    lang_div.style.display = "flex";
+    lang_div.style.flexDirection = "column";
+  }
+
+  const navList = document.querySelector(".navbar-nav.ms-auto");
+  if (navList) {
+    navList.appendChild(lang_sel);
+    return;
+  }
+
+  const navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
+  if (navEnd && navEnd.parentNode) {
+    navEnd.parentNode.appendChild(lang_sel);
+    return;
+  }
+
+  let mount = document.getElementById("atlas-lang-float");
+  if (!mount) {
+    mount = document.createElement("div");
+    mount.id = "atlas-lang-float";
+    mount.style.position = "fixed";
+    mount.style.top = "12px";
+    mount.style.right = "12px";
+    mount.style.zIndex = "1030";
+    mount.style.padding = "6px 10px";
+    mount.style.borderRadius = "999px";
+    mount.style.border = "1px solid rgba(0,0,0,.12)";
+    mount.style.background = "rgba(255,255,255,.92)";
+    mount.style.boxShadow = "0 10px 26px rgba(0,0,0,.10)";
+    document.body.appendChild(mount);
+  }
+  mount.appendChild(lang_sel);
+}
+
+NavbarLangSelector(languages, masterLanguage)
+```
+
+```{ojs}
+nbTitle = _lang({
+  en: "Atlas Hazard Exposure Explorer",
+  fr: "Explorateur d’exposition aux aléas de l’Atlas",
+});
+
+nbText = await FileAttachment("/data/hazardExposure/nbText.json").json();
+
+heading1 = _lang({ en: "Overview", fr: "Aperçu" });
+q1Title = _lang(nbText.sections?.q1?.title);
+q1DetailText = _lang(nbText.sections?.q1?.detailText);
+
+heading2 = q1Title;
+q2Title = _lang(nbText.sections?.q2?.title);
+
+q2DetailText = _lang(nbText.sections?.q2?.detailText);
+
+q3Title = _lang(nbText.sections?.q3?.title);
+q3DetailText = _lang(nbText.sections?.q3?.detailText);
+
+heading3 = q2Title;
+
+```
+
+{{< include /components/_adminSelectorsMulti.qmd >}}

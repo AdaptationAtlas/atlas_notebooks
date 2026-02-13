@@ -1,7 +1,7 @@
 ---
 pagetitle: Admin Selectors (MultiSelect)
 created: "2025-11-25"
-updated: "2025-11-25"
+updated: "2026-02-10"
 ---
 
 <!--
@@ -38,14 +38,10 @@ html`<div style="display: flex; gap: 2em;">${section1A0} ${section1A1} ${section
 
 ```{ojs}
 adminDB = await DuckDBClient.of({
-  admin_lookup: await FileAttachment(
-    "/data/shared/gaul24_africa_lookup.parquet",
-  ),
+  admin_lookup: await FileAttachment("/data/shared/gaul24_africa_lookup.parquet"),
 });
-```
 
-```{ojs}
-// ADMIN 0
+// ADMIN 0 options
 countries = {
   const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
   const filteredCountries = country_list
@@ -54,79 +50,279 @@ countries = {
   return filteredCountries;
 };
 
-viewof admin0Select = Inputs.input(Object.values(countries).slice(0, 2))
+// Default admin0 selection: Kenya if available, otherwise first
+defaultAdmin0 = {
+  const kenya = (countries ?? []).find((d) => d && d.iso3c === "KEN");
+  return kenya ? [kenya] : (countries ?? []).slice(0, 1);
+};
 
-renderA0Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => {
-    const _admin0 = Inputs.select(countries, {
-        //NOTE: _lang & general_translations are defined in 
-        // components/_lang.qmd
-        //Both must be loaded into a notebook for this to work.
-        label: _lang(general_translations.country),
-        format: (d) => _lang(d.translation),
-        // format: (d) => d.iso3c,
-        multiple: true
-      }
-    );
-    // Adds the additional features to the multi-select
-    enhancedMultiSelect(_admin0, { maxSelections, requireAtLeastOne })
-    // Bind to the main global multi-select for updates across NB
-    return Inputs.bind(_admin0, viewof admin0Select)
-}
-```
+// ---- Helpers ----
+hz__a0Label = () => _lang?.(general_translations?.country) ?? "Country:";
+hz__a1Label = () => _lang?.(general_translations?.admin1) ?? "Admin1:";
+hz__a2Label = () => _lang?.(general_translations?.admin2) ?? "Admin2:";
 
-```{ojs}
-// Admin1
-dataAdmin1 = {
+hz__fmtCountry = (d) => {
+  try { return _lang?.(d?.translation) ?? String(d?.admin0_name ?? d?.name ?? ""); } catch (_) {}
+  return String(d?.admin0_name ?? d?.name ?? "");
+};
+
+hz__mkInputHost = () => {
+  const el = document.createElement("div");
+  // Observable viewof: value + input events
+  el.value = [];
+  return el;
+};
+
+hz__dispatch = (el) => {
+  try { el.dispatchEvent(new Event("input", { bubbles: true })); } catch (_) {}
+  try { el.dispatchEvent(new Event("change", { bubbles: true })); } catch (_) {}
+};
+
+hz__uniqKey = (key, fallback = "global") => String(key || fallback);
+
+// Build Admin1 options for selected countries (admin0)
+hz__admin1Options = async (admin0Sel) => {
+  const a0 = Array.isArray(admin0Sel) ? admin0Sel : (admin0Sel ? [admin0Sel] : []);
+  const isoList = a0.map((d) => d?.iso3c).filter(Boolean);
+  if (!isoList.length) return [];
+
   const regions = await adminDB.query(`
     SELECT DISTINCT admin0_name, admin1_name, iso3
     FROM admin_lookup
-    WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
+    WHERE iso3 in ('${isoList.join("', '")}')
   `);
-  
-  return [
-    ...admin0Select.map((d) => ({ admin0_name: d.admin0_name, admin1_name: null, iso3: d.iso3c })),
-    ...regions
-  ]
-  // return regions
-}
 
+  const regionRows = (regions ?? []).map((r) => ({
+    admin0_name: r.admin0_name,
+    admin1_name: r.admin1_name,
+    iso3: r.iso3,
+    admin1_label: `${r.admin1_name} (${r.iso3})`,
+  }));
+
+  // NOTE: "Full country" is represented by leaving Admin1 empty.
+  return regionRows;
+};
+
+// Build Admin2 options for selected admin1 names and countries (admin0)
+hz__admin2Options = async (admin0Sel, admin1Sel) => {
+  const a0 = Array.isArray(admin0Sel) ? admin0Sel : (admin0Sel ? [admin0Sel] : []);
+  const isoList = a0.map((d) => d?.iso3c).filter(Boolean);
+  if (!isoList.length) return [];
+
+  const a1 = Array.isArray(admin1Sel) ? admin1Sel : (admin1Sel ? [admin1Sel] : []);
+  const a1Names = a1
+    .map((d) => (typeof d === "string" ? d : (d?.admin1_name ?? d?.value ?? "")))
+    .map((s) => String(s || "").trim())
+    .filter((s) => s.length > 0);
+
+  if (!a1Names.length) return [];
+
+  const rows = await adminDB.query(`
+    SELECT DISTINCT admin0_name, admin1_name, admin2_name, iso3
+    FROM admin_lookup
+    WHERE iso3 in ('${isoList.join("', '")}')
+      AND admin1_name in ('${a1Names.map(s => s.replace(/'/g, "''")).join("', '")}')
+  `);
+
+  return (rows ?? []).map((r) => ({
+    admin0_name: r.admin0_name,
+    admin1_name: r.admin1_name,
+    admin2_name: r.admin2_name,
+    iso3: r.iso3,
+    admin2_label: `${r.admin2_name} (${r.iso3})`,
+  }));
+};
+
+
+hz__buildEnhanced = (options, { label, format, multiple = true, value = [], maxSelections = Infinity, requireAtLeastOne = false } = {}) => {
+  const sel = Inputs.select(options ?? [], { label, format, multiple, value });
+  try { enhancedMultiSelect(sel, { maxSelections, requireAtLeastOne }); } catch (_) {}
+  return sel;
+};
+
+
+viewof admin0Select = Inputs.input(defaultAdmin0)
 viewof admin1Select = Inputs.input([])
-
-renderA1Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => {
-    const _admin1 = Inputs.select(
-      dataAdmin1,
-      {
-        label: _lang(general_translations.region),
-        format: (d) => `${d.admin1_name || "Full Country"} (${d.iso3})`,
-        multiple: true
-      }
-    )
-    enhancedMultiSelect(_admin1, { maxSelections, requireAtLeastOne })
-    return Inputs.bind(_admin1, viewof admin1Select)
-}
-```
-
-```{ojs}
-// Admin2
-dataAdmin2 = await adminDB.query(`
-  SELECT DISTINCT admin0_name, admin1_name, admin2_name, iso3
-  FROM admin_lookup
-  WHERE iso3 in ('${admin0Select.map((d) => d.iso3c).join("', '")}')
-  AND admin1_name in ('${admin1Select.map((d) => d.admin1_name).join("', '")}')
-`)
-
 viewof admin2Select = Inputs.input([])
 
-renderA2Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => {
-    const _admin2 = Inputs.select(
-      dataAdmin2,
-      {
-        label: _lang(general_translations.district),
-        format: (d) => `${d.admin2_name} (${d.iso3})`,
-        multiple: true
-      }
-    )
-    enhancedMultiSelect(_admin2, { maxSelections, requireAtLeastOne })
-    return Inputs.bind(_admin2, viewof admin2Select)
+dataAdmin1 = await hz__admin1Options(admin0Select)
+dataAdmin2 = await hz__admin2Options(admin0Select, admin1Select)
+
+
+renderA0MultiLegacy = ({ maxSelections = Infinity, requireAtLeastOne = false } = {}) => {
+  const _a0 = Inputs.select(countries, {
+    label: hz__a0Label(),
+    format: hz__fmtCountry,
+    multiple: true
+  });
+  try { enhancedMultiSelect(_a0, { maxSelections, requireAtLeastOne }); } catch (_) {}
+  return Inputs.bind(_a0, viewof admin0Select);
 }
+
+renderA1MultiLegacy = ({ maxSelections = Infinity, requireAtLeastOne = false } = {}) => {
+  const _a1 = Inputs.select(dataAdmin1 ?? [], {
+    label: hz__a1Label(),
+    format: (d) => d?.admin1_label ?? String(d?.admin1_name ?? ""),
+    multiple: true
+  });
+  try { enhancedMultiSelect(_a1, { maxSelections, requireAtLeastOne }); } catch (_) {}
+  return Inputs.bind(_a1, viewof admin1Select);
+}
+
+renderA2MultiLegacy = ({ maxSelections = Infinity, requireAtLeastOne = false } = {}) => {
+  const _a2 = Inputs.select(dataAdmin2 ?? [], {
+    label: hz__a2Label(),
+    format: (d) => d?.admin2_label ?? String(d?.admin2_name ?? ""),
+    multiple: true
+  });
+  try { enhancedMultiSelect(_a2, { maxSelections, requireAtLeastOne }); } catch (_) {}
+  return Inputs.bind(_a2, viewof admin2Select);
+}
+
+renderA0MultiKeyed = ({ key, maxSelections = Infinity, requireAtLeastOne = false } = {}) => {
+  const k = hz__uniqKey(key);
+  const host = hz__mkInputHost();
+  host.dataset.key = k;
+
+  const make = (val) => {
+    const el = hz__buildEnhanced(countries, {
+      label: hz__a0Label(),
+      format: hz__fmtCountry,
+      multiple: true,
+      value: val,
+      maxSelections,
+      requireAtLeastOne
+    });
+    const __on = () => {
+      host.value = el.value ?? [];
+      hz__dispatch(host);
+    };
+    el.addEventListener("input", __on);
+    el.addEventListener("change", __on);
+    return el;
+  };
+
+  const initial = (() => {
+    try {
+      if (typeof defaultAdmin0 !== "undefined" && defaultAdmin0 != null) return defaultAdmin0;
+    } catch (_) {}
+    const k0 = (countries ?? []).find((c) => (c?.iso3c || c?.iso3) === "KEN" || /Kenya/i.test(String(c?.admin0_name ?? c?.name ?? "")));
+    return k0 ? [k0] : [];
+  })();
+  const inner = make(Array.isArray(initial) ? initial.slice() : (initial ? [initial] : []));
+  host.value = inner.value ?? [];
+  host.replaceChildren(inner);
+  try { hz__dispatch(host); } catch (_) {}
+  return host;
+};
+
+renderA1MultiKeyed = ({ key, a0, maxSelections = Infinity, requireAtLeastOne = false } = {}) => {
+  const k = hz__uniqKey(key);
+  const host = hz__mkInputHost();
+  host.dataset.key = k;
+
+  // placeholder
+  try {
+    const ph = document.createElement("div");
+    ph.className = "hz-muted";
+    ph.textContent = "Loading…";
+    host.replaceChildren(ph);
+  } catch (_) {}
+
+  let currentA0 = (a0?.value ?? []);
+
+  const mount = async () => {
+    const opts = await hz__admin1Options(currentA0);
+    const inner = hz__buildEnhanced(opts, {
+      label: hz__a1Label(),
+      format: (d) => d?.admin1_label ?? String(d?.admin1_name ?? ""),
+      multiple: true,
+      value: [],
+      maxSelections,
+      requireAtLeastOne
+    });
+    const __on = () => {
+      host.value = inner.value ?? [];
+      hz__dispatch(host);
+    };
+    inner.addEventListener("input", __on);
+    inner.addEventListener("change", __on);
+    host.value = inner.value ?? [];
+    host.replaceChildren(inner);
+    return host;
+  };
+
+  const refresh = () => {
+    currentA0 = (a0?.value ?? []);
+    mount().then(() => hz__dispatch(host)).catch(() => {});
+  };
+
+  
+  mount().then(() => hz__dispatch(host)).catch(() => {});
+
+  try { a0?.addEventListener?.("input", () => refresh()); } catch (_) {}
+  try { a0?.addEventListener?.("change", () => refresh()); } catch (_) {}
+
+  return host;
+};
+
+renderA2MultiKeyed = ({ key, a0, a1, maxSelections = Infinity, requireAtLeastOne = false } = {}) => {
+  const k = hz__uniqKey(key);
+  const host = hz__mkInputHost();
+  host.dataset.key = k;
+
+  // placeholder
+  try {
+    const ph = document.createElement("div");
+    ph.className = "hz-muted";
+    ph.textContent = "Loading…";
+    host.replaceChildren(ph);
+  } catch (_) {}
+
+  let currentA0 = (a0?.value ?? []);
+  let currentA1 = (a1?.value ?? []);
+
+  const mount = async () => {
+    const opts = await hz__admin2Options(currentA0, currentA1);
+    const inner = hz__buildEnhanced(opts, {
+      label: hz__a2Label(),
+      format: (d) => d?.admin2_label ?? String(d?.admin2_name ?? ""),
+      multiple: true,
+      value: [],
+      maxSelections,
+      requireAtLeastOne
+    });
+    const __on = () => {
+      host.value = inner.value ?? [];
+      hz__dispatch(host);
+    };
+    inner.addEventListener("input", __on);
+    inner.addEventListener("change", __on);
+    host.value = inner.value ?? [];
+    host.replaceChildren(inner);
+    return host;
+  };
+
+  const refresh = () => {
+    currentA0 = (a0?.value ?? []);
+    currentA1 = (a1?.value ?? []);
+    mount().then(() => hz__dispatch(host)).catch(() => {});
+  };
+
+  mount().then(() => hz__dispatch(host)).catch(() => {});
+
+  try { a0?.addEventListener?.("input", () => refresh()); } catch (_) {}
+  try { a0?.addEventListener?.("change", () => refresh()); } catch (_) {}
+  try { a1?.addEventListener?.("input", () => refresh()); } catch (_) {}
+  try { a1?.addEventListener?.("change", () => refresh()); } catch (_) {}
+
+  return host;
+};
+
+
+// ---- Public API ----
+// Prefer keyed behavior when `key` is provided; else use legacy.
+renderA0Multi = (opts = {}) => (opts?.key ? renderA0MultiKeyed(opts) : renderA0MultiLegacy(opts));
+renderA1Multi = (opts = {}) => (opts?.key ? renderA1MultiKeyed(opts) : renderA1MultiLegacy(opts));
+renderA2Multi = (opts = {}) => (opts?.key ? renderA2MultiKeyed(opts) : renderA2MultiLegacy(opts));
 ```
