@@ -19,6 +19,12 @@ format:
           <script src="./../components/backToTop.js"></script>
 ---
 
+```{=html}
+<script>
+window.atlasTocConfig = { headingLevels: [1, 2] };
+</script>
+```
+
 {{< include "/components/_toc.qmd" >}}
 
 <back-to-top></back-to-top>
@@ -38,187 +44,194 @@ style="margin-bottom: 10px; padding: 8px; width: 100%; max-width: 400px; max-hei
 
 ```{=html}
 <script>
-const navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
+const DATA_URL = "../data/docs/glossary.json";
+const LANGUAGES = [
+  { code: "EN", label: "English", placeholder: "Search glossary..." },
+  { code: "FR", label: "Français", placeholder: "Rechercher dans le glossaire..." },
+];
+const state = {
+  currentLang: "EN",
+  searchQuery: "",
+  sections: [],
+};
+const searchBox = document.getElementById("searchBox");
+const output = document.getElementById("output");
 
-if (navEnd) {
-  // Only add it if it doesn't already exist
-  if (!document.getElementById("nav-lang-selector")) {
-    // Create wrapper
-    const langSel = document.createElement("div");
-    langSel.id = "nav-lang-selector";
-    langSel.style.display = "flex";
-    langSel.style.alignItems = "center";
-    langSel.style.marginLeft = "10px";
+function escapeHtml(str = "") {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
-    // Create inner container
-    const langDiv = document.createElement("div");
-    langDiv.style.display = "flex";
-    langDiv.style.flexDirection = "column";
+function sanitizeId(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
-    // Build radios dynamically
-    const langs = [
-      { code: "EN", label: "English" },
-      { code: "FR", label: "Français" },
-    ];
+function createSearchIndex(entry) {
+  return [
+    entry.Term,
+    entry.Acronym,
+    entry["Definition EN"],
+    entry["Definition FR"],
+    entry["Tooltip EN"],
+    entry["Tooltip FR"],
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
 
-    langs.forEach(lang => {
-      const label = document.createElement("label");
-      label.style.fontWeight = "500";
-      label.style.cursor = "pointer";
+function buildSections(entries) {
+  const sections = new Map();
 
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = "language";
-      input.value = lang.code;
-      input.style.accentColor = "var(--atlasGreen)";
-      input.style.marginRight = "5px";
-      input.style.cursor = "pointer";
+  entries.forEach(entry => {
+    const sectionName = entry.Section || "Other";
+    if (!sections.has(sectionName)) sections.set(sectionName, []);
+    sections.get(sectionName).push({ ...entry, _searchIndex: createSearchIndex(entry) });
+  });
 
-      if (lang.code === "EN") input.checked = true;
+  return [...sections.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([sectionName, sectionEntries]) => [
+      sectionName,
+      sectionEntries.sort((a, b) => (a.Term || "").localeCompare(b.Term || "")),
+    ]);
+}
 
-      // When changed → handle switching logic
-      input.addEventListener("change", e => {
-        if (e.target.checked) {
-          currentLang = lang.code;
-          window.currentLang = lang.code;
-          renderGlossary();
-          updateSearchPlaceholder();
-        }
-      });
+function updateSearchPlaceholder() {
+  if (!searchBox) return;
+  const language = LANGUAGES.find(lang => lang.code === state.currentLang);
+  searchBox.placeholder = language ? language.placeholder : "Search glossary...";
+}
 
-      label.appendChild(input);
-      label.appendChild(document.createTextNode(lang.label));
-      langDiv.appendChild(label);
+function handleLanguageChange(langCode) {
+  state.currentLang = langCode;
+  window.currentLang = langCode;
+  updateSearchPlaceholder();
+  renderGlossary();
+  if (typeof updateBackToTopLabel === "function") updateBackToTopLabel();
+}
+
+function mountLanguageSelector() {
+  const navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
+  if (!navEnd || document.getElementById("nav-lang-selector")) return;
+
+  const langSel = document.createElement("div");
+  langSel.id = "nav-lang-selector";
+  langSel.style.display = "flex";
+  langSel.style.alignItems = "center";
+  langSel.style.marginLeft = "10px";
+
+  const langDiv = document.createElement("div");
+  langDiv.style.display = "flex";
+  langDiv.style.flexDirection = "column";
+
+  LANGUAGES.forEach(lang => {
+    const label = document.createElement("label");
+    label.style.fontWeight = "500";
+    label.style.cursor = "pointer";
+
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "language";
+    input.value = lang.code;
+    input.style.accentColor = "var(--atlasGreen)";
+    input.style.marginRight = "5px";
+    input.style.cursor = "pointer";
+    input.checked = lang.code === state.currentLang;
+    input.addEventListener("change", event => {
+      if (event.target.checked) handleLanguageChange(lang.code);
     });
 
-    // Assemble and attach
-    langSel.appendChild(langDiv);
-    navEnd.parentNode.appendChild(langSel);
-  }
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(lang.label));
+    langDiv.appendChild(label);
+  });
+
+  langSel.appendChild(langDiv);
+  navEnd.parentNode.appendChild(langSel);
 }
-</script>
-```
 
-```{=html}
-<script>
-let currentLang = 'EN';
-let glossaryData = null;
-let searchQuery = '';
+function debounce(callback, waitMs) {
+  let timeoutId;
+  return event => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => callback(event), waitMs);
+  };
+}
 
-fetch("./../../data/docs/glossary.json")
+function renderGlossary() {
+  if (!output) return;
+
+  let html = "<div>";
+
+  state.sections.forEach(([section, entries]) => {
+    const filteredEntries = state.searchQuery
+      ? entries.filter(entry => entry._searchIndex.includes(state.searchQuery))
+      : entries;
+
+    if (!filteredEntries.length) return;
+
+    html += `<h2 id="section-${sanitizeId(section)}">${escapeHtml(section)}</h2>`;
+
+    filteredEntries.forEach(entry => {
+      const term = escapeHtml(entry.Term || "");
+      const acronym = escapeHtml((entry.Acronym || "").trim());
+      const definition = escapeHtml(
+        state.currentLang === "EN" ? entry["Definition EN"] || "" : entry["Definition FR"] || ""
+      );
+      const tooltip = escapeHtml(
+        state.currentLang === "EN" ? entry["Tooltip EN"] || "" : entry["Tooltip FR"] || ""
+      );
+
+      html += '<div style="margin-bottom: 30px;">';
+      html += `<h2 style="color: #555; margin-bottom: 5px; font-size: 1.3em;">${term}${
+        acronym ? ` (${acronym})` : ""
+      }</h2>`;
+      if (tooltip) {
+        html += `<p style="color: #667; font-style: italic; margin: 5px 0; font-size: 0.9em;">${tooltip}</p>`;
+      }
+      if (definition) {
+        html += `<p style="color: #444; line-height: 1.6; margin-top: 10px;">${definition}</p>`;
+      }
+      html += "</div>";
+    });
+  });
+
+  html += "</div>";
+  output.innerHTML = html;
+}
+
+fetch(DATA_URL)
   .then(response => {
     if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
     return response.json();
   })
   .then(data => {
-    glossaryData = data;
+    state.sections = buildSections(data);
+    mountLanguageSelector();
+    updateSearchPlaceholder();
     renderGlossary();
 
-    // Language toggle
-    document.querySelectorAll('input[name="language"]').forEach(radio => {
-      // currentLang = localStorage.getItem('glossaryLang') || 'EN';
-      radio.addEventListener('change', event => {
-        currentLang = event.target.value;
-        updateSearchPlaceholder();
-        renderGlossary();
-        updateBackToTopLabel();
-      });
-    });
-
-    // Search filter
-    let searchTimeout;
-    document.getElementById('searchBox').addEventListener('input', event => {
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => {
-        searchQuery = event.target.value.toLowerCase();
-        renderGlossary();
-      }, 200);
-    });
-    updateSearchPlaceholder();
+    if (searchBox) {
+      searchBox.addEventListener(
+        "input",
+        debounce(event => {
+          state.searchQuery = event.target.value.trim().toLowerCase();
+          renderGlossary();
+        }, 200)
+      );
+    }
   })
   .catch(error => {
     console.error("Error loading JSON:", error);
-    document.getElementById("output").innerHTML =
-      `<p style="color: red;">Error loading glossary: ${error.message}</p>`;
+    if (output) output.innerHTML = `<p style="color: red;">Error loading glossary: ${error.message}</p>`;
   });
-
-function updateSearchPlaceholder() {
-  const searchBox = document.getElementById('searchBox');
-  searchBox.placeholder =
-    currentLang === 'FR' ? 'Rechercher dans le glossaire...' : 'Search glossary...';
-}
-
-// Sanitize section name for use as HTML ID
-function sanitizeId(str) {
-  return str
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-// Render glossary
-function renderGlossary() {
-  if (!glossaryData) return;
-
-  const sections = {};
-  Object.entries(glossaryData).forEach(([key, entry]) => {
-    const section = entry.Section || 'Other';
-    if (!sections[section]) sections[section] = [];
-    sections[section].push({ key, ...entry });
-  });
-
-  let html = '<div>';
-
-  Object.keys(sections).sort().forEach(section => {
-    const filteredEntries = sections[section].filter(entry => {
-      const term = entry.Term?.toLowerCase() || '';
-      const acronym = entry.Acronym?.toLowerCase() || '';
-      const defEN = entry['Definition EN']?.toLowerCase() || entry['Definiton EN']?.toLowerCase() || '';
-      const defFR = entry['Definition FR']?.toLowerCase() || '';
-      const tooltipEN = entry['Tooltip EN']?.toLowerCase() || '';
-      const tooltipFR = entry['Tooltip FR']?.toLowerCase() || '';
-
-      return (
-        !searchQuery ||
-        term.includes(searchQuery) ||
-        acronym.includes(searchQuery) ||
-        defEN.includes(searchQuery) ||
-        defFR.includes(searchQuery) ||
-        tooltipEN.includes(searchQuery) ||
-        tooltipFR.includes(searchQuery)
-      );
-    });
-
-    if (filteredEntries.length === 0) return;
-
-    const sectionId = sanitizeId(section);
-    html += `<h1 id="section-${sectionId}">${section}</h1>`;
-
-    filteredEntries
-      .sort((a, b) => a.Term.localeCompare(b.Term))
-      .forEach(entry => {
-        const acronym = entry.Acronym?.trim() || null;
-        const definition =
-          currentLang === 'EN'
-            ? entry['Definiton EN'] || entry['Definition EN'] || ''
-            : entry['Definition FR'] || '';
-        const tooltip =
-          currentLang === 'EN' ? entry['Tooltip EN'] || '' : entry['Tooltip FR'] || '';
-
-        html += '<div style="margin-bottom: 30px;">';
-        html += `<h2 style="color: #555; margin-bottom: 5px; font-size: 1.3em;">
-                  ${entry.Term}${acronym ? ` (${acronym})` : ''}
-                 </h2>`;
-        if (tooltip)
-          html += `<p style="color: #667; font-style: italic; margin: 5px 0; font-size: 0.9em;">${tooltip}</p>`;
-        if (definition)
-          html += `<p style="color: #444; line-height: 1.6; margin-top: 10px;">${definition}</p>`;
-        html += '</div>';
-      });
-  });
-
-  html += '</div>';
-  document.getElementById('output').innerHTML = html;
-}
 </script>
 ```
