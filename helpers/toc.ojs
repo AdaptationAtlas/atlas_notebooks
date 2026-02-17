@@ -8,6 +8,7 @@ function atlasTOC({
     let headings = [];
     let links = [];
     let timeout;
+    let layoutRaf = null;
 
     // Main TOC refresh
     function observed() {
@@ -38,7 +39,7 @@ function atlasTOC({
 
         // Render TOC
         notify(html`
-          <div class="atlas-toc">
+          <div class="atlas-toc atlas-toc-floating">
             <div class="atlas-toc-heading">${heading}</div>
 
             ${headings.length ? links : html`<div>No headings found.</div>`}
@@ -46,7 +47,40 @@ function atlasTOC({
         `);
 
         onScroll();
+        requestLayout();
       }, 5);
+    }
+
+    function requestLayout() {
+      if (layoutRaf) cancelAnimationFrame(layoutRaf);
+      layoutRaf = requestAnimationFrame(layoutTOC);
+    }
+
+    function layoutTOC() {
+      const toc = document.querySelector(".atlas-toc-floating");
+      const content =
+        document.querySelector("#quarto-document-content") ||
+        document.querySelector("#observablehq-main") ||
+        document.querySelector("main");
+
+      if (!toc || !content) return;
+
+      const rect = content.getBoundingClientRect();
+      const gap = 24;
+      const minWidth = 180;
+      const maxWidth = 280;
+      const available = rect.left - gap - 8;
+
+      if (available < minWidth || window.innerWidth <= 900) {
+        toc.style.display = "none";
+        return;
+      }
+
+      const width = Math.min(maxWidth, available);
+      toc.style.display = "block";
+      toc.style.left = `${Math.max(8, rect.left - gap - width)}px`;
+      toc.style.top = "9rem";
+      toc.style.width = `${width}px`;
     }
 
     // Create clickable link
@@ -89,14 +123,18 @@ function atlasTOC({
     const observer = new MutationObserver(observed);
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("scroll", onScroll);
+    window.addEventListener("resize", requestLayout);
 
     observed();
     onScroll();
+    requestLayout();
 
     // Cleanup
     return () => {
       observer.disconnect();
       window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", requestLayout);
+      if (layoutRaf) cancelAnimationFrame(layoutRaf);
     };
   });
 }
@@ -106,8 +144,8 @@ tocStyle = html`
   /* Floating side TOC container */
   .atlas-toc {
     position: fixed;
-    top: 78px;
-    right: 22px;
+    top: 9rem;
+    left: 22px;
     width: 218px;
     max-height: 78vh;
     overflow-y: auto;
@@ -136,7 +174,7 @@ tocStyle = html`
     text-decoration: none;
     color: #442;
     font-size: 11px;
-    line-height: -1.4;
+    line-height: 1.4;
   }
 
   .atlas-toc a.toc-link:hover {

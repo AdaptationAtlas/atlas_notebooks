@@ -250,17 +250,18 @@ class AtlasToc extends HTMLElement {
       const gap = 24;
       const minWidth = 180;
       const maxWidth = 280;
-      const available = window.innerWidth - rect.right - gap - 8;
+      const available = rect.left - gap - 8;
 
       if (available < minWidth || window.innerWidth <= 900) {
         this._panel.style.display = "none";
         return;
       }
 
+      const width = Math.min(maxWidth, available);
       this._panel.style.display = "block";
-      this._panel.style.left = `${rect.right + gap}px`;
-      this._panel.style.top = "6rem";
-      this._panel.style.width = `${Math.min(maxWidth, available)}px`;
+      this._panel.style.left = `${Math.max(8, rect.left - gap - width)}px`;
+      this._panel.style.top = "9rem";
+      this._panel.style.width = `${width}px`;
     };
     this._onResize = () => this._layout();
     window.addEventListener("resize", this._onResize, { passive: true });
