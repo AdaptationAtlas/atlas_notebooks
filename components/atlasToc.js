@@ -202,27 +202,17 @@ class AtlasToc extends HTMLElement {
       let needsUpdate = false;
 
       for (const mutation of mutationsList) {
-        if (mutation.type === "childList") {
-          const relevantNodes = [...mutation.addedNodes, ...mutation.removedNodes];
-          if (
-            relevantNodes.some(node => {
-              if (node.nodeType !== 1) return false;
-              return this._headingLevels.some(
-                level => node.matches(`h${level}`) || node.querySelector(`h${level}`)
-              );
-            })
-          ) {
-            needsUpdate = true;
-            break;
-          }
-        } else if (mutation.type === "characterData" && mutation.target.parentElement) {
-          const isRelevantHeading = this._headingLevels.some(level =>
-            mutation.target.parentElement.matches(`h${level}`)
-          );
-          if (isRelevantHeading) {
-            needsUpdate = true;
-            break;
-          }
+        const relevantNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+        if (
+          relevantNodes.some(node => {
+            if (node.nodeType !== 1) return false;
+            return this._headingLevels.some(
+              level => node.matches(`h${level}`) || node.querySelector(`h${level}`)
+            );
+          })
+        ) {
+          needsUpdate = true;
+          break;
         }
       }
 
@@ -232,7 +222,6 @@ class AtlasToc extends HTMLElement {
     this._observer.observe(document.body, {
       childList: true,
       subtree: true,
-      characterData: true,
     });
 
     this._updateHeadingList();
@@ -247,10 +236,11 @@ class AtlasToc extends HTMLElement {
       }
 
       const rect = content.getBoundingClientRect();
+      const pageLeft = 22;
       const gap = 24;
       const minWidth = 180;
       const maxWidth = 280;
-      const available = rect.left - gap - 8;
+      const available = rect.left - gap - pageLeft;
 
       if (available < minWidth || window.innerWidth <= 900) {
         this._panel.style.display = "none";
@@ -259,7 +249,7 @@ class AtlasToc extends HTMLElement {
 
       const width = Math.min(maxWidth, available);
       this._panel.style.display = "block";
-      this._panel.style.left = `${Math.max(8, rect.left - gap - width)}px`;
+      this._panel.style.left = `${pageLeft}px`;
       this._panel.style.top = "9rem";
       this._panel.style.width = `${width}px`;
     };
