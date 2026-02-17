@@ -1,0 +1,1835 @@
+---
+pagetitle: "Econimic Returns on Investment"
+nb-authors:
+  - Brayden Youngberg
+  - Pete Stewart
+date-created: "2025-10-15"
+date-edited: today
+execute:
+  echo: false
+---
+
+```{ojs}
+import {
+  dropdown_section,
+  downloadButton,
+  makeTooltipLabel,
+} from "/helpers/uiComponents.ojs";
+
+import { atlasTOC } from "/helpers/toc.ojs";
+import { formatUSD, inputTemplate } from "/helpers/std.ojs";
+
+import { heroImage as atlasHero } from "/helpers/hero.js";
+
+import {
+  filterableDataTable as atlasTable,
+  sparkbar,
+} from "/components/atlasTable.ojs";
+```
+
+```{ojs}
+html`${atlasHero(nbTitle, "./../../images/notebooks/roi.webp")}`;
+
+atlasTOC({
+  skip: ["notebook-title", "appendix", "source-code"], // These should be the section headings in the {# headings}
+  heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
+});
+```
+
+# `{ojs} nbOverview` {#overview}
+
+```{ojs}
+//| echo: false
+// Text for overview section
+md`${_lang(nbText.overview.blocks.block1)}`;
+
+md`${_lang(nbText.overview.blocks.block2)}`;
+
+dropdown_section(
+  "Definitions",
+  false,
+  md`${_lang(nbText.indicators.irr.overview)}`,
+
+  md`${_lang(nbText.indicators.mirr.overview)}`,
+
+  md`${_lang(nbText.indicators.npv.overview)}`,
+
+  md`${_lang(nbText.indicators.bcr.overview)}`,
+);
+
+md`${_lang(nbText.overview.blocks.block3)}`;
+
+md`${_lang(nbText.overview.blocks.block4)}`;
+```
+
+# `{ojs} heading1` {#project-setup}
+
+`{ojs} _lang(nbText.projectSetup.blocks.opener1)`
+
+`{ojs} _lang(nbText.projectSetup.blocks.opener2)`
+
+```{ojs}
+htl.html`
+<div style="display: flex; gap: 3em; margin-bottom: 1.5em;">
+    ${viewof select_country}
+    ${viewof select_region}
+    ${viewof select_crop}
+  </div>
+`
+
+viewof productionView = Inputs.radio(["plot", "table"], {
+  value: "table",
+  label: _lang(general_translations.vizType.title),
+  format: (d) => _lang(general_translations.vizType?.[d]),
+})
+```
+
+```{ojs}
+{
+  if (productionView == "table") {
+    const a0_clean = _lang(general_translations.country);
+    const a1_clean = _lang(general_translations.region);
+    const commodity_clean = _lang(general_translations.commodity);
+    const maxVal = d3.max(exposure_data, d => d.value);
+    return atlasTable(exposure_data, {
+      columns: ["admin0_name", "admin1_name", "crop", "value"],
+      header: {value: "USD", crop: commodity_clean, admin0_name: a0_clean, admin1_name: a1_clean},
+      sort: "value",
+      reverse: true,
+      format: {
+        value: sparkbar({
+          max: maxVal,
+          align: "right",
+          background: "#D9ECD9",
+          color: "black",
+          formatter: (d) => formatUSD()(d),
+        })
+      }
+    });
+  } else {
+    return renderProductionBars()
+  }
+}
+
+renderProductionBars = () => {
+  const data = exposure_data
+    .filter((d) =>
+    regionSet.has(`${d.iso3}_${d.admin1_name}`),
+  );
+
+  const totals = d3.rollup(
+    data,
+    v => d3.sum(v, d => d.value),
+    d => d.admin0_name,
+    d => d.crop
+  );
+
+  const flatTotals = Array.from(totals, ([admin0_name, crops]) =>
+    Array.from(crops, ([crop, value]) => ({ admin0_name, crop, value }))
+  ).flat();
+
+  const _title = _lang({
+    en: "Total VoP for selected regions and crops in each country", 
+    fr: "Total VoP pour les régions et les cultures sélectionnées dans chaque pays"
+  })
+
+  return Plot.plot({
+    subtitle: _title,
+    marginLeft: 50,
+    width,
+    height: 500,
+    x: { label: null, tickFormat: (d) => `${d}` },
+    y: { tickFormat:(d) => formatUSD()(d) },
+    color: {
+      legend: true,
+      label: _lang({en: "Commodity", fr: "Culture"}),
+    },
+    marks: [
+      Plot.barY(flatTotals, {
+        x: "admin0_name",
+        y: "value",
+        fill: "crop",
+        tip: true
+      }),
+    ],
+  });
+}
+```
+
+## `{ojs} _lang(nbText.projectSetup.blocks.costs.h2)`
+
+`{ojs} _lang(nbText.projectSetup.blocks.costs.text)`
+
+```{ojs}
+viewof inputProjectOptions = {
+  const inputProjectCost = Inputs.text({
+    label: makeTooltipLabel({
+      labelText: inputOptions_projectCost.label,
+      tooltipText: inputOptions_projectCost.tooltip
+    }),
+    pattern: inputOptions_projectCost.pattern,
+    placeholder: inputOptions_projectCost.placeholder,
+    value: inputOptions_projectCost.valueString
+  });
+  const inputProjectYears = Inputs.select(inputOptions_projectYears.data, {
+    format: (x) => x.label,
+    label: makeTooltipLabel({
+      labelText: inputOptions_projectYears.label,
+      tooltipText: inputOptions_projectYears.tooltip
+    }),
+    value: inputOptions_projectYears.data.find((d) => d.value == 8)
+    });
+
+  return Inputs.form(
+    {
+      cost: inputProjectCost,
+      years:inputProjectYears
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    }
+  );
+}
+```
+
+```{ojs}
+{
+  const template = _lang(nbText.projectSetup.blocks.costs.calloutTemplate)
+  const templateItems = [
+    {name: "money", value: formatUSD({locale: language.locale})(rangeProjectCost)},
+    {name: "time", value: inputProjectOptions.years.label},
+  ]
+  const formatted = Lang.reduceReplaceTemplateItems(template, templateItems)
+  return md`${formatted}`
+}
+```
+
+## `{ojs} _lang(nbText.projectSetup.blocks.impacts.h2)`
+
+`{ojs} _lang(nbText.projectSetup.blocks.impacts.text)`
+
+```{ojs}
+viewof selections_econPerfWalkthrough = {
+  const _label_prodImpact = makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.prodImpactDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.prodImpactDropdown.tooltip,
+      ),
+    })
+
+  const _label_Adoption = makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.adoptionRateDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.adoptionRateDropdown.tooltip,
+      ),
+    })
+
+  const _label_CisImpact = makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.cisImpactDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.cisImpactDropdown.tooltip,
+      ),
+    })
+
+  const inputProdImpact = Inputs.range(
+    [0, 55],
+    {
+      step: 5,
+      label : _label_prodImpact,
+      value: 30
+    },
+  )
+
+  const inputAdoption = Inputs.range(
+    [0.25, 2],
+    {
+      step: 0.25,
+      label : _label_Adoption,
+      value: 1
+    },
+  )
+
+  const inputCisImpact = Inputs.range(
+    [0, 55],
+    {
+      step: 5,
+      label : _label_CisImpact,
+      value: 25
+    },
+    
+  )
+
+  return Inputs.form(
+    {
+      inputProdImpact,
+      inputAdoption,
+      inputCisImpact
+},
+    {
+      template: inputTemplate({ gap: "3em" }),
+    }
+  )
+}
+
+options_econPerfWalkthrough = {
+  const formatted = {};
+  for (const [key, value] of Object.entries(selections_econPerfWalkthrough)) {
+    formatted[key] = {
+      label: `${value}%`,
+      value: value / 100
+    };
+  }
+  return formatted;
+}
+```
+
+```{ojs}
+{
+  const advancedControlsText = nbText.projectSetup.blocks.costs.advancedControls;
+
+  const _benefitLowLabel = makeTooltipLabel({
+    labelText: _lang(advancedControlsText.inputs.benefitScaleLow.label),
+    tooltipText: _lang(advancedControlsText.inputs.benefitScaleLow.tooltip),
+  });
+  const _benefitHighLabel = makeTooltipLabel({
+    labelText: _lang(advancedControlsText.inputs.benefitScaleHigh.label),
+    tooltipText: _lang(advancedControlsText.inputs.benefitScaleHigh.tooltip),
+  });
+  const _costLowLabel = makeTooltipLabel({
+    labelText: _lang(advancedControlsText.inputs.costScaleLow.label),
+    tooltipText: _lang(advancedControlsText.inputs.costScaleLow.tooltip),
+  });
+  const _costHighLabel = makeTooltipLabel({
+    labelText: _lang(advancedControlsText.inputs.costScaleHigh.label),
+    tooltipText: _lang(advancedControlsText.inputs.costScaleHigh.tooltip),
+  });
+
+  const formBenefitScale = Inputs.form(
+    {
+      low: Inputs.range([0.5, 1], {
+        step: 0.01,
+        label: _benefitLowLabel,
+        value: 0.85,
+      }),
+      high: Inputs.range([1, 1.6], {
+        step: 0.01,
+        label: _benefitHighLabel,
+        value: 1.15,
+      }),
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
+
+  const formCostScale = Inputs.form(
+    {
+      low: Inputs.range([0.5, 1], {
+        step: 0.01,
+        label: _costLowLabel,
+        value: 0.9,
+      }),
+      high: Inputs.range([1, 1.8], {
+        step: 0.01,
+        label: _costHighLabel,
+        value: 1.2,
+      }),
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
+
+  const _discountLabel = makeTooltipLabel({
+    labelText: _lang(advancedControlsText.inputs.discountRate.label),
+    tooltipText: _lang(advancedControlsText.inputs.discountRate.tooltip),
+  })
+
+  const _roiLabel = makeTooltipLabel({
+    labelText: _lang(advancedControlsText.inputs.roi.label),
+    tooltipText: _lang(advancedControlsText.inputs.roi.tooltip),
+  })
+
+  const formFinancialControls = Inputs.form(
+    {
+      discountRate: Inputs.bind(
+        Inputs.range(
+          [0, 1],
+          {step: 0.01, format: x => (x * 100), label : _discountLabel, value: 0.12} 
+        ),
+        viewof discountRate
+      ),
+      bcr: Inputs.bind(
+        Inputs.range(
+          [0.5, 2],
+          {step: 0.01, label: _roiLabel, value: 1.62} 
+        ),
+        viewof bcr
+      )
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    }
+  );
+
+  return dropdown_section(
+    _lang(general_translations.advancedControls),
+    false,
+    formFinancialControls,
+    `<b>${_lang(advancedControlsText.modelUncertainty)}</b>`,
+    Inputs.bind(formBenefitScale, viewof uncertaintyBenefitScale),
+    Inputs.bind(formCostScale, viewof uncertaintyCostScale)
+  )
+}
+```
+
+```{ojs}
+uncertainty = runSimulationFromCashflowRows(recipe_dataCashflow, {
+  simulations: 250,
+  discountRate: discountRate,
+  benefitScale: {
+    low: uncertaintyBenefitScale.low,
+    mode: 1.0,
+    high: uncertaintyBenefitScale.high,
+  },
+  costScale: {
+    low: uncertaintyCostScale.low,
+    mode: 1.0,
+    high: uncertaintyCostScale.high,
+  },
+});
+```
+
+# `{ojs} heading2` {#investment-returns}
+
+`{ojs} renderReview1()`
+
+`{ojs} renderReview2()`
+
+```{ojs}
+bigNumbersResults();
+```
+
+```{ojs}
+resultTable();
+downloadButton(
+  walkthroughEconomicIndicators?.enriched,
+  "roi_data.csv",
+  _lang({ en: "Download", fr: "Télécharger" }),
+);
+```
+
+```{ojs}
+resultPlot();
+```
+
+```{ojs}
+indicatorSelector = {
+  // bind input so tooltip can be dynamic
+  return Inputs.bind(
+    Inputs.select(dataPickMetric, {
+    label: makeTooltipLabel({
+      labelText: _lang(nbText.indicators.general.terms.indicator),
+      tooltipText: pickMetricWalkthrough.tooltip,
+    }),
+    format: (x) => x.labelFull,
+  }), viewof pickMetricWalkthrough
+  )
+}
+```
+
+```{ojs}
+{
+  const listWhat = _lang(nbText.investmentReturns.blocks.infoListHeaders.what)
+  const listInterpret = _lang(nbText.investmentReturns.blocks.infoListHeaders.interpret)
+  const listTell = _lang(nbText.investmentReturns.blocks.infoListHeaders.tell)
+
+  // indicator info
+  return md`### ${pickMetricWalkthrough.labelFull}
+
+- **${listWhat}**: ${pickMetricWalkthrough.info.what}
+- **${listInterpret}**: ${pickMetricWalkthrough.info.interpret}
+- **${listTell}**: ${pickMetricWalkthrough.info.tell}
+`
+}
+```
+
+`{ojs} _lang(nbText.investmentReturns.blocks.closer1)`
+
+# `{ojs} nbSummary` {#summary}
+
+`{ojs} _lang(nbText.summary.blocks.block1)`
+
+```{ojs}
+{
+  const npv_rate = (discountRate * 100) + "%";
+  const farm_bcr = bcr;
+  const methods_title = nbMethods;
+  
+  const template = _lang(nbText.summary.blocks.block2)
+  const templateItems = [
+    {name: "npvDisountRate", value: npv_rate},
+    {name: "farmBcr", value: farm_bcr},
+    {name: "methodsSourcesTitle", value: methods_title},
+  ]
+  const formatted = Lang.reduceReplaceTemplateItems(template, templateItems)
+  return md`${formatted}`
+}
+```
+
+# `{ojs} nbMethods` {#methods}
+
+`{ojs} _lang(nbText.methods.intro)`
+
+# `{ojs} appendix` {#appendix}
+
+# Source code {#source-code .hidden}
+
+## Data import and cleaning
+
+```{ojs}
+// Data loader cell
+//TODO: Move this to s3 paths
+db = {
+  let db = await DuckDBClient.of({
+    cv_raw: FileAttachment("/data/economicReturns/faostat_prod_cv.parquet")
+  })
+  await db.query(`
+    CREATE TABLE exposure AS  -- data is ~ 1 mb so table possibly more performant
+      SELECT
+        iso3,
+        admin0_name,
+        admin1_name,
+        REGEXP_REPLACE(crop, '-tropical|-highland', '') AS crop,
+        CONCAT(exposure, '_', unit) AS exposure,
+        SUM(value) AS value
+      FROM read_parquet("s3://digital-atlas/domain=exposure/type=combined/source=glw4-2020_spam2020AA/region=ssa/processing=atlas-harmonized/variable=vop_nominal-usd-2021.parquet")
+      WHERE
+        admin2_name IS NULL AND admin1_name IS NOT NULL
+        AND (tech = 'all' OR tech IS NULL)
+        AND isfinite(value)
+        AND crop !~ '(^other-|rest-of|temperate-fruit|tropical-fruit|vegetables)'
+      GROUP BY
+        iso3,
+        admin0_name,
+        admin1_name,
+        crop,
+        CONCAT(exposure, '_', unit)
+  `)
+  await db.query(`
+    CREATE VIEW cv AS
+      SELECT
+        admin0_name,
+        -- clean and standardize crop names
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(
+            REPLACE(REPLACE(crop, '_meat', ''), ' ', '-'),
+            'goat$', 'goats'
+          ),
+          'pig$', 'pigs'
+        ) AS crop,
+        value_filled AS cv
+      FROM cv_raw
+      WHERE NOT (crop ILIKE '%milk%' OR crop ILIKE '%eggs%' OR LOWER(crop) = 'total')
+
+      UNION ALL
+      -- add robusta-coffee and small-millet substitutes
+      SELECT admin0_name, 'robusta-coffee', value_filled AS cv
+      FROM cv_raw
+      WHERE crop = 'arabica-coffee'
+
+      UNION ALL
+      SELECT admin0_name, 'small-millet', value_filled AS cv
+      FROM cv_raw
+      WHERE crop = 'pearl-millet';
+`)
+  return db;
+};
+
+countries = {
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const filteredCountries = country_list
+    .filter((c) => c.include && c.iso3c !== "SDN")
+    .map(({ include, ...rest }) => rest);
+  return filteredCountries;
+};
+```
+
+<!-- Crops and admin regions based on dataset -->
+
+```{ojs}
+dataAdminRegions = {
+  const regions = await db.query(`
+    SELECT DISTINCT admin0_name, admin1_name, iso3
+    FROM exposure
+    WHERE admin1_name IS NOT null
+    AND iso3 in ('${select_country.join("', '")}')
+  `)
+
+  return regions.map(row => ({
+    ...row,
+    id: `${row.iso3}_${row.admin1_name}`
+  }));
+}
+
+//TODO: Need to add translations and label cleaning to items
+dataCrops = await db.query(`
+  SELECT DISTINCT crop AS item
+  FROM exposure
+  ORDER BY item
+`)
+```
+
+## Inputs
+
+```{ojs}
+// Defaults and gaurd rails for the inputs
+inputOptions_projectCost = {
+  return {
+    range: [1e6, 5e8],
+    label: _lang(nbText.projectSetup.blocks.costs.inputs.costInput.label),
+    tooltip: _lang(nbText.projectSetup.blocks.costs.inputs.costInput.tooltip),
+    step: 1e5,
+    value: 50_000_000,
+    format: d3.format('$.3s'),
+    outputWidth: 90,
+    placeholder: "Ex. $5,000,000",
+    pattern: "^[$]?[1-9]+[0-9,$]*$",
+    valueString: "$50,000,000"
+  }
+}
+
+inputOptions_projectYears = {
+  const years = _lang(
+      nbText.projectSetup.blocks.costs.inputs.projectYearDropdown.terms.year.plural,
+  );
+  return {
+    range: [2, 16],
+    data: d3
+      .range(2, 16 + 1, 1)
+      .map((d) => ({ label: `${d} ${years}`, value: d })),
+    label: _lang(nbText.projectSetup.blocks.costs.inputs.projectYearDropdown.label),
+    tooltip: _lang(nbText.projectSetup.blocks.costs.inputs.projectYearDropdown.tooltip),
+    step: 1,
+    value: 8,
+    outputWidth: 90
+  };
+}
+```
+
+### Scope Selectors - country, region, crop
+
+```{ojs}
+viewof select_country = {
+  const data = countries
+    .map((d) => ({
+      value: d.iso3c, //Migrating to iso codes for future flexability
+      label: _lang(d.translation)
+    }))
+  let input = dropdownInput({
+    inputLabel: makeTooltipLabel({
+      labelText: _lang(nbText.supportNbText.words.country.plural),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.locations.inputs.countryDropdown.tooltip
+      )    
+    }),
+    inputId: "positionsTest",
+    placeholderText: "Select Countries...",
+    options: data,
+    selected: ["KEN", "TZA"],
+  });
+  
+  return debounce(input, 1000); // Noisy input, so delay it a bit.
+}
+```
+
+```{ojs}
+// admin multi-select: regions
+viewof select_region = {
+  // filter regions based on country id's
+  const filteredRegions = dataAdminRegions
+  // const translateCountry = (d) => _lang(td.admin0_name.values?.[d]);
+  const translateCountry = (iso) => _lang(countries.find((c) => c.iso3c === iso).translation);
+  const data = filteredRegions.map((d) => ({
+    value: d.id,
+    label: `${translateCountry(d.iso3)}: ${d.admin1_name}`
+  }));
+  const selectedIds = filteredRegions.map((d) => d.id);
+  const text = {
+    label: _lang(nbText.supportNbText.words.region.plural),
+    tooltip: _lang(nbText.projectSetup.blocks.locations.inputs.regionDropdown.tooltip),
+  }
+  const input = dropdownInput({
+    inputLabel: makeTooltipLabel({labelText: text.label, tooltipText: text.tooltip}),
+    inputId: "positionsTest",
+    placeholderText: "Select regions...",
+    options: data,
+    selected: selectedIds
+  });
+
+  return debounce(input, 1000);
+}
+```
+
+```{ojs}
+// admin multi-select: countries
+viewof select_crop = {
+  const data = dataCrops
+    .map((d) => ({
+      value: d.item,
+      label: Lang.toSentenceCase(d.item) //TODO: Add translations
+    }))
+    .sort((a,b) => a.label > b.label);
+  const selectedId = dataCrops
+    .filter((d) => ["bean", "goats", "maize"].includes(d.item))
+    .map((d) => d.item);
+  const text = {
+    label: _lang(nbText.supportNbText.words.commodity.plural),
+    tooltip: _lang(
+      nbText.projectSetup.blocks.locations.inputs.commodityDropdown.tooltip
+    )
+  };
+  const input = dropdownInput({
+    inputLabel: makeTooltipLabel({
+      labelText: text.label,
+      tooltipText: text.tooltip
+    }),
+    inputId: "positionsTest",
+    placeholderText: "Select crops...",
+    options: data,
+    selected: selectedId
+  });
+
+  return debounce(input, 1000);
+}
+```
+
+## Economic Input Variables
+
+### Main Control Variables
+
+```{ojs}
+rangeProjectCost = {
+  const unpack = Number(inputProjectOptions.cost.replace(/[,|$]/g, ""))
+  const number = Number(unpack)
+  return number
+}
+
+projectYears = inputProjectOptions.years.value
+```
+
+```{ojs}
+render_econPerfWalkthrough = () => {
+  const terms = {
+    none: _lang(nbText.projectSetup.blocks.impacts.terms.none, {
+      key: language.key,
+    }),
+    low: _lang(nbText.projectSetup.blocks.impacts.terms.low, {
+      key: language.key,
+    }),
+    moderate: _lang(nbText.projectSetup.blocks.impacts.terms.moderate, {
+      key: language.key,
+    }),
+    high: _lang(nbText.projectSetup.blocks.impacts.terms.high, {
+      key: language.key,
+    }),
+    incremental: _lang(nbText.projectSetup.blocks.impacts.terms.incremental),
+    transformative: _lang(
+      nbText.projectSetup.blocks.impacts.terms.transformative,
+    ),
+  };
+  const dataProdImpact = [
+    { label: `10% (${terms.incremental})`, value: 0.1 },
+    { label: `20%`, value: 0.2 },
+    { label: `30% (${terms.moderate})`, value: 0.3 },
+    { label: `40%`, value: 0.4 },
+    { label: `50% (${terms.transformative})`, value: 0.5 },
+  ];
+  const inputProdImpact = Inputs.select(dataProdImpact, {
+    label: makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.prodImpactDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.prodImpactDropdown.tooltip,
+      ),
+    }),
+    format: (x) => x.label,
+    value: dataProdImpact.find((d) => d.value == 0.3),
+  });
+  const dataAdoption = [
+    { label: `0.5% (${terms.low})`, value: 0.005 },
+    { label: `1% (${terms.moderate})`, value: 0.01 },
+    { label: `2% (${terms.high})`, value: 0.02 },
+  ];
+  const inputAdoption = Inputs.select(dataAdoption, {
+    label: makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.adoptionRateDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.adoptionRateDropdown.tooltip,
+      ),
+    }),
+    format: (x) => x.label,
+    value: dataAdoption.find((d) => d.value == 0.01),
+  });
+  const dataCisImpact = [
+    { label: `0% (${terms.none})`, value: 0 },
+    { label: `10% (${terms.low})`, value: 0.1 },
+    { label: `25% (${terms.moderate})`, value: 0.25 },
+    { label: `50% (${terms.high})`, value: 0.5 },
+  ];
+  const inputCisImpact = Inputs.select(dataCisImpact, {
+    label: makeTooltipLabel({
+      labelText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.cisImpactDropdown.label,
+      ),
+      tooltipText: _lang(
+        nbText.projectSetup.blocks.impacts.inputs.cisImpactDropdown.tooltip,
+      ),
+    }),
+    format: (x) => x.label,
+    value: dataCisImpact.find((d) => d.value == 0.25),
+  });
+  return Inputs.form(
+    {
+      inputProdImpact,
+      inputAdoption,
+      inputCisImpact,
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
+};
+```
+
+### Advanced Control Variables
+
+```{ojs}
+viewof discountRate = Inputs.range([0, 1],{step: 0.01, format: x => (x * 100), value: 0.12, label: "Discount Rate"} ) // 0-1 as a pct
+viewof bcr = Inputs.range([0.5, 2], {step: 0.01, label: "BCR", value: 1.62} )
+
+
+viewof uncertaintyBenefitScale = Inputs.form(
+    {
+      low: Inputs.range([0.5, 1], {
+        step: 0.01,
+        value: 0.9,
+      }),
+      high: Inputs.range([1, 1.8], {
+        step: 0.01,
+        value: 1.2,
+      }),
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
+
+viewof uncertaintyCostScale = Inputs.form(
+    {
+      low: Inputs.range([0.5, 1], {
+        step: 0.01,
+        value: 0.9,
+      }),
+      high: Inputs.range([1, 1.8], {
+        step: 0.01,
+        value: 1.2,
+      }),
+    },
+    {
+      template: inputTemplate({ gap: "3em" }),
+    },
+  );
+```
+
+### Other Selections
+
+```{ojs}
+// Plot Variable
+// base selector for metric type
+viewof pickMetricWalkthrough = {
+  return Inputs.select(dataPickMetric, {
+    label: _lang(nbText.indicators.general.terms.indicator),
+    format: (x) => x.labelFull,
+    value: dataPickMetric.find((d) => d.key == "irr")
+  });
+}
+```
+
+## Elements
+
+```{ojs}
+import { dropdownInput, dropdownCSS } from "/helpers/multiSelect.ojs";
+
+dropdownCSS;
+```
+
+## Helper Functions
+
+```{ojs}
+debounce = (input, delay = 500) => {
+  class DelayedEvent extends Event {}
+  let id;
+  input.addEventListener("input", (e) => {
+    if (e instanceof DelayedEvent) return;
+    e.stopImmediatePropagation();
+    clearTimeout(id);
+    id = setTimeout(
+      () => input.dispatchEvent(new DelayedEvent("input", { bubbles: true })),
+      delay,
+    );
+  });
+  return input;
+};
+```
+
+## Language
+
+<!-- Text and Language Translations -->
+
+```{ojs}
+// This cell is to contain all the headings and the notebook title
+nbTitle = _lang({
+  en: "Estimate Economic Returns on Adaptation",
+  fr: "Estimer les retours sur économiques l'adaptation",
+});
+// key_insights = _lang({en: "Key Insights", fr: "Résumé"})
+nbOverview = _lang({ en: "Overview", fr: "Vue d’Ensemble" });
+heading1 = _lang({ en: "Project Set-Up", fr: "Configuration de Project" });
+heading2 = _lang({ en: "Investment Returns", fr: "Retours d'Investissements" });
+nbSummary = _lang({ en: "Summary", fr: "Résumé" });
+nbMethods = _lang({ en: "Methods & Sources", fr: "Méthodes & Sources" });
+appendix = _lang(general_translations.appendix);
+```
+
+```{ojs}
+import { lang as Lang } from "/helpers/lang.js"
+
+general_translations = await FileAttachment("/data/shared/generalTranslations.json").json()
+
+nbText = await FileAttachment("/data/economicReturns/translations.json").json()
+
+languages = [
+  { key: "en", label: "English", locale: 'en-US' },
+  { key: "fr", label: "Français", locale: 'fr-FR' }
+]
+
+defaultLangKey = {
+  const name = "lang";
+  const list = languages.map((d) => d.key);
+  const defaultKey = "en";
+  const queryParam = await Lang.getParamFromList({ name, list });
+  return queryParam ?? defaultKey;
+}
+
+_lang = Lang.lg(masterLanguage.key)
+
+viewof masterLanguage = Inputs.radio(languages, {
+  label: "Main language toggle",
+  format: (d) => d.key,
+  value: languages.find((x) => x.key === defaultLangKey),
+})
+```
+
+```{ojs}
+function NavbarLangSelector(language_obj, masterLanguage) {
+  let navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
+  if (navEnd) {
+    let existingLangSelector = document.getElementById("nav-lang-selector");
+    if (!existingLangSelector) {
+      let lang_sel = Inputs.bind(
+        Inputs.radio(language_obj, {
+          label: "",
+          format: (d) => d.label
+        }),
+        viewof masterLanguage
+      );
+      lang_sel.id = "nav-lang-selector";
+      
+      // Hack the css together for the observable inputs
+      lang_sel.style.display = "flex";
+      lang_sel.style.alignItems = "center";
+      lang_sel.style.marginLeft = "10px";
+      let lang_div = lang_sel.querySelector("div");
+      lang_div.style.display = "flex";
+      lang_div.style.flexDirection = "column";
+
+      // Insert the new item after the GitHub icon and other elements
+      navEnd.parentNode.appendChild(lang_sel);
+    }
+  }
+}
+
+NavbarLangSelector(languages, masterLanguage)
+```
+
+### Markdown notebook text
+
+```{ojs}
+dataPickMetric = {
+  return [
+    {
+      key: "irr",
+      columnName: "irr",
+      label: _lang(nbText.indicators.irr.label),
+      tooltip: _lang(nbText.indicators.irr.tooltip),
+      labelLong: _lang(nbText.indicators.irr.labelLong),
+      labelFull: _lang(nbText.indicators.irr.labelFull),
+      info: {
+        what: _lang(nbText.indicators.irr.info.what),
+        interpret: _lang(nbText.indicators.irr.info.interpret),
+        tell: _lang(nbText.indicators.irr.info.tell)
+      },
+      yFormat: (d) => `${d.toFixed(1)}%`
+    },
+    {
+      key: "mirr",
+      columnName: "mirr",
+      label: _lang(nbText.indicators.mirr.label),
+      tooltip: _lang(nbText.indicators.mirr.tooltip),
+      labelLong: _lang(nbText.indicators.mirr.labelLong),
+      labelFull: _lang(nbText.indicators.mirr.labelFull),
+      info: {
+        what: _lang(nbText.indicators.mirr.info.what),
+        interpret: _lang(nbText.indicators.mirr.info.interpret),
+        tell: _lang(nbText.indicators.mirr.info.tell)
+      },
+      yFormat: (d) => `${d.toFixed(1)}%`
+    },
+    {
+      key: "npv",
+      columnName: "npv",
+      label: _lang(nbText.indicators.npv.label),
+      tooltip: _lang(nbText.indicators.npv.tooltip),
+      labelLong: _lang(nbText.indicators.npv.labelLong),
+      labelFull: _lang(nbText.indicators.npv.labelFull),
+      info: {
+        what: _lang(nbText.indicators.npv.info.what),
+        interpret: _lang(nbText.indicators.npv.info.interpret),
+        tell: _lang(nbText.indicators.npv.info.tell)
+      },
+       yFormat: (d) => formatUSD()(d)
+    },
+    {
+      key: "bcr",
+      columnName: "discounted_bcr",
+      label: _lang(nbText.indicators.bcr.label),
+      tooltip: _lang(nbText.indicators.bcr.tooltip),
+      labelLong: _lang(nbText.indicators.bcr.labelLong),
+      labelFull: _lang(nbText.indicators.bcr.labelFull),
+      info: {
+        what: _lang(nbText.indicators.bcr.info.what),
+        interpret: _lang(nbText.indicators.bcr.info.interpret),
+        tell: _lang(nbText.indicators.bcr.info.tell)
+      },
+      yFormat: d3.format(".2f")
+    }
+  ];
+}
+```
+
+```{ojs}
+renderReview1 = () => {
+  const langBasePath = nbText.investmentReturns.blocks.insightReview.setupBlock;
+  const langMissingTemplate = _lang(langBasePath.missingMessage, {
+    key: language.key,
+  });
+
+  const isoSet = new Set(select_country);
+
+  const admin0List = countries
+    .filter((d) => isoSet.has(d.iso3c))
+    .map((d) => d.admin0_name);
+
+  const cropList = select_crop;
+
+  // const cropList = adminCropChoices.crops.sort((a,b) => _lang(a.translation) > _lang(b.translation));
+  const truncateSize = 3;
+  const admin0ListTruncated = admin0List.slice(0, truncateSize);
+  const cropListTruncated = cropList.slice(0, truncateSize); // .map((d) => _lang(d.translation));
+
+  if (admin0List.length == 0 || cropList.length == 0) {
+    return md`${langMissingTemplate}`;
+  }
+
+  // new code
+  const insertCropCount = cropList.length;
+  const insertCropWord =
+    cropList.length == 1
+      ? _lang(nbText.supportNbText.words.crop.singular, {
+          key: language.key,
+        })
+      : _lang(nbText.supportNbText.words.crop.plural, {
+          key: language.key,
+        });
+  const insertCropList = `(**${cropListTruncated.join(", ")}${
+    cropList.length > truncateSize ? "..." : ""
+  }**)`;
+  const insertCrop = `**${insertCropCount} ${insertCropWord}** ${insertCropList}`;
+
+  const insertRegionCount = select_region.length;
+  const insertRegionWord =
+    insertRegionCount == 1
+      ? _lang(nbText.supportNbText.words.region.singular, {
+          key: language.key,
+        })
+      : _lang(nbText.supportNbText.words.region.plural, {
+          key: language.key,
+        });
+  const insertRegion = `${insertRegionCount} ${insertRegionWord}`;
+
+  const insertCountryCount = admin0List.length;
+  const insertCountryWord =
+    insertCountryCount == 1
+      ? _lang(nbText.supportNbText.words.country.singular, {
+          key: language.key,
+        })
+      : _lang(nbText.supportNbText.words.country.plural, {
+          key: language.key,
+        });
+  const insertCountryList = `(**${admin0ListTruncated.join(", ")}${
+    insertCountryCount > truncateSize ? "..." : ""
+  }**)`;
+  const insertCountry = `**${insertCountryCount} ${insertCountryWord}** ${insertCountryList}`;
+
+  // insert to template
+  const langTemplate = _lang(langBasePath.template, {
+    key: language.key,
+  });
+  const langTemplateItems = [
+    { name: "crop_string", value: insertCrop },
+    { name: "region_string", value: insertRegion },
+    { name: "country_string", value: insertCountry },
+    {
+      name: "cost_string",
+      value: formatUSD({ locale: language.locale })(rangeProjectCost),
+    },
+    { name: "year_string", value: projectYears + " years" }, //TODO: add correct "years" string at end of this
+  ];
+  const selectionFormattedTemplate = Lang.reduceReplaceTemplateItems(
+    langTemplate,
+    langTemplateItems,
+  );
+
+  return md`${selectionFormattedTemplate}`;
+};
+```
+
+```{ojs}
+renderReview2 = () => {
+  const investmentTemplate = _lang(
+    nbText.investmentReturns.blocks.insightReview.indicatorBlock,
+  );
+  const investmentTemplateItems = [
+    {
+      name: "prod_impact_label",
+      value: options_econPerfWalkthrough.inputProdImpact.label,
+    },
+    {
+      name: "adoption_rate_label",
+      value: options_econPerfWalkthrough.inputAdoption.label,
+    },
+    {
+      name: "cis_impact_label",
+      value: options_econPerfWalkthrough.inputCisImpact.label,
+    },
+    { name: "year_string", value: projectYears + " years" },
+  ];
+
+  return md`${Lang.reduceReplaceTemplateItems(investmentTemplate, investmentTemplateItems)}:`;
+};
+```
+
+### Result Elements
+
+```{ojs}
+bigNumbersResults = () => {
+  const y = projectYears;
+  const e = walkthroughEconomicIndicators?.enriched?.find((d) => d.year === y);
+
+  const data = dataPickMetric.map((d) => {
+    let value;
+
+    if (d.key === "irr" && e?.irr != null) {
+      value = e.irr; // IRR as percentage
+    } else if (d.key === "mirr" && e?.mirr != null) {
+      value = e.mirr; // MIRR as percentage
+    } else if (
+      d.key === "npv" &&
+      e?.discounted_benefit_cum != null &&
+      e?.discounted_cost_cum != null
+    ) {
+      value = +(e.discounted_benefit_cum - e.discounted_cost_cum).toFixed(1); // NPV, 1 dp
+    } else if (d.key === "bcr") {
+      value = e?.discounted_bcr;
+    }
+
+    return { ...d, value };
+  });
+
+  return htl.html`
+  <style>
+    .outer-div {
+      display: flex;
+      gap: 2em;
+    }
+    .inner-div {
+      width: 30%;
+      padding: 80px 30px;
+      border: 1px solid #efefef;
+    }
+    .label {
+      display: block;
+      font-weight: 400;
+      font-size: 14px;
+      text-transform: uppercase;
+      color: #666;
+    }
+    .value {
+      font-weight: bold;
+      font-size: 42px; 
+    }
+    .negative {
+      color: #EC5A47;
+    }
+    .tooltip-card {
+        position: relative;
+        display: inline-block;
+        cursor: pointer;
+        width: 100%;
+    }
+    .tooltip-card .tooltiptext-card {
+        position: absolute;
+        z-index: 1;
+        visibility: hidden; 
+        left: 0;
+        bottom: 90%;
+        background-color: #efefef;
+        color: #333;
+        padding: 14px 20px;
+        font-size: 14px;
+        line-height: 1.6;
+        text-align: left;
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    .tooltip-card:hover .tooltiptext-card {
+        visibility: visible;
+        opacity: 1;
+        cursor: default;
+    }
+  </style>
+
+  <body>
+    <div class="outer-div">
+      ${data.map(
+        (d) => htl.html`<div class="inner-div">
+          <span class="tooltip-card">
+            <span class="tooltiptext-card">${d.tooltip}</span>
+            <span class="value ${d.value != null && d.value < 0 ? "negative" : ""}">${
+              d.value != null ? d.yFormat(d.value) : "---"
+            }</span>
+            <span class="label">${d.labelFull}</span>
+          </span>
+        </div>`,
+      )}
+    </div>
+  </body>`;
+};
+```
+
+```{ojs}
+resultTable = () => {
+  const fmtUSD = formatUSD({ locale: language.locale });
+  const selectedYear = projectYears;
+  const enriched = (walkthroughEconomicIndicators?.enriched ?? []).filter(
+    (d) => d.year <= selectedYear,
+  );
+
+  const tableHeaders =
+    nbText.investmentReturns.blocks.exploreIndicators.tableHeaders;
+  const headerNames = [
+    _lang(tableHeaders.year),
+    _lang(tableHeaders.benefit),
+    _lang(tableHeaders.cost),
+    _lang(tableHeaders.cashflow),
+    _lang(tableHeaders.discountedBenefitCum),
+    _lang(tableHeaders.discountedCostCum),
+    _lang(tableHeaders.discountedNpvCum),
+    _lang(tableHeaders.discountedBcr),
+    _lang(tableHeaders.irr),
+    _lang(tableHeaders.mirr),
+  ];
+
+  return html`
+    <style>
+      .econ-table {
+        font-family: sans-serif;
+        border-collapse: collapse;
+        font-size: 13.75px;
+        margin-top: 1em;
+        min-width: 100%;
+      }
+      .econ-table th, .econ-table td {
+        border: 1px solid #ddd;
+        padding: 6px 10px;
+        text-align: right;
+      }
+      .econ-table th {
+        background-color: #f4f4f4;
+        white-space: normal;
+        text-align: center;
+      }
+      .econ-table td.year-col {
+        text-align: center;
+        font-weight: bold;
+      }
+      .econ-table tr.final-row td {
+        font-weight: bold;
+        background-color: #f1f1f1;
+      }
+      .table-container {
+        overflow-x: auto;
+        display: block;
+        padding-bottom: 4px;
+      }
+    </style>
+
+    <div class="table-container">
+      <table class="econ-table">
+        <thead>
+          <tr>
+            ${headerNames.map((h) => html`<th title="${h}">${h}</th>`)}
+          </tr>
+        </thead>
+        <tbody>
+          ${enriched.map((d, i) => {
+            const isFinal = i === enriched.length - 1;
+            const npv_i =
+              d.discounted_benefit_cum != null && d.discounted_cost_cum != null
+                ? d.discounted_benefit_cum - d.discounted_cost_cum
+                : null;
+
+            return html`<tr class=${isFinal ? "final-row" : ""}>
+              <td class="year-col">${d.year}</td>
+              <td>${d.project_benefit != null ? fmtUSD(d.project_benefit) : "—"}</td>
+              <td>${d.cost != null ? fmtUSD(d.cost) : "—"}</td>
+              <td>${d.cashflow != null ? fmtUSD(d.cashflow) : "—"}</td>
+              <td>${d.discounted_benefit_cum != null ? fmtUSD(d.discounted_benefit_cum) : "—"}</td>
+              <td>${d.discounted_cost_cum != null ? fmtUSD(d.discounted_cost_cum) : "—"}</td>
+              <td>${npv_i != null ? fmtUSD(npv_i) : "—"}</td>
+              <td>${d.discounted_bcr != null ? d.discounted_bcr.toFixed(2) : "—"}</td>
+              <td>${d.irr != null ? `${(d.irr).toFixed(2)}%` : "—"}</td>
+              <td>${d.mirr != null ? `${(d.mirr).toFixed(2)}%` : "—"}</td>
+            </tr>`;
+          })}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+```
+
+```{ojs}
+resultPlot = () => {
+  const projectYearCutoff = walkthroughSelections.project_years;
+  const selector = pickMetricWalkthrough;
+  const plotData = walkthroughEconomicIndicators?.enriched ?? [];
+  const uncertaintyYearly = uncertainty?.yearly ?? [];
+
+  // Always include all years for consistent x-axis
+  const fullYears = d3.range(0, projectYears + 1); // 0 to 8 inclusive
+  const completePlotData = fullYears.map((y) => {
+    const row = plotData.find((d) => d.year === y);
+    return row ?? { year: y };
+  });
+
+  const bandData = (() => {
+    const metricKey = selector.key;
+    return fullYears
+      .map((year) => {
+        const row = uncertaintyYearly.find((d) => d.year === year);
+        const low = row?.[metricKey]?.p10;
+        const high = row?.[metricKey]?.p90;
+        if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+        return { year, low, high };
+      })
+      .filter((d) => d != null);
+  })();
+
+  const ruleYValue = selector.key === "bcr" ? 1 : 0;
+
+  return Plot.plot({
+    width,
+    marginRight: 80,
+    inset: 5,
+    x: {
+      label: _lang(
+        nbText.investmentReturns.blocks.exploreIndicators.projectYear,
+      ),
+      ticks: fullYears,
+      tickFormat: "d",
+      labelAnchor: "center",
+      labelArrow: "none",
+    },
+    y: {
+      label: selector.label,
+      tickFormat: selector.yFormat,
+    },
+    marks: [
+      Plot.axisY({
+        anchor: "right",
+        label: selector.label,
+        tickFormat: selector.yFormat,
+        tickSize: 0,
+        color: (d) => {
+          return d >= 0 ? "black" : "#EC5A47";
+        },
+      }),
+      // horizontal reference line
+      Plot.ruleY([ruleYValue], {
+        stroke: "#333",
+        strokeDasharray: [3],
+      }),
+
+      Plot.areaY(bandData, {
+        x: "year",
+        y1: "low",
+        y2: "high",
+        fill: "#2c7fb8",
+        fillOpacity: 0.16,
+      }),
+
+      // line
+      Plot.line(completePlotData, {
+        x: "year",
+        y: selector.columnName,
+        stroke: "#444",
+        strokeOpacity: 0.7,
+        strokeWidth: 2,
+        tip: true,
+      }),
+
+      // dots
+      Plot.dot(completePlotData, {
+        x: "year",
+        y: selector.columnName,
+        r: 3,
+        fill: "#444",
+        stroke: "#fff",
+        strokeWidth: 0.5,
+        tip: {
+          format: {
+            x: true,
+            y: selector.yFormat,
+          },
+        },
+      }),
+
+      // highlight selected year
+      Plot.dot(
+        completePlotData.filter((d) => d.year === projectYearCutoff),
+        {
+          x: "year",
+          y: selector.columnName,
+          r: 7,
+          fill: "#fff",
+          stroke: (d) => (d[selector.columnName] >= 0 ? "#333" : "#EC5A47"),
+          strokeWidth: 2,
+        },
+      ),
+    ],
+  });
+};
+```
+
+## Data Analysis and Processing
+
+```{ojs}
+admin0_names = {
+  const isoSet = new Set(select_country);
+  return countries
+  .filter((d) => isoSet.has(d.iso3c))
+  .map((d) => d.admin0_name);
+}
+```
+
+### CV Data
+
+```{ojs}
+// Module Imports for the calculation of ROI data
+import {
+  avlossCalc,
+  avlossCalcUncertainty,
+  calcMIRR,
+  calcIRR,
+  npvDiscreteCumulative,
+  runSimulationFromCashflowRows,
+} from "/notebooks/roi/roi_tools.js";
+```
+
+```{ojs}
+mutable cv_result = [];
+mutable cv_cache_key = '';
+
+calcCV = async () => {
+  const cis_impact = options_econPerfWalkthrough.inputCisImpact.value;
+
+  const cache_key = `${[...admin0_names].sort().join(',')}|${[...select_crop].sort().join(',')}|${cis_impact}`;
+
+  if (cv_cache_key === cache_key) {
+    console.log('Skipped cv run as inputs the same');
+    return cv_result;
+  }
+  
+  console.log('Running the cv analysis as inputs changed')
+  const cv_data = await db.query(`
+    SELECT *
+    FROM cv
+    WHERE crop in ('${select_crop.join("', '")}')
+    AND admin0_name in ('${admin0_names.join("', '")}') -- This needs the a0_name rather than iso3
+`);
+  
+  const cv_monteCarlo = await Promise.all(
+    cv_data.map(async ({ crop, admin0_name, cv }) => {
+      const av = await avlossCalc(cv, cis_impact);
+      const avloss = Math.abs(Number(av.toFixed?.(4) ?? av));
+      return { admin0_name, crop, cv, cis_impact, avloss };
+    }),
+  );
+
+  const cv_index = new Map();
+  for (const { admin0_name, crop, avloss } of cv_monteCarlo) {
+    cv_index.set(`${admin0_name}|${crop}`, avloss);
+  }
+
+  mutable cv_result = cv_index
+  mutable cv_cache_key = cache_key
+  return cv_index
+}
+```
+
+### Other ROI X Exposure Variables
+
+```{ojs}
+// getExposureData = async (crops, countries) => {
+// NOTE: Making this a dataset rather than a function so it only re-runs when crop or country change.
+// Defaulting to all admin 1 data as all admin regions are selected by defualt and this
+// will prevent having to have users re-query the datasets when changing regions in a county.
+
+exposure_data = {
+  let crops = select_crop;
+  let countries = select_country;
+  let data = await db.query(`
+    SELECT *
+    FROM exposure
+    WHERE crop in ('${crops.join("', '")}')
+    AND iso3 in ('${countries.join("', '")}')
+    -- POSSIBLY add admin1 name filter, but defaults to full country, so maybe bigger query is better. 
+  `);
+  return data;
+};
+```
+
+```{ojs}
+crop_adoption = async () => {
+  // Globals from the notebook
+  const adoption = options_econPerfWalkthrough.inputAdoption.value;
+  const years = projectYears;
+  const prod_impact = options_econPerfWalkthrough.inputProdImpact.value;
+  // let data = await getExposureData(select_crop, select_country);
+  const data = exposure_data;
+  const result = [];
+
+  for (const row of data) {
+    const value = row.value || 0;
+    let xPrev = 0;
+
+    for (let i = 1; i <= years; i++) {
+      // cumulative adoption
+      let x;
+      if (i === 1) {
+        x = Math.round(value * adoption * 10) / 10;
+      } else {
+        x = Math.round((value - xPrev) * adoption * 10) / 10 + xPrev;
+      }
+
+      xPrev = x;
+
+      // push a long-form row
+      result.push({
+        admin0_name: row.admin0_name,
+        admin1_name: row.admin1_name,
+        iso3c: row.iso3,
+        crop: row.crop,
+        exposure: row.exposure,
+        value: row.value,
+        adoption: adoption,
+        prod_impact: prod_impact,
+        year_char: `y${i}`,
+        year: i,
+        result: x,
+      });
+    }
+  }
+
+  return result.map((row) => {
+    const result_w_impact =
+      Math.round(row.result * (1 + (row.prod_impact ?? 0)) * 10) / 10;
+    const marginal_impact =
+      Math.round((result_w_impact - row.result) * 10) / 10;
+    return { ...row, result_w_impact, marginal_impact };
+  });
+};
+
+//NOTE: QAQC RESULTS:
+// 1 region & crop: PERFECT - This output matches the R script output exactly
+```
+
+```{ojs}
+roiResults = async () => {
+  const index = await calcCV();
+  const data = await crop_adoption();
+
+  const withImpact = data.map((row) => {
+    const key = `${row.admin0_name}|${row.crop}`;
+    const avloss = index.get(key) ?? 0; // default to 0 if missing
+
+    const result_w_impact_cis =
+      Math.round(row.result_w_impact * (1 + avloss) * 10) / 10;
+    const marginal_cis =
+      Math.round((result_w_impact_cis - row.result_w_impact) * 10) / 10;
+    const marginal_impact_cis =
+      (marginal_cis || 0) + (row.marginal_impact || 0);
+
+    return {
+      ...row,
+      avloss,
+      result_w_impact_cis,
+      marginal_cis,
+      marginal_impact_cis,
+    };
+  });
+
+  return withImpact.map((d) => {
+    const project_benefit =
+      Math.round((d.marginal_impact_cis - d.marginal_impact_cis / bcr) * 10) /
+      10;
+    const cis_impact = options_econPerfWalkthrough.inputCisImpact.value;
+    return { ...d, bcr, cis_impact, project_benefit };
+  });
+};
+
+//NOTE: QAQC RESULTS:
+// 1 region & crop: Good - Output is close, the MC simulation gives different results, but the difference is few $100 each time
+```
+
+### ROI X inputs Calculations
+
+#### Sum across admins and crops
+
+We select all the data for admin regions and crops, and sum up to get the
+benefit across all parameter combos.
+
+```{ojs}
+regionSet = new Set(select_region);
+```
+
+```{ojs}
+recipe_dataSummed = async () => {
+  document.body.style.cursor = "wait";
+  const roi_data = await roiResults();
+
+  // Filter down on this step to the selected regions
+  const roi_data_filtered = roi_data.filter((d) =>
+    regionSet.has(`${d.iso3c}_${d.admin1_name}`),
+  );
+
+  const aggregated = d3
+    .flatGroup(
+      roi_data_filtered,
+      (d) => d.adoption,
+      (d) => d.prod_impact,
+      (d) => d.cis_impact,
+      (d) => d.bcr,
+      (d) => d.year,
+    )
+    .map(([adoption, prod_impact, cis_impact, bcr, year, group]) => ({
+      adoption,
+      prod_impact,
+      cis_impact,
+      bcr,
+      year,
+      project_benefit: d3.sum(group, (d) => d.project_benefit),
+    }));
+
+  document.body.style.cursor = "default";
+  return aggregated;
+};
+```
+
+#### Define project payment schedule
+
+Below we define the project cost schedule
+
+- Cost is evenly distributed across years (
+  - Ex. 1M over 5 years is 200K, 400K, 600K, 800K, 1M; the first year has no
+    project benefit ($200K, 0 benefit)
+
+```{ojs}
+recipe_paymentSchedule = Array.from({ length: projectYears }).map((_, i) => {
+  return {
+    year: i,
+    cost: (1 / projectYears) * rangeProjectCost,
+    cost_cum: ((i + 1) / projectYears) * rangeProjectCost,
+  };
+});
+```
+
+#### Add project scope to data
+
+- Add a zero year at the start (the return rate is hardcoded to one year)
+- Also if the project cost is zero, return an empty array
+
+```{ojs}
+recipe_dataCashflow = {
+  if (!rangeProjectCost || rangeProjectCost === 0) return [];
+
+  const payByYear = new Map(recipe_paymentSchedule.map((d) => [d.year, d]));
+
+  const data = await recipe_dataSummed();
+
+  return d3
+    .flatGroup(
+      data,
+      (d) => d.adoption,
+      (d) => d.prod_impact,
+      (d) => d.cis_impact,
+      (d) => d.bcr,
+    )
+    .flatMap(([adoption, prod_impact, cis_impact, bcr, rows]) => {
+      const allRows = [
+        ...rows,
+        { adoption, prod_impact, cis_impact, bcr, year: 0, project_benefit: 0 },
+      ].sort((a, b) => a.year - b.year);
+
+      return allRows.map((r) => {
+        const pay = payByYear.get(r.year) || {};
+        const cost = pay.cost ?? 0;
+        const cost_cum = pay.cost_cum ?? rangeProjectCost;
+        return {
+          ...r,
+          cost,
+          cost_cum,
+          cashflow: (r.project_benefit ?? 0) - cost,
+          discount_rate: discountRate,
+        };
+      });
+    });
+};
+```
+
+#### Format that into final indicators
+
+```{ojs}
+walkthroughEconomicIndicators = {
+  const selection = walkthroughSelections;
+
+  const data = recipe_dataCashflow
+
+  const years = data.map(d => d.year);
+  const benefit = data.map(d => d.project_benefit);
+  const cost = data.map(d => d.cost);
+  const cashflow = benefit.map((b, i) => b - cost[i]);
+  const discountRate = selection.discount_rate;
+
+  const npv = npvDiscreteCumulative(cashflow, discountRate);
+  const npv_benefit = npvDiscreteCumulative(benefit, discountRate);
+  const npv_cost = npvDiscreteCumulative(cost, discountRate);
+  const discounted_bcr = npv_benefit.map((b, i) => npv_cost[i] === 0 ? null : b / npv_cost[i]);
+
+  const proj_irr = calcIRR(cashflow);
+  const proj_mirr = calcMIRR(cashflow, discountRate, discountRate);
+  const proj_npv = npv.at(-1);
+  const proj_bcr = discounted_bcr.at(-1);
+
+  // === Enriched table
+  const enrichedData = years.map((year, i) => {
+    const cashflowToDate = cashflow.slice(0, i + 1);
+    return {
+      year,
+      project_benefit: benefit[i],
+      cost: cost[i],
+      cashflow: cashflow[i],
+      discounted_benefit_cum: npv_benefit[i],
+      discounted_cost_cum: npv_cost[i],
+      discounted_bcr: discounted_bcr[i],
+      irr: calcIRR(cashflowToDate)*100,
+      mirr: calcMIRR(cashflowToDate, discountRate, discountRate)*100,
+      npv: npv[i]
+    };
+  });
+
+  return {
+    summary: {
+      proj_npv,
+      proj_irr,
+      proj_mirr,
+      proj_bcr
+    },
+    enriched: enrichedData
+  };
+}
+```
+
+#### Calculate final values
+
+At this point, following the recipe, we have the timeseries for the selected
+parameters, with financial values calculated. Specifically:
+
+- adoption
+- prod_impact
+- cis_impact
+- bcr
+- discount_rate
+
+Across:
+
+- year
+
+Data:
+
+- project_benifit
+- cost and cashflow
+- Project IRR
+- Project NPV
+- Project BCR
+
+## Selections
+
+```{ojs}
+walkthroughSelections = {
+  return {
+    countries: select_country,
+    regions: select_region,
+    crops: select_crop,
+    project_years: projectYears,
+    project_cost: rangeProjectCost,
+    prod_impact: options_econPerfWalkthrough.inputProdImpact.value,
+    adoption: options_econPerfWalkthrough.inputAdoption.value,
+    cis_impact: options_econPerfWalkthrough.inputCisImpact.value,
+    discount_rate: discountRate,
+    bcr: bcr,
+    // time_horizon: options_econPerfWalkthrough.inputTime.value,
+  };
+}
+```
