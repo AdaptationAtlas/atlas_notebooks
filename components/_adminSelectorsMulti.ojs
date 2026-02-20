@@ -1,0 +1,139 @@
+import { lang as Lang } from "/helpers/lang.js";
+import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
+
+adminDB = await DuckDBClient.of({
+  admin_lookup: await FileAttachment("/data/shared/gaul24_africa_lookup.parquet"),
+});
+
+adminTranslations = new Object({
+  country: { en: "Country", fr: "Pays" },
+  region: { en: "Region", fr: "Region" },
+  district: { en: "District", fr: "District" },
+});
+
+countries = {
+  const country_list = await FileAttachment("/data/shared/atlas_countries.json").json();
+  return country_list
+    .filter((c) => c.include && c.iso3c !== "SDN")
+    .map(({ include, ...rest }) => rest);
+};
+
+viewof admin0Select = Inputs.input(Object.values(countries).slice(0, 1));
+
+renderA0Multi = (
+  { maxSelections = Infinity, requireAtLeastOne = false, langKey = "en" } = {},
+) => {
+  const _lang = Lang.lg(langKey);
+  const _admin0 = Inputs.select(countries, {
+    label: _lang(adminTranslations.country),
+    format: (d) => _lang(d.translation),
+    multiple: true,
+  });
+  enhancedMultiSelect(_admin0, { maxSelections, requireAtLeastOne });
+  return Inputs.bind(_admin0, viewof admin0Select);
+};
+
+allAdmin1 = {
+  const resp = await adminDB.query(`
+    SELECT DISTINCT admin0_name, admin1_name, iso3
+    FROM admin_lookup
+    WHERE iso3 in ('${countries.map((d) => d.iso3c).join("', '")}')
+  `);
+  return resp;
+};
+
+dataAdmin1 = allAdmin1.filter((d) => admin0Select.some((a0) => a0.iso3c === d.iso3));
+
+viewof admin1Select = Inputs.input([]);
+
+renderA1Multi = (
+  { maxSelections = Infinity, requireAtLeastOne = false, langKey = "en" } = {},
+) => {
+  const _lang = Lang.lg(langKey);
+  const _admin1 = Inputs.select(dataAdmin1, {
+    label: _lang(adminTranslations.region),
+    format: (d) => `${d.admin1_name || "Full Country"} (${d.iso3})`,
+    multiple: true,
+  });
+  enhancedMultiSelect(_admin1, { maxSelections, requireAtLeastOne });
+  return Inputs.bind(_admin1, viewof admin1Select);
+};
+
+allAdmin2 = {
+  const resp = await adminDB.query(`
+    SELECT DISTINCT admin0_name, admin1_name, admin2_name, iso3
+    FROM admin_lookup
+    WHERE iso3 in ('${countries.map((d) => d.iso3c).join("', '")}')
+  `);
+  return resp;
+};
+
+dataAdmin2 = allAdmin2.filter(
+  (d) =>
+    admin0Select.some((a0) => a0.iso3c === d.iso3) &&
+    admin1Select.some((a1) => a1.iso3 === d.iso3 && a1.admin1_name === d.admin1_name),
+);
+
+viewof admin2Select = Inputs.input([]);
+
+renderA2Multi = (
+  { maxSelections = Infinity, requireAtLeastOne = false, langKey = "en" } = {},
+) => {
+  const _lang = Lang.lg(langKey);
+  const _admin2 = Inputs.select(dataAdmin2, {
+    label: _lang(adminTranslations.district),
+    format: (d) => `${d.admin2_name} (${d.iso3})`,
+    multiple: true,
+  });
+  enhancedMultiSelect(_admin2, { maxSelections, requireAtLeastOne });
+  return Inputs.bind(_admin2, viewof admin2Select);
+};
+
+function setSelectorValue(input, value) {
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+{
+  if (!admin1Select.length) {
+    if (admin2Select.length) setSelectorValue(viewof admin2Select, []);
+    return;
+  }
+
+  const selectedA1Iso3 = new Set(admin1Select.map((d) => d.iso3));
+  const a1NoMatch = admin0Select.every((obj) => !selectedA1Iso3.has(obj.iso3c));
+
+  if (a1NoMatch) {
+    setSelectorValue(viewof admin1Select, []);
+    if (admin2Select.length) setSelectorValue(viewof admin2Select, []);
+    return;
+  }
+
+  if (!admin2Select.length) return;
+
+  const selectedA1Pairs = new Set(
+    admin1Select.map((d) => `${d.iso3}||${d.admin1_name ?? ""}`),
+  );
+  const validAdmin2 = admin2Select.filter((d) =>
+    selectedA1Pairs.has(`${d.iso3}||${d.admin1_name ?? ""}`),
+  );
+
+  if (validAdmin2.length !== admin2Select.length) {
+    setSelectorValue(viewof admin2Select, validAdmin2);
+  }
+}
+
+adminSelections = new Object({
+  admin0: admin0Select,
+  admin1: admin1Select,
+  admin2: admin2Select,
+});
+
+buildAdminMultiForm = ({ langKey = "en", maxSelections = Infinity, requireAtLeastOne = false } = {}) =>
+  Inputs.form([
+    renderA0Multi({ langKey, maxSelections, requireAtLeastOne }),
+    renderA1Multi({ langKey, maxSelections, requireAtLeastOne }),
+    renderA2Multi({ langKey, maxSelections, requireAtLeastOne }),
+  ], {
+    template: (inputs) => html`<div style="display: flex; gap: 2em;">${inputs}</div>`,
+  });
