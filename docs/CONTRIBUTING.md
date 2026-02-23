@@ -90,7 +90,6 @@ These rendered files can be opened in a browser, but, OJS cells in html document
 
 Some workarounds: 
 - use `quarto preview`, and explore the site from there, only rendering when pushing to github pages or similar.
-- Serve the html pages locally using the `testServer.ts` helper such as: `quarto run helpers/testServer.ts`
 - Serve the html pages locally using python with `python3 -m http.server -d _site 4000`
 
 ---
@@ -103,9 +102,9 @@ Some workarounds:
 2. **Create a new branch based on `template`** You can do this locally by first checking out the `template` branch, then
 creating your feature branch:
 ```sh 
-git checkout 
-template git pull origin template        # make sure your local template is up to date git
-checkout -b my-feature-branch
+git checkout template
+git pull origin template  # make sure your local template is up to date
+git checkout -b my-feature-branch
 ```
 
 3. **Build on your branch** using clear and frequent commits.
