@@ -571,6 +571,20 @@ html, body { overflow-anchor: none; }
   }
 
 
+  /* Q1 Dynamic Insight */
+  .hz-qInsight{
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    background: rgba(248, 250, 252, 0.7);
+    border-radius: 14px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+  }
+  .hz-qInsight .hz-loading{
+    font-size: 0.95rem;
+  }
+
+
+
 
 .hidden { display: none !important; }
 
@@ -672,6 +686,16 @@ html, body { overflow-anchor: none; }
   .hz-mini{min-width:0}
   .hz-mini figure{margin:0}
 
+  /* Q1 UpSet layout (two plots side-by-side, like the Shiny prototype) */
+  .hz-upsetGrid{display:grid;gap:18px;align-items:start;grid-template-columns:1fr}
+  @media (min-width: 980px){ .hz-upsetGrid{grid-template-columns:1fr 1fr} }
+  .hz-upsetGrid--single{grid-template-columns:1fr !important}
+  .hz-upsetCol{min-width:0}
+  .hz-upsetTitle{text-align:center;font-weight:600;font-size:0.9rem;margin:0 0 6px 0;opacity:0.95}
+  .hz-upsetStack{display:flex;flex-direction:column;gap:0}
+  .hz-upsetStack figure{margin:0}
+
+
 
   .hz-sectionIntro{margin:0 0 12px 0}
   .hz-sectionIntro p{margin:0}
@@ -704,7 +728,7 @@ md`${_lang(nbText.sections.intro.text)}`;
 # `{ojs} q1Title` {#q1}
 
 ```{ojs}
-md`${_lang(nbText.sections.q1.introText)}`;
+md`${_lang(nbText.sections.q1.introText)}\n\n${_lang(nbText.sections.q1.detailText)}`;
 ```
 
 
@@ -2802,95 +2826,207 @@ hz_chartRows = {
 
 ```{ojs}
 //| output: false
-// Build Plot chart
+// Build Q1 UpSet chart (Shiny/prototype parity)
 hz_q1Chart = {
-  const data = Array.isArray(hz_chartRows) ? hz_chartRows : []
-  if (!data.length) return html`<div class="hz-empty">No data for the current filters.</div>`
+  // numeric guard (prevents NaN propagating into Plot scales)
+  const num = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? v : 0
+  }
+
+  // Use the full merged result (not the ranked/sliced chartRows), so all intersections stay accurate.
+  const src = Array.isArray(hz_merged) ? hz_merged : []
+  const raw = src.map((r) => {
+    const hazard = r.hazard ?? r.Hazard ?? r.name ?? r.key ?? "Unknown"
+    const total1 = num(r.total1 ?? r.left ?? r.value1 ?? r.total_left ?? 0)
+    const total2 = num(r.total2 ?? r.right ?? r.value2 ?? r.total_right ?? 0)
+    const total_diff = num(r.total_diff ?? (total2 - total1))
+    const perc1 = num(r.perc1 ?? 0)
+    const perc2 = num(r.perc2 ?? 0)
+    const pct_diff = num(r.pct_diff ?? (perc2 - perc1))
+    return { hazard, total1, total2, total_diff, perc1, perc2, pct_diff }
+  })
+  if (!raw.length) return html`<div class="hz-empty">No data for the current filters.</div>`
 
   const absLabel = hz_varLabel || "Value"
   const pctLabel = hz_relativeLabel || "%"
-  const xLabel = hz_relative ? pctLabel : absLabel
+  const yLabel = hz_relative ? pctLabel : absLabel
 
   const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
   const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
+  const fmtY = hz_relative ? fmtPct : fmtAbs
+
+  // Keep only intersection-style hazard classes (drop helpers)
+  const isIntersection = (h) => {
+    const h0 = String(h ?? "")
+    if (!h0) return false
+    if (h0 === "any" || h0 === "no hazard") return false
+    if (h0 === "Other") return false
+    return true
+  }
+
+  const baseOrder = ["dry", "heat", "wet"]
+
+  const getParts = (h) =>
+    String(h ?? "")
+      .split("+")
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+  const baseSets = (() => {
+    const s = new Set()
+    for (const r of raw) {
+      if (!isIntersection(r.hazard)) continue
+      for (const p of getParts(r.hazard)) s.add(p)
+    }
+    const arr = [...s]
+    const rest = arr.filter((d) => !baseOrder.includes(d)).sort()
+    return baseOrder.filter((d) => arr.includes(d)).concat(rest)
+  })()
+
+  // Generate a complete set of combinations when manageable (<=4 sets).
+  // This matches Shiny's behavior of keeping "missing" intersections as 0.
+  const combos = (() => {
+    if (baseSets.length >= 2 && baseSets.length <= 4) {
+      const arr = baseSets
+      const out = []
+      const n = arr.length
+      for (let mask = 1; mask < (1 << n); mask++) {
+        const parts = []
+        for (let i = 0; i < n; i++) if (mask & (1 << i)) parts.push(arr[i])
+        out.push(parts.join("+"))
+      }
+
+      // Prefer classic dry/heat/wet ordering when available
+      const prefer = ["dry", "heat", "wet", "dry+heat", "dry+wet", "heat+wet", "dry+heat+wet"]
+      const preferSet = new Set(prefer)
+      const ordered = prefer.filter((c) => out.includes(c)).concat(out.filter((c) => !preferSet.has(c)))
+
+      return ordered
+    }
+
+    // Fallback: whatever hazards exist (already ranked upstream)
+    return raw.filter((r) => isIntersection(r.hazard)).map((r) => String(r.hazard))
+  })()
+
+  const byHaz = new Map(raw.map((r) => [String(r.hazard), r]))
+
+  const rows = combos.map((haz) => {
+    const r = byHaz.get(haz) || {}
+    const total1 = num(r.total1 ?? 0)
+    const total2 = num(r.total2 ?? 0)
+    const total_diff = num(r.total_diff ?? (total2 - total1))
+    const perc1 = num(r.perc1 ?? 0)
+    const perc2 = num(r.perc2 ?? 0)
+    const pct_diff = num(r.pct_diff ?? (perc2 - perc1))
+    return { hazard: haz, total1, total2, total_diff, perc1, perc2, pct_diff }
+  })
 
   const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
 
-  if (!hz_difference) {
-    const side = data.flatMap(d => ([
-      { hazard: d.hazard, scenario: hz_s1.label, value: hz_relative ? d.perc1 : d.total1, raw: d.total1, pct: d.perc1 },
-      { hazard: d.hazard, scenario: hz_s2.label, value: hz_relative ? d.perc2 : d.total2, raw: d.total2, pct: d.perc2 }
-    ]))
+  const totalWidth = (() => {
+    const w0 = Number(hz_plotWidth) || 900
+    return Math.max(720, w0 - 24)
+  })()
+  const gap = 18
+  const colWidth = (() => {
+    const w = hz_difference ? totalWidth : Math.floor((totalWidth - gap) / 2)
+    return Number.isFinite(w) && w > 0 ? w : 720
+  })()
 
-    return Plot.plot({
-      width: Math.max(520, (hz_plotWidth ?? 900) - 24),
-      height: hz_chartHeight,
-      marginLeft: 210,
-      marginRight: 24,
-      marginTop: 36,
-      marginBottom: 40,
-      x: {
-        label: xLabel,
+  const barH = Math.max(260, (Number(hz_chartHeight) || 520) - 140)
+  const matH = 110
+
+  const buildMatrixData = (domain) => {
+    const all = []
+    const presentPts = []
+    for (const haz of domain) {
+      const parts = new Set(getParts(haz))
+      for (const s of baseSets) {
+        const present = parts.has(s)
+        all.push({ hazard: haz, set: s, present })
+        if (present) presentPts.push({ hazard: haz, set: s })
+      }
+    }
+    return { all, presentPts }
+  }
+
+  const buildUpSet = ({ label, valueKey, isDiff = false }) => {
+    const domain = combos
+    const data = rows.map((r) => ({ hazard: r.hazard, value: num(r[valueKey] ?? 0) }))
+    const { all, presentPts } = buildMatrixData(domain)
+
+    const maxAbs = Math.max(0, ...data.map((d) => Math.abs(num(d.value ?? 0))))
+    const yNice = hz_relative ? [0, 100] : [0, maxAbs * 1.08]
+    const yDiff = hz_relative ? [-Math.min(100, maxAbs * 1.08), Math.min(100, maxAbs * 1.08)] : [-maxAbs * 1.08, maxAbs * 1.08]
+
+    const barPlot = Plot.plot({
+      width: colWidth,
+      height: barH,
+      marginLeft: 60,
+      marginRight: 14,
+      marginTop: 18,
+      marginBottom: 0,
+      x: { domain, tickFormat: () => "", label: null },
+      y: {
+        label: yLabel,
         grid: true,
-        tickFormat: hz_relative ? fmtPct : fmtAbs
+        domain: isDiff ? yDiff : yNice,
+        tickFormat: fmtY
       },
-      y: { label: null },
-      color: { legend: true },
       caption: subtitle,
       marks: [
-        Plot.ruleX([0]),
-        Plot.barX(side, {
-          x: "value",
-          y: "hazard",
-          fill: "scenario",
-          inset: 0.5,
-          tip: {
-            format: {
-              hazard: true,
-              scenario: true,
-              value: hz_relative ? fmtPct : fmtAbs,
-              raw: hz_relative ? fmtAbs : null,
-              pct: hz_relative ? null : fmtPct
-            }
-          }
+        Plot.ruleY([0]),
+        Plot.barY(data, { x: "hazard", y: "value" }),
+        Plot.text(data, {
+          x: "hazard",
+          y: "value",
+          text: (d) => fmtY(d.value),
+          dy: (d) => (Number(d.value ?? 0) >= 0 ? -6 : 12),
+          fontSize: 10
         })
       ]
     })
+
+    const matrixPlot = Plot.plot({
+      width: colWidth,
+      height: matH,
+      marginLeft: 60,
+      marginRight: 14,
+      marginTop: 0,
+      marginBottom: 22,
+      x: { domain, tickFormat: () => "", label: null },
+      y: { domain: baseSets, label: null },
+      marks: [
+        Plot.line(presentPts, { x: "hazard", y: "set", z: "hazard" }),
+        Plot.dot(all, {
+          x: "hazard",
+          y: "set",
+          r: 3,
+          fill: (d) => (d.present ? "#111827" : "#d1d5db")
+        })
+      ]
+    })
+
+    return html`<div class="hz-upsetCol">
+      <div class="hz-upsetTitle">${label}</div>
+      <div class="hz-upsetStack">${barPlot}${matrixPlot}</div>
+    </div>`
   }
 
-  // Difference mode
-  return Plot.plot({
-    height: hz_chartHeight,
-    marginLeft: 210,
-    marginRight: 24,
-    marginTop: 36,
-    marginBottom: 40,
-    x: {
-      label: xLabel,
-      grid: true,
-      tickFormat: hz_relative ? fmtPct : fmtAbs
-    },
-    y: { label: null },
-    color: { legend: true },
-    caption: subtitle,
-    marks: [
-      Plot.ruleX([0]),
-      Plot.barX(data, {
-        x: hz_relative ? "pct_diff" : "total_diff",
-        y: "hazard",
-        fill: (d) => (Number(d.total_diff ?? 0) >= 0 ? "Increase" : "Decrease"),
-        inset: 0.5,
-        tip: {
-          format: {
-            hazard: true,
-            value: hz_relative ? fmtPct : fmtAbs
-          }
-        }
-      })
-    ]
-  })
+  if (!hz_difference) {
+    return html`<div class="hz-upsetGrid">
+      ${buildUpSet({ label: hz_s1.label, valueKey: (hz_relative ? "perc1" : "total1") })}
+      ${buildUpSet({ label: hz_s2.label, valueKey: (hz_relative ? "perc2" : "total2") })}
+    </div>`
+  }
+
+  return html`<div class="hz-upsetGrid hz-upsetGrid--single">
+    ${buildUpSet({ label: "Difference (Right − Left)", valueKey: (hz_relative ? "pct_diff" : "total_diff"), isDiff: true })}
+  </div>`
 }
 ```
+
 
 ```{ojs}
 //| output: false
@@ -3896,6 +4032,7 @@ hz_controlsMount = html`<div class="hz-mount"><div class="hz-loading">Loading co
 hz_dashMount = html`<div class="hz-mount"><div class="hz-loading">Loading dashboard…</div></div>`
 
 hz_chartHost  = html`<div class="hz-chartWrap"><div class="hz-loading">Loading chart…</div></div>`
+hz_q1_insightHost = html`<div class="hz-qOverview hz-qInsight"><div class="hz-loading">Loading insight…</div></div>`
 hz_tableActionsHost = html`<div class="hz-actions"></div>`
 
 hz_q1_downloadMount = {
@@ -3998,7 +4135,7 @@ hz_q1_applyView = {
 hz_dashboardShell = html`
   <div class="hz-card">
     <div class="hz-card__body">
-      <div class="hz-qOverview">${q1DetailText}</div>
+      ${hz_q1_insightHost}
 
             <div class="hz-qToolbar">
         <div class="hz-qToolbar__left">${viewof hz_viewMode}</div>
@@ -5006,6 +5143,95 @@ hz_updateChart = {
     hz_chartHost.replaceChildren(html`<div class="hz-muted">Chart hidden.</div>`)
   }
 
+
+  // -------------------------
+  // Q1 Dynamic Insight (text)
+  // -------------------------
+  try {
+    if ((hz_activeQuestion || "q1") === "q1") {
+      if (errors.length) {
+        hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">Insight unavailable because the API request failed.</div>`)
+        // still allow chart/table error rendering above
+      }
+      const merged = Array.isArray(hz_merged) ? hz_merged : []
+      const norm = (h) => String(h ?? "").trim().toLowerCase()
+      const isAny = (h) => {
+        const n = norm(h)
+        return n === "any" || n === "any hazard" || n === "total" || n === "all"
+      }
+      const isNoHaz = (h) => {
+        const n = norm(h)
+        return n === "no hazard" || n === "no_hazard" || n === "none"
+      }
+      const isIntersection = (h) => {
+        const n = norm(h)
+        if (!n) return false
+        if (isAny(h) || isNoHaz(h) || n === "other") return false
+        return true
+      }
+
+      const rows = merged.map((r) => {
+        const hazard = r.hazard ?? r.Hazard ?? r.name ?? r.key ?? "Unknown"
+        const total1 = Number(r.total1 ?? r.left ?? r.value1 ?? r.total_left ?? 0)
+        const total2 = Number(r.total2 ?? r.right ?? r.value2 ?? r.total_right ?? 0)
+        return { hazard, total1, total2 }
+      })
+
+      if (!rows.length) {
+        hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">No data for the current filters.</div>`)
+      } else {
+        const anyRow = rows.find((r) => isAny(r.hazard))
+        const sumIntersections = (k) =>
+          rows
+            .filter((r) => isIntersection(r.hazard))
+            .reduce((a, r) => a + Number(r[k] ?? 0), 0)
+
+        const total1 = anyRow ? Number(anyRow.total1 ?? 0) : sumIntersections("total1")
+        const total2 = anyRow ? Number(anyRow.total2 ?? 0) : sumIntersections("total2")
+
+        const isCompound = (h) => String(h ?? "").replace(/\s+/g, "").includes("+")
+        const compound1 =
+          rows
+            .filter((r) => isIntersection(r.hazard) && isCompound(r.hazard))
+            .reduce((a, r) => a + Number(r.total1 ?? 0), 0)
+        const compound2 =
+          rows
+            .filter((r) => isIntersection(r.hazard) && isCompound(r.hazard))
+            .reduce((a, r) => a + Number(r.total2 ?? 0), 0)
+
+        const share1 = total1 > 0 ? (compound1 / total1) * 100 : 0
+        const share2 = total2 > 0 ? (compound2 / total2) * 100 : 0
+
+        const dTotal = total2 - total1
+        const dShare = share2 - share1
+
+        const fmtV = (x) => hz_formatNumber(x, { digits: 2 })
+        const fmtPct = (x) => `${hz_formatNumber(x, { digits: 1 })}%`
+        const unit = hz_varLabel || "Value"
+
+        const s1 = hz_s1?.label ?? "Baseline"
+        const s2 = hz_s2?.label ?? "Future"
+
+        const totalVerb = dTotal >= 0 ? "increased" : "decreased"
+        const shareVerb = dShare >= 0 ? "increased" : "decreased"
+
+        hz_q1_insightHost.replaceChildren(
+          md`**Dynamic insight**
+
+- Under **${s1}**, total exposure is **${fmtV(total1)}** (${unit}), with **${fmtV(compound1)}** (**${fmtPct(share1)}**) from **compound hazards**.
+- Under **${s2}**, total exposure is **${fmtV(total2)}** (${unit}), with **${fmtV(compound2)}** (**${fmtPct(share2)}**) from **compound hazards**.
+- Overall, total exposure **${totalVerb}** by **${fmtV(Math.abs(dTotal))}**, and the compound-hazard share **${shareVerb}** by **${fmtPct(Math.abs(dShare))}**.`
+        )
+      }
+    } else {
+      hz_q1_insightHost.replaceChildren()
+    }
+  } catch (e) {
+    try {
+      hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">Insight unavailable.</div>`)
+    } catch (_) {}
+  }
+
   // Table area
   const clearTable = (msg) => {
     try { hz_tableActionsHost.replaceChildren() } catch (_) {}
@@ -5254,6 +5480,8 @@ hz_updateChart = {
     fixedHeader: true,
     height: "540px"
   })
+
+
 
   return html``
 }
