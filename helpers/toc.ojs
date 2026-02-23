@@ -1,0 +1,141 @@
+function atlasTOC({
+  selector = "h1",
+  heading = "In this notebook",
+  skip = ["notebook-title"],
+  activeClass = "active",
+} = {}) {
+  return Generators.observe((notify) => {
+    let headings = [];
+    let links = [];
+    let timeout;
+    let layoutRaf = null;
+
+    // Main TOC refresh
+    function observed() {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        // Collect headings except skipped ones
+        const h = Array.from(document.querySelectorAll(selector)).filter(
+          (d) =>
+            !skip.some(
+              (value) =>
+                d.parentElement.id === value ||
+                d.id === value ||
+                d.textContent === value ||
+                d.className === value,
+            ),
+        );
+
+        // If no change, do nothing
+        if (
+          h.length === headings.length &&
+          h.every((el, i) => el === headings[i])
+        )
+          return;
+        headings = h;
+
+        // Build links
+        links = headings.map(createLink);
+
+        // Render TOC
+        notify(html`
+          <div class="atlas-toc atlas-toc-floating">
+            <div class="atlas-toc-heading">${heading}</div>
+
+            ${headings.length ? links : html`<div>No headings found.</div>`}
+          </div>
+        `);
+
+        onScroll();
+        requestLayout();
+      }, 5);
+    }
+
+    function requestLayout() {
+      if (layoutRaf) cancelAnimationFrame(layoutRaf);
+      layoutRaf = requestAnimationFrame(layoutTOC);
+    }
+
+    function layoutTOC() {
+      const toc = document.querySelector(".atlas-toc-floating");
+      const content =
+        document.querySelector("#quarto-document-content") ||
+        document.querySelector("#observablehq-main") ||
+        document.querySelector("main");
+
+      if (!toc || !content) return;
+
+      const rect = content.getBoundingClientRect();
+      const pageLeft = 22;
+      const gap = 24;
+      const minWidth = 180;
+      const maxWidth = 280;
+      const available = rect.left - gap - pageLeft;
+
+      if (available < minWidth || window.innerWidth <= 900) {
+        toc.style.display = "none";
+        return;
+      }
+
+      const width = Math.min(maxWidth, available);
+      toc.style.display = "block";
+      toc.style.left = `${pageLeft}px`;
+      toc.style.top = "9rem";
+      toc.style.width = `${width}px`;
+    }
+
+    // Create clickable link
+    function createLink(h) {
+      const id = h.parentElement.id;
+      const link = html`<a class="toc-link" href="#${id}">${DOM.text(h.textContent)}</a>`;
+      link.onclick = (e) => {
+        e.preventDefault();
+        h.scrollIntoView({ behavior: "smooth" });
+        setActiveLink(link);
+      };
+      return link;
+    }
+
+    // Highlight active link
+    function setActiveLink(activeLink) {
+      links.forEach((link) =>
+        link.classList.toggle(activeClass, link === activeLink),
+      );
+    }
+
+    // Scroll spy logic
+    function onScroll() {
+      if (!headings.length) return;
+
+      const closest =
+        links[
+          headings
+            .map((h) => Math.abs(h.getBoundingClientRect().top))
+            .reduce(
+              (minIdx, dist, i, arr) => (dist < arr[minIdx] ? i : minIdx),
+              0,
+            )
+        ];
+
+      setActiveLink(closest);
+    }
+
+    // Watch DOM for changes
+    const observer = new MutationObserver(observed);
+    observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("scroll", onScroll);
+    window.addEventListener("resize", requestLayout);
+
+    observed();
+    onScroll();
+    requestLayout();
+
+    // Cleanup
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", requestLayout);
+      if (layoutRaf) cancelAnimationFrame(layoutRaf);
+    };
+  });
+}

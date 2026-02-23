@@ -37,7 +37,7 @@ const args = Deno.args;
 if (args.length !== 2) {
   console.error("Error: Invalid number of arguments.");
   console.log("Quarto Usage: quarto run cropToWebP.ts <inputPath> <outputPath>");
-  console.log("Example: quarto run helpers/cropToWebP.ts 'default_im.webp' 'default_im_crop.webp'");
+  console.log("Example: quarto run scripts/assets/cropToWebP.ts 'default_im.webp' 'default_im_crop.webp'");
   Deno.exit(1);
 }
 

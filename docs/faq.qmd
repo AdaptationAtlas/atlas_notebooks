@@ -1,0 +1,189 @@
+---
+pagetitle: "Atlas FAQ"
+nb-authors:
+  - Hannah Lang
+  - Lolita Muller
+  - Brayden Youngberg
+  - Pete Stewart
+date-created: "2025-11-10"
+date-edited: today
+
+csv2json:
+  - input: /data/docs/faq.csv
+    output: /data/docs/faq.json
+
+format:
+  html:
+    include-in-header:
+      - text: |
+          <script src="./../components/backToTop.js"></script>
+          <script src="./../components/atlasToc.js"></script>
+---
+
+<back-to-top></back-to-top>
+
+# FAQ
+
+```{=html}
+<atlas-toc heading-levels="2"></atlas-toc>
+```
+
+```{=html}
+<div id="faq-output"></div>
+```
+
+```{=html}
+<script>
+const DATA_URL = "../data/docs/faq.json";
+const LANGUAGES = [
+  {
+    code: "EN",
+    label: "English",
+    section: "sectionEN",
+    question: "Question EN",
+    answer: "Answer EN",
+  },
+  {
+    code: "FR",
+    label: "Français",
+    section: "sectionFR",
+    question: "Question FR",
+    answer: "Answer FR",
+  },
+];
+const state = {
+  currentLang: "EN",
+  sections: [],
+};
+const output = document.getElementById("faq-output");
+
+function escapeHtml(str = "") {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeId(str) {
+  return str
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function getLangConfig() {
+  return LANGUAGES.find(lang => lang.code === state.currentLang) || LANGUAGES[0];
+}
+
+function buildSections(entries) {
+  const sectionsMap = new Map();
+
+  entries.forEach(entry => {
+    const sectionEN = (entry["Section EN"] || "Other").trim();
+    const sectionFR = (entry["Section FR"] || sectionEN).trim();
+
+    if (!sectionsMap.has(sectionEN)) {
+      sectionsMap.set(sectionEN, { sectionEN, sectionFR, items: [] });
+    }
+
+    sectionsMap.get(sectionEN).items.push(entry);
+  });
+
+  return [...sectionsMap.values()]
+    .sort((a, b) => a.sectionEN.localeCompare(b.sectionEN))
+    .map(section => ({
+      ...section,
+      items: section.items.sort((a, b) =>
+        (a["Question EN"] || "").localeCompare(b["Question EN"] || "")
+      ),
+    }));
+}
+
+function handleLanguageChange(langCode) {
+  state.currentLang = langCode;
+  window.currentLang = langCode;
+  renderFAQ();
+  if (typeof updateBackToTopLabel === "function") updateBackToTopLabel();
+}
+
+function mountLanguageSelector() {
+  const navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
+  if (!navEnd || document.getElementById("nav-lang-selector")) return;
+
+  const langSel = document.createElement("div");
+  langSel.id = "nav-lang-selector";
+  langSel.style.display = "flex";
+  langSel.style.alignItems = "center";
+  langSel.style.marginLeft = "10px";
+
+  const langDiv = document.createElement("div");
+  langDiv.style.display = "flex";
+  langDiv.style.flexDirection = "column";
+
+  LANGUAGES.forEach(lang => {
+    const label = document.createElement("label");
+    label.style.fontWeight = "500";
+    label.style.cursor = "pointer";
+
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "language";
+    input.value = lang.code;
+    input.style.accentColor = "var(--atlasGreen)";
+    input.style.marginRight = "5px";
+    input.style.cursor = "pointer";
+    input.checked = lang.code === state.currentLang;
+    input.addEventListener("change", event => {
+      if (event.target.checked) handleLanguageChange(lang.code);
+    });
+
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(lang.label));
+    langDiv.appendChild(label);
+  });
+
+  langSel.appendChild(langDiv);
+  navEnd.parentNode.appendChild(langSel);
+}
+
+function renderFAQ() {
+  if (!output) return;
+
+  const lang = getLangConfig();
+  let html = "";
+
+  state.sections.forEach(section => {
+    const sectionTitle = escapeHtml(section[lang.section] || section.sectionEN);
+    html += `<h2 id="faq-${sanitizeId(section.sectionEN)}">${sectionTitle}</h2>`;
+
+    section.items.forEach(item => {
+      const question = escapeHtml(item[lang.question] || item["Question EN"] || "");
+      const answer = escapeHtml(item[lang.answer] || item["Answer EN"] || "").replace(/\n/g, "<br>");
+      html += "<details style=\"margin-bottom: 12px;\">";
+      html += `<summary style="cursor: pointer; font-weight: 600;">${question}</summary>`;
+      html += `<p style="margin-top: 8px; line-height: 1.6;">${answer}</p>`;
+      html += "</details>";
+    });
+  });
+
+  output.innerHTML = html;
+}
+
+fetch(DATA_URL)
+  .then(response => {
+    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+    return response.json();
+  })
+  .then(data => {
+    state.sections = buildSections(data);
+    mountLanguageSelector();
+    renderFAQ();
+  })
+  .catch(error => {
+    console.error("Error loading FAQ JSON:", error);
+    if (output) output.innerHTML = `<p style="color: red;">Error loading FAQ: ${error.message}</p>`;
+  });
+</script>
+```
