@@ -44,8 +44,8 @@ style="width: 20px; height: 20px; display: block">
 // Function to make atlas hero image
 export const heroImage = (title, bg_image, group = "") => {
   return `<div id="hero-image" style="position: relative; width: 100%; height: 500px; display: flex; justify-content: center; align-items: center;">
-    <img 
-        src="${bg_image}" 
+    <img
+        src="${bg_image}"
         style="position: absolute; width: 100%; height: 100%; object-fit: cover;"
     />
     <div style="position: relative; height: 340px; width: 340px; padding: 40px; display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center; border-radius: 50%; background-color: white; z-index: 10;">
