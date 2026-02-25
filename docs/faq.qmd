@@ -16,15 +16,13 @@ format:
   html:
     include-in-header:
       - text: |
-          <script src="./../components/backToTop.js"></script>
           <script src="./../components/atlasToc.js"></script>
 ---
-
-<back-to-top></back-to-top>
 
 # FAQ
 
 ```{=html}
+<back-to-top></back-to-top>
 <atlas-toc heading-levels="2"></atlas-toc>
 ```
 
@@ -66,6 +64,17 @@ function escapeHtml(str = "") {
     .replace(/'/g, "&#39;");
 }
 
+function renderAnswerWithLinks(raw = "") {
+  const safe = escapeHtml(raw);
+  return safe
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, text, url) => {
+      const href = url.trim();
+      const allowed = /^(https?:\/\/|mailto:|\/|\.\/|\.\.\/|#)/i.test(href);
+      return allowed ? `<a href="${href}">${text}</a>` : `[${text}](${url})`;
+    })
+    .replace(/\n/g, "<br>");
+}
+
 function sanitizeId(str) {
   return str
     .toLowerCase()
@@ -75,6 +84,13 @@ function sanitizeId(str) {
 
 function getLangConfig() {
   return LANGUAGES.find(lang => lang.code === state.currentLang) || LANGUAGES[0];
+}
+
+function updateBackToTopLabel() {
+  const el = document.querySelector("back-to-top");
+  if (!el || typeof el.updateLabel !== "function") return;
+  const label = state.currentLang === "FR" ? "Retour en haut" : "Back to top";
+  el.updateLabel(label);
 }
 
 function buildSections(entries) {
@@ -160,7 +176,7 @@ function renderFAQ() {
 
     section.items.forEach(item => {
       const question = escapeHtml(item[lang.question] || item["Question EN"] || "");
-      const answer = escapeHtml(item[lang.answer] || item["Answer EN"] || "").replace(/\n/g, "<br>");
+      const answer = renderAnswerWithLinks(item[lang.answer] || item["Answer EN"] || "");
       html += "<details style=\"margin-bottom: 12px;\">";
       html += `<summary style="cursor: pointer; font-weight: 600;">${question}</summary>`;
       html += `<p style="margin-top: 8px; line-height: 1.6;">${answer}</p>`;
@@ -180,6 +196,7 @@ fetch(DATA_URL)
     state.sections = buildSections(data);
     mountLanguageSelector();
     renderFAQ();
+    updateBackToTopLabel();
   })
   .catch(error => {
     console.error("Error loading FAQ JSON:", error);
