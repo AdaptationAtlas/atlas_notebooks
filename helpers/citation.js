@@ -106,7 +106,7 @@ export function atlasContributionSection(data, citation = null, lang = "en") {
 }
 
 export function atlasCitation(nbTitle = "") {
-  const title = nbTitle && `<em>${nbTitle}</em>`;
+  const title = nbTitle && `<em>${nbTitle}</em>.`;
   const parts = [title, "Africa Agriculture Adaptation Atlas."]
     .filter(Boolean)
     .join(" ");
