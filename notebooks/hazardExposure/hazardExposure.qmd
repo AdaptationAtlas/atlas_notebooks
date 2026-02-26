@@ -4149,6 +4149,791 @@ hz_q4HazMeta = ({
   error: hz_q4HazRespL?.error || hz_q4HazRespR?.error || null
 })
 
+// ------------------------------------------------------------
+// Q5 — Scenario trajectories + uncertainty (Patch 4)
+// ------------------------------------------------------------
+
+// Q5 controls (closer to the Shiny layout)
+viewof hz_q5_view = Inputs.radio(
+  new Map([
+    ["Chart", "chart"],
+    ["Summary table", "table"]
+  ]),
+  { label: "", value: "chart" }
+)
+
+viewof hz_q5_viewMode = Inputs.radio(
+  new Map([
+    ["All hazards", "all"],
+    ["Single hazard", "one"]
+  ]),
+  { label: "", value: "all" }
+)
+
+viewof hz_q5_hazard = Inputs.select(["any", "dry (any)", "heat (any)", "wet (any)"], {
+  label: "",
+  value: "any"
+})
+
+viewof hz_q5_scale = Inputs.radio(
+  new Map([
+    ["Absolute", "abs"],
+    ["Index to historic (100)", "idx"]
+  ]),
+  { label: "", value: "abs" }
+)
+
+viewof hz_q5_showUncertainty = Inputs.toggle({ label: "", value: true })
+viewof hz_q5_showLines = Inputs.toggle({ label: "", value: false })
+
+viewof hz_q5_chartHeight = Inputs.range([420, 980], {
+  label: "",
+  step: 10,
+  value: 720
+})
+
+// Build scenario/timeframe pairs from the shared hz_scenXTime list (Q5 always requests the full grid)
+hz_q5ScenarioPairsUniq = {
+  const seen = new Set()
+  const out = []
+  for (const st of (hz_scenXTime ?? [])) {
+    const p = hz_parseScenXTime(st)
+    const scenario = String(p?.scenario ?? "")
+    const timeframe = String(p?.timeframe ?? "")
+    const k = `${scenario}|${timeframe}`
+    if (!scenario) continue
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push({ scenario, timeframe })
+  }
+  return out
+}
+
+// Q5 request (uses historic + ensemble datasets if available)
+hz_q5Req = {
+  const urls = [hz_src1?.url, hz_src2?.url].filter(Boolean)
+  if (!urls.length) return { ok: false, error: "Missing dataset_url(s) for Q5." }
+
+  return {
+    ok: true,
+    body: {
+      dataset_urls: urls,
+      geo: hz_geoFilterApi,
+      scenario_time: hz_q5ScenarioPairsUniq,
+      commodities: hz_selectedCommoditiesForReq ?? [],
+      hazard_vars: null,
+      method: hz_method,
+      commodity_group: hz_selectedCommodGroup,
+      severities: [hz_severity],
+      hazards: ["any", "dry (any)", "heat (any)", "wet (any)"],
+      include_rollups: true,
+      include_detail_hazards: false,
+      n_gcm_for_ci: 5
+    }
+  }
+}
+
+// Local busy flag (drives the chart overlay class)
+mutable hz_q5Busy = false
+
+hz_q5Resp = (hz_q5Req?.ok)
+  ? await hz_keepScroll((async () => {
+      mutable hz_q5Busy = true
+      try {
+        return await hz_apiDebouncedCached("q5", "/api/v1/hz/q5", hz_q5Req.body, { ttlMs: 60000, debounceMs: 250 })
+      } finally {
+        mutable hz_q5Busy = false
+      }
+    })())
+  : { ok: false, error: hz_q5Req?.error ?? "Q5 request is not ready." }
+
+hz_q5SeriesAll = hz_q5Resp?.series ?? []
+hz_q5Meta = ({
+  ok: !!hz_q5Resp?.ok,
+  cached: !!hz_q5Resp?.cached,
+  error: hz_q5Resp?.error ?? null,
+  has_value_sd: !!hz_q5Resp?.meta?.has_value_sd,
+  n_gcm_for_ci: (hz_q5Resp?.meta?.n_gcm_for_ci ?? null)
+})
+// Scenario/timeframe options (derived from the fetched rows; fall back to common defaults while loading)
+hz_q5ScenarioOptions = {
+  const isHistName = (s) => /hist|historic/i.test(String(s ?? ""))
+  const opts = Array.from(new Set((hz_q5SeriesAll ?? []).map(d => String(d?.scenario ?? ""))))
+    .filter((s) => s && !isHistName(s))
+    .sort()
+  return opts.length ? opts : ["ssp126", "ssp245", "ssp370", "ssp585"]
+}
+
+hz_q5TimeframeOptions = {
+  const opts = Array.from(new Set((hz_q5SeriesAll ?? []).map(d => String(d?.timeframe ?? ""))))
+    .filter((t) => t && !/hist|historic/i.test(t))
+    .sort()
+  return opts.length ? opts : ["2021-2040", "2041-2060", "2061-2080"]
+}
+
+viewof hz_q5_scenarios = Inputs.select(hz_q5ScenarioOptions, {
+  label: "",
+  multiple: true,
+  value: hz_q5ScenarioOptions
+})
+
+viewof hz_q5_timeframes = Inputs.select(hz_q5TimeframeOptions, {
+  label: "",
+  multiple: true,
+  value: hz_q5TimeframeOptions
+})
+
+// Clean rows + apply client-side filters (scenario/timeframe + hazard view)
+hz_q5RowsClean = {
+  const n = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? v : null
+  }
+  return (hz_q5SeriesAll ?? []).map(d => ({
+    scenario: String(d?.scenario ?? ""),
+    timeframe: String(d?.timeframe ?? ""),
+    year: n(d?.year),
+    hazard: String(d?.hazard ?? ""),
+    value: n(d?.value),
+    value_sd: n(d?.value_sd),
+    value_low: n(d?.value_low),
+    value_high: n(d?.value_high),
+  }))
+}
+
+hz_q5BaselinesByHazard = {
+  const isHist = (s) => /hist|historic/i.test(String(s ?? ""))
+  const m = new Map()
+  for (const r of (hz_q5RowsClean ?? [])) {
+    if (!isHist(r?.scenario)) continue
+    if (!r?.hazard) continue
+    if (r?.value == null) continue
+    if (!m.has(r.hazard)) m.set(r.hazard, r.value)
+  }
+  return m
+}
+
+hz_q5Filtered = {
+  const isHist = (s) => /hist|historic/i.test(String(s ?? ""))
+  const scenSel = (hz_q5_scenarios && hz_q5_scenarios.length) ? hz_q5_scenarios : hz_q5ScenarioOptions
+  const tfSel = (hz_q5_timeframes && hz_q5_timeframes.length) ? hz_q5_timeframes : hz_q5TimeframeOptions
+
+  const scenSet = new Set(scenSel.map(String))
+  const tfSet = new Set(tfSel.map(String))
+
+  const mode = String(hz_q5_viewMode ?? "all")
+  const hzOne = String(hz_q5_hazard ?? "any")
+
+  const out = []
+  for (const r of (hz_q5RowsClean ?? [])) {
+    if (!r) continue
+    if (!r.hazard) continue
+    if (r.value == null || r.year == null) continue
+
+    if (isHist(r.scenario)) {
+      out.push(r) // keep for baselines only
+      continue
+    }
+
+    if (!scenSet.has(String(r.scenario))) continue
+    if (!tfSet.has(String(r.timeframe))) continue
+    if (mode === "one" && String(r.hazard) !== hzOne) continue
+
+    out.push(r)
+  }
+
+  out.sort((a, b) => (a.year - b.year) || String(a.scenario).localeCompare(String(b.scenario)) || String(a.hazard).localeCompare(String(b.hazard)))
+  return out
+}
+
+// Apply scale transform (absolute vs index-to-historic)
+hz_q5PlotRows = {
+  const mode = String(hz_q5_scale ?? "abs")
+  if (mode !== "idx") return (hz_q5Filtered ?? []).filter(d => !/hist|historic/i.test(String(d?.scenario ?? "")))
+
+  const base = hz_q5BaselinesByHazard
+  const scaleRow = (r) => {
+    const b = base?.get?.(r.hazard)
+    if (b == null || b === 0) return null
+    const sc = 100 / b
+    const num = (x) => (x == null ? null : x * sc)
+    return {
+      ...r,
+      value: num(r.value),
+      value_sd: num(r.value_sd),
+      value_low: num(r.value_low),
+      value_high: num(r.value_high),
+    }
+  }
+
+  const out = []
+  for (const r of (hz_q5Filtered ?? [])) {
+    if (/hist|historic/i.test(String(r?.scenario ?? ""))) continue
+    const rr = scaleRow(r)
+    if (rr && rr.value != null) out.push(rr)
+  }
+  return out
+}
+
+// Jitter x positions slightly by scenario (so error bars/points don't sit exactly on top of each other)
+hz_q5PlotRowsJittered = {
+  const rows = hz_q5PlotRows ?? []
+  if (!rows.length) return []
+
+  const scenOrder = (hz_q5_scenarios && hz_q5_scenarios.length) ? hz_q5_scenarios.map(String) : hz_q5ScenarioOptions.map(String)
+  const uniqueScen = Array.from(new Set(scenOrder))
+  const n = uniqueScen.length
+  const span = 0.70
+  const step = (n > 1) ? (span / (n - 1)) : 0
+  const offset = new Map(uniqueScen.map((s, i) => [s, (n > 1 ? (-span / 2 + i * step) : 0)]))
+
+  return rows.map(r => ({
+    ...r,
+    xj: (Number(r.year) + (offset.get(String(r.scenario)) ?? 0))
+  }))
+}
+
+// Baseline lines (historic exposure) shown as dashed rules
+hz_q5BaselineRules = {
+  const mode = String(hz_q5_scale ?? "abs")
+  const hazards = ["any", "dry (any)", "heat (any)", "wet (any)"]
+  const out = []
+  for (const h of hazards) {
+    const b = hz_q5BaselinesByHazard?.get?.(h)
+    if (mode === "idx") {
+      if (b != null) out.push({ hazard: h, baseline: 100 })
+    } else {
+      if (b != null) out.push({ hazard: h, baseline: b })
+    }
+  }
+  return out
+}
+
+hz_q5Plot = {
+  if (hz_q5Meta?.error) return html`<div class="warn"><b>Q5 query failed:</b><br>${hz_q5Meta.error}</div>`
+
+  const rowsJ = hz_q5PlotRowsJittered ?? []
+  if (!rowsJ.length) return html`<div class="hz-loading">Loading chart…</div>`
+
+  const modeView = String(hz_q5_viewMode ?? "all")
+  const showUnc = !!hz_q5_showUncertainty
+  const showLines = !!hz_q5_showLines
+  const scaleMode = String(hz_q5_scale ?? "abs")
+
+  const years = Array.from(new Set(rowsJ.map(d => Math.round(Number(d.year)))))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+
+  // Domain based on the actually plotted x positions (xj), so the chart never collapses to one edge.
+  const xVals = (rowsJ ?? []).map(d => Number(d.xj)).filter(Number.isFinite)
+  const xMin = xVals.length ? Math.min(...xVals) : (years.length ? years[0] : null)
+  const xMax = xVals.length ? Math.max(...xVals) : (years.length ? years[years.length - 1] : null)
+
+  const padYears = (xMin != null && xMax != null && xMin === xMax) ? 5 : 2
+  const xDomain = (xMin != null && xMax != null) ? [xMin - padYears, xMax + padYears] : undefined
+
+  // Only show ticks that fall inside the domain (avoids stray “baseline” years pushing everything right)
+  const tickYears = xDomain ? years.filter(y => y >= xDomain[0] && y <= xDomain[1]) : years
+  const fmt = (v) => hz_formatNumber(v, { digits: 2, compact: true })
+  const fmtScenario = (s) => String(s ?? "").toUpperCase()
+  const yLabel = (scaleMode === "idx")
+    ? "Exposure index (historic = 100)"
+    : (hz_varLabelAbs ?? "Exposure")
+
+  const baseRules = hz_q5BaselineRules ?? []
+  const baseForOne = (h) => {
+    const r = baseRules.find(d => String(d.hazard) === String(h))
+    return r ? Number(r.baseline) : null
+  }
+
+  const titleFor = (d) => {
+    const parts = [
+      `${fmtScenario(d.scenario)}  ${String(d.timeframe ?? "")}`,
+      `Hazard: ${String(d.hazard ?? "")}`,
+      `${fmt(d.value)}`
+    ]
+    if (showUnc && d.value_low != null && d.value_high != null) {
+      parts.push(`CI: ${fmt(d.value_low)}–${fmt(d.value_high)}`)
+    }
+    return parts.join("\n")
+  }
+
+  const rowsOne = (modeView === "one")
+    ? rowsJ.filter(d => String(d.hazard) === String(hz_q5_hazard ?? "any"))
+    : rowsJ
+
+  const baselineOne = (modeView === "one")
+    ? baseForOne(String(hz_q5_hazard ?? "any"))
+    : null
+
+  const commonFy = (modeView === "all") ? { fy: "hazard" } : {}
+
+  const marks = [
+    ...(modeView === "all"
+      ? [Plot.ruleY(baseRules, { y: "baseline", ...commonFy, strokeDasharray: "4,4", opacity: 0.55 })]
+      : (baselineOne != null ? [Plot.ruleY([baselineOne], { strokeDasharray: "4,4", opacity: 0.55 })] : [])
+    ),
+
+    ...(showUnc ? [Plot.ruleY(rowsOne.filter(d => d.value_low != null && d.value_high != null), {
+      x: "xj",
+      y1: "value_low",
+      y2: "value_high",
+      stroke: "scenario",
+      opacity: 0.35,
+      ...commonFy
+    })] : []),
+
+    ...(showLines ? [Plot.line(rowsOne, {
+      x: "year",
+      y: "value",
+      stroke: "scenario",
+      opacity: 0.8,
+      ...commonFy
+    })] : []),
+
+    Plot.dot(rowsOne, {
+      x: "xj",
+      y: "value",
+      stroke: "scenario",
+      fill: "scenario",
+      r: 3,
+      tip: true,
+      title: titleFor,
+      ...commonFy
+    })
+  ]
+
+  const plotOpts = {
+    height: Number(hz_q5_chartHeight ?? 720),
+    marginLeft: 84,
+    marginRight: 18,
+    marginTop: 10,
+    marginBottom: 44,
+    x: {
+      label: "Year",
+      grid: true,
+      domain: xDomain,
+      ticks: tickYears,
+      tickFormat: (d) => String(Math.round(d)),
+      nice: false
+    },
+    y: { label: yLabel, grid: true },
+    color: { legend: true, label: "Scenario" },
+    marks
+  }
+  if (modeView === "all") {
+    plotOpts.fy = { label: null, domain: ["any", "dry (any)", "heat (any)", "wet (any)"] }
+  }
+
+  return Plot.plot(plotOpts)
+}
+
+hz_q5_chartHost = html`
+  <div class="hz-chartWrap ${hz_q5Busy ? "hz-chartWrap--busy" : ""}">
+    ${hz_q5Plot}
+    <div class="hz-chartNote">
+      ${md`${_lang({
+        en: "Dashed lines show the historic (baseline) exposure. Error bars show uncertainty across GCMs where available.",
+        fr: "Les lignes pointillées indiquent l’exposition historique (référence). Les barres d’erreur montrent l’incertitude entre les GCM lorsque disponible.",
+        pt: "Linhas tracejadas mostram a exposição histórica (linha de base). As barras de erro mostram a incerteza entre GCMs quando disponível."
+      })}`}
+    </div>
+  </div>
+`
+
+hz_q5_settingsWrap = html`
+  <div class="hz-qToolbar__right">
+    <div class="hz-inlineToggles">
+      <div class="hz-miniSetting"><span>View</span>${hz_noJumpInput(viewof hz_q5_viewMode)}</div>
+      <div class="hz-miniSetting"><span>Scale</span>${hz_noJumpInput(viewof hz_q5_scale)}</div>
+      <div class="hz-miniSetting"><span>Scenarios</span>${hz_noJumpInput(viewof hz_q5_scenarios)}</div>
+      <div class="hz-miniSetting"><span>Periods</span>${hz_noJumpInput(viewof hz_q5_timeframes)}</div>
+      <div class="hz-miniSetting"><span>Uncertainty</span>${hz_noJumpInput(viewof hz_q5_showUncertainty)}</div>
+      <div class="hz-miniSetting"><span>Lines</span>${hz_noJumpInput(viewof hz_q5_showLines)}</div>
+      <div class="hz-miniSetting hz-q5HazCtl"><span>Hazard</span>${hz_noJumpInput(viewof hz_q5_hazard)}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${hz_noJumpInput(viewof hz_q5_chartHeight)}</div>
+    </div>
+  </div>
+`
+
+// ------------------------------------------------------------
+// Q5 — Summary table + dynamic insights (Patch 5)
+// ------------------------------------------------------------
+
+// Baseline for a hazard under the current scale
+hz_q5BaselineFor = (haz) => {
+  const h = String(haz ?? "")
+  const mode = String(hz_q5_scale ?? "abs")
+  if (mode === "idx") return 100
+  const v = hz_q5BaselinesByHazard?.get?.(h)
+  return (v == null) ? null : Number(v)
+}
+
+// Table (chart-ready rows → table-ready rows)
+hz_q5TableView = {
+  if (hz_q5Meta?.error) return html`<div class="warn"><b>Q5 query failed:</b><br>${hz_q5Meta.error}</div>`
+
+  const rows = hz_q5PlotRows ?? []
+  if (!rows.length) return html`<div class="hz-loading">Loading table…</div>`
+
+  const fmtAbs = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? hz_formatNumber(v, { digits: 2, compact: true }) : "—"
+  }
+  const fmtAbsFull = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? hz_formatNumber(v, { digits: 2, compact: false }) : "—"
+  }
+  const fmtPct = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? `${hz_formatNumber(v, { digits: 2, compact: false })}%` : "—"
+  }
+
+  const hasUnc = !!hz_q5Meta?.has_value_sd
+
+  const out = (rows ?? [])
+    .filter(r => {
+      const h = String(r?.hazard ?? "").trim()
+      const s = String(r?.scenario ?? "").trim()
+      const tf = String(r?.timeframe ?? "").trim()
+      return (r && tf &&
+              h && h.toLowerCase() !== "null" &&
+              s && s.toLowerCase() !== "null")
+    })
+    .map((r) => {
+      const b = hz_q5BaselineFor(r.hazard)
+      const v = (r.value == null ? null : Number(r.value))
+      const bb = (b == null ? null : Number(b))
+
+      const delta = (bb == null || v == null || !Number.isFinite(bb) || !Number.isFinite(v))
+        ? null
+        : (v - bb)
+
+      const pct = (bb == null || !Number.isFinite(bb) || bb === 0 || delta == null || !Number.isFinite(delta))
+        ? null
+        : (100 * delta / bb)
+
+      const ciwRaw = (!hasUnc || r.value_low == null || r.value_high == null)
+        ? null
+        : (Number(r.value_high) - Number(r.value_low))
+
+      const ciw = (ciwRaw == null || !Number.isFinite(ciwRaw) || ciwRaw <= 0) ? null : ciwRaw
+
+      return ({
+        "Hazard": String(r.hazard ?? ""),
+        "Scenario": String(r.scenario ?? "").toUpperCase(),
+        "Period": String(r.timeframe ?? ""),
+        "Year": Number(r.year),
+        "Value": v,
+        "Baseline": (bb == null || !Number.isFinite(bb)) ? null : bb,
+        "Δ vs baseline": (delta == null || !Number.isFinite(delta)) ? null : Number(delta),
+        "Δ% vs baseline": (pct == null || !Number.isFinite(pct)) ? null : Number(pct),
+        "CI width": ciw
+      })
+    })
+
+  // Sort: hazard then year then scenario
+  out.sort((a, b) =>
+    String(a["Hazard"]).localeCompare(String(b["Hazard"])) ||
+    (Number(a["Year"]) - Number(b["Year"])) ||
+    String(a["Scenario"]).localeCompare(String(b["Scenario"]))
+  )
+
+  const scaleMode = String(hz_q5_scale ?? "abs")
+  const valueLabel = (scaleMode === "idx") ? "Index" : "Value"
+
+  // Rename columns dynamically (without mutating the table rows)
+  const data = out.map((d) => ({
+    ...d,
+    [valueLabel]: d["Value"]
+  }))
+
+  return hz_atlasTable(data, {
+    columns: ["Hazard", "Scenario", "Period", "Year", valueLabel, "Baseline", "Δ vs baseline", "Δ% vs baseline", "CI width"],
+    format: {
+      "Year": (x) => Number.isFinite(Number(x)) ? String(Math.round(Number(x))) : "—",
+      [valueLabel]: fmtAbsFull,
+      "Baseline": fmtAbsFull,
+      "Δ vs baseline": fmtAbsFull,
+      "Δ% vs baseline": fmtPct,
+      "CI width": fmtAbs
+    },
+    rows: 14,
+    height: "580px",
+    width: {
+      "Hazard": 150,
+      "Scenario": 120,
+      "Period": 150,
+      "Year": 90,
+      [valueLabel]: 150,
+      "Baseline": 150,
+      "Δ vs baseline": 150,
+      "Δ% vs baseline": 140,
+      "CI width": 120
+    }
+  })
+}
+
+hz_q5_tableHost = html`
+  <div class="hz-tableWrap ${hz_q5Busy ? "hz-tableWrap--busy" : ""}">
+    ${hz_q5TableView}
+  </div>
+`
+
+
+// Q5: keep results host stable to avoid page scroll jumps when toggling controls
+hz_q5_resultsNode = html`
+  <div class="hz-qResults">
+    <div class="hz-qRes hz-qRes--chart"></div>
+    <div class="hz-qRes hz-qRes--table"></div>
+  </div>
+`
+
+hz_q5_resultsMount = {
+  const root = hz_q5_resultsNode
+  const chartDiv = root?.querySelector?.(".hz-qRes--chart")
+  const tableDiv = root?.querySelector?.(".hz-qRes--table")
+  if (chartDiv) chartDiv.replaceChildren(hz_q5_chartHost)
+  if (tableDiv) tableDiv.replaceChildren(hz_q5_tableHost)
+  return root
+}
+
+hz_q5_wireViewToggle = {
+  const viewEl = viewof hz_q5_view
+  const root = hz_q5_resultsNode
+  const chartDiv = root?.querySelector?.(".hz-qRes--chart")
+  const tableDiv = root?.querySelector?.(".hz-qRes--table")
+  const update = () => {
+    const v = String(viewEl?.value ?? "chart")
+    if (chartDiv) chartDiv.style.display = (v === "table") ? "none" : ""
+    if (tableDiv) tableDiv.style.display = (v === "table") ? "" : "none"
+  }
+  update()
+  if (viewEl && !viewEl.__hz_q5_view_wired) {
+    viewEl.__hz_q5_view_wired = true
+    viewEl.addEventListener("input", update)
+    viewEl.addEventListener("change", update)
+  }
+  return null
+}
+
+// Hide/disable the hazard selector unless "Single hazard" is selected (wired via DOM events to avoid rerender)
+hz_q5_wireHazardCtl = {
+  const modeEl = viewof hz_q5_viewMode
+  const hazEl = viewof hz_q5_hazard
+  const update = () => {
+    const one = String(modeEl?.value ?? "all") === "one"
+    try { hazEl.disabled = !one } catch (e) {}
+    try {
+      const wrap = hazEl?.closest?.(".hz-q5HazCtl")
+      if (wrap) wrap.style.display = one ? "" : "none"
+    } catch (e) {}
+  }
+  update()
+  if (modeEl && !modeEl.__hz_q5_haz_wired) {
+    modeEl.__hz_q5_haz_wired = true
+    modeEl.addEventListener("input", update)
+    modeEl.addEventListener("change", update)
+  }
+  return null
+}
+
+
+// Insights helper: table renderer (stacked, no side-by-side)
+hz_q5_smallTable = (cols, rows) => {
+  const safe = (x) => (x == null ? "—" : String(x))
+  return html`
+    <div class="hz-q4TableWrap">
+      <table class="hz-q4Table">
+        <thead>
+          <tr>${cols.map(c => html`<th>${c}</th>`)}</tr>
+        </thead>
+        <tbody>
+          ${rows.length
+            ? rows.map(r => html`<tr>${cols.map(c => html`<td>${safe(r[c])}</td>`)}</tr>`)
+            : html`<tr><td colspan="${cols.length}">—</td></tr>`
+          }
+        </tbody>
+      </table>
+    </div>
+  `
+}
+
+hz_q5Insight = {
+  const err = hz_q5Meta?.error
+  if (err) return html`<div class="hz-muted">Insights unavailable: ${err}</div>`
+
+  const rows = hz_q5PlotRows ?? []
+  if (!rows.length) return html`<div class="hz-muted">Insights will appear once results load.</div>`
+
+  const fmt = (v) => hz_formatNumber(v, { digits: 2, compact: true })
+  const fmtFull = (v) => hz_formatNumber(v, { digits: 2, compact: false })
+  const fmtPct = (v) => `${hz_formatNumber(v, { digits: 2, compact: false })}%`
+
+  const hazardsInView = (() => {
+    const modeView = String(hz_q5_viewMode ?? "all")
+    if (modeView === "one") return [String(hz_q5_hazard ?? "any")]
+    // keep the canonical order
+    const dom = ["any", "dry (any)", "heat (any)", "wet (any)"]
+    const present = new Set(rows.map(r => String(r.hazard)))
+    return dom.filter(h => present.has(h))
+  })()
+
+  // Latest row per hazard+scenario
+  const latest = []
+  for (const h of hazardsInView) {
+    const byScen = new Map()
+    for (const r of rows) {
+      if (String(r.hazard) !== String(h)) continue
+      const s = String(r.scenario ?? "").trim()
+      if (!s || s.toLowerCase() === "null") continue
+      const prev = byScen.get(s)
+      if (!prev || Number(r.year) > Number(prev.year)) byScen.set(s, r)
+    }
+    for (const r of byScen.values()) latest.push(r)
+  }
+
+  const hasUnc = !!hz_q5Meta?.has_value_sd
+  const abs = Math.abs
+
+  const withDeltas = latest.map((r) => {
+    const b = hz_q5BaselineFor(r.hazard)
+    const v = (r.value == null ? null : Number(r.value))
+    const bb = (b == null ? null : Number(b))
+
+    const delta = (bb == null || v == null || !Number.isFinite(bb) || !Number.isFinite(v))
+      ? null
+      : (v - bb)
+
+    const pct = (bb == null || !Number.isFinite(bb) || bb === 0 || delta == null || !Number.isFinite(delta))
+      ? null
+      : (100 * delta / bb)
+
+    const ciwRaw = (!hasUnc || r.value_low == null || r.value_high == null)
+      ? null
+      : (Number(r.value_high) - Number(r.value_low))
+
+    const ciw = (ciwRaw == null || !Number.isFinite(ciwRaw) || ciwRaw <= 0) ? null : ciwRaw
+
+    return { ...r, baseline: bb, delta, pct, ciw }
+  })
+
+  // Largest increase (positive Δ) + smallest change (min |Δ|) per hazard
+  const topInc = []
+  const lowInc = []
+  for (const h of hazardsInView) {
+    const xs = withDeltas
+      .filter(d => String(d.hazard) === String(h))
+      .filter(d => Number.isFinite(d.delta))
+
+    if (!xs.length) continue
+
+    xs.sort((a, b) => (b.delta - a.delta))
+    topInc.push(xs[0])
+
+    const minAbs = xs.reduce((best, cur) => (abs(cur.delta) < abs(best.delta) ? cur : best), xs[0])
+    lowInc.push(minAbs)
+  }
+
+  const colsMain = ["Hazard", "Scenario", "Period", "Year", "Value", "Δ", "Δ%"]
+  const rowToObj = (r) => ({
+    "Hazard": String(r.hazard ?? ""),
+    "Scenario": String(r.scenario ?? "").toUpperCase(),
+    "Period": String(r.timeframe ?? ""),
+    "Year": Number.isFinite(Number(r.year)) ? String(Math.round(Number(r.year))) : "—",
+    "Value": (r.value == null ? "—" : fmtFull(r.value)),
+    "Δ": (r.delta == null ? "—" : fmtFull(r.delta)),
+    "Δ%": (r.pct == null ? "—" : fmtPct(r.pct))
+  })
+
+  // Uncertainty hotspots (widest CI among ALL plotted rows)
+  const unc = (!hasUnc)
+    ? []
+    : (rows ?? [])
+        .filter(r => {
+          const h = String(r?.hazard ?? "").trim()
+          const s = String(r?.scenario ?? "").trim()
+          return (r && r.value_low != null && r.value_high != null &&
+                  h && h.toLowerCase() !== "null" &&
+                  s && s.toLowerCase() !== "null")
+        })
+        .map(r => ({
+          ...r,
+          ciw: Number(r.value_high) - Number(r.value_low)
+        }))
+        .filter(r => Number.isFinite(r.ciw) && r.ciw > 0)
+        .sort((a,b) => (b.ciw - a.ciw))
+        .slice(0, 6)
+
+  const colsUnc = ["Hazard", "Scenario", "Period", "Year", "CI width"]
+  const uncRows = unc.map(r => ({
+    "Hazard": String(r.hazard ?? ""),
+    "Scenario": String(r.scenario ?? "").toUpperCase(),
+    "Period": String(r.timeframe ?? ""),
+    "Year": Number.isFinite(Number(r.year)) ? String(Math.round(Number(r.year))) : "—",
+    "CI width": fmtFull(r.ciw)
+  }))
+
+  const scaleMode = String(hz_q5_scale ?? "abs")
+  const lead = (scaleMode === "idx")
+    ? _lang({
+        en: "Insights below use the latest selected period per scenario, indexed to the historic baseline (100).",
+        fr: "Les aperçus ci-dessous utilisent la dernière période sélectionnée par scénario, indexée à la référence historique (100).",
+        pt: "Os insights abaixo usam o último período selecionado por cenário, indexado à linha de base histórica (100)."
+      })
+    : _lang({
+        en: "Insights below use the latest selected period per scenario, compared to the historic baseline.",
+        fr: "Les aperçus ci-dessous utilisent la dernière période sélectionnée par scénario, comparée à la référence historique.",
+        pt: "Os insights abaixo usam o último período selecionado por cenário, comparado à linha de base histórica."
+      })
+
+  return html`
+    <div class="hz-q4InsightBlock">
+      <div class="hz-q4InsightLead">${md`${lead}`}</div>
+
+      <div>
+        <div class="hz-q4Subhead">${md`${_lang({
+          en: "Largest increases vs baseline (latest period)",
+          fr: "Plus fortes hausses vs référence (dernière période)",
+          pt: "Maiores aumentos vs linha de base (último período)"
+        })}`}</div>
+        ${hz_q5_smallTable(colsMain, topInc.map(rowToObj))}
+      </div>
+
+      <div>
+        <div class="hz-q4Subhead">${md`${_lang({
+          en: "Smallest change vs baseline (latest period)",
+          fr: "Plus faible variation vs référence (dernière période)",
+          pt: "Menor variação vs linha de base (último período)"
+        })}`}</div>
+        ${hz_q5_smallTable(colsMain, lowInc.map(rowToObj))}
+      </div>
+
+      <div>
+        <div class="hz-q4Subhead">${md`${_lang({
+          en: "Uncertainty hotspots (widest confidence intervals)",
+          fr: "Points chauds d’incertitude (IC les plus larges)",
+          pt: "Pontos críticos de incerteza (IC mais amplos)"
+        })}`}</div>
+        ${hz_q5_smallTable(colsUnc, uncRows)}
+        ${uncRows.length ? null : html`<div class="hz-muted">${md`${hasUnc
+          ? _lang({
+              en: "Uncertainty bars are unavailable for the current selection (confidence intervals are missing or zero-width).",
+              fr: "Les barres d’incertitude ne sont pas disponibles pour la sélection actuelle (IC manquants ou de largeur nulle).",
+              pt: "Barras de incerteza indisponíveis para a seleção atual (intervalos ausentes ou de largura zero)."
+            })
+          : _lang({
+              en: "Uncertainty bars are unavailable for the current selection (no `value_sd` in the source).",
+              fr: "Les barres d’incertitude ne sont pas disponibles pour la sélection actuelle (pas de `value_sd` dans la source).",
+              pt: "Barras de incerteza indisponíveis para a seleção atual (sem `value_sd` na fonte)."
+            })}`}</div>`}
+      </div>
+    </div>
+  `
+}
+
+
+
 hz_q4Rows = {
   const nnum = (x) => {
     const v = Number(x)
@@ -6544,6 +7329,37 @@ hz_q4_dashboardCard = hz_noJumpRoot(html`
   </div>
 </div>
 `)
+
+
+// Q5: stable insights mount (avoids scroll jumps when the insights cell recomputes)
+hz_q5_insightNode = html`<div></div>`
+hz_q5_insightMount = {
+  hz_q5_insightNode.replaceChildren(hz_q5Insight)
+  return hz_q5_insightNode
+}
+
+hz_q5_dashboardCard = hz_noJumpRoot(html`
+<div class="hz-card">
+  <div class="hz-card__body">
+    <div class="hz-qOverview">${md`${q5DetailText}`}</div>
+
+    <div class="hz-qToolbar">
+      <div class="hz-qToolbar__left">${hz_noJumpInput(viewof hz_q5_view)}</div>
+      ${hz_q5_settingsWrap}
+    </div>
+
+    <div class="hz-vizWrap">
+      ${hz_q5_resultsNode}
+    </div>
+
+    <div class="hz-qInsight">
+      ${hz_q5_insightNode}
+    </div>
+  </div>
+</div>
+`);
+
+
 hz_q1_block = html`
   <section id="q1" class="hz-question">
     <h1 class="anchored" data-anchor-id="q1">${q1Title}</h1>
@@ -6573,11 +7389,24 @@ hz_questionsStack = html`
       <div class="hz-sectionIntro">${md`${q3IntroText}`}</div>
       ${hz_q3_dashboardCard}
     </section>
+
+
+    <section id="q5" class="hz-question">
+      <h1 class="anchored" data-anchor-id="q5">${q5Title}</h1>
+      <div class="hz-sectionIntro">${md`${q5IntroText}`}</div>
+      ${hz_q5_dashboardCard}
+    </section>
   </div>
 `
 
 hz_mountDash = {
   try {
+    // Ensure Q5 mounts/wires run (keeps UI stable and avoids scroll jumps)
+    hz_q5_resultsMount
+    hz_q5_insightMount
+    hz_q5_wireViewToggle
+    hz_q5_wireHazardCtl
+
     // Preserve scroll position even if Quarto makes a wrapper scroll container.
     const scroller =
       document.scrollingElement ||
@@ -7440,9 +8269,27 @@ q3DetailText = _lang(hz_textObj(nbText?.sections?.q3?.detailText));
 q4Title = _lang(hz_textObj(nbText?.sections?.q4?.title));
 q4IntroText = _lang(hz_textObj(nbText?.sections?.q4?.introText));
 q4DetailText = _lang(hz_textObj(nbText?.sections?.q4?.detailText));
+q5Title = _lang(hz_textObj(nbText?.sections?.q5?.title) ?? {
+  en: "Q5 How does exposure change over time across scenarios (and how uncertain are the estimates)?",
+  fr: "Q5 Comment l’exposition évolue-t-elle dans le temps selon les scénarios (et quelle est l’incertitude) ?",
+  pt: "Q5 Como a exposição muda ao longo do tempo entre cenários (e quão incertas são as estimativas)?"
+});
+q5IntroText = _lang(hz_textObj(nbText?.sections?.q5?.introText) ?? {
+  en: "Explore scenario trajectories over time and the uncertainty across climate model ensembles.",
+  fr: "Explorer les trajectoires des scénarios dans le temps et l’incertitude entre les ensembles de modèles climatiques.",
+  pt: "Explore trajetórias de cenários ao longo do tempo e a incerteza entre conjuntos de modelos climáticos."
+});
+q5DetailText = _lang(hz_textObj(nbText?.sections?.q5?.detailText) ?? {
+  en: "The chart shows median exposure for each scenario and time period. Error bars reflect variability across GCMs (where available). A dashed line indicates the historical baseline.",
+  fr: "Le graphique montre l’exposition médiane pour chaque scénario et période. Les barres d’erreur reflètent la variabilité entre les GCM (si disponible). Une ligne pointillée indique la base historique.",
+  pt: "O gráfico mostra a exposição mediana para cada cenário e período. As barras de erro refletem a variabilidade entre GCMs (quando disponível). Uma linha tracejada indica a linha de base histórica."
+});
+
 
 heading3 = q3Title;
 heading4 = q4Title;
+heading5 = q5Title;
+
 
 ```
 
