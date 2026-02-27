@@ -1,0 +1,150 @@
+// Some general helpers to use across the project
+// This includes formatters for numbers, database generation, etc.
+
+// Data tools //
+
+generateDB = async (data_obj) => {
+  let data = data_obj;
+  const _db = await DuckDBClient.of();
+
+  // loop through datasets
+  for (const d of data) {
+    if (!d.key || d.key.trim() === "") continue;
+    //let path = d.local_path || d.s3_path;
+    let path = d.s3_path;
+    // if (d.local_path) {
+    //   path = "http://localhost:4040" + path;
+    // }
+    let view = d.sql.table ? "TABLE" : "VIEW";
+    let query = d.sql.query;
+    if (!query) {
+      // use default query
+      query = `CREATE ${view} "${d.key}" AS SELECT * FROM read_parquet("${path}");`;
+    } else {
+      query = `
+        CREATE ${view} "${d.key}" AS
+          SELECT ${query.select}
+          FROM read_parquet("${path}")
+          WHERE ${query.where.join(" AND ")};`;
+    }
+    await _db.query(query);
+  }
+  return await _db;
+};
+
+/**
+ * Add a cache-busting query string to URLs when running on Windows,
+ * to prevent TopoJSON from being loaded from cache.
+ *
+ * https://github.com/duckdb/duckdb-wasm/issues/1658
+ *
+ * @param {string} url - URL to patch
+ * @returns {string} patched URL if on Windows, original URL otherwise
+ */
+function patchWindowsCache(url) {
+  let isWindows = false;
+  if (navigator.userAgentData) {
+    // not supported by Fx, although issue seems isolated to Chromium browsers
+    isWindows = navigator.userAgentData.platform === "Windows";
+  } else {
+    isWindows = navigator.userAgent.toLowerCase().includes("windows");
+  }
+
+  return isWindows ? `${url}?t=${Date.now()}` : url;
+}
+
+// Clean escape single quotes in admin queeries.
+cleanAdminInput_SQL = (name) => {
+  return !name ? null : name.replace(/'/g, "''");
+}
+
+// Number formatters //
+
+formatNumCompactShort = ({ locale = "en-US" } = {}) =>
+  new Intl.NumberFormat(locale, {
+    notation: "compact",
+    compactDisplay: "short",
+  }).format;
+
+// format number, to significant figures
+formatNumCompactSigFigs = ({ locale = "en-US", sigFigs = 3 } = {}) => {
+  // Return a formatting function
+  return (number) => {
+    // Adjust number to specified significant figures
+    const formattedNumber = Number(number).toLocaleString(locale, {
+      maximumSignificantDigits: sigFigs,
+      notation: "compact",
+      compactDisplay: "short",
+    });
+
+    return formattedNumber;
+  };
+};
+
+function formatUSD({ locale = "en-US" } = {}) {
+  const formatter = formatNumCompactShort({ locale });
+  return (number) => {
+    const formattedNum = formatter(number);
+    return "$" + formattedNum;
+  };
+}
+
+// Templates //
+
+inputTemplate = ({ gap = "2em" } = {}) => {
+  // template for input form display
+  return (inputs) => {
+    const renderedInputs =
+      inputs && typeof inputs === "object" && !Array.isArray(inputs)
+        ? Object.values(inputs)
+        : inputs;
+    return html`<div style="display: flex; gap: ${gap};">${renderedInputs}</div>`;
+  };
+};
+
+function loaderDiv(id) {
+  return html`
+  <div id="${id}">
+    <div style="
+        min-height: 500px;
+        display: flex;
+        justify-content: center;
+        align-items: center;"
+    >
+      <div style="
+        width: 40px;
+        height: 40px;
+        border: 4px solid #ccc;
+        border-top-color: var(--atlasGreen);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      "></div>
+
+      <style>
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      </style>
+    </div>
+  </div>
+  `;
+}
+
+function wrapTickLabel(label, maxWidth = 10) {
+  const words = label.split(" ");
+  const lines = [];
+  let line = "";
+
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (test.length <= maxWidth) {
+      line = test;
+    } else {
+      if (line) lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+
+  return lines.join("\n");
+}
