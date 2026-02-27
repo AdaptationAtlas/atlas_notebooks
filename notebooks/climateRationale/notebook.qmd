@@ -26,6 +26,13 @@ import { atlasTOC } from "/helpers/toc.ojs";
 atlasHero(nbTitle, "../../images/default_crop.webp");
 ```
 
+```{ojs}
+atlasTOC({
+  skip: ["notebook-title", "appendix", "source-code"],
+  heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
+});
+```
+
 ```{=html}
 <style>
   .atlasFigCaption {
@@ -230,6 +237,13 @@ loaderDiv("plotExtremeEvents");
 
 `{ojs} downloadButton(extremeEvents_plotData, "extremeEvents")`
 
+### `{ojs} _lang(nbText.general.quickInsight)`
+
+```{ojs}
+seasonInsight();
+createCountryInsights([extremeEventsInsight]);
+```
+
 # `{ojs} heading6` {#hazardExposure}
 
 `{ojs} _lang(nbText.sections.hazardExposure.introText)`
@@ -264,16 +278,9 @@ loaderDiv("plotHazardExposure");
 
 # `{ojs} summary` {#summary}
 
-{{< lipsum 1 >}}
+`{ojs} _lang(nbText.sections.summary.text)`
 
-# `{ojs} appendix` {#appendix}
-
-```{ojs}
-atlasTOC({
-  skip: ["notebook-title", "appendix", "source-code"], // These should be the section headings in the {# headings}
-  heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
-});
-```
+# `{ojs} appendix` {#appendix .hidden}
 
 ## `{ojs} methodsData` {#methodsData}
 
@@ -297,7 +304,7 @@ atlasTOC({
 
 ### Methods
 
-# Source code {#source-code}
+## Source code {#source-code}
 
 <!-- Add .hidden back in to hide -->
 
@@ -1196,6 +1203,82 @@ climateInsight = (iso3) => {
   return adminInsights
     ? `${countryInsight}\n\n${adminInsights}`
     : countryInsight;
+};
+```
+
+```{ojs}
+extremeEventsInsight = (iso3) => {
+  const insightBase = nbText.sections.extremeEvents.quickInsight;
+  const countryTemplate = _lang(insightBase.country);
+  const adminTemplate = _lang(insightBase.admin);
+  const country = _lang(iso3ToTranslation[iso3]);
+
+  const rank = {
+    ssp126: 1,
+    ssp245: 2,
+    ssp370: 3,
+    ssp585: 4,
+  };
+
+  const toScenarioSummary = (rows) =>
+    rows.reduce((acc, d) => {
+      if (!acc[d.scenario]) {
+        acc[d.scenario] = {
+          unusual_low: 0,
+          extreme_low: 0,
+          unusual_high: 0,
+          extreme_high: 0,
+        };
+      }
+      acc[d.scenario][d.category] += d.num_events;
+      return acc;
+    }, {});
+
+  const buildInsight = (rows, adminName, template) => {
+    if (!rows.length) return null;
+
+    const byScenario = toScenarioSummary(rows);
+    const historical = byScenario.historical;
+    if (!historical) return null;
+
+    const futureScenario = Object.keys(byScenario)
+      .filter((s) => s !== "historical")
+      .sort((a, b) => (rank[b] || 0) - (rank[a] || 0))[0];
+
+    if (!futureScenario) return null;
+
+    const future = byScenario[futureScenario];
+
+    return Lang.reduceReplaceTemplateItems(template, [
+      { name: "admin", value: adminName },
+      { name: "scenario", value: futureScenario.toUpperCase() },
+      { name: "extremeHighFuture", value: future.extreme_high },
+      { name: "extremeLowFuture", value: future.extreme_low },
+      { name: "extremeHighHistorical", value: historical.extreme_high },
+      { name: "extremeLowHistorical", value: historical.extreme_low },
+    ]);
+  };
+
+  const countryRows = extremeEvents_plotData.filter(
+    (d) => d.iso3 === iso3 && !d.admin1_name,
+  );
+  const countryInsight = buildInsight(countryRows, country, countryTemplate);
+
+  const adminRows = extremeEvents_plotData.filter(
+    (d) => d.iso3 === iso3 && d.admin1_name,
+  );
+  const adminInsights = [...new Set(adminRows.map((d) => d.admin1_name))]
+    .sort((a, b) => a.localeCompare(b))
+    .map((adminName) => {
+      const rows = adminRows.filter((d) => d.admin1_name === adminName);
+      return buildInsight(rows, adminName, adminTemplate);
+    })
+    .filter(Boolean)
+    .join("\n");
+
+  if (countryInsight && adminInsights)
+    return `${countryInsight}\n${adminInsights}`;
+  return countryInsight || adminInsights || null;
 };
 ```
 
