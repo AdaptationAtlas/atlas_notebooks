@@ -1,0 +1,380 @@
+/**
+ * @fileoverview Custom UI wrapper for an HTML <select multiple> element.
+ *
+ * This function replaces the native multiple select with a cleaner,
+ * click-toggleable button and list, implementing maximum selection limits,
+ * required selection constraints, and synchronization with Observable
+ * Inputs.select().
+ */
+
+/**
+ * Creates a custom UI wrapper for a native HTML <select multiple> element,
+ * converting it into a styled dropdown with click-to-toggle functionality.
+ *
+ * It hides the native select, creates a button and a dropdown list, implements
+ * max/min selection constraints, and includes necessary memory cleanup for
+ * Observable notebooks.
+ *
+ * @param {HTMLElement|HTMLFormElement} viewofSelect - The container element (or the select itself) holding the target <select multiple>.
+ * @param {object} [config] - Configuration options for the toggle component.
+ * @param {?number} [config.maxSelections=null] - The maximum number of items that can be selected. Null means no limit.
+ * @param {boolean} [config.requireAtLeastOne=true] - If true, prevents the user from deselecting the last selected item.
+ * @param {boolean} [config.enableSelectAll=false] - If true, displays Select All / Deselect All buttons in the dropdown.
+ * @returns {HTMLElement} An html element, but in OJS the initial select should be returned
+ *
+ * @example
+ * {
+ *  const input = Inputs.select([1, 2, 3, 4, 5, 6], {
+ *      multiple: true,
+ *      label: "pretty multi-select"
+ *    });
+ *  enhancedMultiSelect(input, {
+ *    maxSelections: 3,
+ *    requireAtLeastOne: false,
+ *    enableSelectAll: true
+ *  });
+ *  return input;
+ * }
+ */
+function enhancedMultiSelect(
+  viewofSelect,
+  {
+    maxSelections = null,
+    requireAtLeastOne = true,
+    enableSelectAll = false
+  } = {}
+) {
+  const select = viewofSelect.querySelector("select") || viewofSelect;
+
+  if (!select || !select.multiple) {
+    throw new Error("Inputs.select() requires a multiple=true select");
+  }
+
+  if(enableSelectAll && maxSelections) {
+    throw new Error("Cannot enable select all while also specifying a max number of selections")
+  }
+
+  // --- Styles Configuration ---
+  const styles = {
+    wrapper: "font-family: system-ui; max-width: 400px; position: relative;",
+    btn: `
+      width: 100%; min-width: 360px; padding: 10px;
+      background: white; border: 2px solid #d1d5db; border-radius: 6px;
+      cursor: pointer; font-size: 14px; font-weight: 500;
+      text-align: left; display: flex; justify-content: space-between;
+      align-items: center; transition: all 0.2s ease; color: #111;
+    `,
+    list: `
+      display: none; min-width: 360px;
+      border: 1px solid #d1d5db; border-radius: 8px; background: white;
+      z-index: 10; top: 100%; position: absolute;
+      max-height: 240px; overflow-y: auto; margin-top: 4px;
+      box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+    `,
+    buttonContainer: `
+      display: flex; gap: 8px; padding: 8px 12px;
+      border-bottom: 2px solid #e5e7eb; background: #f9fafb;
+      position: sticky; top: 0; z-index: 1;
+    `,
+    actionBtn: `
+      flex: 1; padding: 6px 12px; font-size: 12px; font-weight: 500;
+      border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;
+      background: white; transition: all 0.15s ease;
+    `,
+    option: `
+      padding: 8px 12px; cursor: pointer; display: flex;
+      justify-content: space-between; align-items: center;
+      border-bottom: 1px solid #e5e7eb; transition: background 0.1s;
+    `,
+    check: `
+       color: rgba(0,0,0,0.8); font-weight: 400; margin-left: 12px; 
+       min-width: 15px;
+    `
+  };
+
+  // --- Helper Functions ---
+  const applyStyle = (el, css) => (el.style.cssText = css);
+
+  const shake = (el) => {
+    const originalBg = el.style.backgroundColor;
+    el.style.backgroundColor = "#ffe5e5";
+    setTimeout(() => (el.style.backgroundColor = originalBg), 180);
+    el.animate(
+      [
+        { transform: "translateX(0)" },
+        { transform: "translateX(-2px)" },
+        { transform: "translateX(2px)" },
+        { transform: "translateX(0)" }
+      ],
+      { duration: 200 }
+    );
+  };
+
+  const getSelectedIndices = () =>
+    new Set(
+      Array.from(select.options).flatMap((o, i) => (o.selected ? [i] : []))
+    );
+
+  // --- Initialization & State ---
+  select.style.display = "none";
+
+  if (
+    requireAtLeastOne &&
+    select.selectedIndex === -1 &&
+    select.options.length > 0
+  ) {
+    select.options[0].selected = true;
+  }
+
+  const wrapper = document.createElement("div");
+  applyStyle(wrapper, styles.wrapper);
+
+  const btn = document.createElement("button");
+  applyStyle(btn, styles.btn);
+
+  const list = document.createElement("div");
+  applyStyle(list, styles.list);
+
+  let isCollapsed = true;
+
+  // --- View Control ---
+
+  const collapseList = () => {
+    if (!isCollapsed) {
+      isCollapsed = true;
+      list.style.display = "none";
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  };
+
+  const expandList = () => {
+    if (isCollapsed) {
+      isCollapsed = false;
+      list.style.display = "block";
+      updateUI();
+      list.scrollTop = 0;
+    }
+  };
+
+  function updateUI() {
+    // Update Button Text and Arrow
+    const selectedOptions = Array.from(select.options).filter(
+      (o) => o.selected
+    );
+    const text = selectedOptions.length
+      ? selectedOptions.map((o) => o.textContent).join(", ")
+      : "None selected";
+    btn.innerHTML = `
+      <span style="pointer-events:none;">${text}</span>
+      <span style="opacity:0.7; pointer-events:none;">
+        ${isCollapsed ? "▾" : "▴"}
+      </span>
+    `;
+
+    // Update List Checkmarks and Backgrounds
+    Array.from(list.children).forEach((div, i) => {
+      // Skip the button container if present
+      if (div.classList.contains("button-container")) return;
+
+      const optionIndex = enableSelectAll ? i - 1 : i;
+      if (optionIndex < 0 || optionIndex >= select.options.length) return;
+
+      const isSelected = select.options[optionIndex].selected;
+      const check = div.querySelector("span");
+      if (check) check.textContent = isSelected ? "✔" : "";
+      div.style.backgroundColor = isSelected ? "#f9fafb" : "white";
+    });
+  }
+  select.addEventListener("input", updateUI) // makes ui update when bound select changes
+
+  // --- Select/Deselect All Buttons ---
+  if (enableSelectAll) {
+    const buttonContainer = document.createElement("div");
+    applyStyle(buttonContainer, styles.buttonContainer);
+    buttonContainer.classList.add("button-container");
+
+    // Select All Button
+    const selectAllBtn = document.createElement("button");
+    applyStyle(selectAllBtn, styles.actionBtn);
+    selectAllBtn.textContent = "Select All";
+
+    selectAllBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const maxAllowed =
+        maxSelections === null ? select.options.length : maxSelections;
+
+      let selectedCount = 0;
+      Array.from(select.options).forEach((opt) => {
+        if (selectedCount < maxAllowed) {
+          opt.selected = true;
+          selectedCount++;
+        }
+      });
+      updateUI();
+    });
+
+    selectAllBtn.addEventListener("mouseenter", () => {
+      selectAllBtn.style.background = "#f3f4f6";
+      selectAllBtn.style.borderColor = "#2E7636";
+      selectAllBtn.style.color = "black";
+    });
+
+    selectAllBtn.addEventListener("mouseleave", () => {
+      selectAllBtn.style.background = "white";
+      selectAllBtn.style.borderColor = "#d1d5db";
+    });
+
+    // Deselect All Button
+    const deselectAllBtn = document.createElement("button");
+    applyStyle(deselectAllBtn, styles.actionBtn);
+    deselectAllBtn.textContent = "Deselect All";
+
+    deselectAllBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (requireAtLeastOne) {
+        shake(buttonContainer);
+        return;
+      }
+
+      Array.from(select.options).forEach((opt) => {
+        opt.selected = false;
+      });
+      updateUI();
+    });
+
+    deselectAllBtn.addEventListener("mouseenter", () => {
+      deselectAllBtn.style.background = "#f3f4f6";
+      deselectAllBtn.style.borderColor = "#2E7636";
+      deselectAllBtn.style.color = "black";
+    });
+
+    deselectAllBtn.addEventListener("mouseleave", () => {
+      deselectAllBtn.style.background = "white";
+      deselectAllBtn.style.borderColor = "#d1d5db";
+    });
+
+    buttonContainer.appendChild(selectAllBtn);
+    buttonContainer.appendChild(deselectAllBtn);
+    list.appendChild(buttonContainer);
+  }
+
+  // --- Option Rendering ---
+  Array.from(select.options).forEach((opt) => {
+    const div = document.createElement("div");
+    div.textContent = opt.textContent;
+    applyStyle(div, styles.option);
+
+    const check = document.createElement("span");
+    applyStyle(check, styles.check);
+    div.appendChild(check);
+
+    // Hover Events
+    div.addEventListener("mouseenter", () => {
+      div.style.color = "#111";
+      div.style.background = opt.selected ? "#f9fafb" : "#f3f4f6";
+    });
+
+    div.addEventListener("mouseleave", () => {
+      div.style.color = "#111";
+      div.style.background = opt.selected ? "#f9fafb" : "white";
+    });
+
+    // Click Event
+    div.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const selectedCount = Array.from(select.options).filter(
+        (o) => o.selected
+      ).length;
+
+      // Max limit check
+      if (
+        maxSelections !== null &&
+        !opt.selected &&
+        selectedCount >= maxSelections
+      ) {
+        shake(div);
+        return;
+      }
+
+      // Min limit check
+      if (requireAtLeastOne && opt.selected && selectedCount <= 1) {
+        shake(div);
+        return;
+      }
+
+      // Toggle & Sync
+      opt.selected = !opt.selected;
+      //NOTE: input when dropdown is closed to avoid noise and to prevent it closing when other values in cell update
+      // (in a form for example)
+
+      // select.dispatchEvent(new Event("input", { bubbles: true }));
+      updateUI();
+    });
+
+    list.appendChild(div);
+  });
+
+  // --- Event Handlers ---
+
+  // Collapse Toggle
+  btn.addEventListener("click", () =>
+    isCollapsed ? expandList() : collapseList()
+  );
+
+  // Button Hover
+  btn.addEventListener("mouseenter", () => {
+    btn.style.borderColor = "#2E7636";
+    btn.style.color = "#111";
+  });
+
+  btn.addEventListener("mouseleave", () => {
+    btn.style.borderColor = "#d1d5db";
+  });
+
+  btn.addEventListener("focus", () => {
+    btn.style.borderColor = "#2E7636";
+  });
+
+  // External Click Handler (Closes list if click is outside the wrapper)
+  const outsideClickListener = (event) => {
+    if (!wrapper.contains(event.target)) {
+      collapseList();
+    }
+  };
+
+  // --- Assembly ---
+  select.parentNode.insertBefore(wrapper, select);
+  wrapper.appendChild(btn);
+  wrapper.appendChild(list);
+  wrapper.appendChild(select);
+
+  document.addEventListener("click", outsideClickListener);
+
+  updateUI();
+
+  // --- Polling Loop & Cleanup ---
+let lastSelected = Array.from(select.options).map(o => o.selected).join(",");
+
+const rafLoop = () => {
+  if (!document.body.contains(wrapper)) {
+    document.removeEventListener("click", outsideClickListener);
+    return; // stop the loop — no cleanup needed
+  }
+
+  const current = Array.from(select.options).map(o => o.selected).join(",");
+  if (current !== lastSelected) {
+    lastSelected = current;
+    updateUI();
+  }
+
+  requestAnimationFrame(rafLoop);
+};
+
+requestAnimationFrame(rafLoop);
+
+  return viewofSelect;
+}
