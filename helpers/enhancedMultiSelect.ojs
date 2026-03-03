@@ -58,7 +58,7 @@ function enhancedMultiSelect(
   const styles = {
     wrapper: "font-family: system-ui; max-width: 400px; position: relative;",
     btn: `
-      width: 100%; min-width: 260px; padding: 10px;
+      width: 100%; min-width: 360px; padding: 10px;
       background: white; border: 2px solid #d1d5db; border-radius: 6px;
       cursor: pointer; font-size: 14px; font-weight: 500;
       text-align: left; display: flex; justify-content: space-between;
@@ -143,7 +143,7 @@ function enhancedMultiSelect(
     if (!isCollapsed) {
       isCollapsed = true;
       list.style.display = "none";
-      updateUI();
+      select.dispatchEvent(new Event("input", { bubbles: true }));
     }
   };
 
@@ -185,6 +185,7 @@ function enhancedMultiSelect(
       div.style.backgroundColor = isSelected ? "#f9fafb" : "white";
     });
   }
+  select.addEventListener("input", updateUI) // makes ui update when bound select changes
 
   // --- Select/Deselect All Buttons ---
   if (enableSelectAll) {
@@ -211,8 +212,6 @@ function enhancedMultiSelect(
           selectedCount++;
         }
       });
-
-      select.dispatchEvent(new Event("input", { bubbles: true }));
       updateUI();
     });
 
@@ -244,8 +243,6 @@ function enhancedMultiSelect(
       Array.from(select.options).forEach((opt) => {
         opt.selected = false;
       });
-
-      select.dispatchEvent(new Event("input", { bubbles: true }));
       updateUI();
     });
 
@@ -311,7 +308,10 @@ function enhancedMultiSelect(
 
       // Toggle & Sync
       opt.selected = !opt.selected;
-      select.dispatchEvent(new Event("input", { bubbles: true }));
+      //NOTE: input when dropdown is closed to avoid noise and to prevent it closing when other values in cell update
+      // (in a form for example)
+
+      // select.dispatchEvent(new Event("input", { bubbles: true }));
       updateUI();
     });
 
@@ -357,33 +357,24 @@ function enhancedMultiSelect(
   updateUI();
 
   // --- Polling Loop & Cleanup ---
-  let lastIndices = getSelectedIndices();
+let lastSelected = Array.from(select.options).map(o => o.selected).join(",");
 
-  const poll = setInterval(() => {
-    const isAttached = document.body.contains(wrapper);
-    if (!isAttached) {
-      clearInterval(poll);
-      document.removeEventListener("click", outsideClickListener);
-      return;
-    }
+const rafLoop = () => {
+  if (!document.body.contains(wrapper)) {
+    document.removeEventListener("click", outsideClickListener);
+    return; // stop the loop — no cleanup needed
+  }
 
-    const currentIndices = getSelectedIndices();
+  const current = Array.from(select.options).map(o => o.selected).join(",");
+  if (current !== lastSelected) {
+    lastSelected = current;
+    updateUI();
+  }
 
-    let changed = currentIndices.size !== lastIndices.size;
-    if (!changed) {
-      for (let i of currentIndices) {
-        if (!lastIndices.has(i)) {
-          changed = true;
-          break;
-        }
-      }
-    }
+  requestAnimationFrame(rafLoop);
+};
 
-    if (changed) {
-      lastIndices = currentIndices;
-      updateUI();
-    }
-  }, 100);
+requestAnimationFrame(rafLoop);
 
   return viewofSelect;
 }
