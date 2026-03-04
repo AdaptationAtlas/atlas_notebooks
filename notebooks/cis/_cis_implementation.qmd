@@ -282,55 +282,6 @@ viewof s3SortBy = {
 ```{ojs}
 //| echo: false
 
-// Filter Countries Multi-select
-s3UniqueCountries = {
-  const countries = Array.from(new Set((section3Data || []).map(d => d.admin0_name))).sort();
-  return countries;
-}
-
-viewof s3FilteredCountries = {
-  if (!s3UniqueCountries || s3UniqueCountries.length === 0) {
-    return Inputs.select([], {label: _lang(cis.s3FilterCountries), disabled: true});
-  }
-  return multiSelect({
-    inputLabel: _lang(cis.s3FilterCountries),
-    inputId: "s3FilterCountries",
-    placeholderText: _lang(cis.admin0Placeholder),
-    options: s3UniqueCountries.map(d => ({ value: d, label: d })),
-    selected: s3UniqueCountries // Select all by default
-  });
-}
-```
-
-```{ojs}
-//| echo: false
-
-// Highlight Countries Multi-select (for scatter plot only)
-viewof s3HighlightedCountries = {
-  // Only show when view type is scatter
-  if (s3ViewType !== "scatter") {
-    const input = Inputs.select([], {label: _lang(cis.s3HighlightCountries)});
-    input.style.display = "none";
-    input.value = [];
-    return input;
-  }
-  
-  if (!s3UniqueCountries || s3UniqueCountries.length === 0) {
-    return Inputs.select([], {label: _lang(cis.s3HighlightCountries), disabled: true});
-  }
-  return multiSelect({
-    inputLabel: _lang(cis.s3HighlightCountries),
-    inputId: "s3HighlightCountries",
-    placeholderText: _lang(cis.admin0Placeholder),
-    options: s3UniqueCountries.map(d => ({ value: d, label: d })),
-    selected: [] // None selected by default
-  });
-}
-```
-
-```{ojs}
-//| echo: false
-
 // View Toggle
 
 // Helper to get current access field name
@@ -359,16 +310,12 @@ s3CurrentAccessRawField = s3AccessType === "combined" ? "combined_pct" :
 // FILTERED & SORTED DATA PREPARATION
 // ============================================================================
 
-// Filter data based on country selection in multi-select
+// Use full section data (country filter controls removed)
 s3FilteredData = {
   if (!section3Data || section3Data.length === 0) {
     return [];
   }
-  
-  // If no countries selected in filter, show all; otherwise filter to selection
-  return section3Data.filter(d => 
-    !s3FilteredCountries || s3FilteredCountries.length === 0 || s3FilteredCountries.includes(d.admin0_name)
-  );
+  return section3Data;
 }
 ```
 
@@ -1000,7 +947,7 @@ function createS3BivariateMap() {
 // Render based on view type
 {
   if (s3ViewType === "map") {
-    yield html`<div style="width: 100%; overflow-x: auto;">
+    return html`<div style="width: 100%; overflow-x: auto;">
       ${s3MapDisplay}
     </div>`;
   } else if (s3ViewType === "dumbbell") {
@@ -1011,7 +958,7 @@ function createS3BivariateMap() {
     
     // Dumbbell Chart - inline to prevent auto-display
   if (!s3SortedData || s3SortedData.length === 0) {
-      yield html`<div style="padding: 20px; background: #f0f0f0; border-radius: 5px;">
+      return html`<div style="padding: 20px; background: #f0f0f0; border-radius: 5px;">
       <em>Dumbbell chart will appear once data is loaded...</em>
     </div>`;
     } else {
@@ -1019,7 +966,7 @@ function createS3BivariateMap() {
   const linkData = s3SortedData.filter(d => d.accessValue !== null && !isNaN(d.accessValue));
   const accessData = s3SortedData.filter(d => d.accessValue !== null && !isNaN(d.accessValue));
   
-      yield html`<div style="width: 100%; overflow-x: auto;">
+      return html`<div style="width: 100%; overflow-x: auto;">
     <div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
       <div style="display: flex; gap: 20px; align-items: center; font-size: 12px;">
         <div><span style="color: #377eb8;">●</span> ${_lang(cis.s3ReadinessLabel)}</div>
@@ -1144,7 +1091,7 @@ function createS3BivariateMap() {
     
     // Faceted Scatter Plot - showing all access types
     if (!s3ProcessedData || s3ProcessedData.length === 0) {
-      yield html`<div style="padding: 20px; background: #f0f0f0; border-radius: 5px;">
+      return html`<div style="padding: 20px; background: #f0f0f0; border-radius: 5px;">
         <em>Scatter plot will appear once data is loaded...</em>
       </div>`;
     } else {
@@ -1184,6 +1131,12 @@ function createS3BivariateMap() {
           });
         }
       });
+
+      if (facetData.length === 0) {
+        return html`<div style="padding: 20px; background: #f0f0f0; border-radius: 5px;">
+          <em>Scatter plot is unavailable because no access values are present for the current selection.</em>
+        </div>`;
+      }
       
       // Setup 2x2 facet grid using index-based mapping
       const n = 2; // Number of columns for 2x2 grid
@@ -1196,8 +1149,11 @@ function createS3BivariateMap() {
       const accessIndex = new Map(accessTypes.map((key, i) => [key, i]));
       const getFx = (key) => accessIndex.get(key) % n;
       const getFy = (key) => Math.floor(accessIndex.get(key) / n);
+      const xExtent = d3.extent(facetData, d => d.cis_readiness_avg);
+      const xDomain = (xExtent[0] == null || xExtent[1] == null) ? [0, 1] : xExtent;
       
-      yield html`<div style="width: 100%; overflow-x: auto;">
+      return html`<div style="width: 100%;">
+        <div style="overflow-x: auto;">
         <div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
           <div style="font-size: 12px;">
             <strong>${_lang(cis.s3ParityLine)}:</strong> Points above the line indicate access exceeds readiness; points below indicate readiness exceeds access.
@@ -1213,16 +1169,13 @@ function createS3BivariateMap() {
           marginLeft: 60,
           grid: true,
           x: {
-            domain: d3.extent(facetData, d => d.cis_readiness_avg),
+            domain: xDomain,
             label: _lang(cis.s3ReadinessLabel) + " →"
           },
           y: {
             // Dynamic domain based on data range
             // domain: d3.extent(facetData, d => d.accessValue),
             label: "Access →"
-          },
-          color: {
-            legend: true
           },
           fx: {
             label: null,
@@ -1257,9 +1210,8 @@ function createS3BivariateMap() {
               fontSize: 11
             }),
             Plot.frame(),
-            // All countries (not highlighted)
             Plot.dot(
-              facetData.filter(d => !s3HighlightedCountries.includes(d.admin0_name)),
+              facetData,
               {
                 x: "cis_readiness_avg",
                 y: "accessValue",
@@ -1274,20 +1226,6 @@ function createS3BivariateMap() {
                 stroke: "#333",
                 strokeWidth: 0.5,
                 r: 4
-              }
-            ),
-            // Highlighted countries
-            Plot.dot(
-              facetData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
-              {
-                x: "cis_readiness_avg",
-                y: "accessValue",
-                fx: d => getFx(d.accessType),
-                fy: d => getFy(d.accessType),
-                fill: "#0066cc",
-                stroke: "#000",
-                strokeWidth: 1.5,
-                r: 6
               }
             ),
             // Tooltips
@@ -1321,27 +1259,13 @@ function createS3BivariateMap() {
                   fy: false 
                 }
               })
-            ),
-            // Labels for highlighted countries
-            Plot.text(
-              facetData.filter(d => s3HighlightedCountries.includes(d.admin0_name)),
-              {
-                x: "cis_readiness_avg",
-                y: "accessValue",
-                fx: d => getFx(d.accessType),
-                fy: d => getFy(d.accessType),
-                text: "admin0_name",
-                dy: -12,
-                fontSize: 9,
-                fontWeight: "bold"
-              }
             )
           ]
         };
         })())}
+        </div>
+        <div style="margin-top: 10px;">${s3DownloadButton}</div>
       </div>`;
-    // Place download button after chart
-    yield html`<div style="margin-top: 10px;">${s3DownloadButton}</div>`;
 }
   } else {
     // Clean up any leftover tooltips from map view
@@ -1350,11 +1274,11 @@ function createS3BivariateMap() {
     
     // Table View - inline to prevent auto-display
   if (!s3SortedData || s3SortedData.length === 0) {
-      yield html`<div style="padding: 20px; background: #f0f0f0; border-radius: 5px;">
+      return html`<div style="padding: 20px; background: #f0f0f0; border-radius: 5px;">
       <em>Table will appear once data is loaded...</em>
     </div>`;
     } else {
-      yield filterableDataTable(s3SortedData, {
+      return filterableDataTable(s3SortedData, {
     columns: [
       "admin0_name",
       "iso3",
