@@ -37,13 +37,7 @@ cisDB = await DuckDBClient.of({
   cis_data: FileAttachment("/data/cis/CIS_nb_data.parquet")
 });
 
-// Query all data - processing is done in JavaScript for type safety
-// and Observable reactivity compatibility
-cisDataRaw = await cisDB.query(`SELECT * FROM cis_data`);
-
-// Transform raw data with proper type parsing
-// Note: Parquet files from some sources encode NULL as "\\N" string
-cisData = cisDataRaw.map(row => ({
+parseCisRow = (row) => ({
   ...row,
   // Clean null values represented as "\N" (common in database exports)
   // These must be converted to JavaScript null for proper filtering
@@ -63,7 +57,15 @@ cisData = cisDataRaw.map(row => ({
   gaul0_code: parseInt(row.gaul0_code),
   gaul1_code: parseInt(row.gaul1_code),
   gaul2_code: parseInt(row.gaul2_code)
-}));
+})
+
+// Query all data - processing is done in JavaScript for type safety
+// and Observable reactivity compatibility
+cisDataRaw = await cisDB.query(`SELECT * FROM cis_data`);
+
+// Transform raw data with proper type parsing
+// Note: Parquet files from some sources encode NULL as "\\N" string
+cisData = cisDataRaw.map(parseCisRow);
 ```
 
 ```{ojs}
@@ -309,26 +311,18 @@ currentAdminLevel = {
 // ============================================================================
 
 filteredData = {
-  // Default: No admin0 selected - show country-level data (admin1_name is null)
-  if (selectedAdmin0.length === 0) {
-    return cisData.filter(d => d.admin1_name == null);
-  }
-  
-  // Admin0 selected, no admin1 - show region-level data for selected countries
-  if (selectedAdmin1.length === 0) {
-    return cisData.filter(d => 
-      selectedAdmin0.includes(d.admin0_name) &&
-      d.admin1_name != null && 
-      d.admin2_name == null
-    );
-  }
-  
-  // Admin1 selected - show district-level data for selected regions
-  return cisData.filter(d => 
-    selectedAdmin0.includes(d.admin0_name) &&
-    selectedAdmin1.includes(d.admin1_name) &&
-    d.admin2_name != null
-  );
+  const adminWhere = buildAdminSelectionWhereClause({
+    admin0: selectedAdmin0 || [],
+    admin1: selectedAdmin1 || []
+  });
+
+  const rows = await cisDB.query(`
+    SELECT *
+    FROM cis_data
+    WHERE ${adminWhere}
+  `);
+
+  return rows.map(parseCisRow);
 }
 
 // Track which Admin2 regions are selected for highlighting on maps

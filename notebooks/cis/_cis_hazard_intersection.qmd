@@ -49,18 +49,30 @@ Inputs.form([
 // ============================================================================
 
 hazardDB = await DuckDBClient.of({
-  hazard_data: FileAttachment("/data/cis/haz-means_adm_historic.parquet")
+  hazard_data: FileAttachment("/data/cis/nexgddpHazards_monthMean_jagermeyr_rounded.parquet")
 });
 
-// Load all hazard data - filtering done in JS to avoid DuckDB key issues
-hazardDataRaw = await hazardDB.query(`SELECT * FROM hazard_data`);
+// Query hazard data with SQL-side admin filtering
+hazardData = {
+  const hazards = ["NDWS-mean", "NDWL0-mean"];
+  const adminWhere = buildAdminSelectionWhereClause({
+    admin0: selectedAdmin0 || [],
+    admin1: selectedAdmin1 || []
+  });
 
-// Filter for the two hazards we need:
-// - NDWS-mean: Normalized Difference Water Stress (drought - days of stress)
-// - NDWL0-mean: Normalized Difference Water Level at surface (waterlogging - days)
-hazardData = hazardDataRaw.filter(d => 
-  d.hazard === "NDWS-mean" || d.hazard === "NDWL0-mean"
-);
+  return await hazardDB.query(`
+    SELECT
+      iso3,
+      admin0_name,
+      admin1_name,
+      admin2_name,
+      hazard,
+      value
+    FROM hazard_data
+    WHERE hazard IN (${toSqlInList(hazards)})
+      AND ${adminWhere}
+  `);
+}
 
 // ============================================================================
 // TERCILE CUTOFFS: Load Pre-Computed Classification Thresholds
@@ -247,34 +259,12 @@ viewof s2ViewToggle = Inputs.radio(
 // Reuse admin level from Section 1
 s2CurrentAdminLevel = currentAdminLevel;
 
-// Process and classify data - filter by Section 1's selections
+// Process and classify data
 s2ProcessedData = {
   const hazardColumn = s2HazardType === "drought" ? "drought_ndws" : "waterlogging_ndwl0";
   const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
   
-  // Filter by Section 1's admin selections using the same logic
   let filtered = combinedData;
-  
-  // Default: No admin0 selected - show all admin0 level data
-  if (selectedAdmin0.length === 0) {
-    filtered = filtered.filter(d => d.admin1_name == null);
-  }
-  // Admin0 selected, no admin1 - show all admin1 data for selected countries
-  else if (selectedAdmin1.length === 0) {
-    filtered = filtered.filter(d => 
-      selectedAdmin0.includes(d.admin0_name) &&
-      d.admin1_name != null && 
-      d.admin2_name == null
-    );
-  }
-  // Admin1 selected - show all admin2 data for selected admin1 regions
-  else {
-    filtered = filtered.filter(d => 
-      selectedAdmin0.includes(d.admin0_name) &&
-      selectedAdmin1.includes(d.admin1_name) &&
-      d.admin2_name != null
-    );
-  }
   
   // Filter by readiness threshold and remove nulls
   filtered = filtered.filter(d => 
