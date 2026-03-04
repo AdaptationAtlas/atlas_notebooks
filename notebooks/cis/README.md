@@ -67,7 +67,6 @@ The notebook uses Quarto's include system to split content across files:
 // Imports used across the notebook
 import { atlasHero, downloadButton, tooltipStyle } from "/helpers/uiComponents.ojs"
 import { atlasTOC, tocStyle } from "/helpers/toc.ojs"
-import { dropdownInput as multiSelect, dropdownCSS } from "/helpers/multiSelect.ojs"
 import { lang as Lang } from "/helpers/lang.js"
 ```
 
