@@ -14,7 +14,7 @@ The CIS Readiness Notebook examines the capacity to deliver reliable climate inf
 
 ```
 notebooks/cis/
-├── cis_readiness.qmd           # Main notebook file
+├── notebook.qmd           # Main notebook file
 ├── _cis_readiness_index.qmd    # Section 1: CIS Readiness Index components
 ├── _cis_hazard_intersection.qmd # Section 2: Hazard intersection analysis
 ├── _cis_implementation.qmd      # Section 3: Implementation and access
