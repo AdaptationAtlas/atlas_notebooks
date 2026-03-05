@@ -1,39 +1,16 @@
 ---
 pagetitle: Admin Selectors (MultiSelect)
 created: "2025-11-25"
-updated: "2026-02-10"
+updated: "2026-03-04"
 ---
 
 <!--
-This should be loaded into a notebook with quarto shortcodes:
+Include with:
 `{{< include /components/_adminSelectorsMulti.qmd >}}`
 
-This esentially copies this code into that notebook during render,
-so any variables defined here can be used in the notebook/will also
-conflict with other global variables in the notebook. -->
-
-<!--IMPORTANT:
-This requires the enhancedMultiSelect component to be imported
-from helpers/enhancedMultiSelect.ojs
-
-This also relies on _lang being defined, so the _lang component must also
-be loaded into the notebook with:
-`{{< include /components/_lang.qmd >}}`
--->
-
-<!-- NOTE:
-Due to how OJS updates cells, when inputs are duplicated across sections they need
-to be defined again with different names and placed in a div. This is because the inputs
-trigger a re-render of the cell every time they are selected, so the focus on the input is
-lost. To see what happens use the following wrong example:
-html`<div style="display: flex; gap: 2em;">${renderA0Multi()} ${renderA1Multi()} ${renderA2Multi()}</div>`;
-
-Correct Example usage:
-/// THese don't need viewof as they are already bound to a global input
-section1A0 = renderA0Multi();
-section1A1 = renderA1Multi();
-section1A2 = renderA2Multi();
-html`<div style="display: flex; gap: 2em;">${section1A0} ${section1A1} ${section1A2}</div>`;
+Requires:
+- helpers/enhancedMultiSelect.ojs
+- components/_lang.qmd
 -->
 
 ```{ojs}
@@ -52,7 +29,6 @@ countries = {
   return filteredCountries;
 };
 
-
 // Default admin0 selection: Kenya if available, otherwise first country
 defaultAdmin0 = {
   const kenya = (countries ?? []).find((d) => d && d.iso3c === "KEN");
@@ -63,8 +39,6 @@ viewof admin0Select = Inputs.input(defaultAdmin0)
 
 renderA0Multi = ({ maxSelections = Infinity, requireAtLeastOne = false } = {}) => {
   const _admin0 = Inputs.select(countries, {
-    // NOTE: _lang & general_translations are defined in components/_lang.qmd
-    // Both must be loaded into a notebook for this to work.
     label: _lang(general_translations.country),
     format: (d) => _lang(d.translation),
     multiple: true
@@ -72,12 +46,12 @@ renderA0Multi = ({ maxSelections = Infinity, requireAtLeastOne = false } = {}) =
 
   enhancedMultiSelect(_admin0, { maxSelections, requireAtLeastOne });
 
-  // Bind to the main global multi-select for updates across NB
   return Inputs.bind(_admin0, viewof admin0Select);
 }
 ```
 
 ```{ojs}
+// ADMIN 1 (Regions)
 dataAdmin1 = {
   const isoList = (admin0Select ?? []).map((d) => d.iso3c).filter(Boolean);
   if (!isoList.length) return [];
@@ -86,8 +60,10 @@ dataAdmin1 = {
     SELECT DISTINCT admin0_name, admin1_name, iso3
     FROM admin_lookup
     WHERE iso3 in ('${isoList.join("', '")}')
+    ORDER BY iso3, admin1_name
   `);
 
+  // Full Country rows (one per selected country)
   const countryRows = (admin0Select ?? []).map((d) => ({
     admin0_name: d.admin0_name,
     admin1_name: null,
@@ -98,11 +74,39 @@ dataAdmin1 = {
 
   const regionRows = (regions ?? []).map((r) => ({
     ...r,
-    admin1_value: r.admin1_name,                 
+    admin1_value: r.admin1_name,
     admin1_label: `${r.admin1_name} (${r.iso3})`
   }));
 
-  return [...countryRows, ...regionRows];
+  // Group by ISO, alphabetize (case-insensitive)
+  const byIso = new Map();
+  for (const r of regionRows) {
+    const iso = String(r.iso3 ?? "");
+    if (!byIso.has(iso)) byIso.set(iso, []);
+    byIso.get(iso).push(r);
+  }
+  for (const [iso, rows] of byIso.entries()) {
+    rows.sort((a, b) =>
+      String(a.admin1_name ?? "").localeCompare(String(b.admin1_name ?? ""), undefined, { sensitivity: "base" })
+    );
+  }
+
+  const countriesSorted = [...countryRows].sort((a, b) =>
+    String(a.iso3 ?? "").localeCompare(String(b.iso3 ?? ""))
+  );
+
+  const out = [];
+  for (const c of countriesSorted) {
+    const iso = String(c.iso3 ?? "");
+    out.push(c);
+    out.push(...(byIso.get(iso) ?? []));
+    byIso.delete(iso);
+  }
+  for (const iso of Array.from(byIso.keys()).sort((a, b) => String(a).localeCompare(String(b)))) {
+    out.push(...(byIso.get(iso) ?? []));
+  }
+
+  return out;
 }
 
 viewof admin1Select = Inputs.input([])
@@ -114,36 +118,80 @@ renderA1Multi = ({ maxSelections = Infinity, requireAtLeastOne = false } = {}) =
     multiple: true
   });
 
-  enhancedMultiSelect(_admin1, { maxSelections, requireAtLeastOne });
+  enhancedMultiSelect(_admin1, {
+    maxSelections,
+    requireAtLeastOne,
+    enableFullCountryToggle: true,
+    fullCountryPrefix: "Full Country"
+  });
 
-  return Inputs.bind(_admin1, viewof admin1Select);
+  const bound = Inputs.bind(_admin1, viewof admin1Select);
+
+  queueMicrotask(() => {
+    if (globalThis.__hz_defaultAdmin1Applied) return;
+
+    const a0 = Array.isArray(admin0Select) ? admin0Select : (admin0Select ? [admin0Select] : []);
+    if (a0.length !== 1) return;
+
+    const iso = String(a0[0]?.iso3c ?? a0[0]?.iso3 ?? a0[0]?.iso ?? "");
+    if (iso !== "KEN") return;
+
+    const current = Array.isArray(_admin1.value) ? _admin1.value : (_admin1.value ? [_admin1.value] : []);
+    if (current.length) return;
+
+    const expanded = (Array.isArray(dataAdmin1) ? dataAdmin1 : []).filter(
+      (d) => d && String(d.iso3 ?? d.iso3c ?? d.iso ?? "") === "KEN"
+    );
+    if (!expanded.length) return;
+
+    globalThis.__hz_defaultAdmin1Applied = true;
+
+    const node = _admin1.querySelector?.("select") ?? _admin1;
+    _admin1.value = expanded;
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  return bound;
 }
 ```
 
 ```{ojs}
+// ADMIN 2 (Districts)
 dataAdmin2 = {
   const isoList = (admin0Select ?? []).map((d) => d.iso3c).filter(Boolean);
   if (!isoList.length) return [];
 
-  // Only fetch districts when at least one region is selected (and it's not the "Full Country" row)
+  // Only fetch districts when at least one region is selected
   const a1 = (admin1Select ?? [])
     .map((d) => d.admin1_value ?? d.admin1_name)
     .filter(Boolean);
 
   if (!a1.length) return [];
 
+  // Escape apostrophes for SQL IN (...) lists (e.g., Murang'a)
+  const esc = (s) => String(s).replaceAll("'", "''");
+  const a1Esc = a1.map(esc);
+
   const rows = await adminDB.query(`
     SELECT DISTINCT admin0_name, admin1_name, admin2_name, iso3
     FROM admin_lookup
     WHERE iso3 in ('${isoList.join("', '")}')
-    AND admin1_name in ('${a1.join("', '")}')
+    AND admin1_name in ('${a1Esc.join("', '")}')
+    ORDER BY admin2_name
   `);
 
-  return (rows ?? []).map((r) => ({
+  const out = (rows ?? []).map((r) => ({
     ...r,
-    admin2_value: r.admin2_name,                
+    admin2_value: r.admin2_name,
     admin2_label: `${r.admin2_name} (${r.iso3})`
   }));
+
+  // Ensure alphabetical order
+  out.sort((a, b) =>
+    String(a.admin2_name ?? "").localeCompare(String(b.admin2_name ?? ""), undefined, { sensitivity: "base" })
+  );
+
+  return out;
 }
 
 viewof admin2Select = Inputs.input([])

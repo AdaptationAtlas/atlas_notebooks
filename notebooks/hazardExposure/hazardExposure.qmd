@@ -456,13 +456,12 @@ html, body { overflow-anchor: none; }
   .hz-controlsCompact .hz-row--3{
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  /* Special row where the middle “Commodities” UI should be wider */
+  
   .hz-controlsCompact .hz-row--3.hz-row--grow{
     grid-template-columns: minmax(190px, 1fr) minmax(280px, 2fr) minmax(190px, 1fr);
   }
   .hz-controlsCompact .hz-field{ min-width:0; }
 
-  /* Special row where the right “Commodities” UI should be wider (2-col variant) */
   .hz-controlsCompact .hz-row--2.hz-row--grow{
     grid-template-columns: minmax(190px, 1fr) minmax(280px, 2fr);
   }
@@ -713,17 +712,27 @@ html, body { overflow-anchor: none; }
 
 .hz-mapNote{font-size:.85rem;color:var(--bs-secondary-color,#6b7280);margin-top:.25rem}
 
-/* Shared side cards (used by Q2/Q4) */
 .hz-sideCard{border:1px solid rgba(148,163,184,.28);border-radius:14px;background:rgba(255,255,255,.82);overflow:hidden}
 .dark .hz-sideCard{background:rgba(15,23,42,.55);border-color:rgba(148,163,184,.2)}
 .hz-sideCard__head,.hz-sideCard__header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(148,163,184,.2)}
 .hz-sideCard__title{font-weight:700;font-size:13px}
 .hz-sideCard__meta,.hz-sideCard__right{font-size:12px;color:#64748b}
 .hz-sideCard__body{padding:10px 12px;overflow:auto}
+
+.hz-sideCard--plot{overflow:visible}
+.hz-sideCard--plot .hz-sideCard__body{overflow:visible}
+.hz-sideCard--plot figure{overflow:visible}
+.hz-sideCard--plot svg{overflow:visible}
+
+.hz-plot--q2 svg text{font-size:13.5px!important}
+
+.plot-tooltip{font-size:15px;line-height:1.3;max-width:420px;padding:8px 10px}
+.plot-tooltip table{font-size:inherit}
+.plot-tooltip *{font-size:inherit}
+.plot-tooltip td,.plot-tooltip th{padding:2px 6px}
+
 .hz-sideCard__body > *{max-width:100%}
 .hz-sideCard__body figure,.hz-sideCard__body svg{max-width:100%}
-
-/* Q4 layout + controls (aligned to Q1–Q3 look) */
 .hz-q4InsightBlock{display:grid;gap:12px;font-size:.95rem}
 .hz-q4InsightLead{font-size:.95rem;color:var(--bs-secondary-color,#6c757d)}
 .dark .hz-q4InsightLead{color:#cbd5e1}
@@ -738,6 +747,11 @@ html, body { overflow-anchor: none; }
 .hz-qToolbar--tight .hz-inlineToggles{gap:.6rem}
 .hz-chartLegend{margin:0 0 .5rem 0}
 .hz-chartLegend figure{margin:0}
+.hz-sideCard{position:relative}
+.hz-sideCard:hover{z-index:50}
+.hz-sideCard--plot{position:relative; z-index:1}
+.hz-sideCard--plot:hover{z-index:60}
+.plot-tooltip{z-index:9999}
 </style>
 ```
 
@@ -763,8 +777,6 @@ md`${_lang(nbText.sections.intro.text)}`;
   null
 }
 ```
-
-<!-- Q1 heading/intro is rendered inside the stacked questions shell so Q4 can appear first -->
 
 ```{=html}
 <div id="hz-dashboard"></div>
@@ -1273,10 +1285,10 @@ viewof hz_scen2 = Inputs.select(hz_scenXTime, {
 
 hz_scenXTime = [
   "historic",
-  "ssp126_2021-2040","ssp126_2041-2060","ssp126_2061-2080",
-  "ssp245_2021-2040","ssp245_2041-2060","ssp245_2061-2080",
-  "ssp370_2021-2040","ssp370_2041-2060","ssp370_2061-2080",
-  "ssp585_2021-2040","ssp585_2041-2060","ssp585_2061-2080"
+  "ssp126_2021-2040","ssp126_2041-2060","ssp126_2061-2080","ssp126_2081-2100",
+  "ssp245_2021-2040","ssp245_2041-2060","ssp245_2061-2080","ssp245_2081-2100",
+  "ssp370_2021-2040","ssp370_2041-2060","ssp370_2061-2080","ssp370_2081-2100",
+  "ssp585_2021-2040","ssp585_2041-2060","ssp585_2061-2080","ssp585_2081-2100"
 ]
 // Default  values:
 // scenario1 = historic; scenario2 = ssp585_2041-2060
@@ -1513,9 +1525,6 @@ hz_selectedCommodities = {
 
 ```{ojs}
 //| output: false
-// Commodities value sent to the API.
-// For custom + empty, interpret as "no commodity filter".
-// We encode that as ["all"] to match the backend's "no filter" semantics.
 hz_selectedCommoditiesForReq = {
   const g = hz_commodityGroup
   const picked = (hz_selectedCommodities ?? []).filter(Boolean)
@@ -1541,8 +1550,6 @@ hz_previewList = (arr, max = 4) => {
 
 ```{ojs}
 //| output: false
-// Display controls
-// Compare mode affects Q2/Q4 when comparing Left vs Right.
 viewof hz_compareMode = {
   const root = document.createElement('label')
   root.className = 'hz-inlineToggle hz-inlineToggle--compact'
@@ -1644,9 +1651,6 @@ hz_parseScenario = (s) => {
   const parts = raw.split("_").filter(Boolean)
   const scenario = parts[0] ?? null
   const timeframe = parts.length > 1 ? parts.slice(1).join("_") : null
-
-  // In this notebook, the dataset key uses the FULL model token as stored in nbData keys
-  // (e.g., historical, ensemble, ssp245_2041-2060). We keep that as `model`.
   return { raw, model: raw, scenario, timeframe, label: hz_formatModel(raw) }
 }
 hz_parseScenarioPick = (x) => {
@@ -1737,7 +1741,7 @@ hz_key1Resolved = hz_src1.resolvedKey
 hz_key2Resolved = hz_src2.resolvedKey
 
 // Total exposure denominator parquet (used for Relative % and 'no hazard' derivations)
-hz_denomUrl = "https://digital-atlas.s3.amazonaws.com/domain=exposure/type=combined/source=glw4-2020_spam2020AA/region=ssa/processing=atlas-harmonized/variable=crop-livestock_all.parquet"
+hz_denomUrl = "https://digital-atlas.s3.amazonaws.com/domain=exposure/type=combined/source=glw4-2020_spam2020AA/region=ssa/processing=atlas-harmonized/variable=vop_nominal-usd-2015.parquet"
 ```
 
 ```{ojs}
@@ -1760,7 +1764,10 @@ hz_advancedSummary = {
   return `${v} · ${p} · ${s} · ${m}`
 }
 
-hz_globalAdvancedControlsPanel = html`
+mutable hz_advOpen = false
+
+hz_globalAdvancedControlsPanel = {
+  const el = html`
   <details class="hz-furl hz-furl--advanced">
     <summary>
       <span>Advanced filters</span>
@@ -1800,6 +1807,11 @@ hz_globalAdvancedControlsPanel = html`
     </div>
   </details>
 `
+  // Preserve open/closed state across re-renders
+  el.open = mutable hz_advOpen
+  el.addEventListener('toggle', () => (mutable hz_advOpen = el.open))
+  return el
+}
 
 
 // ------------------------------------------------------------
@@ -1875,8 +1887,6 @@ hz_sharedFiltersLinkPanel = (targetId = "q1") => {
 ```{ojs}
 //| output: false
 // Admin name tuples (admin0/admin1/admin2) for cascading selectors.
-// Uses the shared local component: components/_atlasBoundaries.ojs
-// (No remote parquet needed.)
 hz_adminNames = {
   try {
     const { admin2 } = await getAdminBoundaries([2])
@@ -2081,7 +2091,7 @@ hz_makeMultiSelect = ({
 //| output: false
 // Geography selectors (standard Atlas boundary UI)
 viewof hz_admin0 = renderA0Multi({ key: "shared", maxSelections: 8 })
-viewof hz_admin1 = renderA1Multi({ key: "shared", a0: viewof hz_admin0, maxSelections: 12 })
+viewof hz_admin1 = renderA1Multi({ key: "shared", a0: viewof hz_admin0, maxSelections: 500 })
 viewof hz_admin2 = renderA2Multi({ key: "shared", a0: viewof hz_admin0, a1: viewof hz_admin1, maxSelections: 20 })
 
 // Render the 3 selectors with the shared input template
@@ -2746,15 +2756,7 @@ return { ok: true, body: { left, right, denom } }
 
 ```{ojs}
 //| output: false
-// Question routing (stacked Q1–Q4). For incremental dev, Q1 is the only wired question for now.
 hz_activeQuestion = "q1"
-
-hz_dashTitle = ({
-  q1: "Total exposure by hazard",
-  q2: "Total exposure by crop",
-  q3: "Hazard composition by crop",
-  q4: "Exposure by administrative area"
-})[hz_activeQuestion] || "Dashboard"
 
 hz_dashSub = ({
   q1: "Compare Left vs Right (side-by-side or Δ). Filters: scenarios, geography, commodities.",
@@ -2872,7 +2874,7 @@ hz_chartRows = {
 
 ```{ojs}
 //| output: false
-// Build Q1 UpSet chart (Shiny/prototype parity)
+// Build Q1 UpSet chart
 hz_q1Chart = {
   // numeric guard (prevents NaN propagating into Plot scales)
   const num = (x) => {
@@ -2931,7 +2933,6 @@ hz_q1Chart = {
   })()
 
   // Generate a complete set of combinations when manageable (<=4 sets).
-  // This matches Shiny's behavior of keeping "missing" intersections as 0.
   const combos = (() => {
     if (baseSets.length >= 2 && baseSets.length <= 4) {
       const arr = baseSets
@@ -3022,7 +3023,11 @@ hz_q1Chart = {
       },
       marks: [
         Plot.ruleY([0]),
-        Plot.barY(data, { x: "hazard", y: "value" }),
+        Plot.barY(data, {
+          x: "hazard",
+          y: "value",
+          tip: { format: { hazard: true, value: fmtY } }
+        }),
         Plot.text(data, {
           x: "hazard",
           y: "value",
@@ -3116,13 +3121,6 @@ hz_q2_sideReq = (src, scen) => ({
   commodity_group: hz_selectedCommodGroup
 })
 
-// API calls (no hz_activeQuestion gate)
-// API call (Q2) — Shiny-aligned data feed
-// We use the dedicated /api/v1/hz/q2 endpoint so we can:
-// - pull hazard×crop rows for both scenarios
-// - pull denom totals per crop (for "no hazard" + true % of total exposure)
-//
-// Note: this patch focuses on DATA ONLY (no chart changes yet).
 hz_q2ReqBody = (() => {
   if (!hz_q2ReqOk.ok) return { ok: false, error: hz_q2ReqOk.error, body: null }
 
@@ -3168,7 +3166,6 @@ hz_q2Resp = hz_q2ReqBody.ok
   ? await hz_keepScroll(hz_apiDebouncedCached("q2", "/api/v1/hz/q2", hz_q2ReqBody.body, { ttlMs: 300000, debounceMs: 250 }))
   : { ok: false, error: hz_q2ReqBody.error, left: [], right: [], denom_by_crop: null, denom: null, cached: false, t_ms: 0 }
 
-// Back-compat shims so existing Q2 chart/table continues to render while we incrementally migrate.
 hz_q2RespL = ({
   ok: !!hz_q2Resp?.ok,
   cached: !!hz_q2Resp?.cached,
@@ -3195,9 +3192,6 @@ hz_q2Meta = ({
   error: hz_q2RespL?.error || hz_q2RespR?.error || null
 })
 
-// ---- Shiny-style derived tables (DATA ONLY) ----
-
-// denom map: crop -> total exposure
 hz_q2DenomMap = {
   const m = new Map()
   for (const d of (hz_q2DenomByCrop ?? [])) {
@@ -3222,7 +3216,6 @@ hz_q2HazMap = (rows, hazLabel) => {
   return m
 }
 
-// Add "no hazard" per crop for each scenario: total exposure - any hazard exposure
 hz_q2RowsL_withNoHazard = {
   const base = (hz_q2DataL ?? []).slice()
   const anyMap = hz_q2HazMap(base, "any")
@@ -3338,7 +3331,7 @@ hz_q2NonCompoundBuckets = (rows) => {
   return out
 }
 
-// Build merged hazard×crop rows (Shiny haz_merge style): total1/total2/diff and percent fields (when denom exists)
+// Build merged hazard×crop rows: total1/total2/diff and percent fields (when denom exists)
 hz_q2HazMerge = (rowsL, rowsR) => {
   const key = (d) => `${d?.crop ?? ""}||${d?.hazard ?? ""}`
   const mapL = new Map((rowsL ?? []).map(d => [key(d), Number(d?.total ?? 0)]))
@@ -3369,7 +3362,7 @@ hz_q2HazMerge = (rowsL, rowsR) => {
   return out
 }
 
-// Derived hazard sets (ready for Patch 2 charts)
+// Derived hazard sets
 hz_q2Set_compound_full = hz_q2HazMerge(hz_q2CompoundExclusive(hz_q2RowsL_withNoHazard), hz_q2CompoundExclusive(hz_q2RowsR_withNoHazard))
 hz_q2Set_compound_simple = hz_q2HazMerge(hz_q2CompoundSimplified(hz_q2CompoundExclusive(hz_q2RowsL_withNoHazard)), hz_q2CompoundSimplified(hz_q2CompoundExclusive(hz_q2RowsR_withNoHazard)))
 hz_q2Set_noncompound = hz_q2HazMerge(hz_q2NonCompoundBuckets(hz_q2RowsL_withNoHazard), hz_q2NonCompoundBuckets(hz_q2RowsR_withNoHazard))
@@ -3420,13 +3413,11 @@ hz_q2Chart = {
   const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
   const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
 
-  // Match Shiny plot_inputs(): pick value columns based on Show % and Show differences
+
   const valLeft  = hz_q2_relative ? "perc1" : "total1"
   const valRight = hz_q2_relative ? "perc2" : "total2"
   const valDiff  = hz_q2_relative ? "perc_diff" : "diff"
 
-  // Shiny q2_fun() ranks crops by total exposure excluding "no hazard";
-  // in diff mode it uses only positive changes to rank the Y axis.
   const rankBy = (valKey, onlyPositive = false) => {
     const m = new Map()
     for (const r of rows) {
@@ -3498,22 +3489,27 @@ hz_q2Chart = {
       }))
 
     const groupedMarks = (rows, hazards) => {
+      // Use a *single* bar mark with per-row dy offsets to avoid overlapping tooltips
       const n = hazards.length
       const step = 12 // px spacing between hazard bars within the same crop band
-      return hazards.map((h, i) => Plot.barX(
-        rows.filter(d => d.hazard === h),
-        {
+      const idx = new Map(hazards.map((h, i) => [h, i]))
+      const data2 = rows.map((d) => ({
+        ...d,
+        __dy: ((idx.get(d.hazard) ?? 0) - (n - 1) / 2) * step
+      }))
+      return [
+        Plot.barX(data2, {
           x: "value",
           y: "crop",
           fill: "hazard",
-          dy: (i - (n - 1) / 2) * step,
+          dy: "__dy",
           insetTop: 5,
           insetBottom: 5,
           tip: {
             format: { crop: true, hazard: true, value: hz_q2_relative ? fmtPct : fmtAbs }
           }
-        }
-      ))
+        })
+      ]
     }
 
     const marks = hz_q2_showCompound
@@ -3534,6 +3530,8 @@ hz_q2Chart = {
       <div class="hz-mini hz-mini--stack">
         <div class="hz-mini__title">${title}</div>
         ${Plot.plot({
+          className: "hz-plot--q2",
+          style: { fontSize: "14px" },
           height,
           width: plotW,
           marginLeft: 180,
@@ -3573,61 +3571,28 @@ const xLabelDiff = hz_q2_relative
     : "Δ exposure (Right − Left)"
 
   const groupedMarks = (rows, hazards) => {
-
-
-    const n = hazards.length
-
-
-    const step = 12 // px spacing between hazard bars within the same crop band
-
-
-    return hazards.map((h, i) => Plot.barX(
-
-
-      rows.filter(d => d.hazard === h),
-
-
-      {
-
-
-        x: "value",
-
-
-        y: "crop",
-
-
-        fill: "hazard",
-
-
-        dy: (i - (n - 1) / 2) * step,
-
-
-        insetTop: 5,
-
-
-        insetBottom: 5,
-
-
-        tip: {
-
-
-          format: { crop: true, hazard: true, value: hz_q2_relative ? fmtPct : fmtAbs }
-
-
-        }
-
-
+  // Use a *single* bar mark with per-row dy offsets to avoid overlapping tooltips
+  const n = hazards.length
+  const step = 12 // px spacing between hazard bars within the same crop band
+  const idx = new Map(hazards.map((h, i) => [h, i]))
+  const data2 = rows.map((d) => ({
+    ...d,
+    __dy: ((idx.get(d.hazard) ?? 0) - (n - 1) / 2) * step
+  }))
+  return [
+    Plot.barX(data2, {
+      x: "value",
+      y: "crop",
+      fill: "hazard",
+      dy: "__dy",
+      insetTop: 5,
+      insetBottom: 5,
+      tip: {
+        format: { crop: true, hazard: true, value: hz_q2_relative ? fmtPct : fmtAbs }
       }
-
-
-    ))
-
-
-  }
-
-
-  
-
+    })
+  ]
+}
 
   const diffMarks = hz_q2_showCompound
       ? (() => {
@@ -3657,6 +3622,8 @@ const xLabelDiff = hz_q2_relative
 return html`
     <div class="hz-legendRow">${legend}</div>
     ${Plot.plot({
+          className: "hz-plot--q2",
+          style: { fontSize: "14px" },
       height,
       marginLeft: 180,
       marginRight: 18,
@@ -3674,7 +3641,7 @@ return html`
 ```{ojs}
 //| output: false
 // ----------------------------
-// Q2 — summary table (AtlasTable, same style as Q1)
+// Q2 — summary table
 // ----------------------------
 hz_q2TableView = {
   const rows = Array.isArray(hz_q2Rows) ? hz_q2Rows : []
@@ -3744,7 +3711,7 @@ hz_q2TableView = {
 ```{ojs}
 //| output: false
 // ----------------------------
-// Q2 — Dynamic Insights (prototype parity)
+// Q2 — Dynamic Insights
 // ----------------------------
 hz_q2InsightView = {
   const ok = !!hz_q2Meta?.ok
@@ -4054,7 +4021,7 @@ hz_q3Chart = {
         marginRight: 18,
         marginTop: 10,
         marginBottom: 28,
-        x: { label: (hz_varLabelAbs ?? "Exposure"), grid: true },
+        x: { label: (hz_varLabelAbs ?? "Exposure"), grid: true, tickFormat: fmtAbs },
         y: { domain: crops, label: null },
         color,
           marks: [
@@ -4093,8 +4060,7 @@ hz_q3Chart = {
 
 hz_mapLevelNote = _lang({
   en: "Map level is auto-detected from the selected geography filters.",
-  fr: "Le niveau de la carte est détecté automatiquement à partir des filtres géographiques sélectionnés.",
-  pt: "O nível do mapa é detectado automaticamente a partir dos filtros geográficos selecionados."
+  fr: "Le niveau de la carte est détecté automatiquement à partir des filtres géographiques sélectionnés."
 })
 // Q4 — totals by admin area
 // ----------------------------
@@ -4115,7 +4081,7 @@ hz_q4RespR = await hz_keepScroll(
   })
 )
 
-// Hazard-by-admin rows (Patch 2): used for Q4 stacked bars + compound hazard modes
+// Hazard-by-admin rows
 hz_q4HazRespL = await hz_keepScroll(
   hz_apiDebouncedCached("q4HazL", "/api/v1/hz/by-admin", hz_sideReq(hz_src1, hz_s1, hz_q4ReqHazExtra), {
     ttlMs: 300000,
@@ -4150,10 +4116,10 @@ hz_q4HazMeta = ({
 })
 
 // ------------------------------------------------------------
-// Q5 — Scenario trajectories + uncertainty (Patch 4)
+// Q5 — Scenario trajectories + uncertainty
 // ------------------------------------------------------------
 
-// Q5 controls (closer to the Shiny layout)
+// Q5 controls
 viewof hz_q5_view = Inputs.radio(
   new Map([
     ["Chart", "chart"],
@@ -4184,7 +4150,7 @@ viewof hz_q5_scale = Inputs.radio(
 )
 
 viewof hz_q5_showUncertainty = Inputs.toggle({ label: "", value: true })
-viewof hz_q5_showLines = Inputs.toggle({ label: "", value: false })
+viewof hz_q5_showLines = Inputs.toggle({ label: "", value: true })
 
 viewof hz_q5_chartHeight = Inputs.range([420, 980], {
   label: "",
@@ -4192,7 +4158,7 @@ viewof hz_q5_chartHeight = Inputs.range([420, 980], {
   value: 720
 })
 
-// Build scenario/timeframe pairs from the shared hz_scenXTime list (Q5 always requests the full grid)
+// Build scenario/timeframe pairs from the shared hz_scenXTime list 
 hz_q5ScenarioPairsUniq = {
   const seen = new Set()
   const out = []
@@ -4209,7 +4175,7 @@ hz_q5ScenarioPairsUniq = {
   return out
 }
 
-// Q5 request (uses historic + ensemble datasets if available)
+// Q5 request
 hz_q5Req = {
   const urls = [hz_src1?.url, hz_src2?.url].filter(Boolean)
   if (!urls.length) return { ok: false, error: "Missing dataset_url(s) for Q5." }
@@ -4233,7 +4199,6 @@ hz_q5Req = {
   }
 }
 
-// Local busy flag (drives the chart overlay class)
 mutable hz_q5Busy = false
 
 hz_q5Resp = (hz_q5Req?.ok)
@@ -4268,7 +4233,7 @@ hz_q5TimeframeOptions = {
   const opts = Array.from(new Set((hz_q5SeriesAll ?? []).map(d => String(d?.timeframe ?? ""))))
     .filter((t) => t && !/hist|historic/i.test(t))
     .sort()
-  return opts.length ? opts : ["2021-2040", "2041-2060", "2061-2080"]
+  return opts.length ? opts : ["2021-2040", "2041-2060", "2061-2080", "2081-2100"]
 }
 
 viewof hz_q5_scenarios = Inputs.select(hz_q5ScenarioOptions, {
@@ -4289,16 +4254,46 @@ hz_q5RowsClean = {
     const v = Number(x)
     return Number.isFinite(v) ? v : null
   }
-  return (hz_q5SeriesAll ?? []).map(d => ({
-    scenario: String(d?.scenario ?? ""),
-    timeframe: String(d?.timeframe ?? ""),
-    year: n(d?.year),
-    hazard: String(d?.hazard ?? ""),
-    value: n(d?.value),
-    value_sd: n(d?.value_sd),
-    value_low: n(d?.value_low),
-    value_high: n(d?.value_high),
-  }))
+
+  
+  const pick = (d, keys) => {
+    for (const k of keys) {
+      const v = d?.[k]
+      if (v != null && v !== "") return v
+    }
+    return null
+  }
+
+  return (hz_q5SeriesAll ?? []).map(d => {
+    const value = n(d?.value)
+    const value_sd = n(d?.value_sd)
+
+    
+    let value_low = n(pick(d, ["value_low", "ci_low", "p05", "q05", "lower", "low"]))
+    let value_high = n(pick(d, ["value_high", "ci_high", "p95", "q95", "upper", "high"]))
+
+    let unc_kind = null
+    if (value_low != null && value_high != null) {
+      unc_kind = "ci"
+    } else if (value != null && value_sd != null) {
+      // Fallback: ±1 SD around the mean
+      value_low = value - value_sd
+      value_high = value + value_sd
+      unc_kind = "sd"
+    }
+
+    return {
+      scenario: String(d?.scenario ?? ""),
+      timeframe: String(d?.timeframe ?? ""),
+      year: n(d?.year),
+      hazard: String(d?.hazard ?? ""),
+      value,
+      value_sd,
+      value_low,
+      value_high,
+      unc_kind
+    }
+  })
 }
 
 hz_q5BaselinesByHazard = {
@@ -4375,7 +4370,7 @@ hz_q5PlotRows = {
   return out
 }
 
-// Jitter x positions slightly by scenario (so error bars/points don't sit exactly on top of each other)
+
 hz_q5PlotRowsJittered = {
   const rows = hz_q5PlotRows ?? []
   if (!rows.length) return []
@@ -4424,7 +4419,7 @@ hz_q5Plot = {
     .filter(Number.isFinite)
     .sort((a, b) => a - b)
 
-  // Domain based on the actually plotted x positions (xj), so the chart never collapses to one edge.
+  
   const xVals = (rowsJ ?? []).map(d => Number(d.xj)).filter(Number.isFinite)
   const xMin = xVals.length ? Math.min(...xVals) : (years.length ? years[0] : null)
   const xMax = xVals.length ? Math.max(...xVals) : (years.length ? years[years.length - 1] : null)
@@ -4432,9 +4427,12 @@ hz_q5Plot = {
   const padYears = (xMin != null && xMax != null && xMin === xMax) ? 5 : 2
   const xDomain = (xMin != null && xMax != null) ? [xMin - padYears, xMax + padYears] : undefined
 
-  // Only show ticks that fall inside the domain (avoids stray “baseline” years pushing everything right)
+ 
   const tickYears = xDomain ? years.filter(y => y >= xDomain[0] && y <= xDomain[1]) : years
-  const fmt = (v) => hz_formatNumber(v, { digits: 2, compact: true })
+  const fmtAbs = (v) => hz_formatNumber(v, { digits: 2, compact: true })
+  const fmtIdx = (v) => hz_formatNumber(v, { digits: 0, compact: false })
+  const fmt = (v) => (scaleMode === "idx" ? fmtIdx(v) : fmtAbs(v))
+  const tickFmtY = (d) => (scaleMode === "idx" ? fmtIdx(d) : fmtAbs(d))
   const fmtScenario = (s) => String(s ?? "").toUpperCase()
   const yLabel = (scaleMode === "idx")
     ? "Exposure index (historic = 100)"
@@ -4453,7 +4451,8 @@ hz_q5Plot = {
       `${fmt(d.value)}`
     ]
     if (showUnc && d.value_low != null && d.value_high != null) {
-      parts.push(`CI: ${fmt(d.value_low)}–${fmt(d.value_high)}`)
+      const lab = (d.unc_kind === "sd") ? "±1 SD" : "CI"
+      parts.push(`${lab}: ${fmt(d.value_low)}–${fmt(d.value_high)}`)
     }
     return parts.join("\n")
   }
@@ -4479,7 +4478,9 @@ hz_q5Plot = {
       y1: "value_low",
       y2: "value_high",
       stroke: "scenario",
-      opacity: 0.35,
+      opacity: 0.45,
+      strokeWidth: 2,
+      strokeLinecap: "round",
       ...commonFy
     })] : []),
 
@@ -4497,16 +4498,18 @@ hz_q5Plot = {
       stroke: "scenario",
       fill: "scenario",
       r: 3,
-      tip: true,
       title: titleFor,
       ...commonFy
     })
   ]
+  const w = (typeof width === "number" && Number.isFinite(width)) ? width : 1100
+  const plotWidth = Math.min(1400, w)
 
   const plotOpts = {
+    width: plotWidth,
     height: Number(hz_q5_chartHeight ?? 720),
     marginLeft: 84,
-    marginRight: 18,
+    marginRight: 96,
     marginTop: 10,
     marginBottom: 44,
     x: {
@@ -4517,12 +4520,12 @@ hz_q5Plot = {
       tickFormat: (d) => String(Math.round(d)),
       nice: false
     },
-    y: { label: yLabel, grid: true },
+    y: { label: yLabel, grid: true, tickFormat: tickFmtY },
     color: { legend: true, label: "Scenario" },
     marks
   }
   if (modeView === "all") {
-    plotOpts.fy = { label: null, domain: ["any", "dry (any)", "heat (any)", "wet (any)"] }
+    plotOpts.fy = { label: null, domain: ["any", "dry (any)", "heat (any)", "wet (any)"], axis: "right" }
   }
 
   return Plot.plot(plotOpts)
@@ -4534,8 +4537,7 @@ hz_q5_chartHost = html`
     <div class="hz-chartNote">
       ${md`${_lang({
         en: "Dashed lines show the historic (baseline) exposure. Error bars show uncertainty across GCMs where available.",
-        fr: "Les lignes pointillées indiquent l’exposition historique (référence). Les barres d’erreur montrent l’incertitude entre les GCM lorsque disponible.",
-        pt: "Linhas tracejadas mostram a exposição histórica (linha de base). As barras de erro mostram a incerteza entre GCMs quando disponível."
+        fr: "Les lignes pointillées indiquent l’exposition historique (référence). Les barres d’erreur montrent l’incertitude entre les GCM lorsque disponible."
       })}`}
     </div>
   </div>
@@ -4557,7 +4559,7 @@ hz_q5_settingsWrap = html`
 `
 
 // ------------------------------------------------------------
-// Q5 — Summary table + dynamic insights (Patch 5)
+// Q5 — Summary table + dynamic insights
 // ------------------------------------------------------------
 
 // Baseline for a hazard under the current scale
@@ -4717,7 +4719,7 @@ hz_q5_wireViewToggle = {
   return null
 }
 
-// Hide/disable the hazard selector unless "Single hazard" is selected (wired via DOM events to avoid rerender)
+// Hide/disable the hazard selector unless "Single hazard" is selected
 hz_q5_wireHazardCtl = {
   const modeEl = viewof hz_q5_viewMode
   const hazEl = viewof hz_q5_hazard
@@ -4878,13 +4880,11 @@ hz_q5Insight = {
   const lead = (scaleMode === "idx")
     ? _lang({
         en: "Insights below use the latest selected period per scenario, indexed to the historic baseline (100).",
-        fr: "Les aperçus ci-dessous utilisent la dernière période sélectionnée par scénario, indexée à la référence historique (100).",
-        pt: "Os insights abaixo usam o último período selecionado por cenário, indexado à linha de base histórica (100)."
+        fr: "Les aperçus ci-dessous utilisent la dernière période sélectionnée par scénario, indexée à la référence historique (100)."
       })
     : _lang({
         en: "Insights below use the latest selected period per scenario, compared to the historic baseline.",
-        fr: "Les aperçus ci-dessous utilisent la dernière période sélectionnée par scénario, comparée à la référence historique.",
-        pt: "Os insights abaixo usam o último período selecionado por cenário, comparado à linha de base histórica."
+        fr: "Les aperçus ci-dessous utilisent la dernière période sélectionnée par scénario, comparée à la référence historique."
       })
 
   return html`
@@ -4894,8 +4894,7 @@ hz_q5Insight = {
       <div>
         <div class="hz-q4Subhead">${md`${_lang({
           en: "Largest increases vs baseline (latest period)",
-          fr: "Plus fortes hausses vs référence (dernière période)",
-          pt: "Maiores aumentos vs linha de base (último período)"
+          fr: "Plus fortes hausses vs référence (dernière période)"
         })}`}</div>
         ${hz_q5_smallTable(colsMain, topInc.map(rowToObj))}
       </div>
@@ -4903,8 +4902,7 @@ hz_q5Insight = {
       <div>
         <div class="hz-q4Subhead">${md`${_lang({
           en: "Smallest change vs baseline (latest period)",
-          fr: "Plus faible variation vs référence (dernière période)",
-          pt: "Menor variação vs linha de base (último período)"
+          fr: "Plus faible variation vs référence (dernière période)"
         })}`}</div>
         ${hz_q5_smallTable(colsMain, lowInc.map(rowToObj))}
       </div>
@@ -4912,20 +4910,17 @@ hz_q5Insight = {
       <div>
         <div class="hz-q4Subhead">${md`${_lang({
           en: "Uncertainty hotspots (widest confidence intervals)",
-          fr: "Points chauds d’incertitude (IC les plus larges)",
-          pt: "Pontos críticos de incerteza (IC mais amplos)"
+          fr: "Points chauds d’incertitude (IC les plus larges)"
         })}`}</div>
         ${hz_q5_smallTable(colsUnc, uncRows)}
         ${uncRows.length ? null : html`<div class="hz-muted">${md`${hasUnc
           ? _lang({
               en: "Uncertainty bars are unavailable for the current selection (confidence intervals are missing or zero-width).",
-              fr: "Les barres d’incertitude ne sont pas disponibles pour la sélection actuelle (IC manquants ou de largeur nulle).",
-              pt: "Barras de incerteza indisponíveis para a seleção atual (intervalos ausentes ou de largura zero)."
+              fr: "Les barres d’incertitude ne sont pas disponibles pour la sélection actuelle (IC manquants ou de largeur nulle)."
             })
           : _lang({
               en: "Uncertainty bars are unavailable for the current selection (no `value_sd` in the source).",
-              fr: "Les barres d’incertitude ne sont pas disponibles pour la sélection actuelle (pas de `value_sd` dans la source).",
-              pt: "Barras de incerteza indisponíveis para a seleção atual (sem `value_sd` na fonte)."
+              fr: "Les barres d’incertitude ne sont pas disponibles pour la sélection actuelle (pas de `value_sd` dans la source)."
             })}`}</div>`}
       </div>
     </div>
@@ -4947,7 +4942,7 @@ hz_q4Rows = {
   return rows.slice(0, Math.max(1, Number(hz_topN ?? 10) || 10))
 }
 
-// Q4 helper rows: normalize hazard-by-admin payload (fallbacks to totals-only rows if API not patched yet)
+// Q4 helper rows: normalize hazard-by-admin payload
 hz_q4HazRowsL_norm = {
   const src = Array.isArray(hz_q4HazDataL) && hz_q4HazDataL.length ? hz_q4HazDataL : (hz_q4DataL ?? []).map((d) => ({ ...d, hazard: "any" }))
   return src
@@ -5255,7 +5250,7 @@ hz_q4Chart = {
 }
 
 
-// Q4 map view alias (compat)
+// Q4 map view alias
 hz_mapView = hz_mapPlot
 
 // ------------------------------------------------------------
@@ -5473,7 +5468,7 @@ hz_registerUi = {
   return null
 }
 
-// Dashboard UI (static shell) — avoid re-rendering the whole card on view toggle.
+// Dashboard UI 
 hz_q1_settingsWrap = {
   const el = html`
   <div class="hz-qToolbar__right">
@@ -5507,7 +5502,7 @@ hz_q1_tableCard = {
   return el
 }
 
-// Wrap both result cards; we toggle visibility (display) instead of swapping nodes.
+// Wrap both result cards; 
 hz_q1_resultsWrap = {
   const wrap = html`<div class="hz-qResults"></div>`
   wrap.append(hz_q1_chartCard, hz_q1_tableCard)
@@ -5575,7 +5570,7 @@ viewof hz_q3_chartHeight = Inputs.range([360, 900], { label: "", step: 10, value
 viewof hz_q4_viewMode = hz_noJumpInput(Inputs.radio(["chart", "table"], {
   label: "",
   value: "chart",
-  format: (v) => ({ chart: _lang({ en: "Chart", fr: "Graphique", pt: "Gráfico" }), table: _lang({ en: "Summary table", fr: "Tableau", pt: "Tabela" }) }[v] ?? v)
+  format: (v) => ({ chart: _lang({ en: "Chart", fr: "Graphique" }), table: _lang({ en: "Summary table", fr: "Tableau" }) }[v] ?? v)
 }))
 hz_q4_viewMode.classList?.add?.("hz-viewToggle")
 
@@ -5601,7 +5596,7 @@ viewof hz_q2_scen2 = Inputs.select(hz_scenOptions ?? [], { label: "Right", value
 viewof hz_q2_compareMode = Inputs.radio(["side", "diff"], { label: "Compare", value: "side", format: (v) => ({ side: "Side-by-side", diff: "Δ (Right − Left)" }[v] ?? v) })
 viewof hz_q2_method = Inputs.select(hz_methodOptions ?? [], { label: "Method", value: (hz_methodOptions ?? [])[0] ?? "auto" })
 
-// Commodities (enhanced multiselect, climateRationale-style)
+// Commodities
 viewof hz_q2_commodityGroup = Inputs.select(hz_commodityGroupOptions ?? [], { label: "Group", value: "crops", format: hz_commodityGroupLabel })
 hz_q2_commodityOptions = {
   const g = hz_q2_commodityGroup
@@ -5670,9 +5665,9 @@ viewof hz_q2_commodities = hz_safeEnhancedMultiSelect(
   { label: "Commodities", value: [] , placeholder: "Search commodities…" }
 )
 
-// Geography UI (exact Atlas boundary UI)
+// Geography UI
 viewof hz_q2_admin0 = renderA0Multi({ key: "q2", maxSelections: 8 })
-viewof hz_q2_admin1 = renderA1Multi({ key: "q2", a0: viewof hz_q2_admin0, maxSelections: 12 })
+viewof hz_q2_admin1 = renderA1Multi({ key: "q2", a0: viewof hz_q2_admin0, maxSelections: 500 })
 viewof hz_q2_admin2 = renderA2Multi({ key: "q2", a0: viewof hz_q2_admin0, a1: viewof hz_q2_admin1, maxSelections: 20 })
 hz_q2_geoUI = inputTemplate()([viewof hz_q2_admin0, viewof hz_q2_admin1, viewof hz_q2_admin2])
 
@@ -5744,7 +5739,7 @@ viewof hz_q3_commodities = hz_safeEnhancedMultiSelect(
 )
 
 viewof hz_q3_admin0 = renderA0Multi({ key: "q3", maxSelections: 8 })
-viewof hz_q3_admin1 = renderA1Multi({ key: "q3", a0: viewof hz_q3_admin0, maxSelections: 12 })
+viewof hz_q3_admin1 = renderA1Multi({ key: "q3", a0: viewof hz_q3_admin0, maxSelections: 500 })
 viewof hz_q3_admin2 = renderA2Multi({ key: "q3", a0: viewof hz_q3_admin0, a1: viewof hz_q3_admin1, maxSelections: 20 })
 hz_q3_geoUI = inputTemplate()([viewof hz_q3_admin0, viewof hz_q3_admin1, viewof hz_q3_admin2])
 hz_q3_geoFilter = ({ admin0: hz_normSel2(hz_q3_admin0), admin1: hz_normSel2(hz_q3_admin1), admin2: hz_normSel2(hz_q3_admin2) })
@@ -5773,7 +5768,7 @@ viewof hz_q4_commodities = hz_safeEnhancedMultiSelect(
 )
 
 viewof hz_q4_admin0 = renderA0Multi({ key: "q4", maxSelections: 8 })
-viewof hz_q4_admin1 = renderA1Multi({ key: "q4", a0: viewof hz_q4_admin0, maxSelections: 12 })
+viewof hz_q4_admin1 = renderA1Multi({ key: "q4", a0: viewof hz_q4_admin0, maxSelections: 500 })
 viewof hz_q4_admin2 = renderA2Multi({ key: "q4", a0: viewof hz_q4_admin0, a1: viewof hz_q4_admin1, maxSelections: 20 })
 hz_q4_geoUI = inputTemplate()([viewof hz_q4_admin0, viewof hz_q4_admin1, viewof hz_q4_admin2])
 hz_q4_geoFilter = ({ admin0: hz_normSel2(hz_q4_admin0), admin1: hz_normSel2(hz_q4_admin1), admin2: hz_normSel2(hz_q4_admin2) })
@@ -5817,7 +5812,7 @@ hz_q2_settingsWrap = html`
       <div class="hz-miniSetting"><span>Show compound hazards</span>${viewof hz_q2_showCompound}</div>
       <div class="hz-miniSetting"><span>Simplify compound hazards</span>${viewof hz_q2_simplifyCompound}</div>
       <div class="hz-miniSetting"><span>Include no hazard</span>${viewof hz_q2_includeNoHazard}</div>
-      ${hz_q2_difference ? html`<div class="hz-miniSetting"><span>Include decreases</span>${viewof hz_q2_includeDecreases}</div>` : ""}
+      <div class="hz-miniSetting" data-hz="q2-includeDecreases" style="visibility:hidden; pointer-events:none;"><span>Include decreases</span>${viewof hz_q2_includeDecreases}</div>
       <div class="hz-miniSetting hz-miniSetting--range"><span>Number of commodities</span>${viewof hz_q2_topN}</div>
       <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q2_chartHeight}</div>
     </div>
@@ -5858,6 +5853,14 @@ hz_q2_applyView = {
   try { hz_q2_chartCard.style.display = (mode === "chart") ? "" : "none"; } catch (_) {}
   try { hz_q2_tableCard.style.display = (mode === "table") ? "" : "none"; } catch (_) {}
   try { hz_q2_settingsWrap.style.visibility = "visible"; } catch (_) {}
+  // Keep toolbar stable: toggle 'Include decreases' without re-rendering (prevents scroll jumps)
+  try {
+    const el = hz_q2_settingsWrap.querySelector('[data-hz="q2-includeDecreases"]')
+    if (el) {
+      el.style.visibility = hz_q2_difference ? "visible" : "hidden"
+      el.style.pointerEvents = hz_q2_difference ? "" : "none"
+    }
+  } catch (_) {}
   return null;
 };
 
@@ -6480,7 +6483,7 @@ hz_q3Charts = {
           hazard: haz,
           scenario: "Δ",
           crop,
-          value: toDisplayAbs(d),
+          value: toDisplayAbs(includeDecreases ? d : pos),
           pos: toDisplayAbs(pos),
           neg: includeDecreases ? toDisplayAbs(neg) : 0,
           signed: d
@@ -6515,7 +6518,7 @@ hz_q3Charts = {
       hazard: haz,
       scenario: "Δ",
       crop: "Other",
-      value: toDisplayAbs(otherDPos + otherDNeg),
+      value: toDisplayAbs(includeDecreases ? (otherDPos + otherDNeg) : (otherDPos)),
       pos: toDisplayAbs(otherDPos),
       neg: includeDecreases ? toDisplayAbs(otherDNeg) : 0,
       signed: otherDPos + otherDNeg
@@ -6564,15 +6567,30 @@ The biggest scenario shift is **${prettyHaz(topD?.hazard)}**, which **${(topD?.d
   const colW = Math.max(minCol, Math.floor((w - gap * (cols - 1)) / cols))
   const h = Math.max(360, Number(hz_q3_chartHeight) || 520)
 
-  const allVals = []
+  // Compute y-domain from stacked totals (not individual segments), so bars never overflow.
+  const scenarios = ["S1", "S2", "Δ"]
+  let yMax = 0
+  let yMin = 0
+
   for (const p of panels) {
-    for (const r of p.rows) {
-      allVals.push(num(r.pos))
-      if (includeDecreases) allVals.push(num(r.neg))
+    const sumsPos = new Map()
+    const sumsNeg = new Map()
+
+    for (const r of (p.rows ?? [])) {
+      const s = String(r?.scenario ?? "")
+      const v = num(r?.value)
+      sumsPos.set(s, (sumsPos.get(s) || 0) + Math.max(0, v))
+      sumsNeg.set(s, (sumsNeg.get(s) || 0) + Math.min(0, v))
+    }
+
+    for (const s of scenarios) {
+      yMax = Math.max(yMax, sumsPos.get(s) || 0)
+      yMin = Math.min(yMin, sumsNeg.get(s) || 0)
     }
   }
-  const yMax = Math.max(0, ...allVals)
-  const yMin = includeDecreases ? Math.min(0, ...allVals) : 0
+
+  if (!includeDecreases) yMin = 0
+
   const yPadMax = yMax > 0 ? yMax * 1.08 : 1
   const yPadMin = yMin < 0 ? yMin * 1.08 : 0
   const yDomain = [yPadMin, yPadMax]
@@ -6585,44 +6603,34 @@ The biggest scenario shift is **${prettyHaz(topD?.hazard)}**, which **${(topD?.d
     const tipFmt = {
       scenario: true,
       crop: true,
-      value: hz_q3_relative ? fmtPct : fmtAbs,
-      signed: (x) => hz_q3_relative ? fmtPct(x) : fmtAbs(x)
+      value: hz_q3_relative ? fmtPct : fmtAbs
     }
 
-    const posMark = Plot.barY(data, Plot.stackY({
+    const barMark = Plot.barY(data, Plot.stackY({
       x: "scenario",
-      y: "pos",
+      y: "value",
       fill: "crop",
       tip: { format: tipFmt }
     }))
 
-    const negMark = includeDecreases
-      ? Plot.barY(data, Plot.stackY({
-          x: "scenario",
-          y: "neg",
-          fill: "crop",
-          tip: { format: tipFmt }
-        }))
-      : null
-
     return html`
-      <div class="hz-sideCard">
+      <div class="hz-sideCard hz-sideCard--plot">
         <div class="hz-sideCard__body">
           <div class="hz-mini__title">${prettyHaz(panel.haz)}</div>
           ${Plot.plot({
             width: colW,
             height: h,
+            style: { overflow: "visible" },
             marginLeft: showY ? 58 : 14,
             marginRight: 10,
             marginTop: 10,
             marginBottom: 28,
             x: { domain: ["S1","S2","Δ"], label: null },
-            y: { label: showY ? yLabel : null, grid: true, axis: showY ? "left" : null, domain: yDomain },
+            y: { label: showY ? yLabel : null, grid: true, axis: showY ? "left" : null, domain: yDomain, tickFormat: hz_q3_relative ? fmtPct : fmtAbs },
             color: { domain: cropDomain, scheme: "tableau10", legend: false },
             marks: [
               Plot.ruleY([0]),
-              posMark,
-              ...(negMark ? [negMark] : [])
+              barMark
             ]
           })}
         </div>
@@ -6979,22 +6987,20 @@ hz_q4RawRecordsView = {
       ${shown.length < rows.length
         ? _lang({
             en: `Showing ${shown.length} of ${rows.length} rows`,
-            fr: `Affichage de ${shown.length} sur ${rows.length} lignes`,
-            pt: `Mostrando ${shown.length} de ${rows.length} linhas`
+            fr: `Affichage de ${shown.length} sur ${rows.length} lignes`
           })
         : _lang({
             en: `${rows.length} rows`,
-            fr: `${rows.length} lignes`,
-            pt: `${rows.length} linhas`
+            fr: `${rows.length} lignes`
           })}
     </div>
     <div style="max-height:420px;overflow:auto;border:1px solid rgba(148,163,184,.35);border-radius:10px;">
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead style="position:sticky;top:0;background:rgba(248,250,252,.98);z-index:1;">
           <tr>
-            <th style="text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;">${_lang({en:"Side",fr:"Côté",pt:"Lado"})}</th>
-            <th style="text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;">${_lang({en:"Geography",fr:"Géographie",pt:"Geografia"})}</th>
-            <th style="text-align:right;padding:8px;border-bottom:1px solid #e2e8f0;">${hz_rel ? _lang({en:"Percent",fr:"Pourcentage",pt:"Percentual"}) : (hz_varLabelAbs ?? _lang({en:"Exposure",fr:"Exposition",pt:"Exposição"}))}</th>
+            <th style="text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;">${_lang({en:"Side",fr:"Côté"})}</th>
+            <th style="text-align:left;padding:8px;border-bottom:1px solid #e2e8f0;">${_lang({en:"Geography",fr:"Géographie"})}</th>
+            <th style="text-align:right;padding:8px;border-bottom:1px solid #e2e8f0;">${hz_rel ? _lang({en:"Percent",fr:"Pourcentage"}) : (hz_varLabelAbs ?? _lang({en:"Exposure",fr:"Exposition"}))}</th>
           </tr>
         </thead>
         <tbody>
@@ -8247,7 +8253,7 @@ NavbarLangSelector(languages, masterLanguage)
 // This cell contains the notebook title + section headings, driven by nbText.json
 nbText = await FileAttachment("/data/hazardExposure/nbText.json").json();
 
-hz_textObj = (x) => x ?? { en: "", fr: "", pt: "" };
+hz_textObj = (x) => x ?? { en: "", fr: "" };
 
 nbTitle = _lang(hz_textObj(nbText?.title));
 heading1 = _lang(hz_textObj(nbText?.sections?.overview?.title));
@@ -8271,18 +8277,15 @@ q4IntroText = _lang(hz_textObj(nbText?.sections?.q4?.introText));
 q4DetailText = _lang(hz_textObj(nbText?.sections?.q4?.detailText));
 q5Title = _lang(hz_textObj(nbText?.sections?.q5?.title) ?? {
   en: "Q5 How does exposure change over time across scenarios (and how uncertain are the estimates)?",
-  fr: "Q5 Comment l’exposition évolue-t-elle dans le temps selon les scénarios (et quelle est l’incertitude) ?",
-  pt: "Q5 Como a exposição muda ao longo do tempo entre cenários (e quão incertas são as estimativas)?"
+  fr: "Q5 Comment l’exposition évolue-t-elle dans le temps selon les scénarios (et quelle est l’incertitude) ?"
 });
 q5IntroText = _lang(hz_textObj(nbText?.sections?.q5?.introText) ?? {
   en: "Explore scenario trajectories over time and the uncertainty across climate model ensembles.",
-  fr: "Explorer les trajectoires des scénarios dans le temps et l’incertitude entre les ensembles de modèles climatiques.",
-  pt: "Explore trajetórias de cenários ao longo do tempo e a incerteza entre conjuntos de modelos climáticos."
+  fr: "Explorer les trajectoires des scénarios dans le temps et l’incertitude entre les ensembles de modèles climatiques."
 });
 q5DetailText = _lang(hz_textObj(nbText?.sections?.q5?.detailText) ?? {
   en: "The chart shows median exposure for each scenario and time period. Error bars reflect variability across GCMs (where available). A dashed line indicates the historical baseline.",
-  fr: "Le graphique montre l’exposition médiane pour chaque scénario et période. Les barres d’erreur reflètent la variabilité entre les GCM (si disponible). Une ligne pointillée indique la base historique.",
-  pt: "O gráfico mostra a exposição mediana para cada cenário e período. As barras de erro refletem a variabilidade entre GCMs (quando disponível). Uma linha tracejada indica a linha de base histórica."
+  fr: "Le graphique montre l’exposition médiane pour chaque scénario et période. Les barres d’erreur reflètent la variabilité entre les GCM (si disponible). Une ligne pointillée indique la base historique."
 });
 
 

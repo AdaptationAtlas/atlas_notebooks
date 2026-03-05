@@ -5,6 +5,13 @@
  * click-toggleable button and list, implementing maximum selection limits,
  * required selection constraints, and synchronization with Observable
  * Inputs.select().
+ *
+ * NOTE (Hazard Exposure notebook):
+ * - By default, this component dispatches the underlying select's `input` event
+ *   ONLY when the dropdown collapses (to avoid noisy re-computation / API calls).
+ * - You can enable an in-dropdown "Full Country (ISO)" toggle that instantly
+ *   expands/clears checkmarks in the UI WITHOUT dispatching `input` until
+ *   the dropdown is collapsed.
  */
 
 /**
@@ -16,32 +23,24 @@
  * Observable notebooks.
  *
  * @param {HTMLElement|HTMLFormElement} viewofSelect - The container element (or the select itself) holding the target <select multiple>.
- * @param {object} [config] - Configuration options for the toggle component.
- * @param {?number} [config.maxSelections=null] - The maximum number of items that can be selected. Null means no limit.
- * @param {boolean} [config.requireAtLeastOne=true] - If true, prevents the user from deselecting the last selected item.
- * @param {boolean} [config.enableSelectAll=false] - If true, displays Select All / Deselect All buttons in the dropdown.
- * @returns {HTMLElement} An html element, but in OJS the initial select should be returned
- *
- * @example
- * {
- *  const input = Inputs.select([1, 2, 3, 4, 5, 6], {
- *      multiple: true,
- *      label: "pretty multi-select"
- *    });
- *  enhancedMultiSelect(input, {
- *    maxSelections: 3,
- *    requireAtLeastOne: false,
- *    enableSelectAll: true
- *  });
- *  return input;
- * }
+ * @param {object} [config] - Configuration options.
+ * @param {?number} [config.maxSelections=null] - Maximum number of items selectable. Null = no limit.
+ * @param {boolean} [config.requireAtLeastOne=true] - Prevents deselecting the last selected item.
+ * @param {boolean} [config.enableSelectAll=false] - Adds Select All / Deselect All buttons.
+ * @param {boolean} [config.enableFullCountryToggle=false] - Enables special handling for an option named "Full Country (ISO)".
+ * @param {string} [config.fullCountryPrefix='Full Country'] - Label prefix used to detect Full Country options.
+ * @param {?number} [config.compactLabelThreshold=10] - If selected count exceeds this, show "N selected" on the button.
+ * @returns {HTMLElement} The original viewofSelect (Inputs.select form) enhanced.
  */
 function enhancedMultiSelect(
   viewofSelect,
   {
     maxSelections = null,
     requireAtLeastOne = true,
-    enableSelectAll = false
+    enableSelectAll = false,
+    enableFullCountryToggle = false,
+    fullCountryPrefix = "Full Country",
+    compactLabelThreshold = 10
   } = {}
 ) {
   const select = viewofSelect.querySelector("select") || viewofSelect;
@@ -50,9 +49,21 @@ function enhancedMultiSelect(
     throw new Error("Inputs.select() requires a multiple=true select");
   }
 
-  if(enableSelectAll && maxSelections) {
-    throw new Error("Cannot enable select all while also specifying a max number of selections")
+  if (enableSelectAll && maxSelections) {
+    throw new Error(
+      "Cannot enable select all while also specifying a max number of selections"
+    );
   }
+
+  const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+  const fullCountryRe = new RegExp(
+    `^${escapeRegExp(fullCountryPrefix)}\\s*\\(([A-Z]{2,3})\\)\\s*$`
+  );
+
+  const parseIsoFromLabel = (label) => {
+    const m = String(label ?? "").match(/\(([A-Z]{2,3})\)\s*$/);
+    return m?.[1] ?? null;
+  };
 
   // --- Styles Configuration ---
   const styles = {
@@ -110,19 +121,10 @@ function enhancedMultiSelect(
     );
   };
 
-  const getSelectedIndices = () =>
-    new Set(
-      Array.from(select.options).flatMap((o, i) => (o.selected ? [i] : []))
-    );
-
   // --- Initialization & State ---
   select.style.display = "none";
 
-  if (
-    requireAtLeastOne &&
-    select.selectedIndex === -1 &&
-    select.options.length > 0
-  ) {
+  if (requireAtLeastOne && select.selectedIndex === -1 && select.options.length > 0) {
     select.options[0].selected = true;
   }
 
@@ -138,11 +140,11 @@ function enhancedMultiSelect(
   let isCollapsed = true;
 
   // --- View Control ---
-
   const collapseList = () => {
     if (!isCollapsed) {
       isCollapsed = true;
       list.style.display = "none";
+      // Dispatch ONLY when collapsing to avoid noisy downstream recompute.
       select.dispatchEvent(new Event("input", { bubbles: true }));
     }
   };
@@ -156,14 +158,30 @@ function enhancedMultiSelect(
     }
   };
 
+  const getSelectedOptions = () => Array.from(select.options).filter((o) => o.selected);
+
   function updateUI() {
-    // Update Button Text and Arrow
-    const selectedOptions = Array.from(select.options).filter(
-      (o) => o.selected
-    );
-    const text = selectedOptions.length
-      ? selectedOptions.map((o) => o.textContent).join(", ")
-      : "None selected";
+    const selectedOptions = getSelectedOptions();
+
+    // Button label
+    let text = "None selected";
+    if (selectedOptions.length) {
+      const full = enableFullCountryToggle
+        ? selectedOptions.map((o) => o.textContent.trim()).find((t) => fullCountryRe.test(t))
+        : null;
+
+      if (full) {
+        // If a Full Country option is selected, show it + count (compact).
+        text = selectedOptions.length > 1
+          ? `${full} — ${selectedOptions.length - 1} selected`
+          : full;
+      } else if (selectedOptions.length > compactLabelThreshold) {
+        text = `${selectedOptions.length} selected`;
+      } else {
+        text = selectedOptions.map((o) => o.textContent).join(", ");
+      }
+    }
+
     btn.innerHTML = `
       <span style="pointer-events:none;">${text}</span>
       <span style="opacity:0.7; pointer-events:none;">
@@ -171,9 +189,8 @@ function enhancedMultiSelect(
       </span>
     `;
 
-    // Update List Checkmarks and Backgrounds
+    // Checkmarks
     Array.from(list.children).forEach((div, i) => {
-      // Skip the button container if present
       if (div.classList.contains("button-container")) return;
 
       const optionIndex = enableSelectAll ? i - 1 : i;
@@ -185,7 +202,9 @@ function enhancedMultiSelect(
       div.style.backgroundColor = isSelected ? "#f9fafb" : "white";
     });
   }
-  select.addEventListener("input", updateUI) // makes ui update when bound select changes
+
+  // Keep UI synced when Observable changes the bound select (e.g., via Inputs.bind)
+  select.addEventListener("input", updateUI);
 
   // --- Select/Deselect All Buttons ---
   if (enableSelectAll) {
@@ -193,7 +212,6 @@ function enhancedMultiSelect(
     applyStyle(buttonContainer, styles.buttonContainer);
     buttonContainer.classList.add("button-container");
 
-    // Select All Button
     const selectAllBtn = document.createElement("button");
     applyStyle(selectAllBtn, styles.actionBtn);
     selectAllBtn.textContent = "Select All";
@@ -202,9 +220,7 @@ function enhancedMultiSelect(
       e.preventDefault();
       e.stopPropagation();
 
-      const maxAllowed =
-        maxSelections === null ? select.options.length : maxSelections;
-
+      const maxAllowed = maxSelections === null ? select.options.length : maxSelections;
       let selectedCount = 0;
       Array.from(select.options).forEach((opt) => {
         if (selectedCount < maxAllowed) {
@@ -226,7 +242,6 @@ function enhancedMultiSelect(
       selectAllBtn.style.borderColor = "#d1d5db";
     });
 
-    // Deselect All Button
     const deselectAllBtn = document.createElement("button");
     applyStyle(deselectAllBtn, styles.actionBtn);
     deselectAllBtn.textContent = "Deselect All";
@@ -262,6 +277,58 @@ function enhancedMultiSelect(
     list.appendChild(buttonContainer);
   }
 
+  // --- Full Country helpers (UI-only; no input dispatch until collapse) ---
+  const findFullCountryOptionForIso = (iso) => {
+    const target = `${fullCountryPrefix} (${iso})`;
+    return Array.from(select.options).find((o) => o.textContent.trim() === target) || null;
+  };
+
+  const isoMatches = (opt, iso) => {
+    const label = opt.textContent.trim();
+    return label.endsWith(`(${iso})`);
+  };
+
+  const applyFullCountrySelection = (iso, checked) => {
+    const fullOpt = findFullCountryOptionForIso(iso);
+    const all = Array.from(select.options);
+
+    if (checked) {
+      // Compute how many will be selected
+      const willSelect = new Set(all.filter((o) => o.selected).map((o) => o.textContent));
+      for (const o of all) {
+        if (!isoMatches(o, iso)) continue;
+        willSelect.add(o.textContent);
+      }
+      if (fullOpt) willSelect.add(fullOpt.textContent);
+
+      if (maxSelections !== null && willSelect.size > maxSelections) {
+        return false; // caller will shake
+      }
+
+      if (fullOpt) fullOpt.selected = true;
+      for (const o of all) {
+        if (!isoMatches(o, iso)) continue;
+        // Keep Full Country itself selected, and select all other matching regions
+        o.selected = true;
+      }
+      return true;
+    }
+
+    // checked === false: clear all for that ISO (including Full Country row)
+    const remaining = all.filter((o) => o.selected && !isoMatches(o, iso));
+    if (requireAtLeastOne && remaining.length === 0) {
+      return false;
+    }
+
+    for (const o of all) {
+      if (!isoMatches(o, iso)) continue;
+      o.selected = false;
+    }
+    // Also clear the Full Country option itself
+    if (fullOpt) fullOpt.selected = false;
+    return true;
+  };
+
   // --- Option Rendering ---
   Array.from(select.options).forEach((opt) => {
     const div = document.createElement("div");
@@ -272,7 +339,6 @@ function enhancedMultiSelect(
     applyStyle(check, styles.check);
     div.appendChild(check);
 
-    // Hover Events
     div.addEventListener("mouseenter", () => {
       div.style.color = "#111";
       div.style.background = opt.selected ? "#f9fafb" : "#f3f4f6";
@@ -283,35 +349,54 @@ function enhancedMultiSelect(
       div.style.background = opt.selected ? "#f9fafb" : "white";
     });
 
-    // Click Event
     div.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      const selectedCount = Array.from(select.options).filter(
-        (o) => o.selected
-      ).length;
 
-      // Max limit check
-      if (
-        maxSelections !== null &&
-        !opt.selected &&
-        selectedCount >= maxSelections
-      ) {
+      const label = opt.textContent.trim();
+      const fullMatch = enableFullCountryToggle ? label.match(fullCountryRe) : null;
+
+      // If Full Country is enabled and currently selected for this ISO,
+      // prevent toggling individual region options for that same ISO.
+      if (enableFullCountryToggle && !fullMatch) {
+        const iso = parseIsoFromLabel(label);
+        if (iso) {
+          const fullOpt = findFullCountryOptionForIso(iso);
+          if (fullOpt && fullOpt.selected) {
+            shake(div);
+            return;
+          }
+        }
+      }
+
+      // Full Country special behavior: expand/clear instantly, but DO NOT dispatch input.
+      if (enableFullCountryToggle && fullMatch) {
+        const iso = fullMatch[1];
+        const selecting = !opt.selected;
+        const ok = applyFullCountrySelection(iso, selecting);
+        if (!ok) {
+          shake(div);
+          return;
+        }
+        updateUI();
+        return;
+      }
+
+      const selectedCount = getSelectedOptions().length;
+
+      // Max limit
+      if (maxSelections !== null && !opt.selected && selectedCount >= maxSelections) {
         shake(div);
         return;
       }
 
-      // Min limit check
+      // Min limit
       if (requireAtLeastOne && opt.selected && selectedCount <= 1) {
         shake(div);
         return;
       }
 
-      // Toggle & Sync
+      // Toggle (no input dispatch until collapse)
       opt.selected = !opt.selected;
-      //NOTE: input when dropdown is closed to avoid noise and to prevent it closing when other values in cell update
-      // (in a form for example)
-
-      // select.dispatchEvent(new Event("input", { bubbles: true }));
       updateUI();
     });
 
@@ -319,13 +404,8 @@ function enhancedMultiSelect(
   });
 
   // --- Event Handlers ---
+  btn.addEventListener("click", () => (isCollapsed ? expandList() : collapseList()));
 
-  // Collapse Toggle
-  btn.addEventListener("click", () =>
-    isCollapsed ? expandList() : collapseList()
-  );
-
-  // Button Hover
   btn.addEventListener("mouseenter", () => {
     btn.style.borderColor = "#2E7636";
     btn.style.color = "#111";
@@ -339,7 +419,6 @@ function enhancedMultiSelect(
     btn.style.borderColor = "#2E7636";
   });
 
-  // External Click Handler (Closes list if click is outside the wrapper)
   const outsideClickListener = (event) => {
     if (!wrapper.contains(event.target)) {
       collapseList();
@@ -357,24 +436,28 @@ function enhancedMultiSelect(
   updateUI();
 
   // --- Polling Loop & Cleanup ---
-let lastSelected = Array.from(select.options).map(o => o.selected).join(",");
+  let lastSelected = Array.from(select.options)
+    .map((o) => o.selected)
+    .join(",");
 
-const rafLoop = () => {
-  if (!document.body.contains(wrapper)) {
-    document.removeEventListener("click", outsideClickListener);
-    return; // stop the loop — no cleanup needed
-  }
+  const rafLoop = () => {
+    if (!document.body.contains(wrapper)) {
+      document.removeEventListener("click", outsideClickListener);
+      return;
+    }
 
-  const current = Array.from(select.options).map(o => o.selected).join(",");
-  if (current !== lastSelected) {
-    lastSelected = current;
-    updateUI();
-  }
+    const current = Array.from(select.options)
+      .map((o) => o.selected)
+      .join(",");
+    if (current !== lastSelected) {
+      lastSelected = current;
+      updateUI();
+    }
+
+    requestAnimationFrame(rafLoop);
+  };
 
   requestAnimationFrame(rafLoop);
-};
-
-requestAnimationFrame(rafLoop);
 
   return viewofSelect;
 }
