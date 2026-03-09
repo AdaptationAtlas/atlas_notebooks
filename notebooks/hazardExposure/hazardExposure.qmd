@@ -177,22 +177,6 @@ hz_resolvePath = (entry) => {
   }
   return { ok: false, raw: null, url: null, source: "missing" }
 }
-
-hz_validateParquetUrl = async (url) => {
-  const u = String(url ?? "").trim()
-  if (!u || !hz_isHttpUrl(u)) return { ok: true }
-  try {
-    const r = await fetch(u, { headers: { Range: "bytes=0-3" } })
-    if (!r.ok) return { ok: false, error: `HTTP ${r.status} ${r.statusText}` }
-    const buf = new Uint8Array(await r.arrayBuffer())
-    const magic = String.fromCharCode(...buf)
-    if (magic !== "PAR1") return { ok: false, error: `Not a Parquet file (magic=${magic})` }
-    return { ok: true }
-  } catch (e) {
-    return { ok: true, warn: String(e) }
-  }
-}
-
 hz_formatNumber = (v, { digits = 0, compact = true } = {}) => {
   const x = Number(v)
   if (!Number.isFinite(x)) return "—"
@@ -204,25 +188,16 @@ hz_formatNumber = (v, { digits = 0, compact = true } = {}) => {
 
 // Shared display formatters (used in Chart/Table/Map)
 fmtAbs = (v) => hz_formatNumber(v, { digits: 2, compact: true })
-fmtAbs0 = (v) => hz_formatNumber(v, { digits: 0, compact: true })
 fmtPct = (v) => {
   const x = Number(v)
   if (!Number.isFinite(x)) return "—"
   return `${hz_formatNumber(x, { digits: 2, compact: false })}%`
 }
-fmtSigned = (v) => {
-  const x = Number(v)
-  if (!Number.isFinite(x)) return "—"
-  const s = x > 0 ? "+" : ""
-  return s + hz_formatNumber(x, { digits: 2, compact: true })
-}
-
 hz_titleCase = (s) =>
 
   String(s ?? "")
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
-
 
 
 hz_restoreScroll = (y) => {
@@ -234,20 +209,67 @@ hz_restoreScroll = (y) => {
   } catch (e) {}
 }
 
+hz_blurFocusChain = (scope = null) => {
+  const run = () => {
+    try { document.activeElement?.blur?.() } catch (_) {}
+    try {
+      const root = (scope && scope.querySelectorAll) ? scope : document
+      root.querySelectorAll?.("input, select, button, textarea, [tabindex]")?.forEach?.((el) => {
+        try { el.blur?.() } catch (_) {}
+      })
+    } catch (_) {}
+  }
+  try {
+    run()
+    setTimeout(run, 0)
+    requestAnimationFrame(run)
+    setTimeout(run, 120)
+  } catch (_) {}
+}
+
+hz_bindHoverBlur = (node, scope = null) => {
+  const el = node
+  const key = "__hz_hover_blur"
+  if (el && !el[key]) {
+    el[key] = true
+    let lastAt = 0
+    const maybeBlur = () => {
+      const now = Date.now()
+      if (now - lastAt < 120) return
+      lastAt = now
+      hz_blurFocusChain(scope || el)
+    }
+    el.addEventListener("pointerenter", maybeBlur, true)
+    el.addEventListener("pointermove", maybeBlur, { capture: true, passive: true })
+    el.addEventListener("touchstart", maybeBlur, { capture: true, passive: true })
+  }
+  return el
+}
+
 hz_noJumpRoot = (node) => {
   const root = node
   const key = "__hz_nojump_installed"
   if (root && !root[key]) {
     root[key] = true
     let lastY = null
-    const snap = () => { lastY = window.scrollY }
-    const restore = () => { if (lastY != null) hz_restoreScroll(lastY) }
+    const snap = () => { lastY = hz_getScrollPos()?.y ?? window.scrollY ?? 0 }
+    const restore = () => {
+      if (lastY != null) {
+        hz_restoreScroll(lastY)
+        lastY = null
+      }
+    }
+    const clear = () => { lastY = null }
+    const settle = () => { restore(); hz_blurFocusChain(root) }
     root.addEventListener("pointerdown", snap, true)
     root.addEventListener("mousedown", snap, true)
     root.addEventListener("touchstart", snap, true)
-    root.addEventListener("click", restore, true)
-    root.addEventListener("input", restore, true)
-    root.addEventListener("change", restore, true)
+    root.addEventListener("click", settle, true)
+    root.addEventListener("input", settle, true)
+    root.addEventListener("change", settle, true)
+    root.addEventListener("wheel", clear, { capture: true, passive: true })
+    root.addEventListener("scroll", clear, true)
+    root.addEventListener("pointermove", clear, true)
   }
   return root
 }
@@ -258,22 +280,66 @@ hz_noJumpInput = (node) => {
   if (el && !el[key]) {
     el[key] = true
     let lastY = null
-    const snap = () => { lastY = window.scrollY }
-    const restore = () => { if (lastY != null) hz_restoreScroll(lastY) }
+    const snap = () => { lastY = hz_getScrollPos()?.y ?? window.scrollY ?? 0 }
+    const restore = () => {
+      if (lastY != null) {
+        hz_restoreScroll(lastY)
+        lastY = null
+      }
+    }
+    const clear = () => { lastY = null }
+    const settle = () => { restore(); hz_blurFocusChain(el) }
     el.addEventListener("pointerdown", snap, true)
     el.addEventListener("mousedown", snap, true)
     el.addEventListener("touchstart", snap, true)
-    el.addEventListener("click", restore, true)
-    el.addEventListener("input", restore, true)
-    el.addEventListener("change", restore, true)
+    el.addEventListener("click", settle, true)
+    el.addEventListener("input", settle, true)
+    el.addEventListener("change", settle, true)
+    el.addEventListener("wheel", clear, { capture: true, passive: true })
+    el.addEventListener("scroll", clear, true)
+    el.addEventListener("pointermove", clear, true)
   }
   return el
 }
 
-hz_keepScroll = async (promise) => {
-  const y = window.scrollY
+hz_getScroller = () =>
+  document.scrollingElement ||
+  document.querySelector("#quarto-content") ||
+  document.querySelector(".page-columns") ||
+  document.documentElement ||
+  document.body
+
+hz_getScrollPos = () => {
+  const sc = hz_getScroller()
+  return {
+    scroller: sc,
+    x: sc?.scrollLeft ?? window.scrollX ?? 0,
+    y: sc?.scrollTop ?? window.scrollY ?? 0
+  }
+}
+
+hz_keepScroll = async (promise, { maxDrift = 80 } = {}) => {
+  const start = hz_getScrollPos()
   const res = await promise
-  hz_restoreScroll(y)
+  const now = hz_getScrollPos()
+
+  const sameScroller = !start.scroller || !now.scroller || start.scroller === now.scroller
+  const driftX = Math.abs((now?.x ?? 0) - (start?.x ?? 0))
+  const driftY = Math.abs((now?.y ?? 0) - (start?.y ?? 0))
+
+  if (sameScroller && driftX <= maxDrift && driftY <= maxDrift) {
+    try {
+      if (start.scroller && start.scroller !== document.body && start.scroller !== document.documentElement) {
+        start.scroller.scrollLeft = start.x
+        start.scroller.scrollTop = start.y
+      } else {
+        window.scrollTo({ top: start.y, left: start.x, behavior: "auto" })
+      }
+    } catch (_) {
+      hz_restoreScroll(start.y)
+    }
+  }
+
   return res
 }
 
@@ -574,6 +640,39 @@ html, body { overflow-anchor: none; }
     }
   }
 
+  .hz-qToolbar__right--grow{
+    flex: 1 1 820px;
+    min-width: min(100%, 720px);
+  }
+  .hz-q2SettingsGrid{
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0.6rem 1rem;
+    align-items: end;
+  }
+  .hz-q2SettingsGrid .hz-miniSetting{
+    justify-content: space-between;
+    min-width: 0;
+    padding: 0.1rem 0;
+  }
+  .hz-q2SettingsGrid .hz-miniSetting--range{
+    grid-column: span 2;
+    align-items: flex-start;
+  }
+  .hz-q2SettingsGrid .hz-miniSetting--range label{
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .hz-q2SettingsGrid .hz-miniSetting--range input[type="range"]{
+    min-width: 160px;
+    width: min(100%, 320px);
+  }
+  @media (max-width: 900px){
+    .hz-q2SettingsGrid .hz-miniSetting--range{
+      grid-column: span 1;
+    }
+  }
 
   /* Q1 Dynamic Insight */
   .hz-qInsight{
@@ -590,8 +689,6 @@ html, body { overflow-anchor: none; }
     font-weight: 650;
     margin: 0.25rem 0 0.35rem;
   }
-
-
 
 
 .hidden { display: none !important; }
@@ -694,7 +791,6 @@ html, body { overflow-anchor: none; }
   .hz-mini{min-width:0}
   .hz-mini figure{margin:0}
 
-  /* Q1 UpSet layout (two plots side-by-side, like the Shiny prototype) */
   .hz-upsetGrid{display:grid;gap:18px;align-items:start;grid-template-columns:1fr}
   @media (min-width: 980px){ .hz-upsetGrid{grid-template-columns:1fr 1fr} }
   .hz-upsetGrid--single{grid-template-columns:1fr !important}
@@ -702,7 +798,6 @@ html, body { overflow-anchor: none; }
   .hz-upsetTitle{text-align:center;font-weight:600;font-size:0.9rem;margin:0 0 6px 0;opacity:0.95}
   .hz-upsetStack{display:flex;flex-direction:column;gap:0}
   .hz-upsetStack figure{margin:0}
-
 
 
   .hz-sectionIntro{margin:0 0 12px 0}
@@ -878,37 +973,6 @@ hz_errors = Generators.observe((notify) => {
 
   return () => window.removeEventListener("hz:diag", handler)
 })
-
-hz_renderErrors = (errors) => {
-  const esc = (s) => String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-
-  if (!errors || errors.length === 0) {
-    return html`<div class="callout callout-note"><strong>No runtime errors captured.</strong></div>`
-  }
-
-  return html`<div class="callout callout-warning">
-    <strong>Runtime diagnostics (${errors.length})</strong>
-    <ol style="margin-top:0.5rem;">
-      ${errors.map(e => html`<li style="margin-bottom:0.75rem;">
-        <div><strong>${esc(e.context)}</strong> <span style="opacity:.75;">${esc(e.time)}</span></div>
-        <div style="white-space:pre-wrap;">${esc(e.message)}</div>
-
-        ${e.details ? html`<details style="margin-top:0.25rem;">
-          <summary>details</summary>
-          <pre style="white-space:pre-wrap; margin:0.5rem 0 0 0;">${esc(JSON.stringify(e.details, null, 2))}</pre>
-        </details>` : null}
-
-        ${e.stack ? html`<details style="margin-top:0.25rem;">
-          <summary>stack</summary>
-          <pre style="white-space:pre-wrap; margin:0.5rem 0 0 0;">${esc(e.stack)}</pre>
-        </details>` : null}
-      </li>`)}
-    </ol>
-  </div>`
-}
 
 // nbData.json loader + normalizer
 
@@ -1433,7 +1497,7 @@ hz_commodityLabelOf = (v) => {
 viewof hz_commodities = {
   const disabled = (hz_commodityGroup === "all")
 
-  // Normalize option values to strings to avoid showing [object Object]
+ 
   const norm = (v) => {
     if (v == null) return null
     if (typeof v === "string" || typeof v === "number") return String(v)
@@ -1540,16 +1604,6 @@ hz_commoditiesUI = viewof hz_commodities
 
 ```{ojs}
 //| output: false
-// Compact preview for long lists (used in controls summaries)
-hz_previewList = (arr, max = 4) => {
-  const xs = Array.isArray(arr) ? arr.filter(Boolean) : []
-  if (xs.length <= max) return xs.join(", ")
-  return xs.slice(0, max).join(", ") + ` +${xs.length - max}`
-}
-```
-
-```{ojs}
-//| output: false
 viewof hz_compareMode = {
   const root = document.createElement('label')
   root.className = 'hz-inlineToggle hz-inlineToggle--compact'
@@ -1579,7 +1633,7 @@ viewof hz_compareMode = {
 
 viewof hz_topN = Inputs.range([5, 50], { label: "No. geographies to show", step: 1, value: 25 })
 viewof hz_groupOther = Inputs.toggle({ label: 'Group remaining hazards into "Other" (Q1)', value: false })
-viewof hz_rel = Inputs.toggle({ label: "Show %", value: false })
+viewof hz_rel = Inputs.toggle({ label: "", value: false })
 hz_isRelative = !!hz_rel
 viewof hz_q1ChartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
 hz_chartHeight = hz_q1ChartHeight
@@ -1644,15 +1698,6 @@ hz_commodityLabel = {
 
 ```{ojs}
 //| output: false
-hz_parseScenario = (s) => {
-  const raw = String(s ?? "")
-  if (!raw) return { raw: "", model: "", scenario: null, timeframe: null, label: "" }
-
-  const parts = raw.split("_").filter(Boolean)
-  const scenario = parts[0] ?? null
-  const timeframe = parts.length > 1 ? parts.slice(1).join("_") : null
-  return { raw, model: raw, scenario, timeframe, label: hz_formatModel(raw) }
-}
 hz_parseScenarioPick = (x) => {
   const p = hz_parseScenXTime(x)
   const isHist = (p?.scenTime === "historic") || (p?.scenario === "historic")
@@ -1854,74 +1899,6 @@ hz_q1_filtersPanel = html`
     </div>
   </details>
 `
-
-// Helper panel for other questions until their filter UI is duplicated.
-// Keeps filters shared by linking back to Q1.
-hz_sharedFiltersLinkPanel = (targetId = "q1") => {
-  const btn = html`<button type="button" class="hz-btn hz-btn--sm">Open filters</button>`
-  btn.onclick = () => {
-    try {
-      const details = document.querySelector(`#${targetId}-filters details.hz-furl--filters`)
-        || document.querySelector(`#${targetId} details.hz-furl--filters`)
-      if (details) details.open = true
-      const anchor = document.getElementById(`${targetId}-filters`) || details || document.getElementById(targetId)
-      anchor?.scrollIntoView?.({ behavior: "smooth", block: "start" })
-    } catch (_) {}
-  }
-
-  return html`
-    <details class="hz-furl hz-furl--filters">
-      <summary>
-        <span>Filters</span>
-        <span class="hz-furl__hint">${hz_sharedControlsSummary}</span>
-      </summary>
-      <div class="hz-furl__body">
-        <div class="hz-muted">These filters are shared across questions.</div>
-        <div style="margin-top:0.5rem">${btn}</div>
-      </div>
-    </details>
-  `
-}
-```
-
-```{ojs}
-//| output: false
-// Admin name tuples (admin0/admin1/admin2) for cascading selectors.
-hz_adminNames = {
-  try {
-    const { admin2 } = await getAdminBoundaries([2])
-    const feats = admin2?.features ?? []
-
-    const pick = (p, keys) => {
-      for (const k of keys) {
-        const v = p?.[k]
-        if (v != null && String(v).trim() !== "") return v
-      }
-      return null
-    }
-
-    const rows = feats.map((f) => {
-      const p = f?.properties ?? {}
-      
-      const admin0_name = pick(p, ["admin0_name","ADM0_NAME","NAME_0","adm0_name","country","COUNTRY","admin0","name0"])
-      const admin1_name = pick(p, ["admin1_name","ADM1_NAME","NAME_1","adm1_name","admin1","name1"])
-      const admin2_name = pick(p, ["admin2_name","ADM2_NAME","NAME_2","adm2_name","admin2","name2"])
-      return { admin0_name, admin1_name, admin2_name }
-    }).filter((d) => d.admin0_name != null)
-
-    
-    const seen = new Set()
-    const out = []
-    for (const d of rows) {
-      const k = `${d.admin0_name ?? ""}||${d.admin1_name ?? ""}||${d.admin2_name ?? ""}`
-      if (!seen.has(k)) { seen.add(k); out.push(d) }
-    }
-
-    return out
-  } catch (e) {
-    return [{ error: `Failed to load admin names from components/_atlasBoundaries.ojs: ${e}` }]
-  }
-}
 
 ```
 
@@ -2214,18 +2191,6 @@ hz_geoPanelReal = html`
 
 ```{ojs}
 //| output: false
-// WHERE clause builder for the hazard exposure parquet schema
-hz_q = (s) => "'" + String(s).replaceAll("'", "''") + "'"
-
-// Crop WHERE helper (safe SQL quoting; supports UI sentinel "all")
-hz_cropWhere = (commodities) => {
-  const list = Array.isArray(commodities) ? commodities.filter((d) => d != null && String(d).trim() !== "") : []
-  const hasAll = list.length === 0 || list.includes("all")
-  if (hasAll) return "TRUE"
-  const vals = list.filter((d) => d !== "all")
-  if (!vals.length) return "TRUE"
-  return `crop IN (${vals.map(hz_q).join(", ")})`
-}
 
 // hazard_vars lists
 // - generic: NDWS (drought) + NTx35 / THI-max (heat) + NDWL0 (flood)
@@ -2240,77 +2205,6 @@ hz_interactions = ({
     "PTOT-L+THI-max+PTOT-G"
   ]
 })
-
-// hazard_vars WHERE helper
-hz_hazardVarsWhere = (method, commodGroup) => {
-  const m = String(method ?? "").toLowerCase()
-  const cg = String(commodGroup ?? "").toLowerCase()
-
-  const vars =
-    (m === "generic") ? hz_interactions.generic :
-    (m === "crop-specific" || m === "crop_specific") ? hz_interactions.crop_specific :
-    // auto (best available): default to crop_specific unless we're aggregating "all"
-    ((cg === "all" || cg === "" || cg === "total") ? hz_interactions.generic : hz_interactions.crop_specific)
-
-  return `hazard_vars IN (${vars.map(hz_q).join(", ")})`
-}
-
-// Exposure value/unit WHERE helper
-hz_unitWhere = (varShort) => {
-  return "TRUE"
-}
-
-// Severity WHERE helper
-hz_sevWhere = (severity) => {
-  return "TRUE"
-}
-
-hz_geoWhere = (geoFilter) => {
-  const gf = geoFilter ?? {}
-  const admin0 = Array.isArray(gf.admin0) ? gf.admin0.filter((d) => d != null && String(d).trim() !== "") : []
-  const admin1 = Array.isArray(gf.admin1) ? gf.admin1.filter((d) => d != null && String(d).trim() !== "") : []
-  const admin2 = Array.isArray(gf.admin2) ? gf.admin2.filter((d) => d != null && String(d).trim() !== "") : []
-
-  
-  const hasAll = admin0.length === 0 || admin0.includes("all")
-  const a0 = hasAll ? [] : admin0.filter((d) => d !== "all")
-  const a1 = hasAll ? [] : admin1
-  const a2 = hasAll ? [] : admin2
-
-  const q = (s) => `'${String(s).replaceAll("'", "''")}'`
-  const inList = (vals) => vals.map(q).join(", ")
-
-  const wh = []
-
-  // Only constrain admin0 when user chose specific countries
-  if (a0.length > 0) {
-    wh.push(`admin0_name IN (${inList(a0)})`)
-  }
-
-  if (a2.length > 0) {
-    // Admin2 totals: admin0 + (optional admin1) + admin2
-    if (a1.length > 0) wh.push(`admin1_name IN (${inList(a1)})`)
-    wh.push(`admin2_name IN (${inList(a2)})`)
-  } else if (a1.length > 0) {
-    // Admin1 totals: admin0 + admin1, and admin2 NULL
-    wh.push(`admin1_name IN (${inList(a1)})`)
-    wh.push(`admin2_name IS NULL`)
-  } else {
-    // Admin0 totals: admin1/admin2 NULL
-    wh.push(`admin1_name IS NULL`)
-    wh.push(`admin2_name IS NULL`)
-  }
-
-  return wh.join("\n      AND ")
-}
-
-hz_scenWhere = (sc) => {
-  const p = (typeof sc === "string") ? hz_parseScenXTime(sc) : (sc ?? {})
-  const scenario = p.scenario
-  const timeframe = p.timeframe ?? (scenario === "historic" ? "historic" : null)
-  if (!scenario || !timeframe) return "FALSE"
-  return `scenario = ${hz_q(scenario)} AND timeframe = ${hz_q(timeframe)}`
-}
 ```
 
 ```{ojs}
@@ -2320,9 +2214,6 @@ viewof hz_loadSchema = Inputs.toggle(false, { label: "Load schema tables (debug,
 
 ```{ojs}
 //| output: false
-// -----------------------------
-// FAST API PATH (v3): call the FastAPI + Redis service for all heavy queries.
-
 // API base URL
 hz_apiBaseUrl = (() => {
   try {
@@ -2874,6 +2765,85 @@ hz_chartRows = {
 
 ```{ojs}
 //| output: false
+// Rows currently displayed in the Q1 chart (match the UpSet combinations + ordering)
+hz_q1DisplayRows = {
+  const num = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? v : 0
+  }
+
+  const src = Array.isArray(hz_merged) ? hz_merged : []
+  const raw = src.map((r) => {
+    const hazard = r.hazard ?? r.Hazard ?? r.name ?? r.key ?? "Unknown"
+    const total1 = num(r.total1 ?? r.left ?? r.value1 ?? r.total_left ?? 0)
+    const total2 = num(r.total2 ?? r.right ?? r.value2 ?? r.total_right ?? 0)
+    const total_diff = num(r.total_diff ?? (total2 - total1))
+    const perc1 = num(r.perc1 ?? 0)
+    const perc2 = num(r.perc2 ?? 0)
+    const pct_diff = num(r.pct_diff ?? (perc2 - perc1))
+    return { hazard, total1, total2, total_diff, perc1, perc2, pct_diff }
+  })
+  if (!raw.length) return []
+
+  const isIntersection = (h) => {
+    const h0 = String(h ?? "")
+    if (!h0) return false
+    if (h0 === "any" || h0 === "no hazard") return false
+    if (h0 === "Other") return false
+    return true
+  }
+
+  const baseOrder = ["dry", "heat", "wet"]
+  const getParts = (h) =>
+    String(h ?? "")
+      .split("+")
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+  const baseSets = (() => {
+    const s = new Set()
+    for (const r of raw) {
+      if (!isIntersection(r.hazard)) continue
+      for (const p of getParts(r.hazard)) s.add(p)
+    }
+    const arr = [...s]
+    const rest = arr.filter((d) => !baseOrder.includes(d)).sort()
+    return baseOrder.filter((d) => arr.includes(d)).concat(rest)
+  })()
+
+  const combos = (() => {
+    if (baseSets.length >= 2 && baseSets.length <= 4) {
+      const arr = baseSets
+      const out = []
+      const n = arr.length
+      for (let mask = 1; mask < (1 << n); mask++) {
+        const parts = []
+        for (let i = 0; i < n; i++) if (mask & (1 << i)) parts.push(arr[i])
+        out.push(parts.join("+"))
+      }
+      const prefer = ["dry", "heat", "wet", "dry+heat", "dry+wet", "heat+wet", "dry+heat+wet"]
+      const preferSet = new Set(prefer)
+      return prefer.filter((c) => out.includes(c)).concat(out.filter((c) => !preferSet.has(c)))
+    }
+    return raw.filter((r) => isIntersection(r.hazard)).map((r) => String(r.hazard))
+  })()
+
+  const byHaz = new Map(raw.map((r) => [String(r.hazard), r]))
+  return combos.map((haz) => {
+    const r = byHaz.get(haz) || {}
+    const total1 = num(r.total1 ?? 0)
+    const total2 = num(r.total2 ?? 0)
+    const total_diff = num(r.total_diff ?? (total2 - total1))
+    const perc1 = num(r.perc1 ?? 0)
+    const perc2 = num(r.perc2 ?? 0)
+    const pct_diff = num(r.pct_diff ?? (perc2 - perc1))
+    return { hazard: haz, total1, total2, total_diff, perc1, perc2, pct_diff }
+  })
+}
+```
+
+```{ojs}
+//| output: false
 // Build Q1 UpSet chart
 hz_q1Chart = {
   // numeric guard (prevents NaN propagating into Plot scales)
@@ -2882,7 +2852,6 @@ hz_q1Chart = {
     return Number.isFinite(v) ? v : 0
   }
 
-  // Use the full merged result (not the ranked/sliced chartRows), so all intersections stay accurate.
   const src = Array.isArray(hz_merged) ? hz_merged : []
   const raw = src.map((r) => {
     const hazard = r.hazard ?? r.Hazard ?? r.name ?? r.key ?? "Unknown"
@@ -2904,7 +2873,6 @@ hz_q1Chart = {
   const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
   const fmtY = hz_relative ? fmtPct : fmtAbs
 
-  // Keep only intersection-style hazard classes (drop helpers)
   const isIntersection = (h) => {
     const h0 = String(h ?? "")
     if (!h0) return false
@@ -2932,7 +2900,6 @@ hz_q1Chart = {
     return baseOrder.filter((d) => arr.includes(d)).concat(rest)
   })()
 
-  // Generate a complete set of combinations when manageable (<=4 sets).
   const combos = (() => {
     if (baseSets.length >= 2 && baseSets.length <= 4) {
       const arr = baseSets
@@ -3004,15 +2971,17 @@ hz_q1Chart = {
     const { all, presentPts } = buildMatrixData(domain)
 
     const maxAbs = Math.max(0, ...data.map((d) => Math.abs(num(d.value ?? 0))))
-    const yNice = hz_relative ? [0, 100] : [0, maxAbs * 1.08]
-    const yDiff = hz_relative ? [-Math.min(100, maxAbs * 1.08), Math.min(100, maxAbs * 1.08)] : [-maxAbs * 1.08, maxAbs * 1.08]
+    const yNice = hz_relative ? [0, 110] : [0, maxAbs * 1.15]
+    const yDiff = hz_relative
+      ? [-Math.min(110, maxAbs * 1.15), Math.min(110, maxAbs * 1.15)]
+      : [-maxAbs * 1.15, maxAbs * 1.15]
 
     const barPlot = Plot.plot({
       width: colWidth,
       height: barH,
       marginLeft: 60,
       marginRight: 14,
-      marginTop: 18,
+      marginTop: 30,
       marginBottom: 0,
       x: { domain, tickFormat: () => "", label: null },
       y: {
@@ -3030,9 +2999,12 @@ hz_q1Chart = {
         }),
         Plot.text(data, {
           x: "hazard",
-          y: "value",
+          y: (d) => {
+            const v = Number(d.value ?? 0)
+            const offset = hz_relative ? 2 : Math.max(maxAbs * 0.015, 1)
+            return v >= 0 ? v + offset : v - offset
+          },
           text: (d) => fmtY(d.value),
-          dy: (d) => (Number(d.value ?? 0) >= 0 ? -6 : 12),
           fontSize: 10
         })
       ]
@@ -3085,7 +3057,6 @@ hz_q1Chart = {
 // ----------------------------
 // Q2 — totals by crop (uses shared global Advanced filters)
 // ----------------------------
-// Reuse global scenario parsing + dataset resolution used by Q1
 hz_q2_s1 = hz_s1
 hz_q2_s2 = hz_s2
 
@@ -3097,6 +3068,23 @@ hz_q2_src2 = hz_src2
 
 // Reuse shared commodities + geo payload used by Q1
 hz_q2_selectedCommoditiesForReq = hz_selectedCommoditiesForReq
+hz_q2_selectedCommodityCount = {
+  const picked = Array.isArray(hz_q2_selectedCommoditiesForReq)
+    ? hz_q2_selectedCommoditiesForReq
+        .map(v => String(v ?? "").trim())
+        .filter(Boolean)
+    : []
+
+  if (picked.includes("all")) {
+    const opts = Array.isArray(hz_q2_commodityOptions)
+      ? hz_q2_commodityOptions.map(v => String(v ?? "").trim()).filter(Boolean)
+      : []
+    return Math.max(1, opts.length || 1)
+  }
+
+  return Math.max(1, picked.length || 1)
+}
+hz_q2_reqTopCrops = hz_q2_selectedCommodityCount
 hz_q2_geoFilterApi = hz_geoFilterApi
 
 // Guard: require Admin0 and resolved datasets (shared)
@@ -3110,17 +3098,6 @@ hz_q2ReqOk = (() => {
   return { ok: true, error: null }
 })()
 
-hz_q2_sideReq = (src, scen) => ({
-  dataset_url: src?.url,
-  scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
-  geo: hz_geoFilterApi,
-  commodities: hz_selectedCommoditiesForReq ?? [],
-  hazard_vars: null,
-  hazards: null,
-  method: hz_method,
-  commodity_group: hz_selectedCommodGroup
-})
-
 hz_q2ReqBody = (() => {
   if (!hz_q2ReqOk.ok) return { ok: false, error: hz_q2ReqOk.error, body: null }
 
@@ -3133,7 +3110,7 @@ hz_q2ReqBody = (() => {
     hazards: null,
     method: hz_method,
     commodity_group: hz_selectedCommodGroup,
-    top_crops: Number(hz_q2_topN || 25),
+    top_crops: Number(hz_q2_reqTopCrops || 1),
     bucket_other: false
   }
 
@@ -3146,7 +3123,7 @@ hz_q2ReqBody = (() => {
     hazards: null,
     method: hz_method,
     commodity_group: hz_selectedCommodGroup,
-    top_crops: Number(hz_q2_topN || 25),
+    top_crops: Number(hz_q2_reqTopCrops || 1),
     bucket_other: false
   }
 
@@ -3296,7 +3273,6 @@ hz_q2CompoundSimplified = (rows) => {
   return out
 }
 
-// Non-compound (overlapping) hazard buckets: dry(any), heat(any), wet(any), any + no hazard
 hz_q2NonCompoundBuckets = (rows) => {
   const byCrop = new Map()
 
@@ -3367,7 +3343,7 @@ hz_q2Set_compound_full = hz_q2HazMerge(hz_q2CompoundExclusive(hz_q2RowsL_withNoH
 hz_q2Set_compound_simple = hz_q2HazMerge(hz_q2CompoundSimplified(hz_q2CompoundExclusive(hz_q2RowsL_withNoHazard)), hz_q2CompoundSimplified(hz_q2CompoundExclusive(hz_q2RowsR_withNoHazard)))
 hz_q2Set_noncompound = hz_q2HazMerge(hz_q2NonCompoundBuckets(hz_q2RowsL_withNoHazard), hz_q2NonCompoundBuckets(hz_q2RowsR_withNoHazard))
 
-// Keep existing Q2 totals chart alive: rank crops by ANY hazard (union)
+
 hz_q2Rows = {
   const anyL = hz_q2HazMap(hz_q2DataL, "any")
   const anyR = hz_q2HazMap(hz_q2DataR, "any")
@@ -3380,16 +3356,16 @@ hz_q2Rows = {
   }))
 
   rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
-  return rows.slice(0, Number(hz_q2_topN || 25))
+  return rows
 }
 
 
-// Labels (Q2-specific)
+
 hz_q2_geoLabel = hz_makeGeoLabel(hz_q2_geoFilter)
 hz_q2_commodityLabel = hz_makeComLabel(hz_q2_selectedCommoditiesForReq ?? [])
 
-// Chart (Q2-specific)
-hz_q2Chart = {
+// Q2 — displayed chart data (shared by chart + table)
+hz_q2DisplayState = {
   const set = hz_q2_showCompound
     ? (hz_q2_simplifyCompound ? hz_q2Set_compound_simple : hz_q2Set_compound_full)
     : hz_q2Set_noncompound
@@ -3404,15 +3380,18 @@ hz_q2Chart = {
     : ["no hazard", "dry (any)", "heat (any)", "wet (any)", "any"]
   const hazLevelsChart = includeNoHazard ? hazLevels : hazLevels.filter((h) => String(h) !== "no hazard")
 
-
   const rows = Array.isArray(set) ? set : []
-  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
-
-  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
-
-  const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
-  const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
-
+  if (!rows.length) {
+    return {
+      rows: [],
+      hazLevelsChart,
+      crops: [],
+      includeDecreases,
+      valLeft: hz_q2_relative ? "perc1" : "total1",
+      valRight: hz_q2_relative ? "perc2" : "total2",
+      valDiff: hz_q2_relative ? "perc_diff" : "diff"
+    }
+  }
 
   const valLeft  = hz_q2_relative ? "perc1" : "total1"
   const valRight = hz_q2_relative ? "perc2" : "total2"
@@ -3427,37 +3406,79 @@ hz_q2Chart = {
       const v = Number(r?.[valKey] ?? 0)
       if (!Number.isFinite(v)) continue
       if (onlyPositive && v <= 0) continue
-      m.set(crop, (m.get(crop) || 0) + v)
+      m.set(crop, (m.get(crop) || 0) + Math.abs(v))
     }
     return Array.from(m.entries())
       .sort((a, b) => b[1] - a[1])
       .map(([c]) => c)
   }
 
-  const n = Math.max(1, Number(hz_q2_topN ?? 25) || 25)
+  const n = Math.max(1, Math.min(
+    Number(hz_q2_topN ?? hz_q2_selectedCommodityCount ?? 1) || 1,
+    hz_q2_selectedCommodityCount || 1
+  ))
 
   const crops = (() => {
     if (hz_q2_difference) {
-      return rankBy(valDiff, true).slice(0, n)
+      return rankBy(valDiff, includeDecreases ? false : true).slice(0, n)
     }
     const topL = rankBy(valLeft, false).slice(0, n)
     const topR = rankBy(valRight, false).slice(0, n)
     return Array.from(new Set([...topL, ...topR]))
   })()
 
-  // Stable ordering across panels: combined (Right + Left)
   const score = (crop) => {
     let s = 0
     for (const r of rows) {
       if (r?.crop !== crop) continue
       if (String(r?.hazard ?? "") === "no hazard") continue
-      s += Number(r?.[valRight] ?? 0) + Number(r?.[valLeft] ?? 0)
+      s += Math.abs(Number(r?.[valRight] ?? 0)) + Math.abs(Number(r?.[valLeft] ?? 0))
     }
     return s
   }
   crops.sort((a, b) => score(b) - score(a))
 
-  const perCrop = hz_q2_showCompound ? 26 : Math.max(34, hazLevelsChart.length * 14 + 18)
+  const cropOrder = new Map(crops.map((crop, i) => [crop, i]))
+  const hazOrder = new Map(hazLevelsChart.map((haz, i) => [haz, i]))
+
+  const displayRows = rows
+    .filter((r) => crops.includes(r?.crop) && hazLevelsChart.includes(String(r?.hazard ?? "")))
+    .filter((r) => !hz_q2_difference || includeDecreases || (Number.isFinite(Number(r?.[valDiff] ?? 0)) && Number(r?.[valDiff] ?? 0) > 0))
+    .map((r) => ({
+      ...r,
+      crop: r.crop,
+      hazard: String(r.hazard)
+    }))
+    .sort((a, b) => {
+      const cropCmp = (cropOrder.get(a?.crop) ?? 9999) - (cropOrder.get(b?.crop) ?? 9999)
+      if (cropCmp !== 0) return cropCmp
+      return (hazOrder.get(a?.hazard) ?? 9999) - (hazOrder.get(b?.hazard) ?? 9999)
+    })
+
+  return { rows, displayRows, hazLevelsChart, crops, includeDecreases, valLeft, valRight, valDiff }
+}
+
+// Chart
+hz_q2Chart = {
+  const state = hz_q2DisplayState ?? {}
+  const rows = Array.isArray(state.rows) ? state.rows : []
+  const hazLevelsChart = Array.isArray(state.hazLevelsChart) ? state.hazLevelsChart : []
+  const crops = Array.isArray(state.crops) ? state.crops.slice() : []
+  const includeDecreases = !!state.includeDecreases
+  const valLeft = state.valLeft ?? (hz_q2_relative ? "perc1" : "total1")
+  const valRight = state.valRight ?? (hz_q2_relative ? "perc2" : "total2")
+  const valDiff = state.valDiff ?? (hz_q2_relative ? "perc_diff" : "diff")
+  if (!rows.length || !hazLevelsChart.length || !crops.length) return html`<div class="hz-muted">No data.</div>`
+
+  const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
+  const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
+
+  const groupGap = 1
+  const slotPx = hz_q2_showCompound ? 14 : 15
+  const perCrop = Math.max(
+    hz_q2_showCompound ? 70 : 62,
+    hazLevelsChart.length * slotPx + groupGap * 12
+  )
 
   const height = Math.max(
     360,
@@ -3477,54 +3498,75 @@ hz_q2Chart = {
   const xLabel = hz_q2_relative ? "%" : xLabelAbs
   const tickFmt = hz_q2_relative ? (x) => fmtPct(x) : (x) => fmtAbs(x)
 
-  const makeSidePlot = (title, sideKey) => {
+  const slotKey = (crop, hazard) => `${crop}__haz__${hazard}`
+  const gapKey = (crop) => `${crop}__gap__`
+
+  const buildGroupedLayout = (sourceRows, hazards) => {
+    const domain = []
+    const tickLabelMap = new Map()
+    const midIdx = Math.floor((hazards.length - 1) / 2)
+    const midHazard = hazards[midIdx] ?? hazards[0] ?? null
+
+    for (const crop of crops) {
+      for (const hazard of hazards) domain.push(slotKey(crop, hazard))
+      if (midHazard) tickLabelMap.set(slotKey(crop, midHazard), crop)
+      domain.push(gapKey(crop))
+    }
+
+    const data = (sourceRows ?? [])
+      .filter((d) => crops.includes(d?.crop) && hazards.includes(String(d?.hazard ?? "")))
+      .map((d) => ({
+        ...d,
+        crop: d.crop,
+        hazard: String(d.hazard),
+        value: Number(d?.value ?? 0),
+        slot: slotKey(d.crop, String(d.hazard))
+      }))
+
+    return { data, domain, tickLabelMap }
+  }
+
+  const groupedBarMark = (layout) => Plot.barX(layout.data, {
+    x: "value",
+    y: "slot",
+    fill: "hazard",
+    insetTop: 1,
+    insetBottom: 1
+  })
+
+  const groupedTipMark = (layout) => Plot.tip(
+    layout.data,
+    Plot.pointerY({
+      x: "value",
+      y: "slot",
+      fill: "hazard",
+      maxRadius: 80,
+      channels: {
+        cropLabel: { value: (d) => d?.crop ?? "—", label: "Crop" },
+        hazardLabel: { value: (d) => d?.hazard ?? "—", label: "Hazard" }
+      },
+      format: {
+        cropLabel: true,
+        hazardLabel: true,
+        x: (v) => hz_q2_relative ? fmtPct(v) : fmtAbs(v),
+        y: false,
+        fill: false
+      }
+    })
+  )
+
+  const makeGroupedSidePlot = (title, sideKey) => {
     const valKey = sideKey === "left" ? valLeft : valRight
 
-    const data = rows
-      .filter(r => crops.includes(r?.crop) && hazLevelsChart.includes(String(r?.hazard ?? "")))
-      .map(r => ({
+    const sourceRows = rows
+      .filter((r) => crops.includes(r?.crop) && hazLevelsChart.includes(String(r?.hazard ?? "")))
+      .map((r) => ({
         crop: r.crop,
         hazard: String(r.hazard),
         value: Number(r?.[valKey] ?? 0)
       }))
 
-    const groupedMarks = (rows, hazards) => {
-      // Use a *single* bar mark with per-row dy offsets to avoid overlapping tooltips
-      const n = hazards.length
-      const step = 12 // px spacing between hazard bars within the same crop band
-      const idx = new Map(hazards.map((h, i) => [h, i]))
-      const data2 = rows.map((d) => ({
-        ...d,
-        __dy: ((idx.get(d.hazard) ?? 0) - (n - 1) / 2) * step
-      }))
-      return [
-        Plot.barX(data2, {
-          x: "value",
-          y: "crop",
-          fill: "hazard",
-          dy: "__dy",
-          insetTop: 5,
-          insetBottom: 5,
-          tip: {
-            format: { crop: true, hazard: true, value: hz_q2_relative ? fmtPct : fmtAbs }
-          }
-        })
-      ]
-    }
-
-    const marks = hz_q2_showCompound
-      ? [
-          Plot.barX(data, Plot.stackX({
-            x: "value",
-            y: "crop",
-            fill: "hazard",
-            tip: {
-              format: { crop: true, hazard: true, value: hz_q2_relative ? fmtPct : fmtAbs }
-            }
-          }))
-        ]
-      : groupedMarks(data, hazLevelsChart)
-
+    const layout = buildGroupedLayout(sourceRows, hazLevelsChart)
 
     return html`
       <div class="hz-mini hz-mini--stack">
@@ -3539,9 +3581,14 @@ hz_q2Chart = {
           marginTop: 10,
           marginBottom: 30,
           x: { label: xLabel, grid: true, tickFormat: tickFmt },
-          y: { domain: crops, label: null },
+          y: {
+            domain: layout.domain,
+            label: null,
+            tickFormat: (d) => layout.tickLabelMap.get(d) ?? "",
+            tickSize: 0
+          },
           color,
-              marks: [Plot.ruleX([0]), ...marks]
+          marks: [Plot.ruleX([0]), groupedBarMark(layout), groupedTipMark(layout)]
         })}
       </div>
     `
@@ -3551,88 +3598,46 @@ hz_q2Chart = {
     return html`
       <div class="hz-legendRow">${legend}</div>
       <div class="hz-grid2 hz-grid2--equal">
-        ${makeSidePlot("Left", "left")}
-        ${makeSidePlot("Right", "right")}
+        ${makeGroupedSidePlot("Left", "left")}
+        ${makeGroupedSidePlot("Right", "right")}
       </div>
     `
   }
 
-  // Difference mode (single plot)
   const diffData = rows
-    .filter(r => crops.includes(r?.crop) && hazLevelsChart.includes(String(r?.hazard ?? "")))
-    .map(r => ({
+    .filter((r) => crops.includes(r?.crop) && hazLevelsChart.includes(String(r?.hazard ?? "")))
+    .map((r) => ({
       crop: r.crop,
       hazard: String(r.hazard),
       value: Number(r?.[valDiff] ?? 0)
     }))
-    .filter(d => includeDecreases || (Number.isFinite(d.value) && d.value > 0))
-const xLabelDiff = hz_q2_relative
+    .filter((d) => includeDecreases || (Number.isFinite(d.value) && d.value > 0))
+
+  const xLabelDiff = hz_q2_relative
     ? "Δ percentage points (Right − Left)"
     : "Δ exposure (Right − Left)"
 
-  const groupedMarks = (rows, hazards) => {
-  // Use a *single* bar mark with per-row dy offsets to avoid overlapping tooltips
-  const n = hazards.length
-  const step = 12 // px spacing between hazard bars within the same crop band
-  const idx = new Map(hazards.map((h, i) => [h, i]))
-  const data2 = rows.map((d) => ({
-    ...d,
-    __dy: ((idx.get(d.hazard) ?? 0) - (n - 1) / 2) * step
-  }))
-  return [
-    Plot.barX(data2, {
-      x: "value",
-      y: "crop",
-      fill: "hazard",
-      dy: "__dy",
-      insetTop: 5,
-      insetBottom: 5,
-      tip: {
-        format: { crop: true, hazard: true, value: hz_q2_relative ? fmtPct : fmtAbs }
-      }
-    })
-  ]
-}
+  const diffLayout = buildGroupedLayout(diffData, hazLevelsChart)
 
-  const diffMarks = hz_q2_showCompound
-      ? (() => {
-          const pos = (diffData ?? []).filter(d => Number(d?.value ?? 0) > 0)
-          const neg = (diffData ?? []).filter(d => Number(d?.value ?? 0) < 0)
-          const mk = []
-          const tipFmt = { crop: true, hazard: true, value: hz_q2_relative ? fmtPct : fmtAbs }
-          if (pos.length) {
-            mk.push(Plot.barX(pos, Plot.stackX({
-              x: "value",
-              y: "crop",
-              fill: "hazard",
-              tip: { format: tipFmt }
-            })))
-          }
-          if (neg.length) {
-            mk.push(Plot.barX(neg, Plot.stackX({
-              x: "value",
-              y: "crop",
-              fill: "hazard",
-              tip: { format: tipFmt }
-            })))
-          }
-          return mk
-        })()
-      : groupedMarks(diffData, hazLevelsChart)
-return html`
+  return html`
     <div class="hz-legendRow">${legend}</div>
     ${Plot.plot({
-          className: "hz-plot--q2",
-          style: { fontSize: "14px" },
+      className: "hz-plot--q2",
+      style: { fontSize: "14px" },
       height,
       marginLeft: 180,
       marginRight: 18,
       marginTop: 10,
       marginBottom: 30,
       x: { label: xLabelDiff, grid: true, tickFormat: tickFmt },
-      y: { domain: crops, label: null },
+      y: {
+        domain: diffLayout.domain,
+        label: null,
+        tickFormat: (d) => diffLayout.tickLabelMap.get(d) ?? "",
+        tickSize: 0
+      },
       color,
-      marks: [Plot.ruleX([0]), ...diffMarks]
+      marks: [Plot.ruleX([0]), groupedBarMark(diffLayout), groupedTipMark(diffLayout)]
     })}
   `
 }
@@ -3644,13 +3649,12 @@ return html`
 // Q2 — summary table
 // ----------------------------
 hz_q2TableView = {
-  const rows = Array.isArray(hz_q2Rows) ? hz_q2Rows : []
+  const state = hz_q2DisplayState ?? {}
+  const rows = Array.isArray(state.displayRows) ? state.displayRows : []
   if (!rows.length) return html`<div class="hz-muted">No data.</div>`
 
-  const sum1 = rows.reduce((s,r) => s + (r.total1 || 0), 0)
-  const sum2 = rows.reduce((s,r) => s + (r.total2 || 0), 0)
-
   const showPct = !!hz_q2_relative
+  const showDiff = !!hz_q2_difference
 
   const fmtAbsFull = (v) => hz_formatNumber(v, { digits: 2, compact: false })
   const fmtPct = (v) => {
@@ -3666,36 +3670,47 @@ hz_q2TableView = {
     return `${sign}${hz_formatNumber(x, { digits: 2, compact: false })} pp`
   }
 
-  const tableData = rows.map((r) => {
-    const p1 = sum1 ? (100 * r.total1 / sum1) : 0
-    const p2 = sum2 ? (100 * r.total2 / sum2) : 0
-    return ({
-      "Crop": r.crop,
-      "Left (abs)": r.total1,
-      "Right (abs)": r.total2,
-      "Δ (abs)": (r.total2 - r.total1),
-      "Left (%)": p1,
-      "Right (%)": p2,
-      "Δ (pp)": (p2 - p1)
-    })
-  })
+  const fmtSignedAbs = (v) => {
+    const x = Number(v)
+    if (!Number.isFinite(x)) return "—"
+    const sign = x > 0 ? "+" : ""
+    return `${sign}${hz_formatNumber(x, { digits: 2, compact: false })}`
+  }
+
+  const tableData = rows.map((r) => ({
+    "Crop": r.crop,
+    "Hazard": r.hazard,
+    "Left (abs)": Number(r?.total1 ?? 0),
+    "Right (abs)": Number(r?.total2 ?? 0),
+    "Δ (abs)": Number(r?.diff ?? 0),
+    "Left (%)": Number(r?.perc1 ?? 0),
+    "Right (%)": Number(r?.perc2 ?? 0),
+    "Δ (pp)": Number(r?.perc_diff ?? 0)
+  }))
+
+  const columns = showDiff
+    ? (showPct
+        ? ["Crop", "Hazard", "Δ (pp)"]
+        : ["Crop", "Hazard", "Δ (abs)"])
+    : (showPct
+        ? ["Crop", "Hazard", "Left (%)", "Right (%)"]
+        : ["Crop", "Hazard", "Left (abs)", "Right (abs)"])
 
   return hz_atlasTable(tableData, {
-    columns: showPct
-      ? ["Crop", "Left (%)", "Right (%)", "Δ (pp)"]
-      : ["Crop", "Left (abs)", "Right (abs)", "Δ (abs)"],
+    columns,
     format: {
       "Left (abs)": fmtAbsFull,
       "Right (abs)": fmtAbsFull,
-      "Δ (abs)": fmtAbsFull,
+      "Δ (abs)": fmtSignedAbs,
       "Left (%)": fmtPct,
       "Right (%)": fmtPct,
       "Δ (pp)": fmtPP
     },
-    rows: 12,
+    rows: 16,
     height: "540px",
     width: {
-      "Crop": 240,
+      "Crop": 220,
+      "Hazard": 180,
       "Left (abs)": 140,
       "Right (abs)": 140,
       "Δ (abs)": 140,
@@ -3955,7 +3970,6 @@ Of ${selTxt} selected commodities, the most exposed commodities (in absolute ter
 ```
 
 
-
 ```{ojs}
 //| output: false
 // ----------------------------
@@ -3963,22 +3977,30 @@ Of ${selTxt} selected commodities, the most exposed commodities (in absolute ter
 // ----------------------------
 hz_q3ReqExtra = ({ top_hazards: 10, top_crops: 12 })
 
-hz_q3RespL = (hz_activeQuestion === "q3")
-  ? await hz_apiDebouncedCached("q3L", "/api/v1/hz/hazard-by-crop", hz_sideReq(hz_src1, hz_s1, hz_q3ReqExtra), { ttlMs: 300000, debounceMs: 250 })
-  : null
+hz_q3RespL = ({
+  ok: !!hz_q2Resp?.ok,
+  cached: !!hz_q2Resp?.cached,
+  t_ms: Number(hz_q2Resp?.t_ms || 0),
+  error: hz_q2Resp?.error || null,
+  data: hz_q2Resp?.left ?? []
+})
 
-hz_q3RespR = (hz_activeQuestion === "q3")
-  ? await hz_apiDebouncedCached("q3R", "/api/v1/hz/hazard-by-crop", hz_sideReq(hz_src2, hz_s2, hz_q3ReqExtra), { ttlMs: 300000, debounceMs: 250 })
-  : null
+hz_q3RespR = ({
+  ok: !!hz_q2Resp?.ok,
+  cached: !!hz_q2Resp?.cached,
+  t_ms: Number(hz_q2Resp?.t_ms || 0),
+  error: hz_q2Resp?.error || null,
+  data: hz_q2Resp?.right ?? []
+})
 
 hz_q3DataL = hz_q3RespL?.data ?? []
 hz_q3DataR = hz_q3RespR?.data ?? []
 
 hz_q3Meta = ({
-  ok: !!(hz_q3RespL?.ok && hz_q3RespR?.ok),
-  cached: !!(hz_q3RespL?.cached && hz_q3RespR?.cached),
-  t_ms: Math.max(Number(hz_q3RespL?.t_ms || 0), Number(hz_q3RespR?.t_ms || 0)),
-  error: hz_q3RespL?.error || hz_q3RespR?.error || null
+  ok: !!hz_q2Meta?.ok,
+  cached: !!hz_q2Meta?.cached,
+  t_ms: Number(hz_q2Meta?.t_ms || 0),
+  error: hz_q2Meta?.error || null
 })
 
 hz_q3Chart = {
@@ -4128,29 +4150,37 @@ viewof hz_q5_view = Inputs.radio(
   { label: "", value: "chart" }
 )
 
-viewof hz_q5_viewMode = Inputs.radio(
-  new Map([
-    ["All hazards", "all"],
-    ["Single hazard", "one"]
-  ]),
-  { label: "", value: "all" }
-)
+hz_q5HazardOptions = ["any", "dry (any)", "heat (any)", "wet (any)"]
 
-viewof hz_q5_hazard = Inputs.select(["any", "dry (any)", "heat (any)", "wet (any)"], {
-  label: "",
-  value: "any"
-})
+hz_formatQ5Hazard = (h) => {
+  const s = String(h ?? "").trim().toLowerCase()
+  if (s === "any") return "Any"
+  if (s === "dry (any)") return "Dry"
+  if (s === "heat (any)") return "Heat"
+  if (s === "wet (any)") return "Wet"
+  return String(h ?? "")
+}
+
+viewof hz_q5_hazards = hz_safeEnhancedMultiSelect(
+  (hz_q5HazardOptions ?? []).map(v => ({ value: v, label: hz_formatQ5Hazard(v) })),
+  {
+    label: "",
+    value: hz_q5HazardOptions,
+    placeholder: "Search hazards…"
+  }
+)
 
 viewof hz_q5_scale = Inputs.radio(
   new Map([
-    ["Absolute", "abs"],
-    ["Index to historic (100)", "idx"]
+    ["Actual exposure", "abs"],
+    ["Relative to historic baseline", "idx"]
   ]),
   { label: "", value: "abs" }
 )
 
-viewof hz_q5_showUncertainty = Inputs.toggle({ label: "", value: true })
+viewof hz_q5_showUncertainty = Inputs.toggle({ label: "", value: false })
 viewof hz_q5_showLines = Inputs.toggle({ label: "", value: true })
+viewof hz_q5_freeY = Inputs.toggle({ label: "", value: true })
 
 viewof hz_q5_chartHeight = Inputs.range([420, 980], {
   label: "",
@@ -4236,17 +4266,23 @@ hz_q5TimeframeOptions = {
   return opts.length ? opts : ["2021-2040", "2041-2060", "2061-2080", "2081-2100"]
 }
 
-viewof hz_q5_scenarios = Inputs.select(hz_q5ScenarioOptions, {
-  label: "",
-  multiple: true,
-  value: hz_q5ScenarioOptions
-})
+viewof hz_q5_scenarios = hz_safeEnhancedMultiSelect(
+  (hz_q5ScenarioOptions ?? []).map(v => ({ value: v, label: String(v ?? "").toUpperCase() })),
+  {
+    label: "",
+    value: hz_q5ScenarioOptions,
+    placeholder: "Search scenarios…"
+  }
+)
 
-viewof hz_q5_timeframes = Inputs.select(hz_q5TimeframeOptions, {
-  label: "",
-  multiple: true,
-  value: hz_q5TimeframeOptions
-})
+viewof hz_q5_timeframes = hz_safeEnhancedMultiSelect(
+  (hz_q5TimeframeOptions ?? []).map(v => ({ value: v, label: String(v ?? "") })),
+  {
+    label: "",
+    value: hz_q5TimeframeOptions,
+    placeholder: "Search periods…"
+  }
+)
 
 // Clean rows + apply client-side filters (scenario/timeframe + hazard view)
 hz_q5RowsClean = {
@@ -4316,8 +4352,8 @@ hz_q5Filtered = {
   const scenSet = new Set(scenSel.map(String))
   const tfSet = new Set(tfSel.map(String))
 
-  const mode = String(hz_q5_viewMode ?? "all")
-  const hzOne = String(hz_q5_hazard ?? "any")
+  const hazardSel = (hz_q5_hazards && hz_q5_hazards.length) ? hz_q5_hazards.map(String) : hz_q5HazardOptions.map(String)
+  const hazardSet = new Set(hazardSel)
 
   const out = []
   for (const r of (hz_q5RowsClean ?? [])) {
@@ -4332,7 +4368,7 @@ hz_q5Filtered = {
 
     if (!scenSet.has(String(r.scenario))) continue
     if (!tfSet.has(String(r.timeframe))) continue
-    if (mode === "one" && String(r.hazard) !== hzOne) continue
+    if (!hazardSet.has(String(r.hazard))) continue
 
     out.push(r)
   }
@@ -4410,25 +4446,26 @@ hz_q5Plot = {
   const rowsJ = hz_q5PlotRowsJittered ?? []
   if (!rowsJ.length) return html`<div class="hz-loading">Loading chart…</div>`
 
-  const modeView = String(hz_q5_viewMode ?? "all")
+  const selectedHazards = (hz_q5_hazards && hz_q5_hazards.length) ? hz_q5_hazards.map(String) : hz_q5HazardOptions.map(String)
+  const hazardDomain = (hz_q5HazardOptions ?? []).map(String).filter(h => selectedHazards.includes(h))
+  const showMultiHazards = hazardDomain.length !== 1
   const showUnc = !!hz_q5_showUncertainty
   const showLines = !!hz_q5_showLines
+  const freeY = !!hz_q5_freeY
   const scaleMode = String(hz_q5_scale ?? "abs")
 
   const years = Array.from(new Set(rowsJ.map(d => Math.round(Number(d.year)))))
     .filter(Number.isFinite)
     .sort((a, b) => a - b)
 
-  
   const xVals = (rowsJ ?? []).map(d => Number(d.xj)).filter(Number.isFinite)
   const xMin = xVals.length ? Math.min(...xVals) : (years.length ? years[0] : null)
   const xMax = xVals.length ? Math.max(...xVals) : (years.length ? years[years.length - 1] : null)
 
   const padYears = (xMin != null && xMax != null && xMin === xMax) ? 5 : 2
   const xDomain = (xMin != null && xMax != null) ? [xMin - padYears, xMax + padYears] : undefined
-
- 
   const tickYears = xDomain ? years.filter(y => y >= xDomain[0] && y <= xDomain[1]) : years
+
   const fmtAbs = (v) => hz_formatNumber(v, { digits: 2, compact: true })
   const fmtIdx = (v) => hz_formatNumber(v, { digits: 0, compact: false })
   const fmt = (v) => (scaleMode === "idx" ? fmtIdx(v) : fmtAbs(v))
@@ -4438,7 +4475,29 @@ hz_q5Plot = {
     ? "Exposure index (historic = 100)"
     : (hz_varLabelAbs ?? "Exposure")
 
-  const baseRules = hz_q5BaselineRules ?? []
+  const yValsAll = []
+  for (const d of (rowsJ ?? [])) {
+    if (!hazardDomain.includes(String(d?.hazard ?? ""))) continue
+    const v = Number(d?.value)
+    if (Number.isFinite(v)) yValsAll.push(v)
+    if (showUnc) {
+      const lo = Number(d?.value_low)
+      const hi = Number(d?.value_high)
+      if (Number.isFinite(lo)) yValsAll.push(lo)
+      if (Number.isFinite(hi)) yValsAll.push(hi)
+    }
+  }
+  const yMinAll = yValsAll.length ? Math.min(...yValsAll) : null
+  const yMaxAll = yValsAll.length ? Math.max(...yValsAll) : null
+  const ySpanAll = (yMinAll != null && yMaxAll != null) ? (yMaxAll - yMinAll) : null
+  const yPadAll = (ySpanAll != null && ySpanAll > 0)
+    ? ySpanAll * 0.06
+    : ((yMinAll != null && yMaxAll != null) ? Math.max(Math.abs(yMaxAll || 0) * 0.08, 1) : null)
+  const sharedYDomain = (yMinAll != null && yMaxAll != null && yPadAll != null)
+    ? [yMinAll - yPadAll, yMaxAll + yPadAll]
+    : undefined
+
+  const baseRules = (hz_q5BaselineRules ?? []).filter(d => hazardDomain.includes(String(d.hazard)))
   const baseForOne = (h) => {
     const r = baseRules.find(d => String(d.hazard) === String(h))
     return r ? Number(r.baseline) : null
@@ -4457,87 +4516,157 @@ hz_q5Plot = {
     return parts.join("\n")
   }
 
-  const rowsOne = (modeView === "one")
-    ? rowsJ.filter(d => String(d.hazard) === String(hz_q5_hazard ?? "any"))
-    : rowsJ
+  const rowsOne = rowsJ.filter(d => hazardDomain.includes(String(d.hazard)))
+  const scenarioDomain = (((hz_q5_scenarios && hz_q5_scenarios.length) ? hz_q5_scenarios : hz_q5ScenarioOptions) ?? [])
+    .map(String)
+    .filter(s => rowsOne.some(r => String(r?.scenario ?? "") === s))
+  const sharedColor = { domain: scenarioDomain, scheme: "tableau10", legend: false }
 
-  const baselineOne = (modeView === "one")
-    ? baseForOne(String(hz_q5_hazard ?? "any"))
-    : null
+  const makeMarks = (data, haz) => {
+    const baseline = baseForOne(haz)
+    const uncRows = data.filter(d => d.value_low != null && d.value_high != null)
+    return [
+      ...(baseline != null ? [Plot.ruleY([baseline], { strokeDasharray: "4,4", opacity: 0.55 })] : []),
+      ...(showUnc ? [
+        Plot.areaY(uncRows, {
+          x: "year",
+          y1: "value_low",
+          y2: "value_high",
+          z: "scenario",
+          fill: "scenario",
+          fillOpacity: 0.14,
+          curve: "linear"
+        }),
+        Plot.ruleX(uncRows, {
+          x: "xj",
+          y1: "value_low",
+          y2: "value_high",
+          stroke: "scenario",
+          opacity: 0.6,
+          strokeWidth: 2.5,
+          strokeLinecap: "round"
+        }),
+        Plot.tickX(uncRows, {
+          x: "xj",
+          y: "value_low",
+          stroke: "scenario",
+          opacity: 0.75,
+          inset: 0,
+          strokeWidth: 2
+        }),
+        Plot.tickX(uncRows, {
+          x: "xj",
+          y: "value_high",
+          stroke: "scenario",
+          opacity: 0.75,
+          inset: 0,
+          strokeWidth: 2
+        })
+      ] : []),
+      ...(showLines ? [Plot.line(data, {
+        x: "year",
+        y: "value",
+        stroke: "scenario",
+        opacity: 0.85,
+        strokeWidth: 2
+      })] : []),
+      Plot.dot(data, {
+        x: "xj",
+        y: "value",
+        stroke: "scenario",
+        fill: "scenario",
+        r: 3.5,
+        title: titleFor
+      })
+    ]
+  }
 
-  const commonFy = (modeView === "all") ? { fy: "hazard" } : {}
-
-  const marks = [
-    ...(modeView === "all"
-      ? [Plot.ruleY(baseRules, { y: "baseline", ...commonFy, strokeDasharray: "4,4", opacity: 0.55 })]
-      : (baselineOne != null ? [Plot.ruleY([baselineOne], { strokeDasharray: "4,4", opacity: 0.55 })] : [])
-    ),
-
-    ...(showUnc ? [Plot.ruleY(rowsOne.filter(d => d.value_low != null && d.value_high != null), {
-      x: "xj",
-      y1: "value_low",
-      y2: "value_high",
-      stroke: "scenario",
-      opacity: 0.45,
-      strokeWidth: 2,
-      strokeLinecap: "round",
-      ...commonFy
-    })] : []),
-
-    ...(showLines ? [Plot.line(rowsOne, {
-      x: "year",
-      y: "value",
-      stroke: "scenario",
-      opacity: 0.8,
-      ...commonFy
-    })] : []),
-
-    Plot.dot(rowsOne, {
-      x: "xj",
-      y: "value",
-      stroke: "scenario",
-      fill: "scenario",
-      r: 3,
-      title: titleFor,
-      ...commonFy
-    })
-  ]
   const w = (typeof width === "number" && Number.isFinite(width)) ? width : 1100
   const plotWidth = Math.min(1400, w)
+  const totalHeight = Number(hz_q5_chartHeight ?? 720)
 
-  const plotOpts = {
-    width: plotWidth,
-    height: Number(hz_q5_chartHeight ?? 720),
-    marginLeft: 84,
-    marginRight: 96,
-    marginTop: 10,
-    marginBottom: 44,
-    x: {
-      label: "Year",
-      grid: true,
-      domain: xDomain,
-      ticks: tickYears,
-      tickFormat: (d) => String(Math.round(d)),
-      nice: false
-    },
-    y: { label: yLabel, grid: true, tickFormat: tickFmtY },
-    color: { legend: true, label: "Scenario" },
-    marks
-  }
-  if (modeView === "all") {
-    plotOpts.fy = { label: null, domain: ["any", "dry (any)", "heat (any)", "wet (any)"], axis: "right" }
+  if (!showMultiHazards) {
+    const oneHaz = hazardDomain[0]
+    const plotOpts = {
+      width: plotWidth,
+      height: totalHeight,
+      marginLeft: 84,
+      marginRight: 96,
+      marginTop: 10,
+      marginBottom: 44,
+      x: {
+        label: "Year",
+        grid: true,
+        domain: xDomain,
+        ticks: tickYears,
+        tickFormat: (d) => String(Math.round(d)),
+        nice: false
+      },
+      y: { label: yLabel, grid: true, tickFormat: tickFmtY, domain: sharedYDomain },
+      color: { ...sharedColor, legend: true, label: "Scenario" },
+      marks: makeMarks(rowsOne.filter(d => String(d.hazard) === String(oneHaz)), oneHaz)
+    }
+    return Plot.plot(plotOpts)
   }
 
-  return Plot.plot(plotOpts)
+  const cols = Math.min(2, Math.max(1, hazardDomain.length))
+  const rowsCount = Math.max(1, Math.ceil(hazardDomain.length / cols))
+  const gap = 16
+  const panelW = Math.max(320, Math.floor((plotWidth - gap * (cols - 1)) / cols))
+  const panelH = Math.max(260, Math.floor((totalHeight - gap * (rowsCount - 1)) / rowsCount))
+  const legend = Plot.legend({ color: { ...sharedColor, legend: true, label: "Scenario" }, columns: Math.min(4, Math.max(1, scenarioDomain.length || 1)) })
+
+  const buildPanel = (haz, idx) => {
+    const data = rowsOne.filter(d => String(d.hazard) === String(haz))
+    const isLeft = (idx % cols) === 0
+    return html`
+      <div class="hz-sideCard hz-sideCard--plot">
+        <div class="hz-sideCard__body">
+          <div class="hz-mini__title">${hz_formatQ5Hazard(haz)}</div>
+          ${Plot.plot({
+            width: panelW,
+            height: panelH,
+            style: { overflow: "visible" },
+            marginLeft: 72,
+            marginRight: 18,
+            marginTop: 10,
+            marginBottom: 40,
+            x: {
+              label: "Year",
+              grid: true,
+              domain: xDomain,
+              ticks: tickYears,
+              tickFormat: (d) => String(Math.round(d)),
+              nice: false
+            },
+            y: {
+              label: isLeft ? yLabel : null,
+              grid: true,
+              tickFormat: tickFmtY,
+              domain: freeY ? undefined : sharedYDomain
+            },
+            color: sharedColor,
+            marks: makeMarks(data, haz)
+          })}
+        </div>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="hz-legendRow">${legend}</div>
+    <div style="display:grid;gap:${gap}px;grid-template-columns:repeat(${cols}, minmax(0, 1fr));align-items:start;">
+      ${hazardDomain.map((haz, idx) => buildPanel(haz, idx))}
+    </div>
+  `
 }
-
 hz_q5_chartHost = html`
   <div class="hz-chartWrap ${hz_q5Busy ? "hz-chartWrap--busy" : ""}">
     ${hz_q5Plot}
     <div class="hz-chartNote">
       ${md`${_lang({
-        en: "Dashed lines show the historic (baseline) exposure. Error bars show uncertainty across GCMs where available.",
-        fr: "Les lignes pointillées indiquent l’exposition historique (référence). Les barres d’erreur montrent l’incertitude entre les GCM lorsque disponible."
+        en: "Dashed lines show the historic (baseline) exposure. When Uncertainty is on, shaded bands and whiskers show the low–high range across GCMs where available.",
+        fr: "Les lignes pointillées indiquent l’exposition historique (référence). Lorsque l’option Incertitude est activée, des bandes ombrées et des moustaches montrent la plage basse–haute entre les GCM lorsque disponible."
       })}`}
     </div>
   </div>
@@ -4545,14 +4674,14 @@ hz_q5_chartHost = html`
 
 hz_q5_settingsWrap = html`
   <div class="hz-qToolbar__right">
-    <div class="hz-inlineToggles">
-      <div class="hz-miniSetting"><span>View</span>${hz_noJumpInput(viewof hz_q5_viewMode)}</div>
+    <div class="hz-inlineToggles hz-inlineToggles--grid">
       <div class="hz-miniSetting"><span>Scale</span>${hz_noJumpInput(viewof hz_q5_scale)}</div>
-      <div class="hz-miniSetting"><span>Scenarios</span>${hz_noJumpInput(viewof hz_q5_scenarios)}</div>
-      <div class="hz-miniSetting"><span>Periods</span>${hz_noJumpInput(viewof hz_q5_timeframes)}</div>
+      <div class="hz-miniSetting hz-miniSetting--grow"><span>Hazards</span>${hz_noJumpInput(viewof hz_q5_hazards)}</div>
+      <div class="hz-miniSetting hz-miniSetting--grow"><span>Scenarios</span>${hz_noJumpInput(viewof hz_q5_scenarios)}</div>
+      <div class="hz-miniSetting hz-miniSetting--grow"><span>Periods</span>${hz_noJumpInput(viewof hz_q5_timeframes)}</div>
       <div class="hz-miniSetting"><span>Uncertainty</span>${hz_noJumpInput(viewof hz_q5_showUncertainty)}</div>
       <div class="hz-miniSetting"><span>Lines</span>${hz_noJumpInput(viewof hz_q5_showLines)}</div>
-      <div class="hz-miniSetting hz-q5HazCtl"><span>Hazard</span>${hz_noJumpInput(viewof hz_q5_hazard)}</div>
+      <div class="hz-miniSetting"><span>Free Y axis</span>${hz_noJumpInput(viewof hz_q5_freeY)}</div>
       <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${hz_noJumpInput(viewof hz_q5_chartHeight)}</div>
     </div>
   </div>
@@ -4719,26 +4848,8 @@ hz_q5_wireViewToggle = {
   return null
 }
 
-// Hide/disable the hazard selector unless "Single hazard" is selected
-hz_q5_wireHazardCtl = {
-  const modeEl = viewof hz_q5_viewMode
-  const hazEl = viewof hz_q5_hazard
-  const update = () => {
-    const one = String(modeEl?.value ?? "all") === "one"
-    try { hazEl.disabled = !one } catch (e) {}
-    try {
-      const wrap = hazEl?.closest?.(".hz-q5HazCtl")
-      if (wrap) wrap.style.display = one ? "" : "none"
-    } catch (e) {}
-  }
-  update()
-  if (modeEl && !modeEl.__hz_q5_haz_wired) {
-    modeEl.__hz_q5_haz_wired = true
-    modeEl.addEventListener("input", update)
-    modeEl.addEventListener("change", update)
-  }
-  return null
-}
+
+hz_q5_wireHazardCtl = null
 
 
 // Insights helper: table renderer (stacked, no side-by-side)
@@ -4773,12 +4884,11 @@ hz_q5Insight = {
   const fmtPct = (v) => `${hz_formatNumber(v, { digits: 2, compact: false })}%`
 
   const hazardsInView = (() => {
-    const modeView = String(hz_q5_viewMode ?? "all")
-    if (modeView === "one") return [String(hz_q5_hazard ?? "any")]
-    // keep the canonical order
+    const selectedHazards = (hz_q5_hazards && hz_q5_hazards.length) ? hz_q5_hazards.map(String) : hz_q5HazardOptions.map(String)
+    const selectedSet = new Set(selectedHazards)
     const dom = ["any", "dry (any)", "heat (any)", "wet (any)"]
     const present = new Set(rows.map(r => String(r.hazard)))
-    return dom.filter(h => present.has(h))
+    return dom.filter(h => selectedSet.has(h) && present.has(h))
   })()
 
   // Latest row per hazard+scenario
@@ -4926,7 +5036,6 @@ hz_q5Insight = {
     </div>
   `
 }
-
 
 
 hz_q4Rows = {
@@ -5117,7 +5226,7 @@ hz_q4RowsChart = {
     }
   }
 
-  const n = Math.max(1, Number(hz_topN ?? 10) || 10)
+  const n = Math.max(1, Number(hz_q4_topN ?? 10) || 10)
   const topAdmins = Array.from(rankMap.entries())
     .sort((a,b) => b[1] - a[1])
     .slice(0, n)
@@ -5253,10 +5362,7 @@ hz_q4Chart = {
 // Q4 map view alias
 hz_mapView = hz_mapPlot
 
-// ------------------------------------------------------------
-// View mode toggle (Chart / Dashboard / Summary / Map / Raw records)
-// (Copied from original hazardExposure.qmd to restore missing cell)
-// ------------------------------------------------------------
+
 viewof hz_viewMode = {
   // Q1 only: Chart + Summary table
   const form = Inputs.radio(
@@ -5310,9 +5416,7 @@ viewof hz_viewMode = {
 
   return form
 }
-// ------------------------------------------------------------
-// Records-view controls (pager + sort). (Copied from the stable v3 notebook.)
-// ------------------------------------------------------------
+
 viewof hz_recordsSide = {
   const options = [
     { value: "left",  label: "Left" },
@@ -5424,16 +5528,19 @@ hz_tableActionsHost = html`<div class="hz-actions"></div>`
 
 hz_q1_downloadMount = {
   try {
-    const rows = Array.isArray(hz_chartRows) ? hz_chartRows : []
-    const data = rows.map((r) => ({
-      "Hazard": r?.hazard ?? "",
-      "Historic (Total)": r?.total1 ?? null,
-      "Scenario (Total)": r?.total2 ?? null,
-      "Difference (Total)": r?.total_diff ?? null,
-      "Historic (%)": r?.perc1 ?? null,
-      "Scenario (%)": r?.perc2 ?? null,
-      "Difference (%)": r?.pct_diff ?? null
-    }))
+    const rows = Array.isArray(hz_q1DisplayRows) ? hz_q1DisplayRows : []
+    const usePct = !!hz_relative
+    const useDiff = !!hz_difference
+    const data = rows.map((r) => {
+      const base = { "Hazard": r?.hazard ?? "" }
+      if (useDiff) {
+        base[usePct ? "Δ (pp)" : "Δ (abs)"] = usePct ? (r?.pct_diff ?? null) : (r?.total_diff ?? null)
+      } else {
+        base[usePct ? "Left (%)" : "Left (abs)"] = usePct ? (r?.perc1 ?? null) : (r?.total1 ?? null)
+        base[usePct ? "Right (%)" : "Right (abs)"] = usePct ? (r?.perc2 ?? null) : (r?.total2 ?? null)
+      }
+      return base
+    })
     hz_tableActionsHost.replaceChildren(downloadButton(data, "hazardExposure_q1_summary"))
   } catch (_) {}
   return null
@@ -5471,10 +5578,10 @@ hz_registerUi = {
 // Dashboard UI 
 hz_q1_settingsWrap = {
   const el = html`
-  <div class="hz-qToolbar__right">
-    <div class="hz-inlineToggles">
+  <div class="hz-qToolbar__right hz-qToolbar__right--grow">
+    <div class="hz-q2SettingsGrid">
       <div class="hz-miniSetting"><span>Show %</span>${viewof hz_relative}</div>
-      <div class="hz-miniSetting"><span>Difference</span>${viewof hz_difference}</div>
+      <div class="hz-miniSetting"><span>Show differences</span>${viewof hz_difference}</div>
       <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q1ChartHeight}</div>
     </div>
   </div>
@@ -5509,7 +5616,7 @@ hz_q1_resultsWrap = {
   return wrap
 }
 
-// Apply current view mode without rebuilding the whole Q1 card.
+
 hz_q1_applyView = {
   const mode = (hz_viewMode || "chart")
   try { hz_q1_chartCard.style.display = (mode === "chart") ? "" : "none" } catch (_) {}
@@ -5539,7 +5646,7 @@ hz_dashboardShell = html`
 // --------------------------
 // Q2–Q4: independent controls
 // --------------------------
-// (These are not yet connected to queries/outputs; they exist now so each question has its own state.)
+
 
 viewof hz_q2_viewMode = Inputs.radio(["chart", "table"], {
   label: "",
@@ -5555,7 +5662,11 @@ viewof hz_q2_simplifyCompound = hz_noJumpInput(Inputs.toggle({ label: "", value:
 
 viewof hz_q2_includeNoHazard = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q2_includeDecreases = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
-viewof hz_q2_topN = Inputs.range([5, 50], { label: "", step: 1, value: 25 })
+viewof hz_q2_topN = hz_noJumpInput(Inputs.range([1, Math.max(1, hz_q2_selectedCommodityCount || 1)], {
+  label: "",
+  step: 1,
+  value: Math.max(1, hz_q2_selectedCommodityCount || 1)
+}))
 
 viewof hz_q2_chartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
 
@@ -5564,9 +5675,28 @@ viewof hz_q3_relative = hz_noJumpInput(Inputs.toggle({ label: "", value: false }
 viewof hz_q3_showCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q3_simplifyCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q3_includeNoHazard = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
-viewof hz_q3_includeDecreases = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
-viewof hz_q3_topN = Inputs.range([5, 50], { label: "", step: 1, value: 8 })
-viewof hz_q3_chartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
+viewof hz_q3_freeX = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
+viewof hz_q3_topN = hz_noJumpInput(Inputs.range([1, Math.max(1, (hz_selectedCommoditiesForReq ?? []).length || 1)], {
+  label: "",
+  step: 1,
+  value: Math.max(1, (hz_selectedCommoditiesForReq ?? []).length || 1)
+}))
+viewof hz_q3_chartHeight = hz_noJumpInput(Inputs.range([360, 900], { label: "", step: 10, value: 520 }))
+
+hz_q4_selectedGeographyCount = {
+  const gf = hz_q4_geoFilter ?? { admin0: [], admin1: [], admin2: [] }
+  const a0 = (gf.admin0 ?? []).filter((d) => d != null && String(d).trim() !== "" && String(d).trim().toLowerCase() !== "all")
+  if ((gf.admin2 ?? []).length) return (gf.admin2 ?? []).length
+  if ((gf.admin1 ?? []).length) return (gf.admin1 ?? []).length
+  return (gf.admin0 ?? []).includes("all") || (gf.admin0 ?? []).length === 0 ? 1 : a0.length
+}
+
+viewof hz_q4_topN = hz_noJumpInput(Inputs.range([1, Math.max(1, hz_q4_selectedGeographyCount || 1)], {
+  label: "",
+  step: 1,
+  value: Math.max(1, hz_q4_selectedGeographyCount || 1)
+}))
+
 viewof hz_q4_viewMode = hz_noJumpInput(Inputs.radio(["chart", "table"], {
   label: "",
   value: "chart",
@@ -5805,8 +5935,8 @@ hz_q2_controlsPanel = html`
 `;
 
 hz_q2_settingsWrap = html`
-  <div class="hz-qToolbar__right">
-    <div class="hz-inlineToggles">
+  <div class="hz-qToolbar__right hz-qToolbar__right--grow">
+    <div class="hz-q2SettingsGrid">
       <div class="hz-miniSetting"><span>Show %</span>${viewof hz_q2_relative}</div>
       <div class="hz-miniSetting"><span>Show differences</span>${viewof hz_q2_difference}</div>
       <div class="hz-miniSetting"><span>Show compound hazards</span>${viewof hz_q2_showCompound}</div>
@@ -5853,7 +5983,8 @@ hz_q2_applyView = {
   try { hz_q2_chartCard.style.display = (mode === "chart") ? "" : "none"; } catch (_) {}
   try { hz_q2_tableCard.style.display = (mode === "table") ? "" : "none"; } catch (_) {}
   try { hz_q2_settingsWrap.style.visibility = "visible"; } catch (_) {}
-  // Keep toolbar stable: toggle 'Include decreases' without re-rendering (prevents scroll jumps)
+  try { hz_blurFocusChain(hz_q2_dashboardCard) } catch (_) {}
+
   try {
     const el = hz_q2_settingsWrap.querySelector('[data-hz="q2-includeDecreases"]')
     if (el) {
@@ -5868,6 +5999,8 @@ hz_q2_applyView = {
 // Mount Q2 outputs into stable hosts (prevents scroll jumps on toggle changes)
 hz_q2_mountChart = {
   hz_q2_chartHost.replaceChildren(hz_q2Chart)
+  hz_bindHoverBlur(hz_q2_chartHost, hz_q2_dashboardCard)
+  hz_blurFocusChain(hz_q2_dashboardCard)
   return null
 }
 
@@ -5904,9 +6037,7 @@ hz_q2_dashboardCard = hz_noJumpRoot(html`
 </div>
 `);
 
-// ------------------------------------------------------------
-// Q3/Q4 Controls (incremental dev placeholders)
-// ------------------------------------------------------------
+
 hz_q3_controlsPanel = html`
   <div class="hz-controlsCompact hz-controlsPanel">
     <div class="hz-controlsGrid2">
@@ -5962,10 +6093,6 @@ hz_q4_controlsPanel = html`
 
 // ------------------------------------------------------------
 // Q3 — Hazard overlap (UpSet)
-// Uses /api/v1/hz/q2 and builds intersections by splitting hazard on "+".
-// Notes:
-// - "no hazard" is excluded from intersections by design (can be shown as KPI).
-// - Q3 makes its own call using groupKey "q3" so it can show its own Updating… overlay.
 // ------------------------------------------------------------
 hz_q3_chartHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading chart…</div></div>`
 
@@ -5984,286 +6111,29 @@ hz_q3_ui = {
 
 
 hz_q3_settingsWrap = html`
-  <div class="hz-qToolbar__right">
-    <div class="hz-inlineToggles">
+  <div class="hz-qToolbar__right hz-qToolbar__right--grow">
+    <div class="hz-q2SettingsGrid">
       <div class="hz-miniSetting"><span>Show %</span>${viewof hz_q3_relative}</div>
       <div class="hz-miniSetting"><span>Show compound hazards</span>${viewof hz_q3_showCompound}</div>
       <div class="hz-miniSetting"><span>Simplify compound hazards</span>${viewof hz_q3_simplifyCompound}</div>
       <div class="hz-miniSetting"><span>Include no hazard</span>${viewof hz_q3_includeNoHazard}</div>
-      <div class="hz-miniSetting"><span>Include decreases in Δ</span>${viewof hz_q3_includeDecreases}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>No. commodities Q3</span>${viewof hz_q3_topN}</div>
+      <div class="hz-miniSetting"><span>Free X axis</span>${viewof hz_q3_freeX}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Number of commodities</span>${viewof hz_q3_topN}</div>
       <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q3_chartHeight}</div>
     </div>
   </div>
 `
 
-hz_q3ReqBody = (() => {
-  // Reuse the same guard logic as Q2 (shared dataset + geo payload)
-  if (!hz_q2ReqOk.ok) return { ok: false, error: hz_q2ReqOk.error, body: null }
+hz_q3ReqBody = hz_q2ReqBody
 
-  const left = {
-    dataset_url: hz_src1?.url,
-    scen: { scenario: hz_s1?.scenario, timeframe: hz_s1?.timeframe },
-    geo: hz_geoFilterApi,
-    commodities: hz_selectedCommoditiesForReq ?? [],
-    hazard_vars: null,
-    hazards: null,
-    method: hz_method,
-    commodity_group: hz_selectedCommodGroup,
-    top_crops: 999,
-    bucket_other: false
-  }
-
-  const right = {
-    dataset_url: hz_src2?.url,
-    scen: { scenario: hz_s2?.scenario, timeframe: hz_s2?.timeframe },
-    geo: hz_geoFilterApi,
-    commodities: hz_selectedCommoditiesForReq ?? [],
-    hazard_vars: null,
-    hazards: null,
-    method: hz_method,
-    commodity_group: hz_selectedCommodGroup,
-    top_crops: 999,
-    bucket_other: false
-  }
-
-  const denom = {
-    denom_url: hz_denomUrl,
-    geo: hz_geoFilterApi,
-    commodities: hz_selectedCommoditiesForReq ?? [],
-    exposure: hz_denomSpec?.exposure ?? null,
-    unit: hz_denomSpec?.unit ?? null,
-    exposure_unit: hz_denomSpec?.unit ?? hz_varShort
-  }
-
-  return { ok: true, error: null, body: { left, right, denom } }
-})()
-
-hz_q3Resp = hz_q3ReqBody.ok
-  ? await hz_keepScroll(
-      hz_apiDebouncedCached("q3", "/api/v1/hz/q2", hz_q3ReqBody.body, { ttlMs: 5 * 60 * 1000, debounceMs: 250 })
-    )
-  : ({ ok: false, error: (hz_q3ReqBody.error ?? "Missing required inputs"), left: [], right: [], denom_by_crop: [] })
+// Reuse the single shared Q2 response instead of triggering a second API call.
+hz_q3Resp = hz_q2Resp
 
 hz_q3RowsL = hz_q3Resp.left ?? []
 hz_q3RowsR = hz_q3Resp.right ?? []
 hz_q3DenomByCrop = hz_q3Resp.denom_by_crop ?? []
 hz_q3DenomTotal = (hz_q3DenomByCrop ?? []).reduce((s, d) => s + (Number(d?.value_tot) || 0), 0)
 
-hz_q3_upsetPrep = (rows, denomTotal, { maxIntersections = 15 } = {}) => {
-  const totalsByHaz = new Map()
-  let anyTotal = 0
-
-  for (const r of (rows ?? [])) {
-    const hazRaw = r?.hazard
-    const haz = (hazRaw == null) ? "" : String(hazRaw).trim()
-    const v = Number(r?.total ?? 0)
-    if (!haz || !Number.isFinite(v)) continue
-    if (haz === "any") { anyTotal += v; continue }
-    totalsByHaz.set(haz, (totalsByHaz.get(haz) ?? 0) + v)
-  }
-
-  // Atomic hazard sets from combinations (excluding "no hazard").
-  const atomicSet = new Set()
-  for (const haz of totalsByHaz.keys()) {
-    if (haz === "no hazard") continue
-    for (const a of haz.split("+")) {
-      const t = a.trim()
-      if (t) atomicSet.add(t)
-    }
-  }
-
-  // Prefer dry/heat/wet ordering when present.
-  const pref = ["dry", "heat", "wet"]
-  const atomic = Array.from(atomicSet).sort((a, b) => {
-    const ia = pref.indexOf(a), ib = pref.indexOf(b)
-    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
-    return a.localeCompare(b)
-  })
-
-  // Intersections (combinations), excluding "no hazard".
-  let intersections = Array.from(totalsByHaz.entries())
-    .filter(([haz]) => haz && haz !== "no hazard")
-    .map(([haz, size]) => ({
-      intersection: haz,
-      sets: haz.split("+").map((s) => s.trim()).filter(Boolean),
-      size: Number(size) || 0
-    }))
-    .filter((d) => d.sets.length > 0)
-
-  intersections.sort((a, b) => (b.size - a.size) || a.intersection.localeCompare(b.intersection))
-  intersections = intersections.slice(0, Math.max(1, Number(maxIntersections) || 15))
-
-  // “Set size” bars (computed from displayed intersections)
-  const setSizes = atomic.map((set) => {
-    let size = 0
-    for (const inter of intersections) if (inter.sets.includes(set)) size += inter.size
-    return { set, size }
-  })
-
-  const denom = Number(denomTotal) || 0
-  const noHazTotal = Math.max(0, denom - (Number(anyTotal) || 0))
-
-  return {
-    atomic,
-    intersections,
-    setSizes,
-    anyTotal: Number(anyTotal) || 0,
-    noHazTotal,
-    denomTotal: denom
-  }
-}
-
-hz_q3_upsetDelta = (L, R, { maxIntersections = 15 } = {}) => {
-  const left = L ?? { atomic: [], intersections: [], anyTotal: 0, noHazTotal: 0, denomTotal: 0 }
-  const right = R ?? { atomic: [], intersections: [], anyTotal: 0, noHazTotal: 0, denomTotal: 0 }
-
-  const atomic = Array.from(new Set([...(left.atomic ?? []), ...(right.atomic ?? [])]))
-
-  const mapL = new Map((left.intersections ?? []).map((d) => [d.intersection, d]))
-  const mapR = new Map((right.intersections ?? []).map((d) => [d.intersection, d]))
-  const keys = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
-
-  let intersections = keys.map((k) => {
-    const a = mapL.get(k)
-    const b = mapR.get(k)
-    const sets = (b?.sets ?? a?.sets ?? String(k).split("+").map((s) => s.trim()).filter(Boolean))
-    const size = (Number(b?.size) || 0) - (Number(a?.size) || 0)
-    return { intersection: String(k), sets, size }
-  }).filter((d) => d.sets.length > 0)
-
-  intersections.sort((a, b) => (Math.abs(b.size) - Math.abs(a.size)) || a.intersection.localeCompare(b.intersection))
-  intersections = intersections.slice(0, Math.max(1, Number(maxIntersections) || 15))
-
-  const setSizes = atomic.map((set) => {
-    let size = 0
-    for (const inter of intersections) if (inter.sets.includes(set)) size += inter.size
-    return { set, size }
-  })
-
-  return {
-    atomic,
-    intersections,
-    setSizes,
-    anyTotal: (Number(right.anyTotal) || 0) - (Number(left.anyTotal) || 0),
-    noHazTotal: (Number(right.noHazTotal) || 0) - (Number(left.noHazTotal) || 0),
-    denomTotal: (Number(right.denomTotal) || 0) - (Number(left.denomTotal) || 0)
-  }
-}
-
-hz_q3_fmt = (v) => {
-  const n = Number(v) || 0
-  const a = Math.abs(n)
-  if (a >= 1e9) return `${(n / 1e9).toFixed(2)}B`
-  if (a >= 1e6) return `${(n / 1e6).toFixed(2)}M`
-  if (a >= 1e3) return `${(n / 1e3).toFixed(2)}k`
-  return `${Math.round(n)}`
-}
-
-hz_q3_upsetFigure = (prep, { width = 900, height = 520, title = "", isDelta = false } = {}) => {
-  const p = prep ?? { atomic: [], intersections: [], setSizes: [], anyTotal: 0, noHazTotal: 0, denomTotal: 0 }
-  const sets = (p.atomic ?? [])
-  const intersections = (p.intersections ?? [])
-  const setSizes = (p.setSizes ?? [])
-
-  if (!sets.length || !intersections.length) {
-    return html`<div class="hz-loading">No overlap data available for the current filters.</div>`
-  }
-
-  const gap = 10
-  const sideW = Math.min(240, Math.max(180, Math.round(width * 0.25)))
-  const mainW = Math.max(360, width - sideW - gap)
-  const upperH = Math.max(150, Math.round(height * 0.42))
-  const lowerH = Math.max(220, height - upperH - 10)
-
-  // index for columns
-  const ix = intersections.map((d, i) => ({ ...d, i: i + 1 }))
-
-  const dotsAll = []
-  for (const inter of ix) {
-    const s = new Set(inter.sets)
-    for (const h of sets) dotsAll.push({ i: inter.i, hazard: h, on: s.has(h) })
-  }
-  const dotsOn = dotsAll.filter((d) => d.on)
-
-  const lines = ix.map((inter) => {
-    const present = sets.filter((h) => inter.sets.includes(h))
-    if (present.length < 2) return null
-    return { i: inter.i, y1: present[0], y2: present[present.length - 1] }
-  }).filter(Boolean)
-
-  const upper = Plot.plot({
-    width: mainW,
-    height: upperH,
-    marginLeft: 44,
-    marginRight: 8,
-    marginTop: 10,
-    marginBottom: 10,
-    x: { label: null, axis: null, domain: ix.map((d) => d.i) },
-    y: { label: null, grid: true },
-    marks: [
-      Plot.ruleY([0]),
-      Plot.barY(ix, {
-        x: "i",
-        y: "size",
-        title: (d) => `${d.intersection}\n${isDelta ? "Δ" : "Total"}: ${hz_q3_fmt(d.size)}`
-      })
-    ]
-  })
-
-  const matrix = Plot.plot({
-    width: mainW,
-    height: lowerH,
-    marginLeft: 44,
-    marginRight: 8,
-    marginTop: 0,
-    marginBottom: 30,
-    x: { label: null, axis: null, domain: ix.map((d) => d.i) },
-    y: { label: null, domain: sets, axis: "left" },
-    marks: [
-      Plot.ruleX(lines, { x: "i", y1: "y1", y2: "y2", strokeOpacity: 0.4 }),
-      Plot.dot(dotsAll, { x: "i", y: "hazard", r: 4, fillOpacity: 0.2 }),
-      Plot.dot(dotsOn, { x: "i", y: "hazard", r: 4.5 })
-    ]
-  })
-
-  const setBars = Plot.plot({
-    width: sideW,
-    height: lowerH,
-    marginLeft: 8,
-    marginRight: 34,
-    marginTop: 0,
-    marginBottom: 30,
-    x: { label: null, axis: "top", grid: true },
-    y: { label: null, domain: sets, axis: "right" },
-    marks: [
-      Plot.ruleX([0]),
-      Plot.barX(setSizes, {
-        y: "set",
-        x: "size",
-        title: (d) => `${d.set}\n${isDelta ? "Δ" : "Total"}: ${hz_q3_fmt(d.size)}`
-      })
-    ]
-  })
-
-  const showNoHaz = Boolean(hz_q3_includeNoHazard)
-  const denom = Number(p.denomTotal) || 0
-  const anyPct = (!isDelta && denom > 0) ? (Number(p.anyTotal) || 0) / denom * 100 : null
-  const noPct = (!isDelta && denom > 0) ? (Number(p.noHazTotal) || 0) / denom * 100 : null
-
-  return html`<div style="display:flex;flex-direction:column;gap:10px;">
-    ${title ? html`<div class="hz-miniTitle">${title}</div>` : null}
-    <div style="overflow-x:auto;">${upper}</div>
-    <div style="display:grid;grid-template-columns: 1fr ${sideW}px;gap:${gap}px;align-items:start;overflow-x:auto;">
-      <div>${matrix}</div>
-      <div>${setBars}</div>
-    </div>
-    <div class="hz-muted" style="display:flex;gap:14px;flex-wrap:wrap;">
-      <span><strong>${isDelta ? "Δ Any hazard" : "Any hazard"}</strong>: ${hz_q3_fmt(p.anyTotal)}${anyPct != null ? ` (${anyPct.toFixed(1)}%)` : ""}</span>
-      ${showNoHaz ? html`<span><strong>${isDelta ? "Δ No hazard" : "No hazard"}</strong>: ${hz_q3_fmt(p.noHazTotal)}${noPct != null ? ` (${noPct.toFixed(1)}%)` : ""}</span>` : null}
-    </div>
-  </div>`
-}
 
 hz_q3Charts = {
   if (!hz_q3Resp?.ok) {
@@ -6392,7 +6262,7 @@ hz_q3Charts = {
   const showCompound = !!hz_q3_showCompound
   const simplify = !!hz_q3_simplifyCompound
   const showNoHaz = !!hz_q3_includeNoHazard
-  const includeDecreases = !!hz_q3_includeDecreases
+  const includeDecreases = false
 
   const L = showCompound ? toExclusive(L0) : toOverlapping(L0)
   const R = showCompound ? toExclusive(R0) : toOverlapping(R0)
@@ -6432,10 +6302,9 @@ hz_q3Charts = {
 
   // Top-N crops by combined ANY exposure (stable across hazards), plus Other.
   const score = (crop) => num(anyL.get(crop)) + num(anyR.get(crop))
-  const topN = Math.max(5, Math.min(50, Number(hz_q3_topN) || 8))
-  const topCrops = Array.from(cropsAll)
-    .sort((a,b) => score(b) - score(a))
-    .slice(0, topN)
+  const topCropsSource = Array.from(cropsAll).sort((a,b) => score(b) - score(a))
+  const topN = Math.max(1, Math.min(Math.max(1, topCropsSource.length || 1), Number(hz_q3_topN) || topCropsSource.length || 1))
+  const topCrops = topCropsSource.slice(0, topN)
 
   const cropDomain = topCrops.concat(["Other"])
   const topSet = new Set(topCrops)
@@ -6531,9 +6400,9 @@ hz_q3Charts = {
 
   const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
   const fmtPct = (x) => `${hz_formatNumber(x, { digits: 2 })}%`
-  const yLabel = hz_q3_relative ? "% of total production value" : (hz_varLabelAbs ?? "Exposure")
+  const xLabel = hz_q3_relative ? "% of total production value" : (hz_varLabelAbs ?? "Exposure")
 
-  // Dynamic insight (prototype style)
+  // Dynamic insight
   const hazardTotals = panels
     .filter(p => p.haz !== "no hazard")
     .map(p => ({
@@ -6561,16 +6430,17 @@ The biggest scenario shift is **${prettyHaz(topD?.hazard)}**, which **${(topD?.d
 
   // Panel plotting
   const w = Number(hz_plotWidth) || 920
-  const gap = 12
-  const minCol = 280
+  const gap = 14
+  const minCol = 360
   const cols = Math.max(1, Math.floor((w + gap) / (minCol + gap)))
   const colW = Math.max(minCol, Math.floor((w - gap * (cols - 1)) / cols))
-  const h = Math.max(360, Number(hz_q3_chartHeight) || 520)
+  const hInput = Number(hz_q3_chartHeight) || 520
+  const h = Math.max(190, Math.min(320, Math.round(hInput * 0.58)))
 
-  // Compute y-domain from stacked totals (not individual segments), so bars never overflow.
+  // Compute x-domain from stacked totals (not individual segments), so bars never overflow.
   const scenarios = ["S1", "S2", "Δ"]
-  let yMax = 0
-  let yMin = 0
+  let xMax = 0
+  let xMin = 0
 
   for (const p of panels) {
     const sumsPos = new Map()
@@ -6584,32 +6454,61 @@ The biggest scenario shift is **${prettyHaz(topD?.hazard)}**, which **${(topD?.d
     }
 
     for (const s of scenarios) {
-      yMax = Math.max(yMax, sumsPos.get(s) || 0)
-      yMin = Math.min(yMin, sumsNeg.get(s) || 0)
+      xMax = Math.max(xMax, sumsPos.get(s) || 0)
+      xMin = Math.min(xMin, sumsNeg.get(s) || 0)
     }
   }
 
-  if (!includeDecreases) yMin = 0
+  if (!includeDecreases) xMin = 0
 
-  const yPadMax = yMax > 0 ? yMax * 1.08 : 1
-  const yPadMin = yMin < 0 ? yMin * 1.08 : 0
-  const yDomain = [yPadMin, yPadMax]
+  const xPadMax = xMax > 0 ? xMax * 1.08 : 1
+  const xPadMin = xMin < 0 ? xMin * 1.08 : 0
+  const xDomain = [xPadMin, xPadMax]
 
-  const legend = Plot.legend({ color: { domain: cropDomain, scheme: "tableau10" }, columns: 4 })
+  const legendCols = Math.max(3, Math.min(6, Math.ceil(cropDomain.length / 2)))
+  const legend = Plot.legend({ color: { domain: cropDomain, scheme: "tableau10" }, columns: legendCols })
+  const freeX = !!hz_q3_freeX
+
+  const panelDomain = (panel) => {
+    let pMax = 0
+    let pMin = 0
+    for (const s of scenarios) {
+      let sumPos = 0
+      let sumNeg = 0
+      for (const r of (panel?.rows ?? [])) {
+        if (String(r?.scenario ?? "") !== s) continue
+        const v = num(r?.value)
+        sumPos += Math.max(0, v)
+        sumNeg += Math.min(0, v)
+      }
+      pMax = Math.max(pMax, sumPos)
+      pMin = Math.min(pMin, sumNeg)
+    }
+    if (!includeDecreases) pMin = 0
+    const padMax = pMax > 0 ? pMax * 1.08 : 1
+    const padMin = pMin < 0 ? pMin * 1.08 : 0
+    return [padMin, padMax]
+  }
 
   const buildPanel = (panel, i) => {
-    const showY = i % cols === 0
+    // Show the x-axis on every hazard panel. Restricting it to only the
+    // bottom row causes upper-row panels (such as dry/heat when wet is below)
+    // to appear without an x-axis.
+    const showX = true
     const data = panel.rows
     const tipFmt = {
       scenario: true,
       crop: true,
       value: hz_q3_relative ? fmtPct : fmtAbs
     }
+    const panelXDomain = freeX ? panelDomain(panel) : xDomain
 
-    const barMark = Plot.barY(data, Plot.stackY({
-      x: "scenario",
-      y: "value",
+    const barMark = Plot.barX(data, Plot.stackX({
+      y: "scenario",
+      x: "value",
       fill: "crop",
+      insetTop: 3,
+      insetBottom: 3,
       tip: { format: tipFmt }
     }))
 
@@ -6621,15 +6520,15 @@ The biggest scenario shift is **${prettyHaz(topD?.hazard)}**, which **${(topD?.d
             width: colW,
             height: h,
             style: { overflow: "visible" },
-            marginLeft: showY ? 58 : 14,
-            marginRight: 10,
+            marginLeft: 72,
+            marginRight: 16,
             marginTop: 10,
-            marginBottom: 28,
-            x: { domain: ["S1","S2","Δ"], label: null },
-            y: { label: showY ? yLabel : null, grid: true, axis: showY ? "left" : null, domain: yDomain, tickFormat: hz_q3_relative ? fmtPct : fmtAbs },
+            marginBottom: showX ? 34 : 18,
+            x: { label: showX ? xLabel : null, grid: true, axis: showX ? "bottom" : null, domain: panelXDomain, tickFormat: hz_q3_relative ? fmtPct : fmtAbs },
+            y: { domain: ["S1", "S2", "Δ"], label: null },
             color: { domain: cropDomain, scheme: "tableau10", legend: false },
             marks: [
-              Plot.ruleY([0]),
+              Plot.ruleX([0]),
               barMark
             ]
           })}
@@ -6941,7 +6840,7 @@ hz_q4Insight = {
   return html`
     <div class="hz-q4InsightBlock">
       <div class="hz-q4InsightLead">
-        Top ${Math.max(1, Number(hz_topN ?? 10) || 10)} geographies currently shown cover <strong>${fmtPct(topShareL)}</strong> of total exposure in <strong>${hz_s1.label}</strong>
+        Top ${Math.max(1, Number(hz_q4_topN ?? 10) || 10)} geographies currently shown cover <strong>${fmtPct(topShareL)}</strong> of total exposure in <strong>${hz_s1.label}</strong>
         and <strong>${fmtPct(topShareR)}</strong> in <strong>${hz_s2.label}</strong>. Compound hazards contribute
         <strong>${fmtPct(compShareL)}</strong> (${hz_s1.label}) and <strong>${fmtPct(compShareR)}</strong> (${hz_s2.label}).
       </div>
@@ -7044,24 +6943,24 @@ hz_q4IntroTextClean = hz_stripLeadingTitle(q4IntroText, q4Title)
 
 // Q4-specific inline control groups (kept close to the map/chart sections for layout parity)
 hz_q4_mapSettingsWrap = html`
-  <div class="hz-qToolbar__right">
-    <div class="hz-inlineToggles">
+  <div class="hz-qToolbar__right hz-qToolbar__right--grow">
+    <div class="hz-q2SettingsGrid">
       <div class="hz-miniSetting"><span>Map color</span>${viewof hz_mapMetric}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Map height</span>${viewof hz_q4MapHeight}</div>
       <div class="hz-miniSetting"><span>Show map subtitle</span>${viewof hz_q4_includeMapCaption}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>Map height</span>${viewof hz_q4MapHeight}</div>
     </div>
   </div>
 `
 
 // Q4 chart controls (same toolbar pattern as Q1–Q3; include shared toggles used by the chart)
 hz_q4_settingsWrap = html`
-  <div class="hz-qToolbar__right">
-    <div class="hz-inlineToggles">
-      <div class="hz-miniSetting hz-miniSetting--range">${viewof hz_topN}</div>
-      <div class="hz-miniSetting">${viewof hz_rel}</div>
+  <div class="hz-qToolbar__right hz-qToolbar__right--grow">
+    <div class="hz-q2SettingsGrid">
+      <div class="hz-miniSetting"><span>Show %</span>${viewof hz_rel}</div>
       <div class="hz-miniSetting"><span>Show differences</span>${viewof hz_q4_difference}</div>
       <div class="hz-miniSetting"><span>Show compound hazards</span>${viewof hz_q4_showCompound}</div>
       <div class="hz-miniSetting"><span>Simplify compound hazards</span>${viewof hz_q4_simplifyCompound}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span>No. geographies to show</span>${viewof hz_q4_topN}</div>
       <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q4_chartHeight}</div>
     </div>
   </div>
@@ -7208,21 +7107,34 @@ hz_q4MapPanel = {
       Plot.geo(features, {
         stroke: "#ffffff",
         strokeWidth: 0.8,
-        fill: (d) => d?.properties?.__hz_value,
-        title: (d) => {
-          const p = d?.properties ?? {}
-          return `${p.__hz_name ?? "Unknown"}
-Left (${hz_s1?.label ?? "Left"}): ${fmtLocal(p.__hz_left)}
-Right (${hz_s2?.label ?? "Right"}): ${fmtLocal(p.__hz_right)}
-Δ (Right − Left): ${fmtDelta(p.__hz_delta)}`
-        }
+        fill: (d) => d?.properties?.__hz_value
       }),
       Plot.geo(features.filter((d) => d?.properties?.__hz_selected), {
         stroke: "#0f172a",
         strokeWidth: 1.8,
         fill: null
       }),
-      Plot.geo(features, { stroke: "rgba(15,23,42,.25)", strokeWidth: 0.5, fill: null })
+      Plot.geo(features, { stroke: "rgba(15,23,42,.25)", strokeWidth: 0.5, fill: null }),
+      Plot.tip(features, Plot.pointer(Plot.centroid({
+        title: (d) => {
+          const name = d?.properties?.__hz_name ?? "Unknown"
+          const left = fmtLocal(d?.properties?.__hz_left)
+          const right = fmtLocal(d?.properties?.__hz_right)
+          const delta = fmtDelta(d?.properties?.__hz_delta)
+          const shown = valueMode === "delta"
+            ? `Displayed: ${delta}`
+            : `Displayed: ${fmtLocal(d?.properties?.__hz_value)}`
+          return [
+            `${hz_q4MapLevelLabel || "Geography"}: ${name}`,
+            `Left (${hz_s1?.label ?? "Left"}): ${left}`,
+            `Right (${hz_s2?.label ?? "Right"}): ${right}`,
+            `Δ (Right − Left): ${delta}`,
+            shown
+          ].join("\n")
+        },
+        anchor: "top-left",
+        textPadding: 6
+      })))
     ]
   })
 
@@ -7244,8 +7156,6 @@ Right (${hz_s2?.label ?? "Right"}): ${fmtLocal(p.__hz_right)}
   `
 }
 
-// Q4 — dynamic insight (prototype-aligned summary cues)
-// [patched] duplicate hz_q4Insight definition removed
 
 hz_q4_mapHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading map…</div></div>`
 hz_q4_chartHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading chart…</div></div>`
@@ -7337,7 +7247,7 @@ hz_q4_dashboardCard = hz_noJumpRoot(html`
 `)
 
 
-// Q5: stable insights mount (avoids scroll jumps when the insights cell recomputes)
+// Q5: stable insights mount 
 hz_q5_insightNode = html`<div></div>`
 hz_q5_insightMount = {
   hz_q5_insightNode.replaceChildren(hz_q5Insight)
@@ -7720,26 +7630,33 @@ hz_updateChart = {
 
   const payload = (() => {
     if (q === "q1") {
-      const rows = Array.isArray(hz_chartRows) ? hz_chartRows : []
-      const headers = ["Hazard","Left total","Right total","Δ (abs)","Left %","Right %","Δ (pp)"]
+      const rows = Array.isArray(hz_q1DisplayRows) ? hz_q1DisplayRows : []
+      const usePct = !!hz_relative
+      const useDiff = !!hz_difference
+
+      if (useDiff) {
+        const headers = ["Hazard", usePct ? "Δ (pp)" : "Δ (abs)"]
+        const data = rows.map(r => [
+          r.hazard,
+          Number(usePct ? (r.pct_diff ?? 0) : (r.total_diff ?? (Number(r.total2 ?? 0) - Number(r.total1 ?? 0))))
+        ])
+        const columns = [
+          { name: "Hazard" },
+          { name: usePct ? "Δ (pp)" : "Δ", sort: true, formatter: (c) => usePct ? fmtPct(c) : fmtAbs(c) }
+        ]
+        return { filename: "q1_by_hazard.csv", headers, data, columns }
+      }
+
+      const headers = ["Hazard", usePct ? "Left %" : "Left total", usePct ? "Right %" : "Right total"]
       const data = rows.map(r => [
         r.hazard,
-        Number(r.total1 ?? 0),
-        Number(r.total2 ?? 0),
-        Number(r.total_diff ?? (Number(r.total2 ?? 0) - Number(r.total1 ?? 0))),
-        Number(r.perc1 ?? 0),
-        Number(r.perc2 ?? 0),
-        Number(r.pct_diff ?? (Number(r.perc2 ?? 0) - Number(r.perc1 ?? 0)))
+        Number(usePct ? (r.perc1 ?? 0) : (r.total1 ?? 0)),
+        Number(usePct ? (r.perc2 ?? 0) : (r.total2 ?? 0))
       ])
-
       const columns = [
         { name: "Hazard" },
-        { name: "Left", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Right", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Δ", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Left %", sort: true, formatter: (c) => fmtPct(c) },
-        { name: "Right %", sort: true, formatter: (c) => fmtPct(c) },
-        { name: "Δ (pp)", sort: true, formatter: (c) => fmtPct(c) }
+        { name: "Left", sort: true, formatter: (c) => usePct ? fmtPct(c) : fmtAbs(c) },
+        { name: "Right", sort: true, formatter: (c) => usePct ? fmtPct(c) : fmtAbs(c) }
       ]
       return { filename: "q1_by_hazard.csv", headers, data, columns }
     }
@@ -7874,7 +7791,9 @@ hz_updateChart = {
   // Mount Grid
   // Q1: render summary with shared Atlas table component (instead of Grid.js)
   if (q === "q1") {
-    const rows = Array.isArray(hz_chartRows) ? hz_chartRows : []
+    const rows = Array.isArray(hz_q1DisplayRows) ? hz_q1DisplayRows : []
+    const usePct = !!hz_relative
+    const useDiff = !!hz_difference
 
     const fmtPP = (v) => {
       const x = Number(v)
@@ -7893,10 +7812,12 @@ hz_updateChart = {
       "Δ (pp)": r.pct_diff
     }))
 
+    const q1Columns = useDiff
+      ? ["Hazard", usePct ? "Δ (pp)" : "Δ (abs)"]
+      : ["Hazard", usePct ? "Left (%)" : "Left (abs)", usePct ? "Right (%)" : "Right (abs)"]
+
     const view = hz_atlasTable(tableData, {
-      columns: showPct
-        ? ["Hazard", "Left (%)", "Right (%)", "Δ (pp)"]
-        : ["Hazard", "Left (abs)", "Right (abs)", "Δ (abs)"],
+      columns: q1Columns,
       format: {
         "Left (abs)": fmtAbsFull,
         "Right (abs)": fmtAbsFull,
@@ -7933,7 +7854,6 @@ hz_updateChart = {
     fixedHeader: true,
     height: "540px"
   })
-
 
 
   return html``
@@ -8183,7 +8103,6 @@ hz_run
 :::
 
 
-
 ## Styling
 
 ```{ojs}
@@ -8248,7 +8167,6 @@ NavbarLangSelector(languages, masterLanguage)
 ```
 
 
-
 ```{ojs}
 // This cell contains the notebook title + section headings, driven by nbText.json
 nbText = await FileAttachment("/data/hazardExposure/nbText.json").json();
@@ -8275,18 +8193,9 @@ q3DetailText = _lang(hz_textObj(nbText?.sections?.q3?.detailText));
 q4Title = _lang(hz_textObj(nbText?.sections?.q4?.title));
 q4IntroText = _lang(hz_textObj(nbText?.sections?.q4?.introText));
 q4DetailText = _lang(hz_textObj(nbText?.sections?.q4?.detailText));
-q5Title = _lang(hz_textObj(nbText?.sections?.q5?.title) ?? {
-  en: "Q5 How does exposure change over time across scenarios (and how uncertain are the estimates)?",
-  fr: "Q5 Comment l’exposition évolue-t-elle dans le temps selon les scénarios (et quelle est l’incertitude) ?"
-});
-q5IntroText = _lang(hz_textObj(nbText?.sections?.q5?.introText) ?? {
-  en: "Explore scenario trajectories over time and the uncertainty across climate model ensembles.",
-  fr: "Explorer les trajectoires des scénarios dans le temps et l’incertitude entre les ensembles de modèles climatiques."
-});
-q5DetailText = _lang(hz_textObj(nbText?.sections?.q5?.detailText) ?? {
-  en: "The chart shows median exposure for each scenario and time period. Error bars reflect variability across GCMs (where available). A dashed line indicates the historical baseline.",
-  fr: "Le graphique montre l’exposition médiane pour chaque scénario et période. Les barres d’erreur reflètent la variabilité entre les GCM (si disponible). Une ligne pointillée indique la base historique."
-});
+q5Title = _lang(hz_textObj(nbText?.sections?.q5?.title));
+q5IntroText = _lang(hz_textObj(nbText?.sections?.q5?.introText));
+q5DetailText = _lang(hz_textObj(nbText?.sections?.q5?.detailText));
 
 
 heading3 = q3Title;
