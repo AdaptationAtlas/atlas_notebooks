@@ -1,0 +1,110 @@
+// The Standard Map for the Atlas
+
+function makeChoropleth({
+  features, // Already joined geo+data features
+  width,
+  height = 550,
+  caption,
+  fill, // Can be accessor function, property name, or undefined
+  color, // Color configuration for the data
+  adminHighlight,
+  channels,
+  tooltip,
+  projection = "azimuthal-equal-area",
+  baseMarkOptions = {},
+  extraMarks = []
+}) {
+  // Check if we have valid data for coloring
+  const hasData = color && fill;
+
+  const noDataColor = "#e0e0e0"
+  
+  // Configure color scale only if we have data
+  const colorConfig = hasData ? {
+    legend: true,
+    label: color.label,
+    type: color.type,
+    scheme: color.scheme,
+    domain: color.domain,
+    range: color.range,
+    ...color // spread any other Plot color options
+  } : undefined;
+
+  const highlights = adminHighlight
+  ? Array.isArray(adminHighlight)
+    ? adminHighlight
+    : [adminHighlight]
+  : [];
+  
+  return Plot.plot({
+    caption,
+    width,
+    height,
+    marginBottom: 10,
+    projection: {
+      type: projection,
+      domain: features,
+    },
+    color: colorConfig,
+    marks: [
+      // Base map
+      Plot.geo(features, {
+        fill: hasData ? fill : noDataColor,
+        stroke: "#fff",
+        strokeWidth: 0.5,
+        ...baseMarkOptions,
+      }),
+      
+      // Admin highlight overlay
+      ...highlights.flatMap(h => [
+        Plot.geo(
+          {
+            type: "FeatureCollection",
+            features: features.features.filter(h.filter)
+          },
+          {
+            fill: h.fill || null,
+            stroke: h.stroke || "#333",
+            strokeWidth: h.strokeWidth ?? 1.5,
+            strokeDasharray: h.strokeDasharray,
+          }
+        )
+      ]),
+      
+      ...extraMarks,
+      
+      // Hover effect
+      Plot.geo(features, Plot.pointer(Plot.centroid({
+        stroke: "#333",
+        strokeWidth: 1.5,
+        channels: channels || {},
+        tip: tooltip
+      }))),
+    ]
+  });
+}
+
+function mergeDataToBoundaries({
+  boundaries,
+  data,
+  boundaryKey,
+  dataKey,
+  dataProp = "data",
+  defaultValue = null,
+}) {
+  const index = new Map(data.map((d) => [dataKey(d), d]));
+
+  return {
+    type: "FeatureCollection",
+    features: boundaries.features.map((feature) => {
+      const key = boundaryKey(feature);
+      return {
+        ...feature,
+        properties: {
+          ...feature.properties,
+          [dataProp]: index.get(key) ?? defaultValue,
+        },
+      };
+    }),
+  };
+}
