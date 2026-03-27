@@ -52,7 +52,7 @@ parseCisRow = (row) => ({
 
   // Parse all numeric indicator fields from strings to numbers
   // Each indicator is normalized to 0-1 scale in the source data
-  "weather-station_density": parseFloat(row["weather-station_density"]),
+  wstation_density: parseFloat(row["wstation_density"]),
   "cloud-coverage_meanannual": parseFloat(row["cloud-coverage_meanannual"]),
   "cv-precipitation_agreement": parseFloat(row["cv-precipitation_agreement"]),
   "short-term_frcst_skill": parseFloat(row["short-term_frcst_skill"]),
@@ -75,117 +75,62 @@ cisData = cisDataRaw.map(parseCisRow);
 ```
 
 ```{ojs}
-// ============================================================================
-// TERCILE CALCULATION: Africa-Wide Classification Thresholds  
-// ============================================================================
-// Terciles divide the data into three equal groups (33.3%, 66.7% cutoffs).
-// This provides a relative classification system where:
-//   - "Weaker" = Bottom third of African values
-//   - "Moderate" = Middle third
-//   - "Stronger" = Top third
-//
-// Why terciles? They provide context-appropriate classifications that
-// account for the distribution of values across Sub-Saharan Africa,
-// rather than using arbitrary absolute thresholds.
-//
-// Note: These cutoffs are computed once from ALL data (not filtered),
-// ensuring consistent classifications regardless of user selections.
-// ============================================================================
+thresholds = await FileAttachment("/data/cis/thresholds.json").json();
 
-africaTerciles = {
-  // Extract each indicator's values, filtering out nulls
-  const weatherStations = cisData.map(d => d["weather-station_density"]).filter(d => d != null);
-  const cloudCover = cisData.map(d => d["cloud-coverage_meanannual"]).filter(d => d != null);
-  const precipAgreement = cisData.map(d => parseFloat(d["cv-precipitation_agreement"])).filter(d => !isNaN(d));
-  const shortTermSkill = cisData.map(d => d["short-term_frcst_skill"]).filter(d => d != null);
-  const seasonalSkill = cisData.map(d => d["seasonal_frcst_skill"]).filter(d => d != null);
-  const cisReadiness = cisData.map(d => d["cis_readiness_index"]).filter(d => d != null);
-  
-  // Custom quantile function using linear interpolation
-  // This matches most statistical software implementations (e.g., R's type=7)
-  const quantile = (arr, q) => {
-    const sorted = arr.slice().sort((a, b) => a - b);
-    const pos = (sorted.length - 1) * q;  // Position in sorted array
-    const base = Math.floor(pos);          // Lower index
-    const rest = pos - base;               // Fractional part for interpolation
-    return sorted[base + 1] !== undefined 
-      ? sorted[base] + rest * (sorted[base + 1] - sorted[base])  // Interpolate
-      : sorted[base];  // Edge case: q=1.0
-  };
-  
-  // Return tercile cutoffs for each indicator
-  // p33 = 33rd percentile (Weaker/Moderate boundary)
-  // p66 = 66th percentile (Moderate/Stronger boundary)
-  return {
-    weatherStation: {
-      p33: quantile(weatherStations, 0.33),
-      p66: quantile(weatherStations, 0.66)
-    },
-    cloudCover: {
-      p33: quantile(cloudCover, 0.33),
-      p66: quantile(cloudCover, 0.66)
-    },
-    precipAgreement: {
-      p33: quantile(precipAgreement, 0.33),
-      p66: quantile(precipAgreement, 0.66)
-    },
-    shortTermSkill: {
-      p33: quantile(shortTermSkill, 0.33),
-      p66: quantile(shortTermSkill, 0.66)
-    },
-    seasonalSkill: {
-      p33: quantile(seasonalSkill, 0.33),
-      p66: quantile(seasonalSkill, 0.66)
-    },
-    cisReadiness: {
-      p33: quantile(cisReadiness, 0.33),
-      p66: quantile(cisReadiness, 0.66)
-    }
-  };
-}
+thresholdIndicatorByField = new Object({
+  wstation_density: "WeatherStation_idx",
+  "cloud-coverage_meanannual": "OpticalAvailability_idx",
+  "cv-precipitation_agreement": "Precipitation variability agreement",
+  "short-term_frcst_skill": "ShortTerm_idx",
+  seasonal_frcst_skill: "LongTerm_idx",
+  cis_readiness_index: "cis_dfci",
+});
+
+thresholdAdminLevel = (rowOrLevel = currentAdminLevel) => {
+  if (typeof rowOrLevel === "number") return `admin${rowOrLevel}`;
+  if (rowOrLevel?.admin2_name != null) return "admin2";
+  if (rowOrLevel?.admin1_name != null) return "admin1";
+  return "admin0";
+};
+
+thresholdRules = (field, rowOrLevel = currentAdminLevel) =>
+  thresholds[thresholdAdminLevel(rowOrLevel)].indicators[
+    thresholdIndicatorByField[field]
+  ];
+
+classifyThreshold = (field, value, rowOrLevel = currentAdminLevel) => {
+  const numericValue = Number(value);
+  if (value == null || Number.isNaN(numericValue)) return "No data";
+
+  const rules = thresholdRules(field, rowOrLevel);
+  const match = rules.find((rule, index) =>
+    "value" in rule
+      ? numericValue === rule.value
+      : numericValue >= rule.min &&
+        (index === rules.length - 1
+          ? numericValue <= rule.max
+          : numericValue < rule.max),
+  );
+
+  return match?.category ?? "No data";
+};
+
+classificationBand = (category) => {
+  const label = String(category).toLowerCase();
+  if (label.includes("weak") || label.includes("low")) return "low";
+  if (label.includes("strong") || label.includes("high")) return "high";
+  return "moderate";
+};
+
+classificationScale = (field, colors) => ({
+  type: "categorical",
+  domain: thresholdRules(field).map((rule) => rule.category),
+  range: colors,
+  label: "Classification",
+});
 ```
 
 ```{ojs}
-// ============================================================================
-// CLASSIFICATION FUNCTIONS: Transform Raw Values to Interpretable Categories
-// ============================================================================
-// These functions convert numeric indicator values into human-readable
-// classification labels for visualization and insight generation.
-// ============================================================================
-
-/**
- * Classify a value into tercile categories (Weaker/Moderate/Stronger)
- * @param {number} value - The indicator value to classify
- * @param {object} terciles - Object with p33 and p66 cutoff values
- * @returns {string} Classification label
- */
-classifyTercile = (value, terciles) => {
-  if (value == null || isNaN(value)) return "No data";
-  if (value <= terciles.p33) return "Weaker";
-  if (value <= terciles.p66) return "Moderate";
-  return "Stronger";
-};
-
-/**
- * Classify precipitation satellite agreement (CV - Coefficient of Variation)
- * Unlike terciles, this uses absolute thresholds based on the number
- * of satellite products that agree on precipitation patterns:
- *   0 = No products agree (Very Low confidence)
- *   1-2 = Partial agreement (Moderate confidence)
- *   3 = Most products agree (High confidence)
- *   4 = All products agree (Very High confidence)
- * @param {number|string} value - Agreement count (0-4)
- * @returns {string} Classification label with confidence level
- */
-classifyPrecipAgreement = (value) => {
-  if (value == null || isNaN(value)) return "No data";
-  const numVal = parseFloat(value);
-  if (numVal === 0) return "No agreement (Very Low)";
-  if (numVal <= 2) return "Partial agreement (Moderate)";
-  if (numVal === 3) return "High agreement (High)";
-  return "Full agreement (Very High)";
-};
-
 /**
  * Interpret forecast skill based on both short-term and long-term RPSS scores
  * RPSS (Ranked Probability Skill Score) measures forecast quality:
@@ -478,10 +423,10 @@ s11MapData = {
       properties: {
         ...feature.properties,
         regionName: regionName,
-        weatherStation: dataRow?.["weather-station_density"],
+        weatherStation: dataRow?.["wstation_density"],
         cloudCover: dataRow?.["cloud-coverage_meanannual"],
-        weatherStationClass: dataRow ? classifyTercile(dataRow["weather-station_density"], africaTerciles.weatherStation) : "No data",
-        cloudCoverClass: dataRow ? classifyTercile(dataRow["cloud-coverage_meanannual"], africaTerciles.cloudCover) : "No data",
+        weatherStationClass: dataRow ? classifyThreshold("wstation_density", dataRow["wstation_density"], dataRow) : "No data",
+        cloudCoverClass: dataRow ? classifyThreshold("cloud-coverage_meanannual", dataRow["cloud-coverage_meanannual"], dataRow) : "No data",
         isHighlighted: isHighlighted
       }
     };
@@ -503,12 +448,6 @@ s11MapData = {
     const width = 2000;
     const height = 1000;
     const useRaw = s11MapMode === "Raw values";
-    const classificationColor = {
-      type: "categorical",
-      domain: ["Weaker", "Moderate", "Stronger"],
-      range: ["#fee5d9", "#fcae91", "#fb6a4a"],
-      label: "Classification"
-    };
     const highlightConfig = {
       filter: (d) => d.properties.isHighlighted,
       stroke: "#000",
@@ -531,7 +470,7 @@ s11MapData = {
             domain: d3.extent(s11MapData.features, d => d.properties.weatherStation),
             scheme: "YlGnBu",
             label: "Density"
-          } : classificationColor,
+          } : classificationScale("wstation_density", ["#fee5d9", "#fcae91", "#fb6a4a"]),
           channels: {
             region: {
               label: "Region",
@@ -570,7 +509,7 @@ s11MapData = {
             domain: d3.extent(s11MapData.features, d => d.properties.cloudCover),
             scheme: "YlGnBu",
             label: "Coverage"
-          } : classificationColor,
+          } : classificationScale("cloud-coverage_meanannual", ["#fee5d9", "#fcae91", "#fb6a4a"]),
           channels: {
             region: {
               label: "Region",
@@ -606,10 +545,10 @@ s11MapData = {
         : `${d.admin2_name}, ${d.admin1_name}`;
       return {
         "Admin Name": adminName,
-      "Weather Station (Raw)": d["weather-station_density"]?.toFixed(3) || "N/A",
-      "Weather Station (Class)": classifyTercile(d["weather-station_density"], africaTerciles.weatherStation),
+      "Weather Station (Raw)": d["wstation_density"]?.toFixed(3) || "N/A",
+      "Weather Station (Class)": classifyThreshold("wstation_density", d["wstation_density"], d),
       "Cloud Cover (Raw)": d["cloud-coverage_meanannual"]?.toFixed(3) || "N/A",
-      "Cloud Cover (Class)": classifyTercile(d["cloud-coverage_meanannual"], africaTerciles.cloudCover)
+      "Cloud Cover (Class)": classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d)
       };
     });
     
@@ -632,15 +571,17 @@ downloadButton(
           : `${d.admin2_name}, ${d.admin1_name}`;
     return {
       "Admin Name": adminName,
-      "Weather Station Density": d["weather-station_density"],
-      "Weather Station Class": classifyTercile(
-        d["weather-station_density"],
-        africaTerciles.weatherStation,
+      "Weather Station Density": d["wstation_density"],
+      "Weather Station Class": classifyThreshold(
+        "wstation_density",
+        d["wstation_density"],
+        d,
       ),
       "Cloud Coverage": d["cloud-coverage_meanannual"],
-      "Cloud Coverage Class": classifyTercile(
+      "Cloud Coverage Class": classifyThreshold(
+        "cloud-coverage_meanannual",
         d["cloud-coverage_meanannual"],
-        africaTerciles.cloudCover,
+        d,
       ),
     };
   }),
@@ -658,14 +599,14 @@ s11Insight = {
     ? filteredData.filter(d => highlightedAdmin2.includes(d.admin2_name))
     : filteredData;
   
-  const avgWeatherStation = d3.mean(insightData, d => d["weather-station_density"]);
+  const avgWeatherStation = d3.mean(insightData, d => d["wstation_density"]);
   const avgCloudCover = d3.mean(insightData, d => d["cloud-coverage_meanannual"]);
   
-  const wsClass = classifyTercile(avgWeatherStation, africaTerciles.weatherStation).toLowerCase();
-  const ccClass = classifyTercile(avgCloudCover, africaTerciles.cloudCover).toLowerCase();
+  const wsClass = classificationBand(classifyThreshold("wstation_density", avgWeatherStation));
+  const ccClass = classificationBand(classifyThreshold("cloud-coverage_meanannual", avgCloudCover));
   
-  const capacity = (wsClass === "stronger" && ccClass === "stronger") ? "high" :
-                   (wsClass === "weaker" || ccClass === "weaker") ? "low" : "moderate";
+  const capacity = (wsClass === "high" && ccClass === "high") ? "high" :
+                   (wsClass === "low" || ccClass === "low") ? "low" : "moderate";
   
   return _lang({
     en: `In ${breadcrumb}, ground-station density is ${avgWeatherStation?.toFixed(3)} and clear-sky fraction ${avgCloudCover?.toFixed(3)}, indicating ${capacity} capacity for both in-situ and optical observation. Classification is relative to Sub-Saharan Africa.`,
@@ -775,7 +716,7 @@ s12MapData = {
       properties: {
         ...feature.properties,
         precipAgreement: precipValue,
-        precipAgreementClass: classifyPrecipAgreement(precipValue),
+        precipAgreementClass: classifyThreshold("cv-precipitation_agreement", precipValue, dataRow),
         isHighlighted: isHighlighted
       }
     };
@@ -806,12 +747,7 @@ s12MapData = {
         domain: d3.extent(s12MapData.features, d => d.properties.precipAgreement),
         scheme: "Viridis",
         label: "Agreement"
-      } : {
-        type: "categorical",
-        domain: ["No agreement (Very Low)", "Partial agreement (Moderate)", "High agreement (High)", "Full agreement (Very High)"],
-        range: ["#fee5d9", "#fcae91", "#fb6a4a", "#a50f15"],
-        label: "Classification"
-      },
+      } : classificationScale("cv-precipitation_agreement", ["#fff5eb", "#fdd0a2", "#fdae6b", "#e6550d", "#a63603"]),
       channels: {
         region: {
           label: "Region",
@@ -849,7 +785,7 @@ s12MapData = {
       return {
         "Admin Name": adminName,
       "Satellite Agreement (Raw)": parseFloat(d["cv-precipitation_agreement"])?.toFixed(1) || "N/A",
-      "Satellite Agreement (Class)": classifyPrecipAgreement(d["cv-precipitation_agreement"])
+      "Satellite Agreement (Class)": classifyThreshold("cv-precipitation_agreement", d["cv-precipitation_agreement"], d)
       };
     });
     
@@ -873,7 +809,11 @@ downloadButton(
     return {
       "Admin Name": adminName,
       "Satellite Agreement": parseFloat(d["cv-precipitation_agreement"]),
-      Classification: classifyPrecipAgreement(d["cv-precipitation_agreement"]),
+      Classification: classifyThreshold(
+        "cv-precipitation_agreement",
+        d["cv-precipitation_agreement"],
+        d,
+      ),
     };
   }),
   "cis_precipitation_agreement",
@@ -1372,18 +1312,6 @@ viewof s14ViewType = Inputs.radio(["Map", "Table", "Heatmap"], {
   label: _lang(cis.viewTypeLabel),
   value: "Map"
 })
-
-viewof s14Threshold = {
-  const round = (x, n) => Math.round(x * 10 ** n) / 10 ** n;
-  const ext = d3.extent(filteredData, d => d["cis_readiness_index"]);
-  const _min = round(ext[0], 2);
-  const _max = round(ext[1], 2);
-  return Inputs.range([_min, _max], {
-    label: _lang(cis.thresholdLabel),
-    value: _min, // show all by default
-    step: 0.001
-  });
-}
 ```
 
 ```{ojs}
@@ -1452,13 +1380,13 @@ s14MapData = {
       properties: {
         ...feature.properties,
         cisReadiness: dataRow?.["cis_readiness_index"],
-        cisReadinessClass: dataRow ? classifyTercile(dataRow["cis_readiness_index"], africaTerciles.cisReadiness) : "No data",
-        weatherStation: dataRow?.["weather-station_density"],
-        weatherStationClass: dataRow ? classifyTercile(dataRow["weather-station_density"], africaTerciles.weatherStation) : "No data",
+        cisReadinessClass: dataRow ? classifyThreshold("cis_readiness_index", dataRow["cis_readiness_index"], dataRow) : "No data",
+        weatherStation: dataRow?.["wstation_density"],
+        weatherStationClass: dataRow ? classifyThreshold("wstation_density", dataRow["wstation_density"], dataRow) : "No data",
         cloudCover: dataRow?.["cloud-coverage_meanannual"],
-        cloudCoverClass: dataRow ? classifyTercile(dataRow["cloud-coverage_meanannual"], africaTerciles.cloudCover) : "No data",
+        cloudCoverClass: dataRow ? classifyThreshold("cloud-coverage_meanannual", dataRow["cloud-coverage_meanannual"], dataRow) : "No data",
         precipAgreement: dataRow ? parseFloat(dataRow["cv-precipitation_agreement"]) : null,
-        precipAgreementClass: dataRow ? classifyPrecipAgreement(dataRow["cv-precipitation_agreement"]) : "No data",
+        precipAgreementClass: dataRow ? classifyThreshold("cv-precipitation_agreement", dataRow["cv-precipitation_agreement"], dataRow) : "No data",
         shortTerm: dataRow?.["short-term_frcst_skill"],
         longTerm: dataRow?.["seasonal_frcst_skill"],
         isHighlighted: isHighlighted
@@ -1474,10 +1402,6 @@ s14MapData = {
 // Section 1.4 Visualization
 {
   if (s14ViewType === "Map") {
-    // Apply threshold to highlight regions
-    const aboveThreshold = s14MapData.features.filter(f => f.properties.cisReadiness >= s14Threshold);
-    const belowThreshold = s14MapData.features.filter(f => f.properties.cisReadiness < s14Threshold);
-
     return makeChoropleth({
       features: s14MapData,
       width: width,
@@ -1502,13 +1426,7 @@ s14MapData = {
         },
         class: {
           label: "Classification",
-          value: (d) => {
-            const c = d.properties.cisReadinessClass;
-            if (c === "Weaker") return "Low (Weaker)";
-            if (c === "Moderate") return "Medium (Moderate)";
-            if (c === "Stronger") return "High (Stronger)";
-            return c;
-          }
+          value: (d) => d.properties.cisReadinessClass
         },
         weatherStation: {
           label: "Weather Stn",
@@ -1532,46 +1450,18 @@ s14MapData = {
         precipAgreement: true
       },
       baseMarkOptions: {
-        fillOpacity: 0.5
+        fillOpacity: 1
       },
       adminHighlight: {
         filter: (d) => d.properties.isHighlighted,
         stroke: "#000",
         strokeWidth: 2.5
-      },
-      extraMarks: [
-        Plot.geo(
-          {
-            type: "FeatureCollection",
-            features: aboveThreshold
-          },
-          {
-            fill: d => d.properties.cisReadiness,
-            fillOpacity: 1,
-            stroke: "#fff",
-            strokeWidth: 1.5
-          }
-        ),
-        Plot.geo(
-          {
-            type: "FeatureCollection",
-            features: aboveThreshold.filter(d => d.properties.isHighlighted)
-          },
-          {
-            fill: null,
-            stroke: "#000",
-            strokeWidth: 2.5
-          }
-        )
-      ]
+      }
     });
   } else if (s14ViewType === "Table") {
-    // Apply threshold filter
-    const thresholdFilteredData = filteredData.filter(d => 
-      d["cis_readiness_index"] != null && d["cis_readiness_index"] >= s14Threshold
-    );
-    
-    const tableData = thresholdFilteredData.map(d => {
+    const tableData = filteredData
+      .filter(d => d["cis_readiness_index"] != null)
+      .map(d => {
       const adminName = currentAdminLevel === 0 
         ? d.admin0_name 
         : currentAdminLevel === 1
@@ -1580,13 +1470,13 @@ s14MapData = {
       return {
         "Admin Name": adminName,
         "CIS Readiness (Raw)": d["cis_readiness_index"]?.toFixed(3) || "N/A",
-        "CIS Readiness (Class)": classifyTercile(d["cis_readiness_index"], africaTerciles.cisReadiness),
-        "Weather Stn (Raw)": d["weather-station_density"]?.toFixed(3) || "N/A",
-        "Weather Stn (Class)": classifyTercile(d["weather-station_density"], africaTerciles.weatherStation),
+        "CIS Readiness (Class)": classifyThreshold("cis_readiness_index", d["cis_readiness_index"], d),
+        "Weather Stn (Raw)": d["wstation_density"]?.toFixed(3) || "N/A",
+        "Weather Stn (Class)": classifyThreshold("wstation_density", d["wstation_density"], d),
         "Cloud Cover (Raw)": d["cloud-coverage_meanannual"]?.toFixed(3) || "N/A",
-        "Cloud Cover (Class)": classifyTercile(d["cloud-coverage_meanannual"], africaTerciles.cloudCover),
+        "Cloud Cover (Class)": classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d),
         "Precip Agree (Raw)": d["cv-precipitation_agreement"]?.toFixed(1) || "N/A",
-        "Precip Agree (Class)": classifyPrecipAgreement(d["cv-precipitation_agreement"]),
+        "Precip Agree (Class)": classifyThreshold("cv-precipitation_agreement", d["cv-precipitation_agreement"], d),
         "Short-term (Raw)": d["short-term_frcst_skill"]?.toFixed(3) || "N/A",
         "Long-term (Raw)": d["seasonal_frcst_skill"]?.toFixed(3) || "N/A"
       };
@@ -1597,14 +1487,9 @@ s14MapData = {
       reverse: true,
     })
   } else {
-    // Heatmap using Observable Plot (cleaner, no overlap issues)
-    // Apply threshold filter
-    const thresholdFilteredData = filteredData.filter(d => 
-      d["cis_readiness_index"] != null && d["cis_readiness_index"] >= s14Threshold
-    );
-    
-    // Prepare data with admin names
-    const heatmapData = thresholdFilteredData.map(d => {
+    const heatmapData = filteredData
+      .filter(d => d["cis_readiness_index"] != null)
+      .map(d => {
       const adminName = currentAdminLevel === 0 
         ? d.admin0_name 
         : currentAdminLevel === 1
@@ -1613,14 +1498,14 @@ s14MapData = {
       
       return {
         country: adminName,
-        "Weather Stations": d["weather-station_density"],
+        "Weather Stations": d["wstation_density"],
         "Cloud Cover": d["cloud-coverage_meanannual"],
         "Precip Agreement": parseFloat(d["cv-precipitation_agreement"]) / 4, // Normalize to 0-1
         "Short-term Forecast": d["short-term_frcst_skill"],
         "Long-term Forecast": d["seasonal_frcst_skill"],
         "CIS Readiness": d["cis_readiness_index"]
       };
-    }).filter(d => d["CIS Readiness"] != null);
+    });
     
     // Sort by CIS Readiness (descending)
     heatmapData.sort((a, b) => (b["CIS Readiness"] || 0) - (a["CIS Readiness"] || 0));
@@ -1708,7 +1593,7 @@ downloadButton(
     return {
       "Admin Name": adminName,
       "CIS Readiness Index": d["cis_readiness_index"],
-      "Weather Station Density": d["weather-station_density"],
+      "Weather Station Density": d["wstation_density"],
       "Cloud Coverage": d["cloud-coverage_meanannual"],
       "Precipitation Agreement": parseFloat(d["cv-precipitation_agreement"]),
       "Short-term Forecast Skill": d["short-term_frcst_skill"],
@@ -1729,15 +1614,11 @@ s14Insight = {
     : filteredData;
   
   const avgReadiness = d3.mean(insightData, d => d["cis_readiness_index"]);
-  const readinessClass = classifyTercile(avgReadiness, africaTerciles.cisReadiness).toLowerCase();
-  
-  const aboveThreshold = insightData.filter(d => d["cis_readiness_index"] >= s14Threshold).length;
-  const total = insightData.length;
-  const pct = ((aboveThreshold / total) * 100).toFixed(1);
+  const readinessClass = classifyThreshold("cis_readiness_index", avgReadiness).toLowerCase();
   
   return _lang({
-    en: `In ${breadcrumb}, the overall CIS Readiness Index averages ${avgReadiness?.toFixed(3)}, classified as ${readinessClass} relative to Sub-Saharan Africa. ${pct}% of regions exceed the ${s14Threshold} readiness threshold.`,
-    fr: `Dans ${breadcrumb}, l'indice global de préparation CIS est en moyenne ${avgReadiness?.toFixed(3)}, classé comme ${readinessClass} par rapport à l'Afrique subsaharienne. ${pct}% des régions dépassent le seuil de préparation ${s14Threshold}.`
+    en: `In ${breadcrumb}, the overall CIS Readiness Index averages ${avgReadiness?.toFixed(3)}, classified as ${readinessClass} relative to Sub-Saharan Africa.`,
+    fr: `Dans ${breadcrumb}, l'indice global de préparation CIS est en moyenne ${avgReadiness?.toFixed(3)}, classé comme ${readinessClass} par rapport à l'Afrique subsaharienne.`
   });
 }
 ```

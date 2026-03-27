@@ -15,7 +15,7 @@
 //
 // Data Sources:
 // - haz-means_adm_historic.parquet: Historical hazard means at admin levels
-// - three_cut_offs.csv: Pre-computed tercile cutoffs for CIS readiness
+// - thresholds.json: Pre-computed classification thresholds for CIS readiness
 // ============================================================================
 
 section2Title = _lang(cis.section2Title)
@@ -73,23 +73,6 @@ hazardData = {
       AND ${adminWhere}
   `);
 }
-
-// ============================================================================
-// TERCILE CUTOFFS: Load Pre-Computed Classification Thresholds
-// ============================================================================
-// Rather than computing cutoffs dynamically (which could vary with selections),
-// we load pre-computed Africa-wide cutoffs from a CSV file. This ensures
-// consistent classifications across all views and user interactions.
-// ============================================================================
-
-cisReadinessCutoffs = await d3.csv("/data/cis/three_cut_offs.csv").then(data => {
-  // Find the row for CIS readiness index
-  const cisRow = data.find(d => d[''] === 'cis_readiness_index');
-  return {
-    low: parseFloat(cisRow['X33.33333.']),      // 33rd percentile
-    moderate: parseFloat(cisRow['X66.66667.'])  // 66th percentile
-  };
-});
 
 // ============================================================================
 // DATA PIVOTING: Transform Long Format to Wide Format
@@ -151,7 +134,7 @@ combinedData = cisData.map(cis => {
 // BIVARIATE CLASSIFICATION FUNCTION
 // ============================================================================
 // Classifies regions into a 3×3 bivariate grid based on:
-// - CIS Readiness: Low/Moderate/High (using pre-computed tercile cutoffs)
+// - CIS Readiness: Low/Moderate/High (using thresholds.json)
 // - Hazard Severity: Low/Moderate/High (using hazard-specific thresholds)
 //
 // Hazard thresholds are based on climate science conventions:
@@ -161,13 +144,13 @@ combinedData = cisData.map(cis => {
 // The resulting bivariateClass (e.g., "High × High") drives map coloring.
 // ============================================================================
 
-function bivariateClassify(readiness, hazard, readinessCutoffs, hazardType) {
-  // Classify CIS readiness using tercile cutoffs from CSV
-  let readinessClass;
-  if (readiness < readinessCutoffs.low) readinessClass = "Low";
-  else if (readiness < readinessCutoffs.moderate) readinessClass = "Moderate";
-  else readinessClass = "High";
-  
+function bivariateClassify(readiness, hazard, hazardType, readinessLevel = currentAdminLevel) {
+  const readinessClass = classifyThreshold(
+    "cis_readiness_index",
+    readiness,
+    readinessLevel,
+  );
+
   // Classify hazard using hazard-type-specific thresholds
   let hazardClass;
   if (hazardType === "NDWS-mean") {
@@ -229,20 +212,6 @@ viewof s2HazardType = Inputs.radio(
   }
 );
 
-viewof s2ReadinessThreshold = {
-  const round = (x, n) => Math.round(x * 10 ** n) / 10 ** n;
-  const ext = d3.extent(combinedData, d => d.cis_readiness_index);
-  const _min = round(ext[0], 2);
-  const _max = round(ext[1], 2);
-
-  const input = Inputs.range([_min, _max], {
-  label: _lang(cis.s2ReadinessThreshold),
-    value: _min, // Show all countries by default
-    step: 0.001
-  })
-  return Inputs.bind(input, viewof s14Threshold)
-}
-
 viewof s2ViewToggle = Inputs.radio(
   ["map", "table"],
   {
@@ -263,22 +232,15 @@ s2CurrentAdminLevel = currentAdminLevel;
 s2ProcessedData = {
   const hazardColumn = s2HazardType === "drought" ? "drought_ndws" : "waterlogging_ndwl0";
   const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
-  
-  let filtered = combinedData;
-  
-  // Filter by readiness threshold and remove nulls
-  filtered = filtered.filter(d => 
-    d.cis_readiness_index >= s2ReadinessThreshold &&
-    d[hazardColumn] !== null
-  );
-  
-  // Add classifications
-  return filtered.map(d => {
+
+  return combinedData
+    .filter(d => d.cis_readiness_index != null && d[hazardColumn] !== null)
+    .map(d => {
     const classified = bivariateClassify(
       d.cis_readiness_index,
       d[hazardColumn],
-      cisReadinessCutoffs,
-      hazardTypeCode
+      hazardTypeCode,
+      d
     );
     
     return {
@@ -301,7 +263,7 @@ s2MapData = {
       const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
       const avgHazard = d3.mean(group, d => d.hazardValue);
       const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
-      const classified = bivariateClassify(avgReadiness, avgHazard, cisReadinessCutoffs, hazardTypeCode);
+      const classified = bivariateClassify(avgReadiness, avgHazard, hazardTypeCode, 0);
       
       return {
         admin0_name: first.admin0_name,
@@ -320,7 +282,7 @@ s2MapData = {
       const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
       const avgHazard = d3.mean(group, d => d.hazardValue);
       const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
-      const classified = bivariateClassify(avgReadiness, avgHazard, cisReadinessCutoffs, hazardTypeCode);
+      const classified = bivariateClassify(avgReadiness, avgHazard, hazardTypeCode, 1);
       
       return {
         admin0_name: first.admin0_name,
