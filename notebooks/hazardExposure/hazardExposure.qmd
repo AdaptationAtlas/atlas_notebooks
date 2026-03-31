@@ -29,6 +29,7 @@ import { atlasTOC } from "/helpers/toc.ojs";
 atlasHero(nbTitle, "../../images/default_crop.webp");
 ```
 
+
 ```{ojs}
  //| output: false
  hz_harmonizeNativeInputs = {
@@ -199,7 +200,6 @@ hz_titleCase = (s) =>
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase())
 
-
 hz_restoreScroll = (y) => {
   try {
     const restore = () => window.scrollTo({ top: y, left: 0, behavior: "auto" })
@@ -300,6 +300,76 @@ hz_noJumpInput = (node) => {
     el.addEventListener("pointermove", clear, true)
   }
   return el
+}
+
+hz_holdViewportOnAsyncInput = (node) => {
+  const root = node
+  const key = "__hz_hold_viewport_async"
+  if (root && !root[key]) {
+    root[key] = true
+    let token = 0
+    let holdY = null
+    const cancel = () => {
+      token += 1
+      holdY = null
+    }
+    const scheduleRestore = () => {
+      const my = ++token
+      holdY = hz_getScrollPos()?.y ?? window.scrollY ?? 0
+      const restore = () => {
+        if (my !== token || holdY == null) return
+        hz_restoreScroll(holdY)
+      }
+      requestAnimationFrame(restore)
+      requestAnimationFrame(() => requestAnimationFrame(restore))
+      setTimeout(restore, 0)
+      setTimeout(restore, 120)
+      setTimeout(restore, 280)
+      setTimeout(restore, 520)
+      setTimeout(restore, 900)
+    }
+    root.addEventListener("input", scheduleRestore, true)
+    root.addEventListener("change", scheduleRestore, true)
+    root.addEventListener("wheel", cancel, { capture: true, passive: true })
+    root.addEventListener("touchmove", cancel, { capture: true, passive: true })
+    root.addEventListener("scroll", cancel, true)
+  }
+  return root
+}
+
+hz_replaceChildrenKeepViewport = (host, node) => {
+  const y = hz_getScrollPos()?.y ?? window.scrollY ?? 0
+  const x = hz_getScrollPos()?.x ?? window.scrollX ?? 0
+  const prevH = Math.ceil(host?.getBoundingClientRect?.().height || 0)
+  const prevMinH = host?.style?.minHeight ?? ""
+  const prevAnchor = host?.style?.overflowAnchor ?? ""
+  const restore = () => {
+    try { window.scrollTo(x, y) } catch (_) {}
+    try { hz_restoreScroll(y) } catch (_) {}
+  }
+  const release = () => {
+    try { host.style.minHeight = prevMinH } catch (_) {}
+    try { host.style.overflowAnchor = prevAnchor } catch (_) {}
+  }
+  try {
+    if (prevH > 0) host.style.minHeight = `${prevH}px`
+    host.style.overflowAnchor = "none"
+  } catch (_) {}
+  try { host.replaceChildren(node) } catch (_) {
+    try { host.replaceChildren() } catch (_) {}
+    try { host.append(node) } catch (_) {}
+  }
+  requestAnimationFrame(restore)
+  requestAnimationFrame(() => requestAnimationFrame(restore))
+  setTimeout(restore, 0)
+  setTimeout(restore, 120)
+  setTimeout(restore, 280)
+  setTimeout(restore, 520)
+  requestAnimationFrame(release)
+  requestAnimationFrame(() => requestAnimationFrame(release))
+  setTimeout(release, 320)
+  setTimeout(release, 900)
+  return null
 }
 
 hz_getScroller = () =>
@@ -532,7 +602,6 @@ html, body { overflow-anchor: none; }
     grid-template-columns: minmax(190px, 1fr) minmax(280px, 2fr);
   }
 
-
   details.hz-furl{
     border: 1px solid rgba(0,0,0,0.12);
     border-radius: 14px;
@@ -690,7 +759,6 @@ html, body { overflow-anchor: none; }
     margin: 0.25rem 0 0.35rem;
   }
 
-
 .hidden { display: none !important; }
 
 .hz-controlsCompact{
@@ -714,7 +782,6 @@ html, body { overflow-anchor: none; }
   font-family: inherit !important;
   font-size: inherit !important;
 }
-
 
 .hz-chartWrap { position: relative; min-height: 340px; }
 .hz-chartWrap--busy::before {
@@ -784,7 +851,6 @@ html, body { overflow-anchor: none; }
   }
 }
 
-
   .hz-grid2{display:grid;gap:16px}
   .hz-grid2--equal{grid-template-columns:1fr}
   @media (min-width: 980px){ .hz-grid2--equal{grid-template-columns:1fr 1fr} }
@@ -798,7 +864,6 @@ html, body { overflow-anchor: none; }
   .hz-upsetTitle{text-align:center;font-weight:600;font-size:0.9rem;margin:0 0 6px 0;opacity:0.95}
   .hz-upsetStack{display:flex;flex-direction:column;gap:0}
   .hz-upsetStack figure{margin:0}
-
 
   .hz-sectionIntro{margin:0 0 12px 0}
   .hz-sectionIntro p{margin:0}
@@ -849,7 +914,6 @@ html, body { overflow-anchor: none; }
 .plot-tooltip{z-index:9999}
 </style>
 ```
-
 
 # `{ojs} heading1` {#overview}
 
@@ -956,23 +1020,6 @@ hz_addError = (context, err, details=null) => {
 }
 
 // Reactive stream of errors for display
-hz_errors = Generators.observe((notify) => {
-  // ensure diagnostics are initialized
-  hz_diagInit
-  if (typeof window === "undefined") {
-    notify([])
-    return () => {}
-  }
-
-  const handler = (ev) => notify(ev?.detail ?? [])
-  window.addEventListener("hz:diag", handler)
-
-  // seed with current state (if any)
-  const existing = window.__hzDiag?.state?.errors ?? []
-  notify(existing.slice())
-
-  return () => window.removeEventListener("hz:diag", handler)
-})
 
 // nbData.json loader + normalizer
 
@@ -1224,30 +1271,10 @@ hz_formatModel = (m) => {
   return s
 }
 
-hz_varShortOptions  = hz_varShorts.map(v => ({ label: hz_formatVarShort(v), value: v }))
-hz_periodOptions    = hz_periods.map(p => ({ label: hz_formatPeriod(p), value: p }))
-hz_severityOptions  = hz_severities.map(s => ({ label: hz_formatSeverity(s), value: s }))
-hz_scenOptions      = hz_models.map(m => ({ label: hz_formatModel(m), value: m }))
-
 hz_defaultVarShort = hz_varShorts.find(v => /usd15/i.test(String(v))) ?? hz_varShorts.find(v => /intld15/i.test(String(v))) ?? hz_varShorts[0] ?? null
 hz_defaultPeriod    = hz_periods.includes("annual") ? "annual" : (hz_periods[0] ?? null)
 hz_defaultSeverity = hz_severities.find(s => String(s).toLowerCase() === "severe") ?? hz_severities.find(s => String(s).toLowerCase() === "extreme") ?? hz_severities[0] ?? null
 
-hz_defaultModel1 = hz_models.find(m => /historic/i.test(String(m))) ?? hz_models[0] ?? null
-hz_defaultModel2 = hz_models.find(m => /ensemble/i.test(String(m))) ?? hz_models.find(m => String(m) !== String(hz_defaultModel1)) ?? hz_defaultModel1
-
-({
-  varShorts: hz_varShorts,
-  periods: hz_periods,
-  models: hz_models,
-  severities: hz_severities
-})
-```
-
-```{ojs}
-//| output: false
-// Label used in compact summaries / headers
-hz_periodLabel = (typeof hz_formatPeriod === 'function') ? hz_formatPeriod(hz_period) : String(hz_period ?? '')
 ```
 
 ```{ojs}
@@ -1269,7 +1296,7 @@ hz_denomSpec = (() => {
   // Core trio used in current UI
   if (v === "prod") return { exposure: "prod", unit: "t" }
   if (v === "area") return { exposure: "harv-area", unit: "ha" }
-  if (v === "vop")  return { exposure: "vop", unit: "intld15" } // Shiny uses intld15 by default
+  if (v === "vop")  return { exposure: "vop", unit: "intld15" }
 
   
   if (v === "intld15") return { exposure: "vop", unit: "intld15" }
@@ -1280,7 +1307,6 @@ hz_denomSpec = (() => {
   return { exposure: v, unit: null }
 })()
 ```
-
 
 ```{ojs}
 //| output: false
@@ -1391,7 +1417,6 @@ viewof hz_method = Inputs.select(hz_methodOptions, {
  hz_spamCropsMapUrl = "/data/shared/MapSpamCrops.json"
  hz_spamCropsMap = await (await fetch(hz_spamCropsMapUrl)).json()
 
-
  hz_spamCodes = {
    const j = hz_spamCropsMap ?? {}
 
@@ -1417,9 +1442,7 @@ viewof hz_method = Inputs.select(hz_methodOptions, {
        const id = String(it?.id ?? "").trim()
        if (!id) continue
        const lab = it?.label ?? {}
-       const label = (typeof _lang === "function")
-         ? _lang(lab)
-         : (lab?.en ?? lab?.fr ?? id)
+       const label = (lab?.en ?? lab?.fr ?? id)
        labels[id] = label
      }
    }
@@ -1493,7 +1516,7 @@ hz_commodityLabelOf = (v) => {
   return label ?? hz_titleCase(id.replaceAll("-", " "))
 }
 
-// multi-select (enhanced): filter + chips + checklist (shared component)
+
 viewof hz_commodities = {
   const disabled = (hz_commodityGroup === "all")
 
@@ -1512,9 +1535,7 @@ viewof hz_commodities = {
     .map(s => String(s ?? "").trim())
     .filter(Boolean)
 
-  const label = (typeof _lang === "function")
-    ? _lang({ en: "Commodities", fr: "Produits" })
-    : "Commodities"
+  const label = "Commodities"
 
  
   const initial = disabled ? [] : []
@@ -1535,7 +1556,7 @@ placeholder: "Search commodities…",
     width: "100%"
   })
 
-  // Ensure truly empty-by-default (no implicit first selection)
+
   try {
     const sel = enhanced.querySelector("select") || enhanced
     Array.from(sel.options).forEach((o) => (o.selected = false))
@@ -1563,7 +1584,7 @@ hz_selectedCommodities = {
     .map((v) => String(v).trim())
     .filter(Boolean)
 
-  // Prevent stale picks when changing groups (only keep picks in current options)
+  // Prevent stale picks when changing groups
   const picked = pickedRaw.filter((v) => optSet.has(v))
 
   // User override
@@ -1595,11 +1616,6 @@ hz_selectedCommoditiesForReq = {
   if (g === "custom" && picked.length === 0) return ["all"]
   return picked
 }
-```
-
-```{ojs}
-//| output: false
-hz_commoditiesUI = viewof hz_commodities
 ```
 
 ```{ojs}
@@ -1658,6 +1674,56 @@ hz_geoFilterApi = {
   }
 }
 
+
+hz_geoFilterReq = {
+  const gf = hz_geoFilterApi ?? {}
+  const a0 = Array.isArray(gf.admin0) ? gf.admin0.filter(Boolean).filter(x => String(x).toLowerCase() !== "all") : []
+  const a1 = Array.isArray(gf.admin1) ? gf.admin1.filter(Boolean) : []
+  const a2 = Array.isArray(gf.admin2) ? gf.admin2.filter(Boolean) : []
+  const uniq = (xs) => Array.from(new Set((xs ?? []).filter(Boolean).map(String)))
+  const allA0 = Array.isArray(countries)
+    ? uniq(countries.map((d) => hz_stripIso(d?.admin0_name ?? d?.country ?? d?.name ?? "")))
+    : []
+  const allA1ForSelectedA0 = Array.isArray(dataAdmin1)
+    ? uniq(dataAdmin1.map((d) => hz_stripIso(d?.admin1_value ?? d?.admin1_name ?? "")))
+    : []
+
+  const out = {
+    ...gf,
+    admin0: [...a0],
+    admin1: [...a1],
+    admin2: [...a2],
+    admin0_name: [...a0],
+    admin1_name: [...a1],
+    admin2_name: [...a2]
+  }
+
+  if (!a0.length && !a1.length && !a2.length) {
+    out.admin0 = [...allA0]
+    out.admin1 = []
+    out.admin2 = []
+    out.admin0_name = [...allA0]
+    out.admin1_name = []
+    out.admin2_name = []
+    return out
+  }
+
+  if (a0.length && !a1.length && !a2.length) {
+    out.admin1 = [...allA1ForSelectedA0]
+    out.admin2 = []
+    out.admin1_name = [...allA1ForSelectedA0]
+    out.admin2_name = []
+    return out
+  }
+
+  if (a1.length) {
+    out.admin2 = []
+    out.admin2_name = []
+  }
+
+  return out
+}
+
 // Friendly labels for the UI
 hz_geoLabel = {
   const gf = hz_geoFilterApi ?? {}
@@ -1672,7 +1738,7 @@ hz_geoLabel = {
     return xs.join(", ") + more
   }
 
-  if (hasAll) return "admin0: all"
+  if (hasAll) return "admin0: SSA (all countries)"
   if (a2.length) return `admin2: ${fmt(a2)} (${a2.length})`
   if (a1.length) return `admin1: ${fmt(a1)} (${a1.length})`
   return `admin0: ${fmt(a0)} (${a0.length})`
@@ -1712,7 +1778,7 @@ hz_s2 = (() => hz_parseScenarioPick(hz_scen2))()
 
 ```{ojs}
 //| output: false
-// Resolve a dataset key from selected controls (note: model determined by scenario pick)
+// Resolve a dataset key from selected controls 
 hz_keyBaseFor = ({ varShort, period, model, severity }) => {
   // Base key: hazardExposure_{varShort}_{period}_{model}_{severity}
   return `hazardExposure_${varShort}_${period}_${model}_${severity}`
@@ -1799,7 +1865,6 @@ null
 //| output: false
 // ------------------------------------------------------------
 // Global advanced controls (shared by all questions)
-// - Furled (collapsed by default)
 // ------------------------------------------------------------
 hz_advancedSummary = {
   const v = hz_formatVarShort(hz_varShort)
@@ -1840,11 +1905,9 @@ hz_globalAdvancedControlsPanel = {
   return el
 }
 
-
 // ------------------------------------------------------------
 // Shared question controls (sync across questions)
 // - Group, Commodities, Geo, Scenario A/B
-// - Furled (collapsed by default)
 // ------------------------------------------------------------
 hz_sharedControlsSummary = {
   const left = hz_parseScenarioPick(hz_scen1)?.label ?? String(hz_scen1 ?? "")
@@ -1854,164 +1917,11 @@ hz_sharedControlsSummary = {
   return `${left} vs ${right} · ${geo} · ${com}`
 }
 
-
-```
-
-
-```{ojs}
-//| output: false
-// multi-select (chips + search + checklist).
-hz_makeMultiSelect = ({
-  label = "Select",
-  options = [],
-  value = [],
-  placeholder = "Search…",
-  disabled = false,
-  actions = [{ id: "none", label: "Clear" }],
-  exclusive = null,         // e.g., "all" (cannot coexist with others)
-  maxHeight = 240,
-  maxRender = 600
-} = {}) => {
-  const form = html`<form class="hz-ms" style="opacity:${disabled ? 0.65 : 1}; pointer-events:${disabled ? "none" : "auto"}">
-    <label class="hz-ms__label">${label}</label>
-    <div class="hz-ms__top">
-      <input class="hz-ms__search" type="search" placeholder="${placeholder}" />
-      <div class="hz-ms__btns"></div>
-    </div>
-    <div class="hz-ms__chips" aria-label="Selected"></div>
-    <div class="hz-ms__list" style="max-height:${maxHeight}px;"></div>
-    <div class="hz-ms__meta"></div>
-  </form>`
-
-  const search = form.querySelector(".hz-ms__search")
-  const chips = form.querySelector(".hz-ms__chips")
-  const list  = form.querySelector(".hz-ms__list")
-  const btns  = form.querySelector(".hz-ms__btns")
-  const meta  = form.querySelector(".hz-ms__meta")
-
-  const norm = (arr) => Array.from(new Set((arr ?? []).filter((d) => d != null && String(d).trim() !== "")))
-
-  const setExclusiveRules = (selSet) => {
-    if (!exclusive) return selSet
-    if (selSet.size === 0) { selSet.add(exclusive); return selSet }
-    if (selSet.has(exclusive) && selSet.size > 1) selSet.delete(exclusive)
-    return selSet
-  }
-
-  const selected = new Set(norm(value))
-  setExclusiveRules(selected)
-
-  form.value = Array.from(selected)
-
-  const emit = () => {
-    // Apply exclusive rules + keep stable order based on options list
-    setExclusiveRules(selected)
-    const optIndex = new Map(options.map((d, i) => [String(d), i]))
-    const ordered = Array.from(selected).sort((a, b) => (optIndex.get(String(a)) ?? 1e9) - (optIndex.get(String(b)) ?? 1e9))
-    form.value = ordered
-    form.dispatchEvent(new Event("input", { bubbles: true }))
-    renderChips()
-    renderList()
-  }
-
-  const renderChips = () => {
-    chips.replaceChildren()
-    const vals = Array.from(selected)
-    if (!vals.length) return
-    for (const v of vals) {
-      const chip = html`<span class="hz-chip" title="${v}">
-        <span>${v}</span>
-        <button type="button" aria-label="Remove">×</button>
-      </span>`
-      chip.querySelector("button").onclick = () => { selected.delete(v); emit() }
-      chips.appendChild(chip)
-    }
-  }
-
-  const filteredOptions = () => {
-    const q = (search.value ?? "").trim().toLowerCase()
-    if (!q) return options
-    return options.filter((d) => String(d).toLowerCase().includes(q))
-  }
-
-  const renderList = () => {
-    list.replaceChildren()
-    const filt = filteredOptions()
-    const shown = filt.slice(0, maxRender)
-
-    meta.replaceChildren(
-      html`<span class="hz-ms__metaText">
-        ${filt.length.toLocaleString()} match(es) · showing ${shown.length.toLocaleString()}
-        ${filt.length > maxRender ? html` <span class="hz-ms__metaWarn">(refine search to see more)</span>` : ""}
-      </span>`
-    )
-
-    for (const v of shown) {
-      const row = html`<label class="hz-ms__item">
-        <input type="checkbox" />
-        <span class="hz-ms__itemText">${v}</span>
-      </label>`
-      const cb = row.querySelector("input")
-      cb.checked = selected.has(v)
-      cb.onchange = () => {
-        if (cb.checked) {
-          if (exclusive && v === exclusive) {
-            selected.clear()
-            selected.add(exclusive)
-          } else {
-            selected.add(v)
-            if (exclusive) selected.delete(exclusive)
-          }
-        } else {
-          selected.delete(v)
-          setExclusiveRules(selected)
-        }
-        emit()
-      }
-      list.appendChild(row)
-    }
-
-    if (!shown.length) {
-      list.appendChild(html`<div class="hz-ms__empty">No matches.</div>`)
-    }
-  }
-
-  // Build action buttons
-  btns.replaceChildren()
-  for (const a of (actions ?? [])) {
-    const b = html`<button type="button" class="hz-ms__btn">${a.label}</button>`
-    b.onclick = () => {
-      if (a.id === "none") {
-        selected.clear()
-        if (exclusive) selected.add(exclusive)
-        emit()
-      } else if (a.id === "all") {
-        if (exclusive) {
-          selected.clear()
-          selected.add(exclusive)
-        } else {
-          selected.clear()
-          for (const v of options) selected.add(v)
-        }
-        emit()
-      }
-    }
-    btns.appendChild(b)
-  }
-
-  search.oninput = () => renderList()
-
-  // initial paint
-  renderChips()
-  renderList()
-
-  return form
-}
 ```
 
 ```{ojs}
 //| output: false
-// Geography selectors (standard Atlas boundary UI)
+// Geography selectors
 viewof hz_admin0 = renderA0Multi({ key: "shared", maxSelections: 8 })
 viewof hz_admin1 = renderA1Multi({ key: "shared", a0: viewof hz_admin0, maxSelections: 500 })
 viewof hz_admin2 = renderA2Multi({ key: "shared", a0: viewof hz_admin0, a1: viewof hz_admin1, maxSelections: 20 })
@@ -2026,13 +1936,6 @@ hz_normSel = (xs) => {
     .map((d) => {
       if (d == null) return ""
       if (typeof d === "string" || typeof d === "number") return String(d)
-
-      // Admin selector objects from /components/_adminSelectorsMulti.qmd:
-      // - admin0 objects have admin0_name (and iso3c)
-      // - admin1 objects have admin1_name (and admin0_name, iso3)
-      // - admin2 objects have admin2_name (and admin1_name, admin0_name, iso3)
-      // We must send clean names to the API (no “(ISO)” label strings) and
-      // treat “Full Country” rows (admin1_name/admin2_name == null) as “no filter”.
       if (typeof d === "object") {
         if ("admin2_name" in d) return d.admin2_name == null ? "" : String(d.admin2_name)
         if ("admin1_name" in d) return d.admin1_name == null ? "" : String(d.admin1_name)
@@ -2052,25 +1955,6 @@ hz_geoFilter = ({
   admin2: hz_normSel(hz_admin2)
 })
 ```
-
-```{ojs}
-//| output: false
-
-// hazard_vars lists
-// - generic: NDWS (drought) + NTx35 / THI-max (heat) + NDWL0 (flood)
-// - crop_specific: PTOT-L (drought) + NTxS / THI-max (heat) + PTOT-G (flood)
-hz_interactions = ({
-  generic: [
-    "NDWS+NTx35+NDWL0",
-    "NDWS+THI-max+NDWL0"
-  ],
-  crop_specific: [
-    "PTOT-L+NTxS+PTOT-G",
-    "PTOT-L+THI-max+PTOT-G"
-  ]
-})
-```
-
 
 ```{ojs}
 //| output: false
@@ -2158,8 +2042,8 @@ hz_apiPostJson = async (path, body, { signal } = {}) => {
 
 // Debounced + cached API call.
 //| output: false
-// ============================================================
-// Map view (choropleth) — reuses getAdminBoundaries + by-admin API
+
+// Map view
 // ============================================================
 
 viewof hz_mapMetric = {
@@ -2224,7 +2108,7 @@ hz_mapSub = {
   if (hz_mapLevel === 2 && a1.length && !a2.length) return `Showing Admin2 (children of selected Admin1).`
   if (hz_mapLevel === 2 && a2.length) return `Showing selected Admin2 areas.`
   if (hz_mapLevel === 1 && a0.length) return `Showing Admin1 (children of selected Admin0).`
-  return `Showing Admin0 across current selection.`
+  return `Showing Admin0 across SSA.`
 }
 
 hz_guessNameKey = (feature, level) => {
@@ -2325,7 +2209,6 @@ if (!featsUse.length) {
 
 const fcUse = { type: "FeatureCollection", features: featsUse }
 
-// If the join doesn't match, we still render boundaries; data-less areas appear empty
 const joinHits = featsUse.some(f => names.has(getName(f)))
 const joinNote = (!joinHits)
   ? html`<div class="hz-muted hz-note">Note: could not match by-admin names to boundary properties; showing boundaries without fill.</div>`
@@ -2333,6 +2216,14 @@ const joinNote = (!joinHits)
 
 const isDelta = (metric === "delta")
   const label = isDelta ? "Δ exposure (Right − Left)" : (metric === "left" ? "Exposure (Left)" : "Exposure (Right)")
+
+const fcSelectedA2 = (() => {
+  const picked = new Set((a2 ?? []).map(String))
+  const features = picked.size
+    ? featsUse.filter(f => picked.has(getName(f)))
+    : []
+  return { type: "FeatureCollection", features }
+})()
 
   const plot = Plot.plot({
     projection: { type: "mercator", domain: fcUse, inset: 10 },
@@ -2353,9 +2244,17 @@ const isDelta = (metric === "delta")
           const n = getName(f)
           const v = lookup(n)
           const vv = (v == null) ? "n/a" : fmtAbs(v)
-          return `${n}\n${label}: ${vv}`
+          const picked = (a2 ?? []).includes(n) ? "\nSelected Admin2" : ""
+          return `${n}\n${label}: ${vv}${picked}`
         }
-      })
+      }),
+      ...(fcSelectedA2.features.length ? [
+        Plot.geo(fcSelectedA2, {
+          fill: "none",
+          stroke: "#111827",
+          strokeWidth: 2
+        })
+      ] : [])
     ]
   })
 
@@ -2450,13 +2349,11 @@ hz_apiDebouncedCached = async (groupKey, path, body, { ttlMs = 60000, debounceMs
 
 ```{ojs}
 //| output: false
+// ============================================================
+// Q1 — REQUEST, RESPONSE, CHART, SUMMARY, INSIGHT
+// ============================================================
 // Build a single "Q1" request that returns everything needed for the main chart.
 hz_isBroadGeo = (geo) => {
-  const a0 = Array.isArray(geo?.admin0) ? geo.admin0.filter((d) => d && d !== "all") : []
-  // If no specific admin0 selected, it's broad.
-  if (a0.length === 0) return true
-  // If the UI includes "all" explicitly, treat as broad.
-  if (Array.isArray(geo?.admin0) && geo.admin0.includes("all")) return true
   return false
 }
 
@@ -2472,7 +2369,7 @@ hz_q1Req = (() => {
   const left = {
     dataset_url: hz_src1.url,
     scen: { scenario: hz_s1?.scenario, timeframe: hz_s1?.timeframe },
-    geo: hz_geoFilterApi,
+    geo: hz_geoFilterReq,
     commodities: hz_selectedCommoditiesForReq ?? [],
     hazard_vars: null,
     hazards: null,
@@ -2483,7 +2380,7 @@ hz_q1Req = (() => {
   const right = {
     dataset_url: hz_src2.url,
     scen: { scenario: hz_s2?.scenario, timeframe: hz_s2?.timeframe },
-    geo: hz_geoFilterApi,
+    geo: hz_geoFilterReq,
     commodities: hz_selectedCommoditiesForReq ?? [],
     hazard_vars: null,
     hazards: null,
@@ -2493,11 +2390,10 @@ hz_q1Req = (() => {
 
   const denom = {
     denom_url: hz_denomUrl,
-    geo: hz_geoFilterApi,
+    geo: hz_geoFilterReq,
     commodities: hz_selectedCommoditiesForReq ?? [],
     exposure: hz_denomSpec?.exposure ?? null,
     unit: hz_denomSpec?.unit ?? null,
-    // keep legacy key for backwards compatibility on the API side
     exposure_unit: hz_denomSpec?.unit ?? hz_varShort
   }
 return { ok: true, body: { left, right, denom } }
@@ -2509,18 +2405,11 @@ return { ok: true, body: { left, right, denom } }
 //| output: false
 hz_activeQuestion = "q1"
 
-hz_dashSub = ({
-  q1: "Compare Left vs Right (side-by-side or Δ). Filters: scenarios, geography, commodities.",
-  q2: "Compare Left vs Right. Filters: scenarios, geography, commodities.",
-  q3: "Compare Left vs Right. Filters: scenarios, geography, commodities.",
-  q4: "Compare Left vs Right. Filters: scenarios, geography, commodities."
-})[hz_activeQuestion] || ""
-
-// Common request payload for single-side endpoints (used by map + other side queries)
+// Common request payload for single-side endpoints
 hz_sideReq = (src, scen, extra = {}) => ({
   dataset_url: src?.url,
   scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
-  geo: hz_geoFilterApi,
+  geo: hz_geoFilterReq,
   commodities: hz_selectedCommoditiesForReq ?? [],
   hazard_vars: null,
   hazards: null,
@@ -2557,7 +2446,7 @@ hz_q1Meta = ({
 
 ```{ojs}
 //| output: false
-// Rows currently displayed in the Q1 chart (match the UpSet combinations + ordering)
+// Rows currently displayed in the Q1 chart
 hz_q1DisplayRows = {
   const num = (x) => {
     const v = Number(x)
@@ -2636,7 +2525,6 @@ hz_q1DisplayRows = {
 
 ```{ojs}
 //| output: false
-// Build Q1 UpSet chart
 hz_q1Chart = {
   // numeric guard (prevents NaN propagating into Plot scales)
   const num = (x) => {
@@ -2711,7 +2599,7 @@ hz_q1Chart = {
       return ordered
     }
 
-    // Fallback: whatever hazards exist (already ranked upstream)
+    // Fallback: whatever hazards exist
     return raw.filter((r) => isIntersection(r.hazard)).map((r) => String(r.hazard))
   })()
 
@@ -2843,22 +2731,12 @@ hz_q1Chart = {
 }
 ```
 
-
 ```{ojs}
 //| output: false
-// ----------------------------
-// Q2 — totals by crop (uses shared global Advanced filters)
-// ----------------------------
-hz_q2_s1 = hz_s1
-hz_q2_s2 = hz_s2
-
-hz_q2_keyCandidates1 = hz_keyCandidates1
-hz_q2_keyCandidates2 = hz_keyCandidates2
-
-hz_q2_src1 = hz_src1
-hz_q2_src2 = hz_src2
-
-// Reuse shared commodities + geo payload used by Q1
+// ============================================================
+// Q2 — TOTALS BY CROP, CHART, SUMMARY, INSIGHT
+// ============================================================
+// Q2 — totals by crop
 hz_q2_selectedCommoditiesForReq = hz_selectedCommoditiesForReq
 hz_q2_selectedCommodityCount = {
   const picked = Array.isArray(hz_q2_selectedCommoditiesForReq)
@@ -2877,9 +2755,7 @@ hz_q2_selectedCommodityCount = {
   return Math.max(1, picked.length || 1)
 }
 hz_q2_reqTopCrops = hz_q2_selectedCommodityCount
-hz_q2_geoFilterApi = hz_geoFilterApi
-
-// Guard: require Admin0 and resolved datasets (shared)
+// Guard: require Admin0 and resolved datasets
 hz_q2ReqOk = (() => {
   if (hz_isBroadGeo?.(hz_geoFilter)) {
     return { ok: false, error: "Select at least an Admin0 (broad selection blocked for speed)." }
@@ -2896,7 +2772,7 @@ hz_q2ReqBody = (() => {
   const left = {
     dataset_url: hz_src1?.url,
     scen: { scenario: hz_s1?.scenario, timeframe: hz_s1?.timeframe },
-    geo: hz_geoFilterApi,
+    geo: hz_geoFilterReq,
     commodities: hz_selectedCommoditiesForReq ?? [],
     hazard_vars: null,
     hazards: null,
@@ -2909,7 +2785,7 @@ hz_q2ReqBody = (() => {
   const right = {
     dataset_url: hz_src2?.url,
     scen: { scenario: hz_s2?.scenario, timeframe: hz_s2?.timeframe },
-    geo: hz_geoFilterApi,
+    geo: hz_geoFilterReq,
     commodities: hz_selectedCommoditiesForReq ?? [],
     hazard_vars: null,
     hazards: null,
@@ -2921,7 +2797,7 @@ hz_q2ReqBody = (() => {
 
   const denom = {
     denom_url: hz_denomUrl,
-    geo: hz_geoFilterApi,
+    geo: hz_geoFilterReq,
     commodities: hz_selectedCommoditiesForReq ?? [],
     exposure: hz_denomSpec?.exposure ?? null,
     unit: hz_denomSpec?.unit ?? null,
@@ -3015,7 +2891,7 @@ hz_q2RowsR_withNoHazard = {
   return base
 }
 
-// Exclusive compound hazards (stackable): dry/heat/wet as "(only)" + their combinations + no hazard
+// Exclusive compound hazards: dry/heat/wet as "(only)" + their combinations + no hazard
 hz_q2CompoundExclusive = (rows) => {
   const out = []
   for (const r of (rows ?? [])) {
@@ -3135,7 +3011,6 @@ hz_q2Set_compound_full = hz_q2HazMerge(hz_q2CompoundExclusive(hz_q2RowsL_withNoH
 hz_q2Set_compound_simple = hz_q2HazMerge(hz_q2CompoundSimplified(hz_q2CompoundExclusive(hz_q2RowsL_withNoHazard)), hz_q2CompoundSimplified(hz_q2CompoundExclusive(hz_q2RowsR_withNoHazard)))
 hz_q2Set_noncompound = hz_q2HazMerge(hz_q2NonCompoundBuckets(hz_q2RowsL_withNoHazard), hz_q2NonCompoundBuckets(hz_q2RowsR_withNoHazard))
 
-
 hz_q2Rows = {
   const anyL = hz_q2HazMap(hz_q2DataL, "any")
   const anyR = hz_q2HazMap(hz_q2DataR, "any")
@@ -3151,8 +3026,32 @@ hz_q2Rows = {
   return rows
 }
 
+// color scheme 
+hz_hazardColorHex = (raw) => {
+  const s = String(raw ?? "").trim().toLowerCase()
+  if (!s) return "#9CA3AF"
+  if (s === "wet" || s === "wet (any)" || s === "wet (only)") return "#4FB5B7"
+  if (s === "dry" || s === "dry (any)" || s === "dry (only)") return "#FCC42C"
+  if (s === "heat" || s === "heat (any)" || s === "heat (only)") return "#FC8A34"
+  if (s === "dry+heat") return "#EE624F"
+  if (s === "dry+wet") return "#B34E65"
+  if (s === "heat+wet") return "#8C3E5F"
+  if (s === "dry+heat+wet") return "#523D4E"
+  if (s === "no hazard") return "#EFEFEF"
+  if (s === "any" || s === "any hazard") return "#6B7280"
+  if (s === "1 hazard") return "#FCC42C"
+  if (s === "2 hazards") return "#B34E65"
+  if (s === "3 hazards") return "#523D4E"
+  return "#9CA3AF"
+}
+hz_hazardColorConfig = (domain = [], legend = false) => ({
+  type: "categorical",
+  domain: Array.isArray(domain) ? domain : [],
+  range: (Array.isArray(domain) ? domain : []).map((d) => hz_hazardColorHex(d)),
+  legend
+})
 
-// Q2 — displayed chart data (shared by chart + table)
+// Q2 — displayed chart data
 hz_q2DisplayState = {
   const set = hz_q2_showCompound
     ? (hz_q2_simplifyCompound ? hz_q2Set_compound_simple : hz_q2Set_compound_full)
@@ -3279,8 +3178,8 @@ hz_q2Chart = {
       ? Math.floor((hz_plotWidth - 16) / 2)
       : hz_plotWidth
 
-  const color = { domain: hazLevelsChart, scheme: "tableau10", legend: false }
-  const legend = Plot.legend({ color: { domain: hazLevelsChart, scheme: "tableau10" }, columns: 4 })
+  const color = hz_hazardColorConfig(hazLevelsChart, false)
+  const legend = Plot.legend({ color: hz_hazardColorConfig(hazLevelsChart, true), columns: 4 })
 
   const xLabelAbs = (hz_varLabelAbs ?? "Exposure")
   const xLabel = hz_q2_relative ? "%" : xLabelAbs
@@ -3433,9 +3332,7 @@ hz_q2Chart = {
 
 ```{ojs}
 //| output: false
-// ----------------------------
 // Q2 — summary table
-// ----------------------------
 hz_q2TableView = {
   const state = hz_q2DisplayState ?? {}
   const rows = Array.isArray(state.displayRows) ? state.displayRows : []
@@ -3510,17 +3407,15 @@ hz_q2TableView = {
 }
 ```
 
-
 ```{ojs}
 //| output: false
-// ----------------------------
 // Q2 — Dynamic Insights
-// ----------------------------
 hz_q2InsightView = {
+  const _langTick = masterLanguage
   const ok = !!hz_q2Meta?.ok
   if (!ok) {
     const err = hz_q2Meta?.error ?? "Missing required inputs."
-    return html`<div class="hz-muted">Insights unavailable: ${err}</div>`
+    return html`<div class="hz-muted">${hz_tpl("sections.q2.insight.unavailable", { err })}</div>`
   }
 
   const denomMap = hz_q2DenomMap ?? new Map()
@@ -3538,15 +3433,15 @@ hz_q2InsightView = {
     const h0 = raw.replace(/\s*\(.*?\)\s*/g, "").trim()
     if (!h0) return "—"
     const low = h0.toLowerCase()
-    if (low === "no hazard") return "No hazard"
-    if (low === "any") return "Any hazard"
+    if (low === "no hazard") return hz_t("general.hazards.noHazard")
+    if (low === "any") return hz_t("general.hazards.anyHazard")
 
     const cap = (s) => {
       const t = String(s ?? "").trim().toLowerCase()
       if (!t) return ""
-      if (t === "dry") return "Dry"
-      if (t === "heat") return "Heat"
-      if (t === "wet") return "Wet"
+      if (t === "dry") return hz_t("general.hazards.dry")
+      if (t === "heat") return hz_t("general.hazards.heat")
+      if (t === "wet") return hz_t("general.hazards.wet")
       return t.charAt(0).toUpperCase() + t.slice(1)
     }
 
@@ -3615,11 +3510,11 @@ hz_q2InsightView = {
     const top = data.slice(0, 5)
 
     const table = top.map((d) => ({
-      "Commodity": d.crop,
-      "Unit": d.unit,
-      "%": d.pct,
-      "Top Alone": d.topAloneStr,
-      "Top Compound": d.topCompStr
+      [hz_t("sections.q2.insight.columns.commodity")]: d.crop,
+      [hz_t("sections.q2.insight.columns.unit")]: d.unit,
+      [hz_t("sections.q2.insight.columns.pct")]: d.pct,
+      [hz_t("sections.q2.insight.columns.topAlone")]: d.topAloneStr,
+      [hz_t("sections.q2.insight.columns.topCompound")]: d.topCompStr
     }))
 
     return { label, table }
@@ -3629,7 +3524,7 @@ hz_q2InsightView = {
   const s2 = hz_s2?.label ?? "Right"
   const sev = hz_severityLabel ?? "selected"
   const nSel = (hz_selectedCommoditiesForReq ?? []).length
-  const selTxt = nSel ? `${nSel}` : "your"
+  const selTxt = nSel ? `${nSel}` : hz_t("sections.q2.insight.your")
 
   const left = calcScenarioTable(rowsL, s1)
   const right = calcScenarioTable(rowsR, s2)
@@ -3699,11 +3594,11 @@ hz_q2InsightView = {
     const top = diffRows.slice(0, 5)
 
     return top.map((d) => ({
-      "Commodity": d.crop,
-      "Δ Unit": d.dU,
-      "Δ %": d.dP,
-      "Top Δ Alone": d.topAlone,
-      "Top Δ Compound": d.topComp
+      [hz_t("sections.q2.insight.columns.commodity")]: d.crop,
+      [hz_t("sections.q2.insight.columns.deltaUnit")]: d.dU,
+      [hz_t("sections.q2.insight.columns.deltaPct")]: d.dP,
+      [hz_t("sections.q2.insight.columns.topDeltaAlone")]: d.topAlone,
+      [hz_t("sections.q2.insight.columns.topDeltaCompound")]: d.topComp
     }))
   }
 
@@ -3725,46 +3620,73 @@ hz_q2InsightView = {
   }
 
   return html`<div>
-    ${md`**Dynamic Insights**
-
-Of ${selTxt} selected commodities, the most exposed commodities (in absolute terms) to **${sev}** hazards are:`}
+    ${md`${[
+      `**${hz_t("sections.q2.insight.heading")}**`,
+      "",
+      hz_tpl("sections.q2.insight.intro", { selTxt, sev })
+    ].join("\n\n")}`}
 
     <div class="hz-insightSubhead">${left.label}</div>
     ${hz_atlasTable(left.table, {
-      columns: ["Commodity", "Unit", "%", "Top Alone", "Top Compound"],
+      columns: [
+        hz_t("sections.q2.insight.columns.commodity"),
+        hz_t("sections.q2.insight.columns.unit"),
+        hz_t("sections.q2.insight.columns.pct"),
+        hz_t("sections.q2.insight.columns.topAlone"),
+        hz_t("sections.q2.insight.columns.topCompound")
+      ],
       rows: 5,
       height: "260px",
-      format: { "Unit": fmtAbs, "%": fmtPct }
+      format: {
+        [hz_t("sections.q2.insight.columns.unit")]: fmtAbs,
+        [hz_t("sections.q2.insight.columns.pct")]: fmtPct
+      }
     })}
 
     <div class="hz-insightSubhead" style="margin-top:0.6rem">${right.label}</div>
     ${hz_atlasTable(right.table, {
-      columns: ["Commodity", "Unit", "%", "Top Alone", "Top Compound"],
+      columns: [
+        hz_t("sections.q2.insight.columns.commodity"),
+        hz_t("sections.q2.insight.columns.unit"),
+        hz_t("sections.q2.insight.columns.pct"),
+        hz_t("sections.q2.insight.columns.topAlone"),
+        hz_t("sections.q2.insight.columns.topCompound")
+      ],
       rows: 5,
       height: "260px",
-      format: { "Unit": fmtAbs, "%": fmtPct }
+      format: {
+        [hz_t("sections.q2.insight.columns.unit")]: fmtAbs,
+        [hz_t("sections.q2.insight.columns.pct")]: fmtPct
+      }
     })}
 
-    ${md`These crops show the greatest absolute changes in **${sev}** exposure between **${s1}** and **${s2}**.`}
+    ${md`${hz_tpl("sections.q2.insight.change", { sev, s1, s2 })}`}
 
     ${hz_atlasTable(diffTable, {
-      columns: ["Commodity", "Δ Unit", "Δ %", "Top Δ Alone", "Top Δ Compound"],
+      columns: [
+        hz_t("sections.q2.insight.columns.commodity"),
+        hz_t("sections.q2.insight.columns.deltaUnit"),
+        hz_t("sections.q2.insight.columns.deltaPct"),
+        hz_t("sections.q2.insight.columns.topDeltaAlone"),
+        hz_t("sections.q2.insight.columns.topDeltaCompound")
+      ],
       rows: 5,
       height: "260px",
-      format: { "Δ Unit": fmtAbsSigned, "Δ %": fmtPP }
+      format: {
+        [hz_t("sections.q2.insight.columns.deltaUnit")]: fmtAbsSigned,
+        [hz_t("sections.q2.insight.columns.deltaPct")]: fmtPP
+      }
     })}
   </div>`
 }
 ```
 
-
 ```{ojs}
 //| output: false
-// ----------------------------
+// ============================================================
+// Q3 — HAZARD OVERLAP
+// ============================================================
 // Q3 — hazard by crop
-// ----------------------------
-hz_q3ReqExtra = ({ top_hazards: 10, top_crops: 12 })
-
 hz_q3RespL = ({
   ok: !!hz_q2Resp?.ok,
   cached: !!hz_q2Resp?.cached,
@@ -3819,8 +3741,8 @@ hz_q3Chart = {
       .map(d => ({ crop: d.crop, hazard: d.hazard, total: Number(d.total || 0) }))
 
   // Shared categorical color scale (keeps left/right colors aligned)
-  const color = { type: "categorical", domain: hazards, scheme: "tableau10", legend: false }
-  const legend = Plot.legend({ color: { domain: hazards, scheme: "tableau10" }, columns: 3 })
+  const color = hz_hazardColorConfig(hazards, false)
+  const legend = Plot.legend({ color: hz_hazardColorConfig(hazards, true), columns: 3 })
 
   const plotStack = (data, title) => html`
     <div class="hz-mini hz-mini--stack">
@@ -3866,14 +3788,11 @@ hz_q3Chart = {
 
 ```{ojs}
 //| output: false
-// ----------------------------
 
-hz_mapLevelNote = _lang({
-  en: "Map level is auto-detected from the selected geography filters.",
-  fr: "Le niveau de la carte est détecté automatiquement à partir des filtres géographiques sélectionnés."
-})
+// ============================================================
+// Q4 — ADMIN GEOGRAPHY ANALYSIS
+// ============================================================
 // Q4 — totals by admin area
-// ----------------------------
 hz_q4ReqExtra = ({ group_child: false, group_hazard: false })
 hz_q4ReqHazExtra = ({ group_child: false, group_hazard: true })
 
@@ -3925,9 +3844,10 @@ hz_q4HazMeta = ({
   error: hz_q4HazRespL?.error || hz_q4HazRespR?.error || null
 })
 
-// ------------------------------------------------------------
+// ============================================================
+// Q5 — SCENARIO TRAJECTORIES + UNCERTAINTY
+// ============================================================
 // Q5 — Scenario trajectories + uncertainty
-// ------------------------------------------------------------
 
 // Q5 controls
 viewof hz_q5_view = Inputs.radio(
@@ -4002,7 +3922,7 @@ hz_q5Req = {
     ok: true,
     body: {
       dataset_urls: urls,
-      geo: hz_geoFilterApi,
+      geo: hz_geoFilterReq,
       scenario_time: hz_q5ScenarioPairsUniq,
       commodities: hz_selectedCommoditiesForReq ?? [],
       hazard_vars: null,
@@ -4038,7 +3958,7 @@ hz_q5Meta = ({
   has_value_sd: !!hz_q5Resp?.meta?.has_value_sd,
   n_gcm_for_ci: (hz_q5Resp?.meta?.n_gcm_for_ci ?? null)
 })
-// Scenario/timeframe options (derived from the fetched rows; fall back to common defaults while loading)
+// Scenario/timeframe options
 hz_q5ScenarioOptions = {
   const isHistName = (s) => /hist|historic/i.test(String(s ?? ""))
   const opts = Array.from(new Set((hz_q5SeriesAll ?? []).map(d => String(d?.scenario ?? ""))))
@@ -4072,7 +3992,6 @@ viewof hz_q5_timeframes = hz_safeEnhancedMultiSelect(
   }
 )
 
-// Clean rows + apply client-side filters (scenario/timeframe + hazard view)
 hz_q5RowsClean = {
   const n = (x) => {
     const v = Number(x)
@@ -4193,7 +4112,6 @@ hz_q5PlotRows = {
   }
   return out
 }
-
 
 hz_q5PlotRowsJittered = {
   const rows = hz_q5PlotRows ?? []
@@ -4452,10 +4370,7 @@ hz_q5_chartHost = html`
   <div class="hz-chartWrap ${hz_q5Busy ? "hz-chartWrap--busy" : ""}">
     ${hz_q5Plot}
     <div class="hz-chartNote">
-      ${md`${_lang({
-        en: "Dashed lines show the historic (baseline) exposure. When Uncertainty is on, shaded bands and whiskers show the low–high range across GCMs where available.",
-        fr: "Les lignes pointillées indiquent l’exposition historique (référence). Lorsque l’option Incertitude est activée, des bandes ombrées et des moustaches montrent la plage basse–haute entre les GCM lorsque disponible."
-      })}`}
+      ${md`${hz_t("sections.q5.chartNote")}`}
     </div>
   </div>
 `
@@ -4463,21 +4378,20 @@ hz_q5_chartHost = html`
 hz_q5_settingsWrap = html`
   <div class="hz-qToolbar__right">
     <div class="hz-inlineToggles hz-inlineToggles--grid">
-      <div class="hz-miniSetting"><span>Scale</span>${hz_noJumpInput(viewof hz_q5_scale)}</div>
-      <div class="hz-miniSetting hz-miniSetting--grow"><span>Hazards</span>${hz_noJumpInput(viewof hz_q5_hazards)}</div>
-      <div class="hz-miniSetting hz-miniSetting--grow"><span>Scenarios</span>${hz_noJumpInput(viewof hz_q5_scenarios)}</div>
-      <div class="hz-miniSetting hz-miniSetting--grow"><span>Periods</span>${hz_noJumpInput(viewof hz_q5_timeframes)}</div>
-      <div class="hz-miniSetting"><span>Uncertainty</span>${hz_noJumpInput(viewof hz_q5_showUncertainty)}</div>
-      <div class="hz-miniSetting"><span>Lines</span>${hz_noJumpInput(viewof hz_q5_showLines)}</div>
-      <div class="hz-miniSetting"><span>Free Y axis</span>${hz_noJumpInput(viewof hz_q5_freeY)}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${hz_noJumpInput(viewof hz_q5_chartHeight)}</div>
+      <div class="hz-miniSetting"><span id="hz-q5-label-scale">Scale</span>${hz_noJumpInput(viewof hz_q5_scale)}</div>
+      <div class="hz-miniSetting hz-miniSetting--grow"><span id="hz-q5-label-hazards">Hazards</span>${hz_noJumpInput(viewof hz_q5_hazards)}</div>
+      <div class="hz-miniSetting hz-miniSetting--grow"><span id="hz-q5-label-scenarios">Scenarios</span>${hz_noJumpInput(viewof hz_q5_scenarios)}</div>
+      <div class="hz-miniSetting hz-miniSetting--grow"><span id="hz-q5-label-periods">Periods</span>${hz_noJumpInput(viewof hz_q5_timeframes)}</div>
+      <div class="hz-miniSetting"><span id="hz-q5-label-uncertainty">Uncertainty</span>${hz_noJumpInput(viewof hz_q5_showUncertainty)}</div>
+      <div class="hz-miniSetting"><span id="hz-q5-label-lines">Lines</span>${hz_noJumpInput(viewof hz_q5_showLines)}</div>
+      <div class="hz-miniSetting"><span id="hz-q5-label-freey">Free Y axis</span>${hz_noJumpInput(viewof hz_q5_freeY)}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q5-label-height">Height</span>${hz_noJumpInput(viewof hz_q5_chartHeight)}</div>
     </div>
   </div>
 `
 
-// ------------------------------------------------------------
 // Q5 — Summary table + dynamic insights
-// ------------------------------------------------------------
+
 
 // Baseline for a hazard under the current scale
 hz_q5BaselineFor = (haz) => {
@@ -4488,12 +4402,12 @@ hz_q5BaselineFor = (haz) => {
   return (v == null) ? null : Number(v)
 }
 
-// Table (chart-ready rows → table-ready rows)
+// Table
 hz_q5TableView = {
   if (hz_q5Meta?.error) return html`<div class="warn"><b>Q5 query failed:</b><br>${hz_q5Meta.error}</div>`
 
   const rows = hz_q5PlotRows ?? []
-  if (!rows.length) return html`<div class="hz-loading">Loading table…</div>`
+  if (!rows.length) return html`<div class="hz-loading"><span id="hz-q5-loading-table">Loading table…</span></div>`
 
   const fmtAbs = (x) => {
     const v = Number(x)
@@ -4561,7 +4475,7 @@ hz_q5TableView = {
   const scaleMode = String(hz_q5_scale ?? "abs")
   const valueLabel = (scaleMode === "idx") ? "Index" : "Value"
 
-  // Rename columns dynamically (without mutating the table rows)
+  // Rename columns dynamically
   const data = out.map((d) => ({
     ...d,
     [valueLabel]: d["Value"]
@@ -4599,7 +4513,6 @@ hz_q5_tableHost = html`
   </div>
 `
 
-
 // Q5: keep results host stable to avoid page scroll jumps when toggling controls
 hz_q5_resultsNode = html`
   <div class="hz-qResults">
@@ -4636,11 +4549,9 @@ hz_q5_wireViewToggle = {
   return null
 }
 
-
 hz_q5_wireHazardCtl = null
 
-
-// Insights helper: table renderer (stacked, no side-by-side)
+// Insights helper: table renderer
 hz_q5_smallTable = (cols, rows) => {
   const safe = (x) => (x == null ? "—" : String(x))
   return html`
@@ -4661,11 +4572,12 @@ hz_q5_smallTable = (cols, rows) => {
 }
 
 hz_q5Insight = {
+  const _langTick = masterLanguage
   const err = hz_q5Meta?.error
-  if (err) return html`<div class="hz-muted">Insights unavailable: ${err}</div>`
+  if (err) return html`<div class="hz-muted">${hz_tpl("sections.q5.insight.unavailable", { err })}</div>`
 
   const rows = hz_q5PlotRows ?? []
-  if (!rows.length) return html`<div class="hz-muted">Insights will appear once results load.</div>`
+  if (!rows.length) return html`<div class="hz-muted">${hz_t("sections.q5.insight.loading")}</div>`
 
   const fmt = (v) => hz_formatNumber(v, { digits: 2, compact: true })
   const fmtFull = (v) => hz_formatNumber(v, { digits: 2, compact: false })
@@ -4735,15 +4647,15 @@ hz_q5Insight = {
     lowInc.push(minAbs)
   }
 
-  const colsMain = ["Hazard", "Scenario", "Period", "Year", "Value", "Δ", "Δ%"]
+  const colsMain = [hz_t("sections.q5.insight.columns.hazard"), hz_t("sections.q5.insight.columns.scenario"), hz_t("sections.q5.insight.columns.period"), hz_t("sections.q5.insight.columns.year"), hz_t("sections.q5.insight.columns.value"), hz_t("sections.q5.insight.columns.delta"), hz_t("sections.q5.insight.columns.deltaPct")]
   const rowToObj = (r) => ({
-    "Hazard": String(r.hazard ?? ""),
-    "Scenario": String(r.scenario ?? "").toUpperCase(),
-    "Period": String(r.timeframe ?? ""),
-    "Year": Number.isFinite(Number(r.year)) ? String(Math.round(Number(r.year))) : "—",
-    "Value": (r.value == null ? "—" : fmtFull(r.value)),
-    "Δ": (r.delta == null ? "—" : fmtFull(r.delta)),
-    "Δ%": (r.pct == null ? "—" : fmtPct(r.pct))
+    [hz_t("sections.q5.insight.columns.hazard")]: hz_hazardLabel(String(r.hazard ?? "")),
+    [hz_t("sections.q5.insight.columns.scenario")]: String(r.scenario ?? "").toUpperCase(),
+    [hz_t("sections.q5.insight.columns.period")]: String(r.timeframe ?? ""),
+    [hz_t("sections.q5.insight.columns.year")]: Number.isFinite(Number(r.year)) ? String(Math.round(Number(r.year))) : "—",
+    [hz_t("sections.q5.insight.columns.value")]: (r.value == null ? "—" : fmtFull(r.value)),
+    [hz_t("sections.q5.insight.columns.delta")]: (r.delta == null ? "—" : fmtFull(r.delta)),
+    [hz_t("sections.q5.insight.columns.deltaPct")]: (r.pct == null ? "—" : fmtPct(r.pct))
   })
 
   // Uncertainty hotspots (widest CI among ALL plotted rows)
@@ -4765,66 +4677,44 @@ hz_q5Insight = {
         .sort((a,b) => (b.ciw - a.ciw))
         .slice(0, 6)
 
-  const colsUnc = ["Hazard", "Scenario", "Period", "Year", "CI width"]
+  const colsUnc = [hz_t("sections.q5.insight.columns.hazard"), hz_t("sections.q5.insight.columns.scenario"), hz_t("sections.q5.insight.columns.period"), hz_t("sections.q5.insight.columns.year"), hz_t("sections.q5.insight.columns.ciWidth")]
   const uncRows = unc.map(r => ({
-    "Hazard": String(r.hazard ?? ""),
-    "Scenario": String(r.scenario ?? "").toUpperCase(),
-    "Period": String(r.timeframe ?? ""),
-    "Year": Number.isFinite(Number(r.year)) ? String(Math.round(Number(r.year))) : "—",
-    "CI width": fmtFull(r.ciw)
+    [hz_t("sections.q5.insight.columns.hazard")]: hz_hazardLabel(String(r.hazard ?? "")),
+    [hz_t("sections.q5.insight.columns.scenario")]: String(r.scenario ?? "").toUpperCase(),
+    [hz_t("sections.q5.insight.columns.period")]: String(r.timeframe ?? ""),
+    [hz_t("sections.q5.insight.columns.year")]: Number.isFinite(Number(r.year)) ? String(Math.round(Number(r.year))) : "—",
+    [hz_t("sections.q5.insight.columns.ciWidth")]: fmtFull(r.ciw)
   }))
 
   const scaleMode = String(hz_q5_scale ?? "abs")
   const lead = (scaleMode === "idx")
-    ? _lang({
-        en: "Insights below use the latest selected period per scenario, indexed to the historic baseline (100).",
-        fr: "Les aperçus ci-dessous utilisent la dernière période sélectionnée par scénario, indexée à la référence historique (100)."
-      })
-    : _lang({
-        en: "Insights below use the latest selected period per scenario, compared to the historic baseline.",
-        fr: "Les aperçus ci-dessous utilisent la dernière période sélectionnée par scénario, comparée à la référence historique."
-      })
+    ? hz_t("sections.q5.insight.leadIndexed")
+    : hz_t("sections.q5.insight.leadCompared")
 
   return html`
     <div class="hz-q4InsightBlock">
       <div class="hz-q4InsightLead">${md`${lead}`}</div>
 
       <div>
-        <div class="hz-q4Subhead">${md`${_lang({
-          en: "Largest increases vs baseline (latest period)",
-          fr: "Plus fortes hausses vs référence (dernière période)"
-        })}`}</div>
+        <div class="hz-q4Subhead">${md`${hz_t("sections.q5.insight.titles.largestIncrease")}`}</div>
         ${hz_q5_smallTable(colsMain, topInc.map(rowToObj))}
       </div>
 
       <div>
-        <div class="hz-q4Subhead">${md`${_lang({
-          en: "Smallest change vs baseline (latest period)",
-          fr: "Plus faible variation vs référence (dernière période)"
-        })}`}</div>
+        <div class="hz-q4Subhead">${md`${hz_t("sections.q5.insight.titles.smallestChange")}`}</div>
         ${hz_q5_smallTable(colsMain, lowInc.map(rowToObj))}
       </div>
 
       <div>
-        <div class="hz-q4Subhead">${md`${_lang({
-          en: "Uncertainty hotspots (widest confidence intervals)",
-          fr: "Points chauds d’incertitude (IC les plus larges)"
-        })}`}</div>
+        <div class="hz-q4Subhead">${md`${hz_t("sections.q5.insight.titles.uncertaintyHotspots")}`}</div>
         ${hz_q5_smallTable(colsUnc, uncRows)}
-        ${uncRows.length ? null : html`<div class="hz-muted">${md`${hasUnc
-          ? _lang({
-              en: "Uncertainty bars are unavailable for the current selection (confidence intervals are missing or zero-width).",
-              fr: "Les barres d’incertitude ne sont pas disponibles pour la sélection actuelle (IC manquants ou de largeur nulle)."
-            })
-          : _lang({
-              en: "Uncertainty bars are unavailable for the current selection (no `value_sd` in the source).",
-              fr: "Les barres d’incertitude ne sont pas disponibles pour la sélection actuelle (pas de `value_sd` dans la source)."
-            })}`}</div>`}
+        ${uncRows.length ? html`` : html`<div class="hz-muted">${md`${hasUnc
+          ? hz_t("sections.q5.insight.uncertaintyMissing")
+          : hz_t("sections.q5.insight.uncertaintyNoSd")}`}</div>`}
       </div>
     </div>
   `
 }
-
 
 hz_q4Rows = {
   const nnum = (x) => {
@@ -4836,7 +4726,7 @@ hz_q4Rows = {
   const names = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
   const rows = names.map(name => ({ name, total1: nnum(mapL.get(name)), total2: nnum(mapR.get(name)) }))
   rows.sort((a,b) => (b.total2 - a.total2) || (b.total1 - a.total1))
-  return rows.slice(0, Math.max(1, Number(hz_q4_topN ?? 10) || 10))
+  return rows.slice(0, Math.max(1, Number(hz_q4_topNEff ?? 10) || 10))
 }
 
 // Q4 helper rows: normalize hazard-by-admin payload
@@ -5014,7 +4904,7 @@ hz_q4RowsChart = {
     }
   }
 
-  const n = Math.max(1, Number(hz_q4_topN ?? 10) || 10)
+  const n = Math.max(1, Number(hz_q4_topNEff ?? 10) || 10)
   const topAdmins = Array.from(rankMap.entries())
     .sort((a,b) => b[1] - a[1])
     .slice(0, n)
@@ -5056,7 +4946,7 @@ hz_q4Chart = {
   const fmt = (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })}%` : hz_formatNumber(x, { digits: 2 })
   const fmtDiff = (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })} pp` : hz_formatNumber(x, { digits: 2 })
 
-  const sharedColor = { type: "categorical", domain: hazLevels, scheme: "tableau10", legend: true }
+  const sharedColor = hz_hazardColorConfig(hazLevels, true)
   const legend = Plot.legend({ color: sharedColor, columns: Math.min(4, Math.max(1, hazLevels.length || 1)) })
 
   const markSide = (data, key, title) => html`
@@ -5145,11 +5035,6 @@ hz_q4Chart = {
       : html``}
   `
 }
-
-
-// Q4 map view alias
-hz_mapView = hz_mapPlot
-
 
 viewof hz_viewMode = {
   // Q1 only: Chart + Summary table
@@ -5305,14 +5190,16 @@ viewof hz_recordsPage = {
 
 ```{ojs}
 //| output: false
+// ============================================================
+// SHARED SHELL, HOSTS, GENERIC TABLE/CSV HELPERS, FINAL MOUNTING
+// ============================================================
 // Render main shell
 hz_dashMount = html`<div class="hz-mount"><div class="hz-loading">Loading dashboard…</div></div>`
 
 hz_chartHost  = html`<div class="hz-chartWrap"><div class="hz-loading">Loading chart…</div></div>`
-hz_q1_insightHost = html`<div class="hz-qOverview hz-qInsight"><div class="hz-loading">Loading insight…</div></div>`
-hz_q2_insightHost = html`<div class="hz-qOverview hz-qInsight"><div class="hz-loading">Loading insights…</div></div>`
+hz_q1_insightHost = html`<div class="hz-qOverview hz-qInsight"><div class="hz-loading"><span id="hz-q1-insight-loading">Loading insight…</span></div></div>`
+hz_q2_insightHost = html`<div class="hz-qOverview hz-qInsight"><div class="hz-loading"><span id="hz-q2-insight-loading">Loading insights…</span></div></div>`
 hz_tableActionsHost = html`<div class="hz-actions"></div>`
-
 
 hz_tableHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading table…</div></div>`
 hz_mapHost  = html`<div class="hz-mapWrap"><div class="hz-loading">Loading map…</div></div>`
@@ -5345,9 +5232,9 @@ hz_q1_settingsWrap = {
   const el = html`
   <div class="hz-qToolbar__right hz-qToolbar__right--grow">
     <div class="hz-q2SettingsGrid">
-      <div class="hz-miniSetting"><span>Show %</span>${viewof hz_relative}</div>
-      <div class="hz-miniSetting"><span>Show differences</span>${viewof hz_difference}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q1ChartHeight}</div>
+      <div class="hz-miniSetting"><span id="hz-q1-label-showpct">Show %</span>${viewof hz_relative}</div>
+      <div class="hz-miniSetting"><span id="hz-q1-label-showdiff">Show differences</span>${viewof hz_difference}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q1-label-height">Height</span>${viewof hz_q1ChartHeight}</div>
     </div>
   </div>
 `;
@@ -5357,7 +5244,7 @@ hz_q1_settingsWrap = {
 
 hz_q1_chartCard = html`<div class="hz-sideCard">
   <div class="hz-sideCard__header">
-    <div class="hz-sideCard__title">Chart</div>
+    <div id="hz-q1-chart-title" class="hz-sideCard__title">Chart</div>
   </div>
   <div class="hz-sideCard__body">${hz_chartHost}</div>
 </div>`
@@ -5365,7 +5252,7 @@ hz_q1_chartCard = html`<div class="hz-sideCard">
 hz_q1_tableCard = {
   const el = html`<div class="hz-sideCard">
   <div class="hz-sideCard__header">
-    <div class="hz-sideCard__title">Summary table</div>
+    <div id="hz-q1-table-title" class="hz-sideCard__title">Summary table</div>
     <div class="hz-sideCard__right">${hz_tableActionsHost}</div>
   </div>
   <div class="hz-sideCard__body">${hz_tableHost}</div>
@@ -5381,7 +5268,6 @@ hz_q1_resultsWrap = {
   return wrap
 }
 
-
 hz_q1_applyView = {
   const mode = (hz_viewMode || "chart")
   try { hz_q1_chartCard.style.display = (mode === "chart") ? "" : "none" } catch (_) {}
@@ -5390,7 +5276,7 @@ hz_q1_applyView = {
   return null
 }
 
-// Dashboard shell renders once; inner parts update via hz_q1_applyView + mount cells.
+
 hz_dashboardShell = hz_noJumpRoot(html`
   <div class="hz-card">
     <div class="hz-card__body">
@@ -5409,9 +5295,10 @@ hz_dashboardShell = hz_noJumpRoot(html`
 `);
 
 
-// --------------------------
+// ============================================================
+// SHARED MIRRORED QUESTION FILTERS (Q1–Q5)
+// ============================================================
 // Q2–Q4: independent controls
-// --------------------------
 
 
 viewof hz_q2_viewMode = Inputs.radio(["chart", "table"], {
@@ -5436,7 +5323,6 @@ viewof hz_q2_topN = hz_noJumpInput(Inputs.range([1, Math.max(1, hz_q2_selectedCo
 
 viewof hz_q2_chartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
 
-
 viewof hz_q3_relative = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q3_showCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q3_simplifyCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
@@ -5452,11 +5338,6 @@ viewof hz_q3_chartHeight = hz_noJumpInput(Inputs.range([360, 900], { label: "", 
 hz_q4_selectedGeographyCount = {
   const normName = (x) => String(x ?? "").trim()
 
-  const fromHaz = Array.isArray(hz_q4HazSetActive)
-    ? Array.from(new Set((hz_q4HazSetActive ?? []).map((d) => normName(d?.admin)).filter(Boolean)))
-    : []
-  if (fromHaz.length) return fromHaz.length
-
   const fromTotals = Array.from(new Set([
     ...(hz_q4DataL ?? []).map((d) => normName(d?.admin_name ?? d?.admin ?? d?.name)),
     ...(hz_q4DataR ?? []).map((d) => normName(d?.admin_name ?? d?.admin ?? d?.name))
@@ -5470,31 +5351,35 @@ hz_q4_selectedGeographyCount = {
   return (gf.admin0 ?? []).includes("all") || (gf.admin0 ?? []).length === 0 ? 1 : a0.length
 }
 
-viewof hz_q4_topN = hz_noJumpInput(Inputs.range([1, Math.max(1, hz_q4_selectedGeographyCount || 1)], {
+hz_q4_topNEff = {
+  const chosen = Math.max(1, Number(hz_q4_topN ?? 50) || 50)
+  const available = Math.max(1, Number(hz_q4_selectedGeographyCount ?? 1) || 1)
+  return Math.min(chosen, available)
+}
+
+viewof hz_q4_topN = hz_noJumpInput(Inputs.range([1, Math.max(1, Number(hz_q4_selectedGeographyCount ?? 1) || 1)], {
   label: "",
   step: 1,
-  value: Math.max(1, hz_q4_selectedGeographyCount || 1)
+  value: Math.max(1, Number(hz_q4_selectedGeographyCount ?? 1) || 1)
 }))
 
 viewof hz_q4_viewMode = hz_noJumpInput(Inputs.radio(["chart", "table"], {
   label: "",
   value: "chart",
-  format: (v) => ({ chart: _lang({ en: "Chart", fr: "Graphique" }), table: _lang({ en: "Summary table", fr: "Tableau" }) }[v] ?? v)
+  format: (v) => ({ chart: hz_t("general.view.chart"), table: hz_t("general.view.summaryTable") }[v] ?? v)
 }))
 hz_q4_viewMode.classList?.add?.("hz-viewToggle")
 
 viewof hz_q4_difference = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q4_chartHeight = hz_noJumpInput(Inputs.range([360, 900], { label: "", step: 10, value: 520 }))
 viewof hz_q4MapHeight = hz_noJumpInput(Inputs.range([260, 900], { label: "", step: 10, value: 420 }))
-viewof hz_q4_showCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
-viewof hz_q4_simplifyCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
+viewof hz_q4_showCompound = Inputs.toggle({ label: "", value: false })
+viewof hz_q4_simplifyCompound = Inputs.toggle({ label: "", value: false })
 viewof hz_q4_includeMapCaption = hz_noJumpInput(Inputs.toggle({ label: "", value: true }))
 
-// prevent scroll jumps when shared controls are used inside Q4 toolbar
 hz_noJumpInput(viewof hz_rel)
 hz_noJumpInput(viewof hz_topN)
 hz_noJumpInput(viewof hz_mapMetric)
-
 
 hz_safeEnhancedMultiSelect = (options, cfg = {}) => {
   const label = cfg.label ?? "Select"
@@ -5548,18 +5433,17 @@ hz_safeEnhancedMultiSelect = (options, cfg = {}) => {
   })
 }
 
-
 hz_q2_settingsWrap = html`
   <div class="hz-qToolbar__right hz-qToolbar__right--grow">
     <div class="hz-q2SettingsGrid">
-      <div class="hz-miniSetting"><span>Show %</span>${viewof hz_q2_relative}</div>
-      <div class="hz-miniSetting"><span>Show differences</span>${viewof hz_q2_difference}</div>
-      <div class="hz-miniSetting"><span>Show compound hazards</span>${viewof hz_q2_showCompound}</div>
-      <div class="hz-miniSetting"><span>Simplify compound hazards</span>${viewof hz_q2_simplifyCompound}</div>
-      <div class="hz-miniSetting"><span>Include no hazard</span>${viewof hz_q2_includeNoHazard}</div>
-      <div class="hz-miniSetting" data-hz="q2-includeDecreases" style="visibility:hidden; pointer-events:none;"><span>Include decreases</span>${viewof hz_q2_includeDecreases}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Number of commodities</span>${viewof hz_q2_topN}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q2_chartHeight}</div>
+      <div class="hz-miniSetting"><span id="hz-q2-label-showpct">Show %</span>${viewof hz_q2_relative}</div>
+      <div class="hz-miniSetting"><span id="hz-q2-label-showdiff">Show differences</span>${viewof hz_q2_difference}</div>
+      <div class="hz-miniSetting"><span id="hz-q2-label-showcompound">Show compound hazards</span>${viewof hz_q2_showCompound}</div>
+      <div class="hz-miniSetting"><span id="hz-q2-label-simplifycompound">Simplify compound hazards</span>${viewof hz_q2_simplifyCompound}</div>
+      <div class="hz-miniSetting"><span id="hz-q2-label-includenohazard">Include no hazard</span>${viewof hz_q2_includeNoHazard}</div>
+      <div class="hz-miniSetting" data-hz="q2-includeDecreases" style="visibility:hidden; pointer-events:none;"><span id="hz-q2-label-includedecreases">Include decreases</span>${viewof hz_q2_includeDecreases}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q2-label-topn">Number of commodities</span>${viewof hz_q2_topN}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q2-label-height">Height</span>${viewof hz_q2_chartHeight}</div>
     </div>
   </div>
 `
@@ -5567,7 +5451,6 @@ hz_q2_settingsWrap = html`
 
 hz_q2_chartHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading chart…</div></div>`
 hz_q2_tableHost = html`<div class="hz-tableWrap hz-tableHost"><div class="hz-loading">Loading table…</div></div>`
-// Q2 busy overlay controller (mirrors Q1 “Updating…” overlay).
 hz_q2_ui = {
   const ui = (globalThis.__ATLAS_HZ_UI_Q2__ ??= {})
   ui.chartWrap = hz_q2_chartHost
@@ -5582,14 +5465,13 @@ hz_q2_ui = {
   return null
 }
 
-
 hz_q2_chartCard = html`<div class="hz-sideCard">
-  <div class="hz-sideCard__header"><div class="hz-sideCard__title">Chart</div></div>
+  <div class="hz-sideCard__header"><div id="hz-q2-chart-title" class="hz-sideCard__title">Chart</div></div>
   <div class="hz-sideCard__body">${hz_q2_chartHost}</div>
 </div>`;
 
 hz_q2_tableCard = html`<div class="hz-sideCard">
-  <div class="hz-sideCard__header"><div class="hz-sideCard__title">Summary table</div></div>
+  <div class="hz-sideCard__header"><div id="hz-q2-table-title" class="hz-sideCard__title">Summary table</div></div>
   <div class="hz-sideCard__body">${hz_q2_tableHost}</div>
 </div>`;
 
@@ -5610,8 +5492,7 @@ hz_q2_applyView = {
   return null;
 };
 
-
-// Mount Q2 outputs into stable hosts (prevents scroll jumps on toggle changes)
+// Mount Q2 outputs into stable hosts
 hz_q2_mountChart = {
   hz_q2_chartHost.replaceChildren(hz_q2Chart)
   hz_bindHoverBlur(hz_q2_chartHost, hz_q2_dashboardCard)
@@ -5624,7 +5505,6 @@ hz_q2_mountTable = {
   return null
 }
 
-
 hz_q2_mountInsight = {
   hz_q2_insightHost.replaceChildren(hz_q2InsightView)
   return null
@@ -5633,7 +5513,7 @@ hz_q2_mountInsight = {
 hz_q2_dashboardCard = hz_noJumpRoot(html`
 <div class="hz-card">
   <div class="hz-card__body">
-    <div class="hz-qOverview">${md`${q2DetailText}`}</div>
+    <div id="hz-q2-overview" class="hz-qOverview"></div>
 
     ${hz_q2_filtersHost}
 
@@ -5655,9 +5535,8 @@ hz_q2_dashboardCard = hz_noJumpRoot(html`
 `);
 
 
-// --------------------------
-// Synced per-question filter copies (bound to shared controls)
-// --------------------------
+// Synced per-question filter copies
+
 hz_q5_sharedControlsSummary = {
   const geo = hz_geoLabel ?? ""
   const com = hz_commodityLabel ?? ""
@@ -5667,19 +5546,167 @@ hz_q5_sharedControlsSummary = {
 hz_makeBoundSelect = (masterView, options, cfg = {}) =>
   Inputs.bind(Inputs.select(options ?? [], cfg), masterView)
 
-hz_makeBoundCommodityMulti = (masterView, options, cfg = {}) => {
-  const local = hz_safeEnhancedMultiSelect(
-    (options ?? []).map(v => ({ value: v, label: hz_commodityLabelOf(v) })),
-    {
-      label: cfg.label ?? "Commodities",
-      value: Array.isArray(masterView?.value) ? masterView.value : [],
-      disabled: !!cfg.disabled,
-      placeholder: cfg.placeholder ?? "Search commodities…",
-      maxHeight: cfg.maxHeight ?? 200,
-      width: cfg.width ?? "100%"
+hz_mountNodeOnce = (host, node) => {
+  if (!host.__hz_mounted_once) {
+    try { host.replaceChildren(node) } catch (_) {
+      try { host.innerHTML = "" } catch (_) {}
+      try { host.append(node) } catch (_) {}
     }
-  )
-  return Inputs.bind(local, masterView)
+    host.__hz_mounted_once = true
+    host.__hz_mounted_node = node
+  } else if (host.__hz_mounted_node !== node && !host.contains(node)) {
+    try { host.replaceChildren(node) } catch (_) {}
+    host.__hz_mounted_node = node
+  }
+  return null
+}
+
+hz_keyAdmin0 = (d) => String(d?.iso3c ?? d?.iso3 ?? d?.iso ?? d?.admin0_name ?? d?.value ?? d ?? "").trim()
+hz_keyAdmin1 = (d) => `${String(d?.iso3 ?? d?.iso3c ?? d?.iso ?? "")}|${String(d?.admin1_value ?? d?.admin1_name ?? "__FULL__")}`
+hz_keyAdmin2 = (d) => `${String(d?.iso3 ?? d?.iso3c ?? d?.iso ?? "")}|${String(d?.admin1_name ?? d?.admin1_value ?? "")}|${String(d?.admin2_value ?? d?.admin2_name ?? "")}`
+hz_fmtAdmin0 = (d) => {
+  try { return _lang(d?.translation) } catch (_) {}
+  return String(d?.admin0_name ?? d?.name ?? d?.value ?? d ?? "")
+}
+hz_fmtAdmin1 = (d) => String(d?.admin1_label ?? `${d?.admin1_name || "Full Country"} (${d?.iso3 ?? d?.iso3c ?? d?.iso ?? ""})`)
+hz_fmtAdmin2 = (d) => String(d?.admin2_label ?? `${d?.admin2_name ?? ""} (${d?.iso3 ?? d?.iso3c ?? d?.iso ?? ""})`)
+hz_fieldNode = (node) => {
+  const el = html`<div class="hz-field"></div>`
+  try { el.append(node) } catch (_) {}
+  return el
+}
+hz_rowNode = (cls, nodes) => {
+  const row = html`<div class="hz-row ${cls}"></div>`
+  ;(nodes ?? []).forEach((n) => { try { row.append(hz_fieldNode(n)) } catch (_) {} })
+  return row
+}
+
+hz_makeStableMirrorMulti = (masterView, {
+  label = "Select",
+  format = (d) => String(d ?? ""),
+  keyOf = (d) => String(d ?? ""),
+  maxSelections = null,
+  requireAtLeastOne = false,
+  enableFullCountryToggle = false,
+  fullCountryPrefix = "Full Country",
+  placeholder = "Search…",
+  width = "100%",
+  maxHeight = 200
+} = {}) => {
+  const root = html`<div class="hz-stableMirror"></div>`
+  let optionsState = []
+  let inputNode = null
+  let selectEl = null
+  let suppressUp = false
+  let lastOptionsSig = ""
+  let lastValueSig = ""
+  let lastDisabled = null
+
+  const normArr = (xs) => Array.isArray(xs) ? xs : (xs == null ? [] : [xs])
+  const keyStr = (d) => String(keyOf(d) ?? "").trim()
+  const keysFrom = (xs) => new Set(normArr(xs).map(keyStr).filter(Boolean))
+  const optionsSigOf = (opts) => JSON.stringify((opts ?? []).map((d) => keyStr(d)))
+  const valueSigOf = (xs) => JSON.stringify(Array.from(keysFrom(xs)).sort())
+
+  const getValue = () => {
+    if (!selectEl) return []
+    const out = []
+    Array.from(selectEl.options).forEach((opt, i) => {
+      if (opt.selected && optionsState[i] != null) out.push(optionsState[i])
+    })
+    return out
+  }
+
+  const applyValue = (xs) => {
+    if (!selectEl) return
+    const keys = keysFrom(xs)
+    suppressUp = true
+    Array.from(selectEl.options).forEach((opt, i) => {
+      opt.selected = keys.has(keyStr(optionsState[i]))
+    })
+    try { selectEl.dispatchEvent(new Event("input", { bubbles: true })) } catch (_) {}
+    requestAnimationFrame(() => { suppressUp = false })
+    lastValueSig = valueSigOf(xs)
+  }
+
+  const render = (disabled = false) => {
+    const rows = (optionsState ?? []).map((d) => ({
+      value: keyStr(d),
+      label: String(format(d))
+    }))
+    const view = Inputs.select(rows.map((r) => r.value), {
+      label,
+      multiple: true,
+      value: Array.from(keysFrom(masterView?.value)),
+      disabled: !!disabled,
+      format: (v) => rows.find((r) => r.value === String(v))?.label ?? String(v)
+    })
+    enhancedMultiSelect(view, {
+      maxSelections,
+      requireAtLeastOne,
+      enableFullCountryToggle,
+      fullCountryPrefix,
+      placeholder,
+      width,
+      maxHeight
+    })
+    const select = view.querySelector?.("select") || view
+    select.addEventListener("input", () => {
+      if (suppressUp) return
+      const next = getValue()
+      try { masterView.value = next } catch (_) {}
+      try { masterView.dispatchEvent(new Event("input", { bubbles: true })) } catch (_) {}
+      try { root.dispatchEvent(new Event("input", { bubbles: true })) } catch (_) {}
+      lastValueSig = valueSigOf(next)
+    })
+    try { root.replaceChildren(view) } catch (_) {
+      try { root.innerHTML = "" } catch (_) {}
+      try { root.append(view) } catch (_) {}
+    }
+    inputNode = view
+    selectEl = select
+    lastDisabled = !!disabled
+    applyValue(masterView?.value)
+  }
+
+  root.sync = (opts, xs = masterView?.value, { disabled = false } = {}) => {
+    const optSig = optionsSigOf(opts)
+    const valSig = valueSigOf(xs)
+    optionsState = Array.isArray(opts) ? opts : []
+    const needRender = !inputNode || optSig != lastOptionsSig || !!disabled !== lastDisabled
+    lastOptionsSig = optSig
+    if (needRender) {
+      render(disabled)
+    } else if (valSig != lastValueSig) {
+      applyValue(xs)
+    }
+  }
+
+  Object.defineProperty(root, "value", {
+    get() { return getValue() },
+    set(v) { applyValue(v) }
+  })
+
+  return root
+}
+
+hz_makeFiltersPanel = ({ hintNode, rows, open = false, onToggle = null } = {}) => {
+  const el = html`
+    <details class="hz-furl hz-furl--filters">
+      <summary><span>Filters</span></summary>
+      <div class="hz-furl__body">
+        <div class="hz-controlsCompact hz-controlsPanel">
+          <div class="hz-controlsRows"></div>
+        </div>
+      </div>
+    </details>
+  `
+  try { el.querySelector("summary").append(hintNode) } catch (_) {}
+  const rowsWrap = el.querySelector(".hz-controlsRows")
+  ;(rows ?? []).forEach((r) => { try { rowsWrap.append(r) } catch (_) {} })
+  el.open = !!open
+  if (typeof onToggle === "function") el.addEventListener("toggle", () => onToggle(el.open))
+  return hz_holdViewportOnAsyncInput(el)
 }
 
 mutable hz_q1SyncOpen = false
@@ -5694,267 +5721,308 @@ hz_q3_filtersHost = html`<div></div>`
 hz_q4_filtersHost = html`<div></div>`
 hz_q5_filtersHost = html`<div></div>`
 
-// Q1 mirrors
+// stable shared mirrors
 viewof hz_q1sync_commodityGroup = hz_makeBoundSelect(viewof hz_commodityGroup, hz_commodityGroupOptions ?? [], {
   label: "Group",
-  value: hz_commodityGroup,
   format: hz_commodityGroupLabel
 })
-viewof hz_q1sync_commodities = hz_makeBoundCommodityMulti(viewof hz_commodities, hz_commodityOptions ?? [], {
+hz_q1sync_commoditiesCtl = hz_makeStableMirrorMulti(viewof hz_commodities, {
   label: "Commodities",
-  disabled: (hz_commodityGroup === "all")
+  format: hz_commodityLabelOf,
+  keyOf: (d) => String(d ?? ""),
+  placeholder: "Search commodities…",
+  width: "100%",
+  maxHeight: 200
 })
-viewof hz_q1sync_admin0 = Inputs.bind(renderA0Multi({ key: "sync-q1", maxSelections: 8 }), viewof hz_admin0)
-viewof hz_q1sync_admin1 = Inputs.bind(renderA1Multi({ key: "sync-q1", a0: viewof hz_q1sync_admin0, maxSelections: 500 }), viewof hz_admin1)
-viewof hz_q1sync_admin2 = Inputs.bind(renderA2Multi({ key: "sync-q1", a0: viewof hz_q1sync_admin0, a1: viewof hz_q1sync_admin1, maxSelections: 20 }), viewof hz_admin2)
-viewof hz_q1sync_scen1 = hz_makeBoundSelect(viewof hz_scen1, hz_scenXTime ?? [], { label: "Scenario A:", value: hz_scen1, format: hz_formatScenXTime })
-viewof hz_q1sync_scen2 = hz_makeBoundSelect(viewof hz_scen2, hz_scenXTime ?? [], { label: "Scenario B:", value: hz_scen2, format: hz_formatScenXTime })
-hz_q1sync_filtersPanel = {
-  const el = html`
-    <details class="hz-furl hz-furl--filters">
-      <summary>
-        <span>Filters</span>
-        <span class="hz-furl__hint">${hz_sharedControlsSummary}</span>
-      </summary>
-      <div class="hz-furl__body">
-        <div class="hz-controlsCompact hz-controlsPanel">
-          <div class="hz-controlsRows">
-            <div class="hz-row hz-row--2 hz-row--grow">
-              <div class="hz-field">${viewof hz_q1sync_commodityGroup}</div>
-              <div class="hz-field">${viewof hz_q1sync_commodities}</div>
-            </div>
-            <div class="hz-row hz-row--3">
-              <div class="hz-field">${viewof hz_q1sync_admin0}</div>
-              <div class="hz-field">${viewof hz_q1sync_admin1}</div>
-              <div class="hz-field">${viewof hz_q1sync_admin2}</div>
-            </div>
-            <div class="hz-row hz-row--2">
-              <div class="hz-field">${viewof hz_q1sync_scen1}</div>
-              <div class="hz-field">${viewof hz_q1sync_scen2}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </details>
-  `
-  el.open = mutable hz_q1SyncOpen
-  el.addEventListener("toggle", () => (mutable hz_q1SyncOpen = el.open))
-  return el
-}
-hz_q1_mountFilters = {
-  hz_q1_filtersHost.replaceChildren(hz_q1sync_filtersPanel)
-  return null
-}
+viewof hz_q1sync_commodities = hz_q1sync_commoditiesCtl
+hz_q1sync_admin0Ctl = hz_makeStableMirrorMulti(viewof hz_admin0, {
+  label: (() => { try { return _lang(general_translations.country) } catch (_) { return "Country" } })(),
+  format: hz_fmtAdmin0,
+  keyOf: hz_keyAdmin0,
+  maxSelections: 8
+})
+viewof hz_q1sync_admin0 = hz_q1sync_admin0Ctl
+hz_q1sync_admin1Ctl = hz_makeStableMirrorMulti(viewof hz_admin1, {
+  label: (() => { try { return _lang(general_translations.region) } catch (_) { return "Region" } })(),
+  format: hz_fmtAdmin1,
+  keyOf: hz_keyAdmin1,
+  maxSelections: 500,
+  enableFullCountryToggle: true,
+  fullCountryPrefix: "Full Country"
+})
+viewof hz_q1sync_admin1 = hz_q1sync_admin1Ctl
+hz_q1sync_admin2Ctl = hz_makeStableMirrorMulti(viewof hz_admin2, {
+  label: (() => { try { return _lang(general_translations.district) } catch (_) { return "District" } })(),
+  format: hz_fmtAdmin2,
+  keyOf: hz_keyAdmin2,
+  maxSelections: 20
+})
+viewof hz_q1sync_admin2 = hz_q1sync_admin2Ctl
+viewof hz_q1sync_scen1 = hz_makeBoundSelect(viewof hz_scen1, hz_scenXTime ?? [], { label: "Scenario A:", format: hz_formatScenXTime })
+viewof hz_q1sync_scen2 = hz_makeBoundSelect(viewof hz_scen2, hz_scenXTime ?? [], { label: "Scenario B:", format: hz_formatScenXTime })
 
-// Q2 mirrors
 viewof hz_q2sync_commodityGroup = hz_makeBoundSelect(viewof hz_commodityGroup, hz_commodityGroupOptions ?? [], {
   label: "Group",
-  value: hz_commodityGroup,
   format: hz_commodityGroupLabel
 })
-viewof hz_q2sync_commodities = hz_makeBoundCommodityMulti(viewof hz_commodities, hz_commodityOptions ?? [], {
+hz_q2sync_commoditiesCtl = hz_makeStableMirrorMulti(viewof hz_commodities, {
   label: "Commodities",
-  disabled: (hz_commodityGroup === "all")
+  format: hz_commodityLabelOf,
+  keyOf: (d) => String(d ?? ""),
+  placeholder: "Search commodities…",
+  width: "100%",
+  maxHeight: 200
 })
-viewof hz_q2sync_admin0 = Inputs.bind(renderA0Multi({ key: "sync-q2", maxSelections: 8 }), viewof hz_admin0)
-viewof hz_q2sync_admin1 = Inputs.bind(renderA1Multi({ key: "sync-q2", a0: viewof hz_q2sync_admin0, maxSelections: 500 }), viewof hz_admin1)
-viewof hz_q2sync_admin2 = Inputs.bind(renderA2Multi({ key: "sync-q2", a0: viewof hz_q2sync_admin0, a1: viewof hz_q2sync_admin1, maxSelections: 20 }), viewof hz_admin2)
-viewof hz_q2sync_scen1 = hz_makeBoundSelect(viewof hz_scen1, hz_scenXTime ?? [], { label: "Scenario A:", value: hz_scen1, format: hz_formatScenXTime })
-viewof hz_q2sync_scen2 = hz_makeBoundSelect(viewof hz_scen2, hz_scenXTime ?? [], { label: "Scenario B:", value: hz_scen2, format: hz_formatScenXTime })
-hz_q2sync_filtersPanel = {
-  const el = html`
-    <details class="hz-furl hz-furl--filters">
-      <summary>
-        <span>Filters</span>
-        <span class="hz-furl__hint">${hz_sharedControlsSummary}</span>
-      </summary>
-      <div class="hz-furl__body">
-        <div class="hz-controlsCompact hz-controlsPanel">
-          <div class="hz-controlsRows">
-            <div class="hz-row hz-row--2 hz-row--grow">
-              <div class="hz-field">${viewof hz_q2sync_commodityGroup}</div>
-              <div class="hz-field">${viewof hz_q2sync_commodities}</div>
-            </div>
-            <div class="hz-row hz-row--3">
-              <div class="hz-field">${viewof hz_q2sync_admin0}</div>
-              <div class="hz-field">${viewof hz_q2sync_admin1}</div>
-              <div class="hz-field">${viewof hz_q2sync_admin2}</div>
-            </div>
-            <div class="hz-row hz-row--2">
-              <div class="hz-field">${viewof hz_q2sync_scen1}</div>
-              <div class="hz-field">${viewof hz_q2sync_scen2}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </details>
-  `
-  el.open = mutable hz_q2SyncOpen
-  el.addEventListener("toggle", () => (mutable hz_q2SyncOpen = el.open))
-  return el
-}
-hz_q2_mountFilters = {
-  hz_q2_filtersHost.replaceChildren(hz_q2sync_filtersPanel)
-  return null
-}
+viewof hz_q2sync_commodities = hz_q2sync_commoditiesCtl
+hz_q2sync_admin0Ctl = hz_makeStableMirrorMulti(viewof hz_admin0, {
+  label: (() => { try { return _lang(general_translations.country) } catch (_) { return "Country" } })(),
+  format: hz_fmtAdmin0,
+  keyOf: hz_keyAdmin0,
+  maxSelections: 8
+})
+viewof hz_q2sync_admin0 = hz_q2sync_admin0Ctl
+hz_q2sync_admin1Ctl = hz_makeStableMirrorMulti(viewof hz_admin1, {
+  label: (() => { try { return _lang(general_translations.region) } catch (_) { return "Region" } })(),
+  format: hz_fmtAdmin1,
+  keyOf: hz_keyAdmin1,
+  maxSelections: 500,
+  enableFullCountryToggle: true,
+  fullCountryPrefix: "Full Country"
+})
+viewof hz_q2sync_admin1 = hz_q2sync_admin1Ctl
+hz_q2sync_admin2Ctl = hz_makeStableMirrorMulti(viewof hz_admin2, {
+  label: (() => { try { return _lang(general_translations.district) } catch (_) { return "District" } })(),
+  format: hz_fmtAdmin2,
+  keyOf: hz_keyAdmin2,
+  maxSelections: 20
+})
+viewof hz_q2sync_admin2 = hz_q2sync_admin2Ctl
+viewof hz_q2sync_scen1 = hz_makeBoundSelect(viewof hz_scen1, hz_scenXTime ?? [], { label: "Scenario A:", format: hz_formatScenXTime })
+viewof hz_q2sync_scen2 = hz_makeBoundSelect(viewof hz_scen2, hz_scenXTime ?? [], { label: "Scenario B:", format: hz_formatScenXTime })
 
-// Q3 mirrors
 viewof hz_q3sync_commodityGroup = hz_makeBoundSelect(viewof hz_commodityGroup, hz_commodityGroupOptions ?? [], {
   label: "Group",
-  value: hz_commodityGroup,
   format: hz_commodityGroupLabel
 })
-viewof hz_q3sync_commodities = hz_makeBoundCommodityMulti(viewof hz_commodities, hz_commodityOptions ?? [], {
+hz_q3sync_commoditiesCtl = hz_makeStableMirrorMulti(viewof hz_commodities, {
   label: "Commodities",
-  disabled: (hz_commodityGroup === "all")
+  format: hz_commodityLabelOf,
+  keyOf: (d) => String(d ?? ""),
+  placeholder: "Search commodities…",
+  width: "100%",
+  maxHeight: 200
 })
-viewof hz_q3sync_admin0 = Inputs.bind(renderA0Multi({ key: "sync-q3", maxSelections: 8 }), viewof hz_admin0)
-viewof hz_q3sync_admin1 = Inputs.bind(renderA1Multi({ key: "sync-q3", a0: viewof hz_q3sync_admin0, maxSelections: 500 }), viewof hz_admin1)
-viewof hz_q3sync_admin2 = Inputs.bind(renderA2Multi({ key: "sync-q3", a0: viewof hz_q3sync_admin0, a1: viewof hz_q3sync_admin1, maxSelections: 20 }), viewof hz_admin2)
-viewof hz_q3sync_scen1 = hz_makeBoundSelect(viewof hz_scen1, hz_scenXTime ?? [], { label: "Scenario A:", value: hz_scen1, format: hz_formatScenXTime })
-viewof hz_q3sync_scen2 = hz_makeBoundSelect(viewof hz_scen2, hz_scenXTime ?? [], { label: "Scenario B:", value: hz_scen2, format: hz_formatScenXTime })
-hz_q3sync_filtersPanel = {
-  const el = html`
-    <details class="hz-furl hz-furl--filters">
-      <summary>
-        <span>Filters</span>
-        <span class="hz-furl__hint">${hz_sharedControlsSummary}</span>
-      </summary>
-      <div class="hz-furl__body">
-        <div class="hz-controlsCompact hz-controlsPanel">
-          <div class="hz-controlsRows">
-            <div class="hz-row hz-row--2 hz-row--grow">
-              <div class="hz-field">${viewof hz_q3sync_commodityGroup}</div>
-              <div class="hz-field">${viewof hz_q3sync_commodities}</div>
-            </div>
-            <div class="hz-row hz-row--3">
-              <div class="hz-field">${viewof hz_q3sync_admin0}</div>
-              <div class="hz-field">${viewof hz_q3sync_admin1}</div>
-              <div class="hz-field">${viewof hz_q3sync_admin2}</div>
-            </div>
-            <div class="hz-row hz-row--2">
-              <div class="hz-field">${viewof hz_q3sync_scen1}</div>
-              <div class="hz-field">${viewof hz_q3sync_scen2}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </details>
-  `
-  el.open = mutable hz_q3SyncOpen
-  el.addEventListener("toggle", () => (mutable hz_q3SyncOpen = el.open))
-  return el
-}
-hz_q3_mountFilters = {
-  hz_q3_filtersHost.replaceChildren(hz_q3sync_filtersPanel)
-  return null
-}
+viewof hz_q3sync_commodities = hz_q3sync_commoditiesCtl
+hz_q3sync_admin0Ctl = hz_makeStableMirrorMulti(viewof hz_admin0, {
+  label: (() => { try { return _lang(general_translations.country) } catch (_) { return "Country" } })(),
+  format: hz_fmtAdmin0,
+  keyOf: hz_keyAdmin0,
+  maxSelections: 8
+})
+viewof hz_q3sync_admin0 = hz_q3sync_admin0Ctl
+hz_q3sync_admin1Ctl = hz_makeStableMirrorMulti(viewof hz_admin1, {
+  label: (() => { try { return _lang(general_translations.region) } catch (_) { return "Region" } })(),
+  format: hz_fmtAdmin1,
+  keyOf: hz_keyAdmin1,
+  maxSelections: 500,
+  enableFullCountryToggle: true,
+  fullCountryPrefix: "Full Country"
+})
+viewof hz_q3sync_admin1 = hz_q3sync_admin1Ctl
+hz_q3sync_admin2Ctl = hz_makeStableMirrorMulti(viewof hz_admin2, {
+  label: (() => { try { return _lang(general_translations.district) } catch (_) { return "District" } })(),
+  format: hz_fmtAdmin2,
+  keyOf: hz_keyAdmin2,
+  maxSelections: 20
+})
+viewof hz_q3sync_admin2 = hz_q3sync_admin2Ctl
+viewof hz_q3sync_scen1 = hz_makeBoundSelect(viewof hz_scen1, hz_scenXTime ?? [], { label: "Scenario A:", format: hz_formatScenXTime })
+viewof hz_q3sync_scen2 = hz_makeBoundSelect(viewof hz_scen2, hz_scenXTime ?? [], { label: "Scenario B:", format: hz_formatScenXTime })
 
-// Q4 mirrors
 viewof hz_q4sync_commodityGroup = hz_makeBoundSelect(viewof hz_commodityGroup, hz_commodityGroupOptions ?? [], {
   label: "Group",
-  value: hz_commodityGroup,
   format: hz_commodityGroupLabel
 })
-viewof hz_q4sync_commodities = hz_makeBoundCommodityMulti(viewof hz_commodities, hz_commodityOptions ?? [], {
+hz_q4sync_commoditiesCtl = hz_makeStableMirrorMulti(viewof hz_commodities, {
   label: "Commodities",
-  disabled: (hz_commodityGroup === "all")
+  format: hz_commodityLabelOf,
+  keyOf: (d) => String(d ?? ""),
+  placeholder: "Search commodities…",
+  width: "100%",
+  maxHeight: 200
 })
-viewof hz_q4sync_admin0 = Inputs.bind(renderA0Multi({ key: "sync-q4", maxSelections: 8 }), viewof hz_admin0)
-viewof hz_q4sync_admin1 = Inputs.bind(renderA1Multi({ key: "sync-q4", a0: viewof hz_q4sync_admin0, maxSelections: 500 }), viewof hz_admin1)
-viewof hz_q4sync_admin2 = Inputs.bind(renderA2Multi({ key: "sync-q4", a0: viewof hz_q4sync_admin0, a1: viewof hz_q4sync_admin1, maxSelections: 20 }), viewof hz_admin2)
-viewof hz_q4sync_scen1 = hz_makeBoundSelect(viewof hz_scen1, hz_scenXTime ?? [], { label: "Scenario A:", value: hz_scen1, format: hz_formatScenXTime })
-viewof hz_q4sync_scen2 = hz_makeBoundSelect(viewof hz_scen2, hz_scenXTime ?? [], { label: "Scenario B:", value: hz_scen2, format: hz_formatScenXTime })
-hz_q4sync_filtersPanel = {
-  const el = html`
-    <details class="hz-furl hz-furl--filters">
-      <summary>
-        <span>Filters</span>
-        <span class="hz-furl__hint">${hz_sharedControlsSummary}</span>
-      </summary>
-      <div class="hz-furl__body">
-        <div class="hz-controlsCompact hz-controlsPanel">
-          <div class="hz-controlsRows">
-            <div class="hz-row hz-row--2 hz-row--grow">
-              <div class="hz-field">${viewof hz_q4sync_commodityGroup}</div>
-              <div class="hz-field">${viewof hz_q4sync_commodities}</div>
-            </div>
-            <div class="hz-row hz-row--3">
-              <div class="hz-field">${viewof hz_q4sync_admin0}</div>
-              <div class="hz-field">${viewof hz_q4sync_admin1}</div>
-              <div class="hz-field">${viewof hz_q4sync_admin2}</div>
-            </div>
-            <div class="hz-row hz-row--2">
-              <div class="hz-field">${viewof hz_q4sync_scen1}</div>
-              <div class="hz-field">${viewof hz_q4sync_scen2}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </details>
-  `
-  el.open = mutable hz_q4SyncOpen
-  el.addEventListener("toggle", () => (mutable hz_q4SyncOpen = el.open))
-  return el
-}
-hz_q4_mountFilters = {
-  hz_q4_filtersHost.replaceChildren(hz_q4sync_filtersPanel)
-  return null
-}
+viewof hz_q4sync_commodities = hz_q4sync_commoditiesCtl
+hz_q4sync_admin0Ctl = hz_makeStableMirrorMulti(viewof hz_admin0, {
+  label: (() => { try { return _lang(general_translations.country) } catch (_) { return "Country" } })(),
+  format: hz_fmtAdmin0,
+  keyOf: hz_keyAdmin0,
+  maxSelections: 8
+})
+viewof hz_q4sync_admin0 = hz_q4sync_admin0Ctl
+hz_q4sync_admin1Ctl = hz_makeStableMirrorMulti(viewof hz_admin1, {
+  label: (() => { try { return _lang(general_translations.region) } catch (_) { return "Region" } })(),
+  format: hz_fmtAdmin1,
+  keyOf: hz_keyAdmin1,
+  maxSelections: 500,
+  enableFullCountryToggle: true,
+  fullCountryPrefix: "Full Country"
+})
+viewof hz_q4sync_admin1 = hz_q4sync_admin1Ctl
+hz_q4sync_admin2Ctl = hz_makeStableMirrorMulti(viewof hz_admin2, {
+  label: (() => { try { return _lang(general_translations.district) } catch (_) { return "District" } })(),
+  format: hz_fmtAdmin2,
+  keyOf: hz_keyAdmin2,
+  maxSelections: 20
+})
+viewof hz_q4sync_admin2 = hz_q4sync_admin2Ctl
+viewof hz_q4sync_scen1 = hz_makeBoundSelect(viewof hz_scen1, hz_scenXTime ?? [], { label: "Scenario A:", format: hz_formatScenXTime })
+viewof hz_q4sync_scen2 = hz_makeBoundSelect(viewof hz_scen2, hz_scenXTime ?? [], { label: "Scenario B:", format: hz_formatScenXTime })
 
-// Q5 mirrors (geography + commodities only; scenarios stay independent in Q5 settings)
 viewof hz_q5sync_commodityGroup = hz_makeBoundSelect(viewof hz_commodityGroup, hz_commodityGroupOptions ?? [], {
   label: "Group",
-  value: hz_commodityGroup,
   format: hz_commodityGroupLabel
 })
-viewof hz_q5sync_commodities = hz_makeBoundCommodityMulti(viewof hz_commodities, hz_commodityOptions ?? [], {
+hz_q5sync_commoditiesCtl = hz_makeStableMirrorMulti(viewof hz_commodities, {
   label: "Commodities",
-  disabled: (hz_commodityGroup === "all")
+  format: hz_commodityLabelOf,
+  keyOf: (d) => String(d ?? ""),
+  placeholder: "Search commodities…",
+  width: "100%",
+  maxHeight: 200
 })
-viewof hz_q5sync_admin0 = Inputs.bind(renderA0Multi({ key: "sync-q5", maxSelections: 8 }), viewof hz_admin0)
-viewof hz_q5sync_admin1 = Inputs.bind(renderA1Multi({ key: "sync-q5", a0: viewof hz_q5sync_admin0, maxSelections: 500 }), viewof hz_admin1)
-viewof hz_q5sync_admin2 = Inputs.bind(renderA2Multi({ key: "sync-q5", a0: viewof hz_q5sync_admin0, a1: viewof hz_q5sync_admin1, maxSelections: 20 }), viewof hz_admin2)
-hz_q5sync_filtersPanel = {
-  const el = html`
-    <details class="hz-furl hz-furl--filters">
-      <summary>
-        <span>Filters</span>
-        <span class="hz-furl__hint">${hz_q5_sharedControlsSummary}</span>
-      </summary>
-      <div class="hz-furl__body">
-        <div class="hz-controlsCompact hz-controlsPanel">
-          <div class="hz-controlsRows">
-            <div class="hz-row hz-row--2 hz-row--grow">
-              <div class="hz-field">${viewof hz_q5sync_commodityGroup}</div>
-              <div class="hz-field">${viewof hz_q5sync_commodities}</div>
-            </div>
-            <div class="hz-row hz-row--3">
-              <div class="hz-field">${viewof hz_q5sync_admin0}</div>
-              <div class="hz-field">${viewof hz_q5sync_admin1}</div>
-              <div class="hz-field">${viewof hz_q5sync_admin2}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </details>
-  `
-  el.open = mutable hz_q5SyncOpen
-  el.addEventListener("toggle", () => (mutable hz_q5SyncOpen = el.open))
-  return el
+viewof hz_q5sync_commodities = hz_q5sync_commoditiesCtl
+hz_q5sync_admin0Ctl = hz_makeStableMirrorMulti(viewof hz_admin0, {
+  label: (() => { try { return _lang(general_translations.country) } catch (_) { return "Country" } })(),
+  format: hz_fmtAdmin0,
+  keyOf: hz_keyAdmin0,
+  maxSelections: 8
+})
+viewof hz_q5sync_admin0 = hz_q5sync_admin0Ctl
+hz_q5sync_admin1Ctl = hz_makeStableMirrorMulti(viewof hz_admin1, {
+  label: (() => { try { return _lang(general_translations.region) } catch (_) { return "Region" } })(),
+  format: hz_fmtAdmin1,
+  keyOf: hz_keyAdmin1,
+  maxSelections: 500,
+  enableFullCountryToggle: true,
+  fullCountryPrefix: "Full Country"
+})
+viewof hz_q5sync_admin1 = hz_q5sync_admin1Ctl
+hz_q5sync_admin2Ctl = hz_makeStableMirrorMulti(viewof hz_admin2, {
+  label: (() => { try { return _lang(general_translations.district) } catch (_) { return "District" } })(),
+  format: hz_fmtAdmin2,
+  keyOf: hz_keyAdmin2,
+  maxSelections: 20
+})
+viewof hz_q5sync_admin2 = hz_q5sync_admin2Ctl
+
+hz_q1sync_hint = html`<span class="hz-furl__hint"></span>`
+hz_q2sync_hint = html`<span class="hz-furl__hint"></span>`
+hz_q3sync_hint = html`<span class="hz-furl__hint"></span>`
+hz_q4sync_hint = html`<span class="hz-furl__hint"></span>`
+hz_q5sync_hint = html`<span class="hz-furl__hint"></span>`
+
+hz_q1sync_filtersPanel = hz_makeFiltersPanel({
+  hintNode: hz_q1sync_hint,
+  rows: [
+    hz_rowNode("hz-row--2 hz-row--grow", [viewof hz_q1sync_commodityGroup, hz_q1sync_commoditiesCtl]),
+    hz_rowNode("hz-row--3", [hz_q1sync_admin0Ctl, hz_q1sync_admin1Ctl, hz_q1sync_admin2Ctl]),
+    hz_rowNode("hz-row--2", [viewof hz_q1sync_scen1, viewof hz_q1sync_scen2])
+  ],
+  open: mutable hz_q1SyncOpen,
+  onToggle: (v) => (mutable hz_q1SyncOpen = v)
+})
+hz_q2sync_filtersPanel = hz_makeFiltersPanel({
+  hintNode: hz_q2sync_hint,
+  rows: [
+    hz_rowNode("hz-row--2 hz-row--grow", [viewof hz_q2sync_commodityGroup, hz_q2sync_commoditiesCtl]),
+    hz_rowNode("hz-row--3", [hz_q2sync_admin0Ctl, hz_q2sync_admin1Ctl, hz_q2sync_admin2Ctl]),
+    hz_rowNode("hz-row--2", [viewof hz_q2sync_scen1, viewof hz_q2sync_scen2])
+  ],
+  open: mutable hz_q2SyncOpen,
+  onToggle: (v) => (mutable hz_q2SyncOpen = v)
+})
+hz_q3sync_filtersPanel = hz_makeFiltersPanel({
+  hintNode: hz_q3sync_hint,
+  rows: [
+    hz_rowNode("hz-row--2 hz-row--grow", [viewof hz_q3sync_commodityGroup, hz_q3sync_commoditiesCtl]),
+    hz_rowNode("hz-row--3", [hz_q3sync_admin0Ctl, hz_q3sync_admin1Ctl, hz_q3sync_admin2Ctl]),
+    hz_rowNode("hz-row--2", [viewof hz_q3sync_scen1, viewof hz_q3sync_scen2])
+  ],
+  open: mutable hz_q3SyncOpen,
+  onToggle: (v) => (mutable hz_q3SyncOpen = v)
+})
+hz_q4sync_filtersPanel = hz_makeFiltersPanel({
+  hintNode: hz_q4sync_hint,
+  rows: [
+    hz_rowNode("hz-row--2 hz-row--grow", [viewof hz_q4sync_commodityGroup, hz_q4sync_commoditiesCtl]),
+    hz_rowNode("hz-row--3", [hz_q4sync_admin0Ctl, hz_q4sync_admin1Ctl, hz_q4sync_admin2Ctl]),
+    hz_rowNode("hz-row--2", [viewof hz_q4sync_scen1, viewof hz_q4sync_scen2])
+  ],
+  open: mutable hz_q4SyncOpen,
+  onToggle: (v) => (mutable hz_q4SyncOpen = v)
+})
+hz_q5sync_filtersPanel = hz_makeFiltersPanel({
+  hintNode: hz_q5sync_hint,
+  rows: [
+    hz_rowNode("hz-row--2 hz-row--grow", [viewof hz_q5sync_commodityGroup, hz_q5sync_commoditiesCtl]),
+    hz_rowNode("hz-row--3", [hz_q5sync_admin0Ctl, hz_q5sync_admin1Ctl, hz_q5sync_admin2Ctl])
+  ],
+  open: mutable hz_q5SyncOpen,
+  onToggle: (v) => (mutable hz_q5SyncOpen = v)
+})
+
+hz_q1sync_controlsSync = {
+  hz_q1sync_commoditiesCtl.sync(hz_commodityOptions ?? [], hz_commodities, { disabled: (hz_commodityGroup === "all") })
+  hz_q1sync_admin0Ctl.sync(countries ?? [], hz_admin0)
+  hz_q1sync_admin1Ctl.sync(dataAdmin1 ?? [], hz_admin1)
+  hz_q1sync_admin2Ctl.sync(dataAdmin2 ?? [], hz_admin2)
+  try { hz_q1sync_hint.textContent = hz_sharedControlsSummary ?? "" } catch (_) {}
+  return null
 }
-hz_q5_mountFilters = {
-  hz_q5_filtersHost.replaceChildren(hz_q5sync_filtersPanel)
+hz_q2sync_controlsSync = {
+  hz_q2sync_commoditiesCtl.sync(hz_commodityOptions ?? [], hz_commodities, { disabled: (hz_commodityGroup === "all") })
+  hz_q2sync_admin0Ctl.sync(countries ?? [], hz_admin0)
+  hz_q2sync_admin1Ctl.sync(dataAdmin1 ?? [], hz_admin1)
+  hz_q2sync_admin2Ctl.sync(dataAdmin2 ?? [], hz_admin2)
+  try { hz_q2sync_hint.textContent = hz_sharedControlsSummary ?? "" } catch (_) {}
+  return null
+}
+hz_q3sync_controlsSync = {
+  hz_q3sync_commoditiesCtl.sync(hz_commodityOptions ?? [], hz_commodities, { disabled: (hz_commodityGroup === "all") })
+  hz_q3sync_admin0Ctl.sync(countries ?? [], hz_admin0)
+  hz_q3sync_admin1Ctl.sync(dataAdmin1 ?? [], hz_admin1)
+  hz_q3sync_admin2Ctl.sync(dataAdmin2 ?? [], hz_admin2)
+  try { hz_q3sync_hint.textContent = hz_sharedControlsSummary ?? "" } catch (_) {}
+  return null
+}
+hz_q4sync_controlsSync = {
+  hz_q4sync_commoditiesCtl.sync(hz_commodityOptions ?? [], hz_commodities, { disabled: (hz_commodityGroup === "all") })
+  hz_q4sync_admin0Ctl.sync(countries ?? [], hz_admin0)
+  hz_q4sync_admin1Ctl.sync(dataAdmin1 ?? [], hz_admin1)
+  hz_q4sync_admin2Ctl.sync(dataAdmin2 ?? [], hz_admin2)
+  try { hz_q4sync_hint.textContent = hz_sharedControlsSummary ?? "" } catch (_) {}
+  return null
+}
+hz_q5sync_controlsSync = {
+  hz_q5sync_commoditiesCtl.sync(hz_commodityOptions ?? [], hz_commodities, { disabled: (hz_commodityGroup === "all") })
+  hz_q5sync_admin0Ctl.sync(countries ?? [], hz_admin0)
+  hz_q5sync_admin1Ctl.sync(dataAdmin1 ?? [], hz_admin1)
+  hz_q5sync_admin2Ctl.sync(dataAdmin2 ?? [], hz_admin2)
+  try { hz_q5sync_hint.textContent = hz_q5_sharedControlsSummary ?? "" } catch (_) {}
   return null
 }
 
+hz_q1_mountFilters = hz_mountNodeOnce(hz_q1_filtersHost, hz_q1sync_filtersPanel)
+hz_q2_mountFilters = hz_mountNodeOnce(hz_q2_filtersHost, hz_q2sync_filtersPanel)
+hz_q3_mountFilters = hz_mountNodeOnce(hz_q3_filtersHost, hz_q3sync_filtersPanel)
+hz_q4_mountFilters = hz_mountNodeOnce(hz_q4_filtersHost, hz_q4sync_filtersPanel)
+hz_q5_mountFilters = hz_mountNodeOnce(hz_q5_filtersHost, hz_q5sync_filtersPanel)
 
-// ------------------------------------------------------------
-// Q3 — Hazard overlap (UpSet)
-// ------------------------------------------------------------
+// Q3 — Hazard overlap 
+
 hz_q3_chartHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading chart…</div></div>`
 
-// Q3 busy overlay controller (mirrors Q1/Q2 “Updating…” overlay).
+// Q3 busy overlay controller
 hz_q3_ui = {
   const ui = (globalThis.__ATLAS_HZ_UI_Q3__ ??= {})
   ui.chartWrap = hz_q3_chartHost
@@ -5967,24 +6035,21 @@ hz_q3_ui = {
   return null
 }
 
-
 hz_q3_settingsWrap = html`
   <div class="hz-qToolbar__right hz-qToolbar__right--grow">
     <div class="hz-q2SettingsGrid">
-      <div class="hz-miniSetting"><span>Show %</span>${viewof hz_q3_relative}</div>
-      <div class="hz-miniSetting"><span>Show compound hazards</span>${viewof hz_q3_showCompound}</div>
-      <div class="hz-miniSetting"><span>Simplify compound hazards</span>${viewof hz_q3_simplifyCompound}</div>
-      <div class="hz-miniSetting"><span>Include no hazard</span>${viewof hz_q3_includeNoHazard}</div>
-      <div class="hz-miniSetting"><span>Free X axis</span>${viewof hz_q3_freeX}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Number of commodities</span>${viewof hz_q3_topN}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q3_chartHeight}</div>
+      <div class="hz-miniSetting"><span id="hz-q3-label-showpct">Show %</span>${viewof hz_q3_relative}</div>
+      <div class="hz-miniSetting"><span id="hz-q3-label-showcompound">Show compound hazards</span>${viewof hz_q3_showCompound}</div>
+      <div class="hz-miniSetting"><span id="hz-q3-label-simplifycompound">Simplify compound hazards</span>${viewof hz_q3_simplifyCompound}</div>
+      <div class="hz-miniSetting"><span id="hz-q3-label-includenohazard">Include no hazard</span>${viewof hz_q3_includeNoHazard}</div>
+      <div class="hz-miniSetting"><span id="hz-q3-label-freex">Free X axis</span>${viewof hz_q3_freeX}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q3-label-topn">Number of commodities</span>${viewof hz_q3_topN}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q3-label-height">Height</span>${viewof hz_q3_chartHeight}</div>
     </div>
   </div>
 `
 
-hz_q3ReqBody = hz_q2ReqBody
-
-// Reuse the single shared Q2 response instead of triggering a second API call.
+// Reuse the single shared Q2 response
 hz_q3Resp = hz_q2Resp
 
 hz_q3RowsL = hz_q3Resp.left ?? []
@@ -5992,8 +6057,8 @@ hz_q3RowsR = hz_q3Resp.right ?? []
 hz_q3DenomByCrop = hz_q3Resp.denom_by_crop ?? []
 hz_q3DenomTotal = (hz_q3DenomByCrop ?? []).reduce((s, d) => s + (Number(d?.value_tot) || 0), 0)
 
-
 hz_q3Charts = {
+  const _langTick = masterLanguage
   if (!hz_q3Resp?.ok) {
     return html`<div class="hz-loading"><strong>Unable to load Q3.</strong> ${hz_q3Resp?.error ?? "Unknown error"}</div>`
   }
@@ -6009,7 +6074,9 @@ hz_q3Charts = {
     return s
       .replace(" (any)", "")
       .replace(" (only)", " only")
-      .replace(/\+/g, " + ")
+      .split("+")
+      .map((part) => hz_hazardLabel(part.trim()))
+      .join(" + ")
   }
 
   const leftRows = Array.isArray(hz_q3RowsL) ? hz_q3RowsL : []
@@ -6158,7 +6225,7 @@ hz_q3Charts = {
     ...Rb.map(r => r?.crop).filter(Boolean)
   ])
 
-  // Top-N crops by combined ANY exposure (stable across hazards), plus Other.
+  // Top-N crops by combined ANY exposure
   const score = (crop) => num(anyL.get(crop)) + num(anyR.get(crop))
   const topCropsSource = Array.from(cropsAll).sort((a,b) => score(b) - score(a))
   const topN = Math.max(1, Math.min(Math.max(1, topCropsSource.length || 1), Number(hz_q3_topN) || topCropsSource.length || 1))
@@ -6276,15 +6343,35 @@ hz_q3Charts = {
 
   const pctOfTotal = (v) => denomTotal ? (100 * v / denomTotal) : 0
 
-  const insight = md`
-**Dynamic Insight**
+  const insightVerb = (topD?.diff ?? 0) >= 0
+    ? hz_t("sections.q3.insight.increases")
+    : hz_t("sections.q3.insight.decreases")
 
-For **${hz_s1.label}**, the largest hazard contribution is **${prettyHaz(topL?.hazard)}** at **${fmtAbs(topL?.total1 ?? 0)} ${hz_varShort ?? ""}** (~${fmtPct(pctOfTotal(topL?.total1 ?? 0))} of total production value).
-
-For **${hz_s2.label}**, the largest hazard contribution is **${prettyHaz(topR?.hazard)}** at **${fmtAbs(topR?.total2 ?? 0)} ${hz_varShort ?? ""}** (~${fmtPct(pctOfTotal(topR?.total2 ?? 0))}).
-
-The biggest scenario shift is **${prettyHaz(topD?.hazard)}**, which **${(topD?.diff ?? 0) >= 0 ? "increases" : "decreases"}** by **${fmtAbs(Math.abs(topD?.diff ?? 0))} ${hz_varShort ?? ""}** (~${fmtPct(Math.abs(pctOfTotal(topD?.diff ?? 0)))}) between Left and Right.
-`
+  const insight = md`${[
+    `**${hz_t("sections.q3.insight.heading")}**`,
+    "",
+    hz_tpl("sections.q3.insight.line1", {
+      s1: hz_s1.label,
+      haz1: prettyHaz(topL?.hazard),
+      val1: fmtAbs(topL?.total1 ?? 0),
+      unit: hz_varShort ?? "",
+      pct1: fmtPct(pctOfTotal(topL?.total1 ?? 0))
+    }),
+    hz_tpl("sections.q3.insight.line2", {
+      s2: hz_s2.label,
+      haz2: prettyHaz(topR?.hazard),
+      val2: fmtAbs(topR?.total2 ?? 0),
+      unit: hz_varShort ?? "",
+      pct2: fmtPct(pctOfTotal(topR?.total2 ?? 0))
+    }),
+    hz_tpl("sections.q3.insight.line3", {
+      haz3: prettyHaz(topD?.hazard),
+      verb: insightVerb,
+      delta: fmtAbs(Math.abs(topD?.diff ?? 0)),
+      unit: hz_varShort ?? "",
+      pct3: fmtPct(Math.abs(pctOfTotal(topD?.diff ?? 0)))
+    })
+  ].join("\n\n")}`
 
   // Panel plotting
   const w = Number(hz_plotWidth) || 920
@@ -6295,7 +6382,7 @@ The biggest scenario shift is **${prettyHaz(topD?.hazard)}**, which **${(topD?.d
   const hInput = Number(hz_q3_chartHeight) || 520
   const h = Math.max(190, Math.min(320, Math.round(hInput * 0.58)))
 
-  // Compute x-domain from stacked totals (not individual segments), so bars never overflow.
+  // Compute x-domain from stacked totals
   const scenarios = ["S1", "S2", "Δ"]
   let xMax = 0
   let xMin = 0
@@ -6349,9 +6436,7 @@ The biggest scenario shift is **${prettyHaz(topD?.hazard)}**, which **${(topD?.d
   }
 
   const buildPanel = (panel, i) => {
-    // Show the x-axis on every hazard panel. Restricting it to only the
-    // bottom row causes upper-row panels (such as dry/heat when wet is below)
-    // to appear without an x-axis.
+    // Show the x-axis on every hazard panel.
     const showX = true
     const data = panel.rows
     const tipFmt = {
@@ -6414,7 +6499,7 @@ hz_q3_mountChart = {
 hz_q3_dashboardCard = hz_noJumpRoot(html`
 <div class="hz-card">
   <div class="hz-card__body">
-    <div class="hz-qOverview">${md`${q3DetailText}`}</div>
+    <div id="hz-q3-overview" class="hz-qOverview"></div>
 
     ${hz_q3_filtersHost}
 
@@ -6540,6 +6625,7 @@ hz_q4TableView = {
 }
 
 hz_q4Insight = {
+  const _langTick = masterLanguage
   const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0)
   const fmtAbs = (x) => hz_formatNumber(num(x), { digits: 2, compact: false })
   const fmtPct = (x) => `${hz_formatNumber(num(x), { digits: 2, compact: false })}%`
@@ -6556,7 +6642,7 @@ hz_q4Insight = {
 
   const baseL = Array.isArray(hz_q4HazRowsL_norm) ? hz_q4HazRowsL_norm : []
   const baseR = Array.isArray(hz_q4HazRowsR_norm) ? hz_q4HazRowsR_norm : []
-  if (!baseL.length && !baseR.length) return html`<div class="hz-muted">No dynamic insight yet — adjust the filters to load Q4 results.</div>`
+  if (!baseL.length && !baseR.length) return html`<div class="hz-muted">${hz_t("sections.q4.insight.empty")}</div>`
 
   const nonL = hz_q4NonCompoundBuckets(baseL)
   const nonR = hz_q4NonCompoundBuckets(baseR)
@@ -6573,24 +6659,30 @@ hz_q4Insight = {
     return out
   }
 
+  const H_HEAT = hz_t("general.hazards.heat")
+  const H_DRY = hz_t("general.hazards.dry")
+  const H_WET = hz_t("general.hazards.wet")
+  const H_COMPOUND = hz_t("general.hazards.compound")
+  const H_ANY = hz_t("general.hazards.anyHazard")
+
   const hazardSetsL = {
-    "Heat": asAdminVal(nonL, (r) => String(r?.hazard) === "heat (any)"),
-    "Dry": asAdminVal(nonL, (r) => String(r?.hazard) === "dry (any)"),
-    "Wet": asAdminVal(nonL, (r) => String(r?.hazard) === "wet (any)"),
-    "Compound": asAdminVal(compExL, (r) => String(r?.hazard || "").includes("+")),
-    "Any Hazard": asAdminVal(nonL, (r) => String(r?.hazard) === "any")
+    [H_HEAT]: asAdminVal(nonL, (r) => String(r?.hazard) === "heat (any)"),
+    [H_DRY]: asAdminVal(nonL, (r) => String(r?.hazard) === "dry (any)"),
+    [H_WET]: asAdminVal(nonL, (r) => String(r?.hazard) === "wet (any)"),
+    [H_COMPOUND]: asAdminVal(compExL, (r) => String(r?.hazard || "").includes("+")),
+    [H_ANY]: asAdminVal(nonL, (r) => String(r?.hazard) === "any")
   }
   const hazardSetsR = {
-    "Heat": asAdminVal(nonR, (r) => String(r?.hazard) === "heat (any)"),
-    "Dry": asAdminVal(nonR, (r) => String(r?.hazard) === "dry (any)"),
-    "Wet": asAdminVal(nonR, (r) => String(r?.hazard) === "wet (any)"),
-    "Compound": asAdminVal(compExR, (r) => String(r?.hazard || "").includes("+")),
-    "Any Hazard": asAdminVal(nonR, (r) => String(r?.hazard) === "any")
+    [H_HEAT]: asAdminVal(nonR, (r) => String(r?.hazard) === "heat (any)"),
+    [H_DRY]: asAdminVal(nonR, (r) => String(r?.hazard) === "dry (any)"),
+    [H_WET]: asAdminVal(nonR, (r) => String(r?.hazard) === "wet (any)"),
+    [H_COMPOUND]: asAdminVal(compExR, (r) => String(r?.hazard || "").includes("+")),
+    [H_ANY]: asAdminVal(nonR, (r) => String(r?.hazard) === "any")
   }
 
-  const totalsL = Array.from(hazardSetsL["Any Hazard"].values()).reduce((s,v)=>s+v,0)
-  const totalsR = Array.from(hazardSetsR["Any Hazard"].values()).reduce((s,v)=>s+v,0)
-  const hazardOrder = ["Heat", "Dry", "Wet", "Compound", "Any Hazard"]
+  const totalsL = Array.from(hazardSetsL[H_ANY].values()).reduce((s,v)=>s+v,0)
+  const totalsR = Array.from(hazardSetsR[H_ANY].values()).reduce((s,v)=>s+v,0)
+  const hazardOrder = [H_HEAT, H_DRY, H_WET, H_COMPOUND, H_ANY]
 
   const topRow = (m) => {
     const rows = Array.from((m ?? new Map()).entries()).map(([admin, value]) => ({ admin, value: num(value) }))
@@ -6603,10 +6695,10 @@ hz_q4Insight = {
       const t = topRow(sets[hz] ?? new Map())
       const pct = totalAll > 0 ? 100 * t.value / totalAll : 0
       return {
-        "Hazard": hz,
-        "Top geography": t.admin,
-        "Exposure": t.value,
-        "% of total": pct
+        [hz_t("sections.q4.insight.columns.hazard")]: hz,
+        [hz_t("sections.q4.insight.columns.topGeography")]: t.admin,
+        [hz_t("sections.q4.insight.columns.exposure")]: t.value,
+        [hz_t("sections.q4.insight.columns.pctOfTotal")]: pct
       }
     })
 
@@ -6614,18 +6706,18 @@ hz_q4Insight = {
       <div>
         <div class="hz-insightSubhead">${title}</div>
         ${hz_atlasTable(rows, {
-          columns: ["Hazard", "Top geography", "Exposure", "% of total"],
+          columns: [hz_t("sections.q4.insight.columns.hazard"), hz_t("sections.q4.insight.columns.topGeography"), hz_t("sections.q4.insight.columns.exposure"), hz_t("sections.q4.insight.columns.pctOfTotal")],
           rows: 6,
           height: "300px",
           format: {
-            "Exposure": fmtAbs,
-            "% of total": fmtPct
+            [hz_t("sections.q4.insight.columns.exposure")]: fmtAbs,
+            [hz_t("sections.q4.insight.columns.pctOfTotal")]: fmtPct
           },
           width: {
-            "Hazard": 120,
-            "Top geography": 200,
-            "Exposure": 140,
-            "% of total": 120
+            [hz_t("sections.q4.insight.columns.hazard")]: 120,
+            [hz_t("sections.q4.insight.columns.topGeography")]: 200,
+            [hz_t("sections.q4.insight.columns.exposure")]: 140,
+            [hz_t("sections.q4.insight.columns.pctOfTotal")]: 120
           }
         })}
       </div>
@@ -6656,11 +6748,11 @@ hz_q4Insight = {
         : null
 
       return {
-        "Hazard": hz,
-        "Geo (abs)": absPick?.admin ?? "—",
-        "Δ abs": absPick?.delta ?? null,
-        "Geo (% change)": pctPick?.admin ?? "—",
-        "Δ % change": pctPick?.pct ?? null
+        [hz_t("sections.q4.insight.columns.hazard")]: hz,
+        [hz_t("sections.q4.insight.columns.geoAbs")]: absPick?.admin ?? "—",
+        [hz_t("sections.q4.insight.columns.deltaAbs")]: absPick?.delta ?? null,
+        [hz_t("sections.q4.insight.columns.geoPctChange")]: pctPick?.admin ?? "—",
+        [hz_t("sections.q4.insight.columns.deltaPctChange")]: pctPick?.pct ?? null
       }
     })
 
@@ -6668,19 +6760,19 @@ hz_q4Insight = {
       <div>
         <div class="hz-insightSubhead">${title}</div>
         ${hz_atlasTable(rows, {
-          columns: ["Hazard", "Geo (abs)", "Δ abs", "Geo (% change)", "Δ % change"],
+          columns: [hz_t("sections.q4.insight.columns.hazard"), hz_t("sections.q4.insight.columns.geoAbs"), hz_t("sections.q4.insight.columns.deltaAbs"), hz_t("sections.q4.insight.columns.geoPctChange"), hz_t("sections.q4.insight.columns.deltaPctChange")],
           rows: 6,
           height: "300px",
           format: {
-            "Δ abs": (v) => (v == null ? "—" : fmtDeltaAbs(v)),
-            "Δ % change": (v) => (v == null ? "—" : fmtDeltaPct(v))
+            [hz_t("sections.q4.insight.columns.deltaAbs")]: (v) => (v == null ? "—" : fmtDeltaAbs(v)),
+            [hz_t("sections.q4.insight.columns.deltaPctChange")]: (v) => (v == null ? "—" : fmtDeltaPct(v))
           },
           width: {
-            "Hazard": 110,
-            "Geo (abs)": 160,
-            "Δ abs": 110,
-            "Geo (% change)": 160,
-            "Δ % change": 120
+            [hz_t("sections.q4.insight.columns.hazard")]: 110,
+            [hz_t("sections.q4.insight.columns.geoAbs")]: 160,
+            [hz_t("sections.q4.insight.columns.deltaAbs")]: 110,
+            [hz_t("sections.q4.insight.columns.geoPctChange")]: 160,
+            [hz_t("sections.q4.insight.columns.deltaPctChange")]: 120
           }
         })}
       </div>
@@ -6692,34 +6784,39 @@ hz_q4Insight = {
   const shownR = shownRows.reduce((s, d) => s + num(d?.total2), 0)
   const topShareL = totalsL > 0 ? (100 * shownL / totalsL) : 0
   const topShareR = totalsR > 0 ? (100 * shownR / totalsR) : 0
-  const compL = Array.from(hazardSetsL["Compound"].values()).reduce((s,v)=>s+v,0)
-  const compR = Array.from(hazardSetsR["Compound"].values()).reduce((s,v)=>s+v,0)
+  const compL = Array.from((hazardSetsL[H_COMPOUND] ?? new Map()).values()).reduce((s,v)=>s+v,0)
+  const compR = Array.from((hazardSetsR[H_COMPOUND] ?? new Map()).values()).reduce((s,v)=>s+v,0)
   const compShareL = totalsL > 0 ? (100 * compL / totalsL) : 0
   const compShareR = totalsR > 0 ? (100 * compR / totalsR) : 0
 
   return html`
     <div class="hz-q4InsightBlock">
       <div class="hz-q4InsightLead">
-        Top ${Math.max(1, Number(hz_q4_topN ?? 10) || 10)} geographies currently shown cover <strong>${fmtPct(topShareL)}</strong> of total exposure in <strong>${hz_s1.label}</strong>
-        and <strong>${fmtPct(topShareR)}</strong> in <strong>${hz_s2.label}</strong>. Compound hazards contribute
-        <strong>${fmtPct(compShareL)}</strong> (${hz_s1.label}) and <strong>${fmtPct(compShareR)}</strong> (${hz_s2.label}).
+        ${md`${hz_tpl("sections.q4.insight.lead", {
+          topN: Math.max(1, Number(hz_q4_topNEff ?? 10) || 10),
+          topShareL: fmtPct(topShareL),
+          s1: hz_s1.label,
+          topShareR: fmtPct(topShareR),
+          s2: hz_s2.label,
+          compShareL: fmtPct(compShareL),
+          compShareR: fmtPct(compShareR)
+        })}`}
       </div>
       <div class="hz-stack" style="display:grid;gap:12px;">
         ${mkScenarioTable(hz_s1.label, hazardSetsL, totalsL)}
         ${mkScenarioTable(hz_s2.label, hazardSetsR, totalsR)}
       </div>
       <div class="hz-stack" style="display:grid;gap:12px;margin-top:8px;">
-        ${mkChangeTable("Increase in total exposure", "increase")}
-        ${mkChangeTable("Decrease in total exposure", "decrease")}
+        ${mkChangeTable(hz_t("sections.q4.insight.titles.increase"), "increase")}
+        ${mkChangeTable(hz_t("sections.q4.insight.titles.decrease"), "decrease")}
       </div>
     </div>
   `
 }
 
+// Q4 — raw records view
 
-// Q4 — raw records view (compat + Shiny-style diagnostics)
-
-// Helper: strip a leading title line from a markdown text (prevents duplicate title rendering)
+// Helper
 hz_stripLeadingTitle = (text, title) => {
   const t = String(text ?? "")
   const lines = t.split(/\r?\n/)
@@ -6731,32 +6828,31 @@ hz_stripLeadingTitle = (text, title) => {
 
 // Q4 — render card
 
-
-// Q4 — map panel (Shiny/prototype order: map first, then chart/summary, then insight)
+// Q4 — map panel
 
 hz_q4IntroTextClean = hz_stripLeadingTitle(q4IntroText, q4Title)
 
-// Q4-specific inline control groups (kept close to the map/chart sections for layout parity)
+// Q4-specific inline control groups
 hz_q4_mapSettingsWrap = html`
   <div class="hz-qToolbar__right hz-qToolbar__right--grow">
     <div class="hz-q2SettingsGrid">
-      <div class="hz-miniSetting"><span>Map color</span>${viewof hz_mapMetric}</div>
-      <div class="hz-miniSetting"><span>Show map subtitle</span>${viewof hz_q4_includeMapCaption}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Map height</span>${viewof hz_q4MapHeight}</div>
+      <div class="hz-miniSetting"><span id="hz-q4-label-mapcolor">Map color</span>${viewof hz_mapMetric}</div>
+      <div class="hz-miniSetting"><span id="hz-q4-label-showmapsubtitle">Show map subtitle</span>${viewof hz_q4_includeMapCaption}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q4-label-mapheight">Map height</span>${viewof hz_q4MapHeight}</div>
     </div>
   </div>
 `
 
-// Q4 chart controls (same toolbar pattern as Q1–Q3; include shared toggles used by the chart)
+// Q4 chart controls
 hz_q4_settingsWrap = html`
   <div class="hz-qToolbar__right hz-qToolbar__right--grow">
     <div class="hz-q2SettingsGrid">
-      <div class="hz-miniSetting"><span>Show %</span>${viewof hz_rel}</div>
-      <div class="hz-miniSetting"><span>Show differences</span>${viewof hz_q4_difference}</div>
-      <div class="hz-miniSetting"><span>Show compound hazards</span>${viewof hz_q4_showCompound}</div>
-      <div class="hz-miniSetting"><span>Simplify compound hazards</span>${viewof hz_q4_simplifyCompound}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>No. geographies to show</span>${viewof hz_q4_topN}</div>
-      <div class="hz-miniSetting hz-miniSetting--range"><span>Height</span>${viewof hz_q4_chartHeight}</div>
+      <div class="hz-miniSetting"><span id="hz-q4-label-showpct">Show %</span>${viewof hz_rel}</div>
+      <div class="hz-miniSetting"><span id="hz-q4-label-showdiff">Show differences</span>${viewof hz_q4_difference}</div>
+      <div class="hz-miniSetting"><span id="hz-q4-label-showcompound">Show compound hazards</span>${viewof hz_q4_showCompound}</div>
+      <div class="hz-miniSetting"><span id="hz-q4-label-simplifycompound">Simplify compound hazards</span>${viewof hz_q4_simplifyCompound}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q4-label-topn">No. geographies to show</span>${viewof hz_q4_topN}</div>
+      <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q4-label-height">Height</span>${viewof hz_q4_chartHeight}</div>
     </div>
   </div>
 `
@@ -6797,15 +6893,17 @@ hz_q4MapPanel = {
   const mapLNorm = aggNorm(leftRows)
   const mapRNorm = aggNorm(rightRows)
   const apiNormNames = new Set([...mapLNorm.keys(), ...mapRNorm.keys()].filter(Boolean))
+  const totalL_all = leftRows.reduce((s, r) => s + toNum(r?.total ?? r?.value), 0)
+  const totalR_all = rightRows.reduce((s, r) => s + toNum(r?.total ?? r?.value), 0)
+  const mapValueL = (x) => hz_rel ? (totalL_all ? (100 * toNum(x) / totalL_all) : 0) : toNum(x)
+  const mapValueR = (x) => hz_rel ? (totalR_all ? (100 * toNum(x) / totalR_all) : 0) : toNum(x)
 
-  // Q4 map level should match the most specific boundary the user explicitly selected
   const a0 = (hz_geoFilter?.admin0 ?? []).filter(Boolean).filter((x) => String(x).toLowerCase() !== "all")
   const a1 = (hz_geoFilter?.admin1 ?? []).filter(Boolean)
   const a2 = (hz_geoFilter?.admin2 ?? []).filter(Boolean)
-  const hz_q4MapLevel = a2.length ? 2 : (a1.length ? 1 : 0)
+  const hz_q4MapLevel = a2.length ? 2 : (a1.length ? 2 : (a0.length ? 1 : 0))
   const hz_q4MapLevelLabel = (hz_q4MapLevel === 2) ? "Admin2" : (hz_q4MapLevel === 1 ? "Admin1" : "Admin0")
-  const selectedAtLevel = (hz_q4MapLevel === 2) ? a2 : ((hz_q4MapLevel === 1) ? a1 : a0)
-  const selectedNorms = new Set((selectedAtLevel ?? []).map(hz_q4NormName).filter(Boolean))
+  const selectedA2Norms = new Set((a2 ?? []).map(hz_q4NormName).filter(Boolean))
 
   const boundsObj = await getAdminBoundaries([hz_q4MapLevel])
   const fc = boundsObj?.[`admin${hz_q4MapLevel}`]
@@ -6816,27 +6914,43 @@ hz_q4MapPanel = {
   if (!nameKey) return html`<div class="warn">Could not identify the boundary name field for ${hz_q4MapLevelLabel}.</div>`
 
   const getName = (f) => String(f?.properties?.[nameKey] ?? "").trim()
+  const guessKey = (levelWanted) => {
+    const props0 = feats?.[0]?.properties ?? {}
+    const keys = Object.keys(props0)
+    const prefer = (levelWanted === 0)
+      ? ["gaul0_name", "admin0_name", "ADM0_NAME", "NAME_0", "country", "COUNTRY", "name", "NAME"]
+      : (levelWanted === 1)
+        ? ["gaul1_name", "admin1_name", "ADM1_NAME", "NAME_1", "name", "NAME"]
+        : ["gaul2_name", "admin2_name", "ADM2_NAME", "NAME_2", "name", "NAME"]
+    for (const k of prefer) if (k in props0) return k
+    const re = (levelWanted === 0) ? /(gaul0|adm0|admin0|name_0|country)/i
+      : (levelWanted === 1) ? /(gaul1|adm1|admin1|name_1)/i
+      : /(gaul2|adm2|admin2|name_2)/i
+    return keys.find((k) => re.test(k)) || keys.find((k) => /name/i.test(k)) || null
+  }
+  const admin0Key = guessKey(0)
+  const admin1Key = guessKey(1)
+  const getAdmin0 = (f) => {
+    const p = f?.properties ?? {}
+    return (admin0Key && p[admin0Key] != null) ? String(p[admin0Key]).trim() : ""
+  }
+  const getAdmin1 = (f) => {
+    const p = f?.properties ?? {}
+    return (admin1Key && p[admin1Key] != null) ? String(p[admin1Key]).trim() : ""
+  }
 
-  // Scope to the selected boundaries at the chosen level so zoom is always correct
+  // Scope to the effective parent geography so zoom and boundary level follow the API request.
   let scoped = feats
-  if (selectedNorms.size) {
-    scoped = feats.filter((f) => selectedNorms.has(hz_q4NormName(getName(f))))
-    // Fallback: check common alternate keys if the guessed key differs from the selected label field
-    if (!scoped.length) {
-      const altKeyCandidates = (hz_q4MapLevel === 0)
-        ? ["gaul0_name", "admin0_name", "ADM0_NAME", "NAME_0", "country", "COUNTRY", "name", "NAME"]
-        : (hz_q4MapLevel === 1)
-          ? ["gaul1_name", "admin1_name", "ADM1_NAME", "NAME_1", "name", "NAME"]
-          : ["gaul2_name", "admin2_name", "ADM2_NAME", "NAME_2", "name", "NAME"]
-      scoped = feats.filter((f) => {
-        const p = f?.properties ?? {}
-        return altKeyCandidates.some((k) => (k in p) && selectedNorms.has(hz_q4NormName(p[k])))
-      })
-    }
-    if (!scoped.length) {
-      return html`<div class="warn"><b>No matching ${hz_q4MapLevelLabel} boundaries found</b> for the current selection.<br>
-        Try clearing the most specific boundary filter and selecting again.</div>`
-    }
+  if (hz_q4MapLevel === 1 && a0.length) {
+    scoped = feats.filter((f) => a0.includes(getAdmin0(f)))
+  }
+  if (hz_q4MapLevel === 2) {
+    if (a1.length) scoped = feats.filter((f) => a1.includes(getAdmin1(f)))
+    else if (a2.length) scoped = feats.filter((f) => selectedA2Norms.has(hz_q4NormName(getName(f))))
+  }
+  if (!scoped.length) {
+    return html`<div class="warn"><b>No matching ${hz_q4MapLevelLabel} boundaries found</b> for the current selection.<br>
+      Try clearing the most specific boundary filter and selecting again.</div>`
   }
 
   const features = scoped
@@ -6845,14 +6959,16 @@ hz_q4MapPanel = {
       const p = f?.properties ?? {}
       const dispName = getName(f)
       const nk = hz_q4NormName(dispName)
-      const left = toNum(mapLNorm.get(nk)?.total)
-      const right = toNum(mapRNorm.get(nk)?.total)
+      const leftAbs = toNum(mapLNorm.get(nk)?.total)
+      const rightAbs = toNum(mapRNorm.get(nk)?.total)
+      const left = mapValueL(leftAbs)
+      const right = mapValueR(rightAbs)
       return {
         ...f,
         properties: {
           ...p,
           __hz_name: dispName,
-          __hz_selected: selectedNorms.size ? selectedNorms.has(nk) : false,
+          __hz_selected: selectedA2Norms.size ? selectedA2Norms.has(nk) : false,
           __hz_left: left,
           __hz_right: right,
           __hz_delta: right - left
@@ -6894,6 +7010,9 @@ hz_q4MapPanel = {
     color: {
       ...fillCfg,
       legend: true,
+      tickFormat: (x) => hz_rel
+        ? `${hz_formatNumber(x, { digits: 2 })}%`
+        : hz_formatNumber(x, { digits: 1, compact: true }),
       label: (valueMode === "delta")
         ? (hz_rel ? "Difference (pp)" : "Difference")
         : (hz_rel ? "Exposure (%)" : (hz_varLabelAbs ?? hz_varLabel ?? "Exposure"))
@@ -6951,13 +7070,12 @@ hz_q4MapPanel = {
   `
 }
 
+hz_q4_mapHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading"><span id="hz-q4-loading-map">Loading map…</span></div></div>`
+hz_q4_chartHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading"><span id="hz-q4-loading-chart">Loading chart…</span></div></div>`
+hz_q4_tableHost = html`<div class="hz-tableWrap hz-tableHost"><div class="hz-loading"><span id="hz-q4-loading-table">Loading table…</span></div></div>`
+hz_q4_insightHost = html`<div class="hz-qInsight"><div class="hz-loading"><span id="hz-q4-loading-insights">Loading insights…</span></div></div>`
 
-hz_q4_mapHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading map…</div></div>`
-hz_q4_chartHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading chart…</div></div>`
-hz_q4_tableHost = html`<div class="hz-tableWrap hz-tableHost"><div class="hz-loading">Loading table…</div></div>`
-hz_q4_insightHost = html`<div class="hz-qInsight"><div class="hz-loading">Loading insights…</div></div>`
-
-// Q4 busy overlay controller (mirrors Q1/Q2/Q3 “Updating…” overlay for map/chart/table).
+// Q4 busy overlay
 hz_q4_ui = {
   const ui = (globalThis.__ATLAS_HZ_UI_Q4__ ??= {})
   ui.mapWrap = hz_q4_mapHost
@@ -6974,58 +7092,28 @@ hz_q4_ui = {
   return null
 }
 
-
-hz_q4_chartCard = html`<div class="hz-sideCard">
-  <div class="hz-sideCard__header"><div class="hz-sideCard__title">Chart</div></div>
+hz_q4_chartCard = html`<div id="hz-q4-chart-card" class="hz-sideCard">
+  <div class="hz-sideCard__header"><div id="hz-q4-chart-title" class="hz-sideCard__title">Chart</div></div>
   <div class="hz-sideCard__body">${hz_q4_chartHost}</div>
 </div>`
 
-hz_q4_tableCard = html`<div class="hz-sideCard">
-  <div class="hz-sideCard__header"><div class="hz-sideCard__title">Summary table</div></div>
+hz_q4_tableCard = html`<div id="hz-q4-table-card" class="hz-sideCard">
+  <div class="hz-sideCard__header"><div id="hz-q4-table-title" class="hz-sideCard__title">Summary table</div></div>
   <div class="hz-sideCard__body">${hz_q4_tableHost}</div>
 </div>`
 
-hz_q4_applyView = {
-  const mode = (hz_q4_viewMode || "chart")
-  try { hz_q4_chartCard.style.display = (mode === "chart") ? "" : "none" } catch (_) {}
-  try { hz_q4_tableCard.style.display = (mode === "table") ? "" : "none" } catch (_) {}
-  return null
-}
+hz_q4_mapMetaNode = html`<div id="hz-q4-map-meta" class="hz-sideCard__meta"></div>`
+hz_q4_mapCard = html`<div id="hz-q4-map-block" class="hz-sideCard" style="overflow-anchor:none;">
+  <div class="hz-sideCard__head">
+    <div id="hz-q4-map-title" class="hz-sideCard__title">Map</div>
+    ${hz_q4_mapMetaNode}
+  </div>
+  <div class="hz-sideCard__body">${hz_q4_mapHost}</div>
+</div>`
 
-hz_q4_mountMap = {
-  hz_q4_mapHost.replaceChildren(hz_q4MapPanel)
-  return null
-}
-
-hz_q4_mountChart = {
-  hz_q4_chartHost.replaceChildren(hz_q4Chart)
-  return null
-}
-
-hz_q4_mountTable = {
-  hz_q4_tableHost.replaceChildren(hz_q4TableView)
-  return null
-}
-
-hz_q4_mountInsight = {
-  hz_q4_insightHost.replaceChildren(hz_q4Insight)
-  return null
-}
-
-
-hz_q4_dashboardCard = hz_noJumpRoot(html`
-<div class="hz-card">
-  <div class="hz-card__body">
-    ${hz_q4_filtersHost}
-    <div class="hz-sideCard">
-      <div class="hz-sideCard__head">
-        <div class="hz-sideCard__title">Map</div>
-        <div class="hz-sideCard__meta">${hz_mapSub ?? ""}</div>
-      </div>
-      <div class="hz-sideCard__body">${hz_q4_mapHost}</div>
-    </div>
-
-    <div class="hz-qToolbar hz-qToolbar--tight">
+hz_q4_resultsCard = html`<div id="hz-q4-results-block" class="hz-sideCard" style="overflow-anchor:none;">
+  <div class="hz-sideCard__body">
+    <div id="hz-q4-controls-anchor" class="hz-qToolbar hz-qToolbar--tight">
       <div class="hz-qToolbar__left">${viewof hz_q4_viewMode}</div>
       ${hz_q4_settingsWrap}
     </div>
@@ -7037,11 +7125,42 @@ hz_q4_dashboardCard = hz_noJumpRoot(html`
       </div>
     </div>
 
-    ${hz_q4_insightHost}
+    <div id="hz-q4-insight-wrap">${hz_q4_insightHost}</div>
+  </div>
+</div>`
+
+hz_q4_syncCardMeta = {
+  try { hz_q4_mapMetaNode.textContent = hz_q4_includeMapCaption ? (hz_mapSub ?? "") : "" } catch (_) {}
+  try { hz_q4_mapMetaNode.style.display = hz_q4_includeMapCaption ? "" : "none" } catch (_) {}
+  return null
+}
+
+hz_q4_applyView = {
+  const mode = (hz_q4_viewMode || "chart")
+  try { hz_q4_chartCard.style.display = (mode === "chart") ? "" : "none" } catch (_) {}
+  try { hz_q4_tableCard.style.display = (mode === "table") ? "" : "none" } catch (_) {}
+  return null
+}
+
+hz_q4_mountMap = hz_replaceChildrenKeepViewport(hz_q4_mapHost, hz_q4MapPanel)
+
+hz_q4_mountChart = hz_replaceChildrenKeepViewport(hz_q4_chartHost, hz_q4Chart)
+
+hz_q4_mountTable = hz_replaceChildrenKeepViewport(hz_q4_tableHost, hz_q4TableView)
+
+hz_q4_mountInsight = hz_replaceChildrenKeepViewport(hz_q4_insightHost, hz_q4Insight)
+
+hz_q4_dashboardCard = html`
+<div class="hz-card">
+  <div class="hz-card__body">
+    ${hz_q4_filtersHost}
+    <div class="hz-stack" style="display:grid;gap:12px;">
+      ${hz_q4_mapCard}
+      ${hz_q4_resultsCard}
+    </div>
   </div>
 </div>
-`)
-
+`
 
 // Q5: stable insights mount 
 hz_q5_insightNode = html`<div></div>`
@@ -7053,7 +7172,7 @@ hz_q5_insightMount = {
 hz_q5_dashboardCard = hz_noJumpRoot(html`
 <div class="hz-card">
   <div class="hz-card__body">
-    <div class="hz-qOverview">${md`${q5DetailText}`}</div>
+    <div id="hz-q5-overview" class="hz-qOverview"></div>
 
     ${hz_q5_filtersHost}
 
@@ -7073,62 +7192,87 @@ hz_q5_dashboardCard = hz_noJumpRoot(html`
 </div>
 `);
 
+// ============================================================
+// FINAL QUESTION STACK + CARD HOSTS (DISPLAY ORDER STAYS Q4 FIRST)
+// ============================================================
+hz_q1_cardHost = html`<div></div>`
+hz_q2_cardHost = html`<div></div>`
+hz_q3_cardHost = html`<div></div>`
+hz_q4_cardHost = html`<div></div>`
+hz_q5_cardHost = html`<div></div>`
 
-hz_q1_block = html`
-  <section id="q1" class="hz-question">
-    <h1 class="anchored" data-anchor-id="q1">${q1Title}</h1>
-    <div class="hz-sectionIntro">${md`${q1IntroText}`}</div>
-    ${hz_dashboardShell}
-  </section>
-`
+hz_q1_mountCard = hz_replaceChildrenKeepViewport(hz_q1_cardHost, hz_dashboardShell)
+hz_q2_mountCard = hz_replaceChildrenKeepViewport(hz_q2_cardHost, hz_q2_dashboardCard)
+hz_q3_mountCard = hz_replaceChildrenKeepViewport(hz_q3_cardHost, hz_q3_dashboardCard)
+hz_q4_mountCard = hz_replaceChildrenKeepViewport(hz_q4_cardHost, hz_q4_dashboardCard)
+hz_q5_mountCard = hz_replaceChildrenKeepViewport(hz_q5_cardHost, hz_q5_dashboardCard)
 
 hz_questionsStack = html`
   <div class="hz-stack hz-stack--questions">
     <section id="q4" class="hz-question">
-      <h1 class="anchored" data-anchor-id="q4">${q4Title}</h1>
-      <div class="hz-sectionIntro">${md`${hz_q4IntroTextClean ?? q4IntroText}`}</div>
-      ${hz_q4_dashboardCard}
+      <h1 id="hz-q4-title" class="anchored" data-anchor-id="q4"></h1>
+      <div id="hz-q4-intro" class="hz-sectionIntro"></div>
+      ${hz_q4_cardHost}
     </section>
 
-    ${hz_q1_block}
+    <section id="q1" class="hz-question">
+      <h1 id="hz-q1-title" class="anchored" data-anchor-id="q1"></h1>
+      <div id="hz-q1-intro" class="hz-sectionIntro"></div>
+      ${hz_q1_cardHost}
+    </section>
 
     <section id="q2" class="hz-question">
-      <h1 class="anchored" data-anchor-id="q2">${q2Title}</h1>
-      <div class="hz-sectionIntro">${md`${q2IntroText}`}</div>
-      ${hz_q2_dashboardCard}
+      <h1 id="hz-q2-title" class="anchored" data-anchor-id="q2"></h1>
+      <div id="hz-q2-intro" class="hz-sectionIntro"></div>
+      ${hz_q2_cardHost}
     </section>
 
     <section id="q3" class="hz-question">
-      <h1 class="anchored" data-anchor-id="q3">${q3Title}</h1>
-      <div class="hz-sectionIntro">${md`${q3IntroText}`}</div>
-      ${hz_q3_dashboardCard}
+      <h1 id="hz-q3-title" class="anchored" data-anchor-id="q3"></h1>
+      <div id="hz-q3-intro" class="hz-sectionIntro"></div>
+      ${hz_q3_cardHost}
     </section>
 
-
     <section id="q5" class="hz-question">
-      <h1 class="anchored" data-anchor-id="q5">${q5Title}</h1>
-      <div class="hz-sectionIntro">${md`${q5IntroText}`}</div>
-      ${hz_q5_dashboardCard}
+      <h1 id="hz-q5-title" class="anchored" data-anchor-id="q5"></h1>
+      <div id="hz-q5-intro" class="hz-sectionIntro"></div>
+      ${hz_q5_cardHost}
     </section>
   </div>
 `
 
 hz_mountDash = {
   try {
-    // Mount per-question synced filter panels before attaching the dashboard shell
     hz_q1_mountFilters
     hz_q2_mountFilters
     hz_q3_mountFilters
     hz_q4_mountFilters
     hz_q5_mountFilters
 
-    // Ensure Q5 mounts/wires run (keeps UI stable and avoids scroll jumps)
+    hz_q1sync_controlsSync
+    hz_q2sync_controlsSync
+    hz_q3sync_controlsSync
+    hz_q4sync_controlsSync
+    hz_q5sync_controlsSync
+
+    hz_q1_mountCard
+    hz_q2_mountCard
+    hz_q3_mountCard
+    hz_q4_mountCard
+    hz_q5_mountCard
+
     hz_q5_resultsMount
     hz_q5_insightMount
     hz_q5_wireViewToggle
     hz_q5_wireHazardCtl
 
-    // Preserve scroll position even if Quarto makes a wrapper scroll container.
+    // Mount the dashboard stack only once after the initial loading placeholder
+    // has been replaced. The individual question/filter mount cells below update
+
+    if (hz_dashMount.__hz_stack_mounted_once) {
+      return html``
+    }
+
     const scroller =
       document.scrollingElement ||
       document.querySelector("#quarto-content") ||
@@ -7139,10 +7283,8 @@ hz_mountDash = {
     const y = scroller?.scrollTop ?? window.scrollY
     const x = scroller?.scrollLeft ?? window.scrollX
 
-    // Avoid focus-driven jump when the radio/checkbox inputs are recreated.
-    try { document.activeElement?.blur?.() } catch (e) {}
-
     hz_dashMount.replaceChildren(hz_questionsStack)
+    hz_dashMount.__hz_stack_mounted_once = true
 
     const restore = () => {
       if (scroller) {
@@ -7153,11 +7295,15 @@ hz_mountDash = {
       }
     }
 
-    // Restore twice to beat post-layout focus adjustments.
     requestAnimationFrame(() => {
       restore()
       requestAnimationFrame(restore)
     })
+    setTimeout(restore, 0)
+    setTimeout(restore, 120)
+    setTimeout(restore, 280)
+    setTimeout(restore, 520)
+    setTimeout(restore, 900)
   } catch (e) {
     hz_dashMount.replaceChildren(html`<div class="warn"><b>Dashboard failed to render:</b><br>${String(e)}</div>`)
   }
@@ -7165,40 +7311,11 @@ hz_mountDash = {
 }
 
 // ------------------------------------------------------------
-// Table rendering (Grid.js) + CSV export
+// ============================================================
+// SHARED TABLE RENDERING (ATLAS TABLE) + CSV EXPORT
+// ============================================================
+// Table rendering (Atlas table) + CSV export
 // ------------------------------------------------------------
-hz_loadCssOnce = (id, href) => {
-  if (document.getElementById(id)) return Promise.resolve(true)
-  return new Promise((resolve, reject) => {
-    const el = document.createElement("link")
-    el.id = id
-    el.rel = "stylesheet"
-    el.href = href
-    el.onload = () => resolve(true)
-    el.onerror = (e) => reject(e)
-    document.head.appendChild(el)
-  })
-}
-
-hz_loadScriptOnce = (id, src) => {
-  if (document.getElementById(id)) return Promise.resolve(true)
-  return new Promise((resolve, reject) => {
-    const el = document.createElement("script")
-    el.id = id
-    el.src = src
-    el.async = true
-    el.onload = () => resolve(true)
-    el.onerror = (e) => reject(e)
-    document.head.appendChild(el)
-  })
-}
-
-hz_loadGridjs = async () => {
-  await hz_loadCssOnce("hz-gridjs-theme", "https://unpkg.com/gridjs/dist/theme/mermaid.min.css")
-  await hz_loadScriptOnce("hz-gridjs-lib", "https://cdnjs.cloudflare.com/ajax/libs/gridjs/6.2.0/gridjs.production.min.js")
-  return window.gridjs
-}
-
 hz_csvEscape = (v) => {
   const s = String(v ?? "")
   if (/[",\n]/.test(s)) return `"${s.replaceAll('"', '""')}"`
@@ -7216,20 +7333,9 @@ hz_downloadCsv = (filename, rows) => {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 250)
 }
 
-hz_mountGrid = (host, key, cfg) => {
-  const g = window.gridjs
-  if (!g?.Grid) throw new Error("Grid.js not loaded")
-  const store = (globalThis.__ATLAS_HZ_GRIDS__ ??= {})
-  try { store[key]?.destroy?.() } catch (_) {}
-  host.replaceChildren()
-  const grid = new g.Grid(cfg)
-  store[key] = grid
-  grid.render(host)
-  return grid
-}
-
 // Build chart *safely* (catch DuckDB/Arrow/Plot errors so UI still renders)
 hz_updateChart = {
+  const _langTick = masterLanguage
   const q = (hz_activeQuestion || "q1")
   const view = (hz_viewMode || "both")
   const wantsChart = (view === "chart" || view === "both")
@@ -7311,14 +7417,15 @@ hz_updateChart = {
     hz_chartHost.replaceChildren(html`<div class="hz-muted">Chart hidden.</div>`)
   }
 
-
   // -------------------------
-  // Q1 Dynamic Insight (text)
+  // -------------------------
+// Q1 Dynamic Insight (text)
+// -------------------------
   // -------------------------
   try {
     if ((hz_activeQuestion || "q1") === "q1") {
       if (errors.length) {
-        hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">Insight unavailable because the API request failed.</div>`)
+        hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">${hz_t("sections.q1.insight.unavailableApi")}</div>`)
         // still allow chart/table error rendering above
       }
       const merged = Array.isArray(hz_merged) ? hz_merged : []
@@ -7346,7 +7453,7 @@ hz_updateChart = {
       })
 
       if (!rows.length) {
-        hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">No data for the current filters.</div>`)
+        hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">${hz_t("sections.q1.insight.noData")}</div>`)
       } else {
         const anyRow = rows.find((r) => isAny(r.hazard))
         const sumIntersections = (k) =>
@@ -7380,15 +7487,21 @@ hz_updateChart = {
         const s1 = hz_s1?.label ?? "Baseline"
         const s2 = hz_s2?.label ?? "Future"
 
-        const totalVerb = dTotal >= 0 ? "increased" : "decreased"
-        const shareVerb = dShare >= 0 ? "increased" : "decreased"
+        const totalVerb = dTotal >= 0
+          ? hz_t("sections.q1.insight.increased")
+          : hz_t("sections.q1.insight.decreased")
+        const shareVerb = dShare >= 0
+          ? hz_t("sections.q1.insight.increased")
+          : hz_t("sections.q1.insight.decreased")
 
         hz_q1_insightHost.replaceChildren(
-          md`**Dynamic insight**
-
-- Under **${s1}**, total exposure is **${fmtV(total1)}** (${unit}), with **${fmtV(compound1)}** (**${fmtPct(share1)}**) from **compound hazards**.
-- Under **${s2}**, total exposure is **${fmtV(total2)}** (${unit}), with **${fmtV(compound2)}** (**${fmtPct(share2)}**) from **compound hazards**.
-- Overall, total exposure **${totalVerb}** by **${fmtV(Math.abs(dTotal))}**, and the compound-hazard share **${shareVerb}** by **${fmtPct(Math.abs(dShare))}**.`
+          md`${[
+            `**${hz_t("sections.q1.insight.heading")}**`,
+            "",
+            `- ${hz_tpl("sections.q1.insight.line1", { s1, total1: fmtV(total1), unit, compound1: fmtV(compound1), share1: fmtPct(share1) })}`,
+            `- ${hz_tpl("sections.q1.insight.line2", { s2, total2: fmtV(total2), unit, compound2: fmtV(compound2), share2: fmtPct(share2) })}`,
+            `- ${hz_tpl("sections.q1.insight.line3", { totalVerb, deltaTotal: fmtV(Math.abs(dTotal)), shareVerb, deltaShare: fmtPct(Math.abs(dShare)) })}`
+          ].join("\n\n")}`
         )
       }
     } else {
@@ -7396,7 +7509,7 @@ hz_updateChart = {
     }
   } catch (e) {
     try {
-      hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">Insight unavailable.</div>`)
+      hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">${hz_t("sections.q1.insight.unavailable")}</div>`)
     } catch (_) {}
   }
 
@@ -7413,14 +7526,6 @@ hz_updateChart = {
 
   if (errors.length) {
     clearTable("Table unavailable because the API request failed.")
-    return html``
-  }
-
-  // Load Grid.js (once)
-  let gridOk = true
-  try { await hz_loadGridjs() } catch (e) { gridOk = false }
-  if (!gridOk) {
-    clearTable("Table library failed to load (Grid.js). Check network/CSP and reload.")
     return html``
   }
 
@@ -7593,8 +7698,7 @@ hz_updateChart = {
 
   hz_tableActionsHost.replaceChildren(actionsWrap)
 
-  // Mount Grid
-  // Q1: render summary with shared Atlas table component (instead of Grid.js)
+  // Q1: render summary with shared Atlas table component
   if (q === "q1") {
     const rows = Array.isArray(hz_q1DisplayRows) ? hz_q1DisplayRows : []
     const usePct = !!hz_relative
@@ -7648,18 +7752,37 @@ hz_updateChart = {
     return html``
   }
 
-  const tableDiv = document.createElement("div")
-  hz_tableHost.replaceChildren(tableDiv)
-  hz_mountGrid(tableDiv, "hz_table", {
-    columns: payload.columns,
-    data: payload.data,
-    search: true,
-    sort: true,
-    pagination: { enabled: true, limit: 12 },
-    fixedHeader: true,
-    height: "540px"
+  const tableRows = (payload.data ?? []).map((row) => {
+    const out = {}
+    ;(payload.columns ?? []).forEach((col, i) => {
+      const key = typeof col === "string" ? col : (col?.name ?? `col_${i}`)
+      out[key] = Array.isArray(row) ? row[i] : row?.[key]
+    })
+    return out
   })
 
+  const tableColumns = (payload.columns ?? []).map((col, i) =>
+    typeof col === "string" ? col : (col?.name ?? `col_${i}`)
+  )
+
+  const tableFormat = Object.fromEntries(
+    (payload.columns ?? [])
+      .map((col, i) => {
+        const key = typeof col === "string" ? col : (col?.name ?? `col_${i}`)
+        const fmt = (typeof col === "object" && typeof col?.formatter === "function") ? col.formatter : null
+        return fmt ? [key, fmt] : null
+      })
+      .filter(Boolean)
+  )
+
+  hz_tableHost.replaceChildren(
+    hz_atlasTable(tableRows, {
+      columns: tableColumns,
+      format: tableFormat,
+      rows: 12,
+      height: "540px"
+    })
+  )
 
   return html``
 }
@@ -7678,7 +7801,7 @@ hz_recordsReq = {
   const req = {
     dataset_url: src?.url,
     scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
-    geo: hz_geoFilterApi,
+    geo: hz_geoFilterReq,
     commodities: hz_selectedCommoditiesForReq ?? [],
     hazard_vars: null,
     method: hz_method,
@@ -7761,15 +7884,6 @@ hz_exportRecordsCsv = async ({ scope = "all" } = {}) => {
 hz_updateRecords = {
   if (hz_viewMode !== "records") return html``
 
-  // Ensure Grid.js is available
-  try { await hz_loadGridjs() } catch (e) {
-    hz_recordsActionsHost.replaceChildren()
-    hz_recordsHost.replaceChildren(
-      html`<div class="warn"><b>Records table failed</b><br/><div class="hz-muted">Could not load Grid.js. ${String(e)}</div></div>`
-    )
-    return html``
-  }
-
   const resp = hz_recordsResp
   if (!resp?.rows || !resp?.ok) {
     hz_recordsActionsHost.replaceChildren()
@@ -7814,47 +7928,259 @@ hz_updateRecords = {
   actions.appendChild(btnAll)
   hz_recordsActionsHost.replaceChildren(actions)
 
-  const columns = [
-    { name: "admin0" },
-    { name: "admin1" },
-    { name: "admin2" },
-    { name: "scenario" },
-    { name: "timeframe" },
-    { name: "hazard" },
-    { name: "hazard_vars" },
-    { name: "crop" },
-    { name: "value", sort: true, formatter: (c) => hz_formatNumber(c, { digits: 2, compact: true }) }
-  ]
+  const recordsRows = hz_recordsRows.map((r) => ({
+    "admin0": r.admin0_name ?? null,
+    "admin1": r.admin1_name ?? null,
+    "admin2": r.admin2_name ?? null,
+    "scenario": r.scenario ?? null,
+    "timeframe": r.timeframe ?? null,
+    "hazard": r.hazard ?? null,
+    "hazard_vars": r.hazard_vars ?? null,
+    "crop": r.crop ?? null,
+    "value": (r.value === null || r.value === undefined) ? null : Number(r.value)
+  }))
 
-  const data = hz_recordsRows.map(r => [
-    r.admin0_name ?? null,
-    r.admin1_name ?? null,
-    r.admin2_name ?? null,
-    r.scenario ?? null,
-    r.timeframe ?? null,
-    r.hazard ?? null,
-    r.hazard_vars ?? null,
-    r.crop ?? null,
-    (r.value === null || r.value === undefined) ? null : Number(r.value)
-  ])
-
-  const host = document.createElement("div")
-  hz_recordsHost.replaceChildren(host)
-
-  hz_mountGrid(host, "records", {
-    columns,
-    data,
-    search: true,
-    sort: true,
-    fixedHeader: true,
-    height: "560px"
-  })
+  hz_recordsHost.replaceChildren(
+    hz_atlasTable(recordsRows, {
+      columns: ["admin0", "admin1", "admin2", "scenario", "timeframe", "hazard", "hazard_vars", "crop", "value"],
+      rows: 20,
+      height: "560px",
+      format: {
+        "value": (v) => {
+          const x = Number(v)
+          return Number.isFinite(x) ? hz_formatNumber(x, { digits: 2, compact: true }) : "—"
+        }
+      },
+      width: {
+        "admin0": 130,
+        "admin1": 150,
+        "admin2": 150,
+        "scenario": 110,
+        "timeframe": 110,
+        "hazard": 120,
+        "hazard_vars": 150,
+        "crop": 120,
+        "value": 110
+      }
+    })
+  )
 
   return html``
 }
+hz_setNodeText = (selector, text) => {
+  const el = hz_dashMount?.querySelector?.(selector)
+  if (el) el.textContent = String(text ?? "")
+}
+hz_setNodeMarkdown = (selector, text) => {
+  const el = hz_dashMount?.querySelector?.(selector)
+  if (!el) return
+  el.replaceChildren(md`${String(text ?? "")}`)
+}
+hz_safeChoiceLabel = (root, index, text) => {
+  try {
+    const labels = root?.querySelectorAll?.("label")
+    const el = labels?.[index]
+    if (!el) return
+    const textNodes = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE)
+    const target = textNodes.find((n) => String(n.textContent ?? "").trim())
+    if (target) {
+      target.textContent = ` ${String(text ?? "")}`
+      return
+    }
+    let span = el.querySelector(".hz-choice-label")
+    if (!span) {
+      span = document.createElement("span")
+      span.className = "hz-choice-label"
+      el.appendChild(span)
+    }
+    span.textContent = String(text ?? "")
+  } catch (_) {}
+}
+hz_syncQuestionCopy = {
+  const _langTick = masterLanguage
+  hz_dashMount
+  hz_setNodeText("#hz-q1-title", q1Title)
+  hz_setNodeMarkdown("#hz-q1-intro", q1IntroText)
+  hz_setNodeText("#hz-q2-title", q2Title)
+  hz_setNodeMarkdown("#hz-q2-intro", q2IntroText)
+  hz_setNodeMarkdown("#hz-q2-overview", q2DetailText)
+  hz_setNodeText("#hz-q3-title", q3Title)
+  hz_setNodeMarkdown("#hz-q3-intro", q3IntroText)
+  hz_setNodeMarkdown("#hz-q3-overview", q3DetailText)
+  hz_setNodeText("#hz-q4-title", q4Title)
+  hz_setNodeMarkdown("#hz-q4-intro", hz_q4IntroTextClean ?? q4IntroText)
+  hz_setNodeText("#hz-q5-title", q5Title)
+  hz_setNodeMarkdown("#hz-q5-intro", q5IntroText)
+  hz_setNodeMarkdown("#hz-q5-overview", q5DetailText)
+  return null
+}
+
+hz_syncQ1StaticLabels = {
+  const _langTick = masterLanguage
+  hz_dashMount
+  const apply = () => {
+    hz_setNodeText("#hz-q1-filters-title", hz_t("sections.q1.ui.filtersTitle"))
+    hz_setNodeText("#hz-q1-label-showpct", hz_t("sections.q1.ui.showPct"))
+    hz_setNodeText("#hz-q1-label-showdiff", hz_t("sections.q1.ui.showDifferences"))
+    hz_setNodeText("#hz-q1-label-height", hz_t("sections.q1.ui.height"))
+    hz_setNodeText("#hz-q1-chart-title", hz_t("sections.q1.ui.chartTitle"))
+    hz_setNodeText("#hz-q1-table-title", hz_t("sections.q1.ui.summaryTableTitle"))
+    hz_setNodeText("#hz-q1-insight-loading", hz_t("sections.q1.ui.loadingInsight"))
+    hz_safeChoiceLabel(viewof hz_viewMode, 0, hz_t("general.view.chart"))
+    hz_safeChoiceLabel(viewof hz_viewMode, 1, hz_t("general.view.summaryTable"))
+  }
+  apply()
+  requestAnimationFrame(apply)
+  return null
+}
+
+hz_syncQ2StaticLabels = {
+  const _langTick = masterLanguage
+  hz_dashMount
+  const apply = () => {
+    hz_setNodeText("#hz-q2-label-showpct", hz_t("sections.q2.ui.showPct"))
+    hz_setNodeText("#hz-q2-label-showdiff", hz_t("sections.q2.ui.showDifferences"))
+    hz_setNodeText("#hz-q2-label-showcompound", hz_t("sections.q2.ui.showCompoundHazards"))
+    hz_setNodeText("#hz-q2-label-simplifycompound", hz_t("sections.q2.ui.simplifyCompoundHazards"))
+    hz_setNodeText("#hz-q2-label-includenohazard", hz_t("sections.q2.ui.includeNoHazard"))
+    hz_setNodeText("#hz-q2-label-includedecreases", hz_t("sections.q2.ui.includeDecreases"))
+    hz_setNodeText("#hz-q2-label-topn", hz_t("sections.q2.ui.numberOfCommodities"))
+    hz_setNodeText("#hz-q2-label-height", hz_t("sections.q2.ui.height"))
+    hz_setNodeText("#hz-q2-chart-title", hz_t("sections.q2.ui.chartTitle"))
+    hz_setNodeText("#hz-q2-table-title", hz_t("sections.q2.ui.summaryTableTitle"))
+    hz_setNodeText("#hz-q2-insight-loading", hz_t("sections.q2.ui.loadingInsight"))
+    hz_safeChoiceLabel(viewof hz_q2_viewMode, 0, hz_t("general.view.chart"))
+    hz_safeChoiceLabel(viewof hz_q2_viewMode, 1, hz_t("general.view.summaryTable"))
+  }
+  apply()
+  requestAnimationFrame(apply)
+  return null
+}
+
+hz_syncQ3StaticLabels = {
+  const _langTick = masterLanguage
+  hz_dashMount
+  const apply = () => {
+    hz_setNodeText("#hz-q3-label-showpct", hz_t("sections.q3.ui.showPct"))
+    hz_setNodeText("#hz-q3-label-showcompound", hz_t("sections.q3.ui.showCompoundHazards"))
+    hz_setNodeText("#hz-q3-label-simplifycompound", hz_t("sections.q3.ui.simplifyCompoundHazards"))
+    hz_setNodeText("#hz-q3-label-includenohazard", hz_t("sections.q3.ui.includeNoHazard"))
+    hz_setNodeText("#hz-q3-label-freex", hz_t("sections.q3.ui.freeXAxis"))
+    hz_setNodeText("#hz-q3-label-topn", hz_t("sections.q3.ui.numberOfCommodities"))
+    hz_setNodeText("#hz-q3-label-height", hz_t("sections.q3.ui.height"))
+  }
+  apply()
+  requestAnimationFrame(apply)
+  return null
+}
+
+hz_syncQ4StaticLabels = {
+  const _langTick = masterLanguage
+  hz_dashMount
+  hz_q4_dashboardCard
+  hz_q4_syncCardMeta
+  const apply = () => {
+    hz_setNodeText("#hz-q4-filters-title", hz_t("sections.q4.ui.filtersTitle"))
+    hz_setNodeText("#hz-q4-map-title", hz_t("sections.q4.ui.mapTitle"))
+    hz_setNodeText("#hz-q4-label-mapcolor", hz_t("sections.q4.ui.mapColor"))
+    hz_setNodeText("#hz-q4-label-showmapsubtitle", hz_t("sections.q4.ui.showMapSubtitle"))
+    hz_setNodeText("#hz-q4-label-mapheight", hz_t("sections.q4.ui.mapHeight"))
+    hz_setNodeText("#hz-q4-label-showpct", hz_t("sections.q4.ui.showPct"))
+    hz_setNodeText("#hz-q4-label-showdiff", hz_t("sections.q4.ui.showDifferences"))
+    hz_setNodeText("#hz-q4-label-showcompound", hz_t("sections.q4.ui.showCompoundHazards"))
+    hz_setNodeText("#hz-q4-label-simplifycompound", hz_t("sections.q4.ui.simplifyCompoundHazards"))
+    hz_setNodeText("#hz-q4-label-topn", hz_t("sections.q4.ui.numberOfGeographiesToShow"))
+    hz_setNodeText("#hz-q4-label-height", hz_t("sections.q4.ui.height"))
+    hz_setNodeText("#hz-q4-chart-title", hz_t("sections.q4.ui.chartTitle"))
+    hz_setNodeText("#hz-q4-table-title", hz_t("sections.q4.ui.summaryTableTitle"))
+    hz_setNodeText("#hz-q4-loading-map", hz_t("sections.q4.ui.loadingMap"))
+    hz_setNodeText("#hz-q4-loading-chart", hz_t("sections.q4.ui.loadingChart"))
+    hz_setNodeText("#hz-q4-loading-table", hz_t("sections.q4.ui.loadingTable"))
+    hz_setNodeText("#hz-q4-loading-insights", hz_t("sections.q4.ui.loadingInsights"))
+    hz_safeChoiceLabel(viewof hz_q4_viewMode, 0, hz_t("general.view.chart"))
+    hz_safeChoiceLabel(viewof hz_q4_viewMode, 1, hz_t("general.view.summaryTable"))
+  }
+  apply()
+  requestAnimationFrame(() => {
+    apply()
+    requestAnimationFrame(apply)
+  })
+  return null
+}
+
+hz_syncQ5StaticLabels = {
+  const _langTick = masterLanguage
+  hz_dashMount
+  hz_q5_dashboardCard
+  const apply = () => {
+    hz_setNodeText("#hz-q5-label-scale", hz_t("sections.q5.ui.scale"))
+    hz_setNodeText("#hz-q5-label-hazards", hz_t("sections.q5.ui.hazards"))
+    hz_setNodeText("#hz-q5-label-scenarios", hz_t("sections.q5.ui.scenarios"))
+    hz_setNodeText("#hz-q5-label-periods", hz_t("sections.q5.ui.periods"))
+    hz_setNodeText("#hz-q5-label-uncertainty", hz_t("sections.q5.ui.uncertainty"))
+    hz_setNodeText("#hz-q5-label-lines", hz_t("sections.q5.ui.lines"))
+    hz_setNodeText("#hz-q5-label-freey", hz_t("sections.q5.ui.freeYAxis"))
+    hz_setNodeText("#hz-q5-label-height", hz_t("sections.q5.ui.height"))
+    hz_setNodeText("#hz-q5-loading-table", hz_t("sections.q5.ui.loadingTable"))
+    hz_safeChoiceLabel(viewof hz_q5_view, 0, hz_t("general.view.chart"))
+    hz_safeChoiceLabel(viewof hz_q5_view, 1, hz_t("general.view.summaryTable"))
+    hz_safeChoiceLabel(viewof hz_q5_scale, 0, hz_t("sections.q5.ui.actualExposure"))
+    hz_safeChoiceLabel(viewof hz_q5_scale, 1, hz_t("sections.q5.ui.relativeToHistoricBaseline"))
+  }
+  apply()
+  requestAnimationFrame(() => {
+    apply()
+    requestAnimationFrame(apply)
+  })
+  return null
+}
+
+hz_syncMountedText = {
+  const _langTick = masterLanguage
+  hz_renderApp
+  hz_mountDash
+  const apply = () => {
+    hz_setNodeText("#hz-q1-title", q1Title)
+    hz_setNodeMarkdown("#hz-q1-intro", q1IntroText)
+    hz_setNodeText("#hz-q2-title", q2Title)
+    hz_setNodeMarkdown("#hz-q2-intro", q2IntroText)
+    hz_setNodeMarkdown("#hz-q2-overview", q2DetailText)
+    hz_setNodeText("#hz-q3-title", q3Title)
+    hz_setNodeMarkdown("#hz-q3-intro", q3IntroText)
+    hz_setNodeMarkdown("#hz-q3-overview", q3DetailText)
+    hz_setNodeText("#hz-q4-title", q4Title)
+    hz_setNodeMarkdown("#hz-q4-intro", hz_q4IntroTextClean ?? q4IntroText)
+    hz_setNodeText("#hz-q5-title", q5Title)
+    hz_setNodeMarkdown("#hz-q5-intro", q5IntroText)
+    hz_setNodeMarkdown("#hz-q5-overview", q5DetailText)
+    hz_setNodeText("#hz-q1-filters-title", hz_t("sections.q1.ui.filtersTitle"))
+    hz_setNodeText("#hz-q1-label-showpct", hz_t("sections.q1.ui.showPct"))
+    hz_setNodeText("#hz-q1-label-showdiff", hz_t("sections.q1.ui.showDifferences"))
+    hz_setNodeText("#hz-q1-label-height", hz_t("sections.q1.ui.height"))
+    hz_setNodeText("#hz-q1-chart-title", hz_t("sections.q1.ui.chartTitle"))
+    hz_setNodeText("#hz-q1-table-title", hz_t("sections.q1.ui.summaryTableTitle"))
+    hz_setNodeText("#hz-q1-insight-loading", hz_t("sections.q1.ui.loadingInsight"))
+    hz_safeChoiceLabel(viewof hz_viewMode, 0, hz_t("general.view.chart"))
+    hz_safeChoiceLabel(viewof hz_viewMode, 1, hz_t("general.view.summaryTable"))
+  }
+  apply()
+  requestAnimationFrame(() => {
+    apply()
+    requestAnimationFrame(apply)
+  })
+  return null
+}
+
 // Bootstrap cell: forces mounts + updates to execute without blocking hz_main.
 hz_bootstrap = {
   hz_mountDash
+  hz_syncQuestionCopy
+  hz_syncQ1StaticLabels
+  hz_syncQ2StaticLabels
+  hz_syncQ3StaticLabels
+  hz_syncQ4StaticLabels
+  hz_syncQ5StaticLabels
+  hz_syncMountedText
   hz_registerUi
   hz_recordsPagerSync
   hz_recordsResetPage
@@ -7892,7 +8218,6 @@ hz_run = {
 hz_run
 ```
 
-
 ::: {.hidden}
 
 ### Methods
@@ -7906,7 +8231,6 @@ hz_run
 ::: {.hidden}
 {{< include /components/_lang.qmd >}}
 :::
-
 
 ## Styling
 
@@ -7971,22 +8295,41 @@ function NavbarLangSelector(language_obj, masterLanguage) {
 NavbarLangSelector(languages, masterLanguage)
 ```
 
-
 ```{ojs}
 // This cell contains the notebook title + section headings, driven by nbText.json
 nbText = await FileAttachment("/data/hazardExposure/nbText.json").json();
 
-hz_textObj = (x) => x ?? { en: "", fr: "" };
+hz_textObj = (x) => (x && typeof x === "object" ? x : Object.create(null));
+hz_textPath = (obj, path) => {
+  const parts = Array.isArray(path) ? path : String(path ?? "").split(".").filter(Boolean)
+  return parts.reduce((acc, key) => acc?.[key], obj)
+}
+hz_textLookup = (path) => {
+  const hit = hz_textPath(nbText, path)
+  return (hit && typeof hit === "object") ? hit : Object.create(null)
+}
+hz_t = (path) => _lang(hz_textLookup(path))
+hz_tpl = (path, vars = {}) => {
+  const base = String(hz_t(path) ?? "")
+  return base.replace(/\{(\w+)\}/g, (_, key) => String(vars?.[key] ?? `{${key}}`))
+}
+hz_hazardLabel = (raw) => {
+  const s = String(raw ?? "").trim().toLowerCase()
+  if (!s) return "—"
+  if (s === "dry" || s === "dry (any)") return hz_t("general.hazards.dry")
+  if (s === "heat" || s === "heat (any)") return hz_t("general.hazards.heat")
+  if (s === "wet" || s === "wet (any)") return hz_t("general.hazards.wet")
+  if (s === "compound") return hz_t("general.hazards.compound")
+  if (s === "any" || s === "any hazard") return hz_t("general.hazards.anyHazard")
+  if (s === "no hazard") return hz_t("general.hazards.noHazard")
+  return String(raw ?? "")
+}
 
 nbTitle = _lang(hz_textObj(nbText?.title));
 heading1 = _lang(hz_textObj(nbText?.sections?.overview?.title));
 
 q1Title = _lang(hz_textObj(nbText?.sections?.q1?.title));
 q1IntroText = _lang(hz_textObj(nbText?.sections?.q1?.introText));
-q1DetailText = _lang(hz_textObj(nbText?.sections?.q1?.detailText));
-
-heading2 = q1Title;
-
 q2Title = _lang(hz_textObj(nbText?.sections?.q2?.title));
 q2IntroText = _lang(hz_textObj(nbText?.sections?.q2?.introText));
 q2DetailText = _lang(hz_textObj(nbText?.sections?.q2?.detailText));
@@ -7997,16 +8340,9 @@ q3DetailText = _lang(hz_textObj(nbText?.sections?.q3?.detailText));
 
 q4Title = _lang(hz_textObj(nbText?.sections?.q4?.title));
 q4IntroText = _lang(hz_textObj(nbText?.sections?.q4?.introText));
-q4DetailText = _lang(hz_textObj(nbText?.sections?.q4?.detailText));
 q5Title = _lang(hz_textObj(nbText?.sections?.q5?.title));
 q5IntroText = _lang(hz_textObj(nbText?.sections?.q5?.introText));
 q5DetailText = _lang(hz_textObj(nbText?.sections?.q5?.detailText));
-
-
-heading3 = q3Title;
-heading4 = q4Title;
-heading5 = q5Title;
-
 
 ```
 
