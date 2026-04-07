@@ -575,6 +575,29 @@ html, body { overflow-anchor: none; }
     align-items: center;
   }
 
+  .hz-summaryDownload{
+    margin-top: 10px;
+  }
+  .hz-summaryDownload :where(button, input[type="button"], input[type="submit"]){
+    appearance: none;
+    -webkit-appearance: none;
+    background: #ffffff !important;
+    color: #111111 !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 8px !important;
+    padding: 0.7rem 1.15rem !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+    transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+  }
+  .hz-summaryDownload :where(button, input[type="button"], input[type="submit"]):hover,
+  .hz-summaryDownload :where(button, input[type="button"], input[type="submit"]):focus-visible{
+    background: #2f7d32 !important;
+    color: #ffffff !important;
+    border-color: #2f7d32 !important;
+    box-shadow: none !important;
+  }
+
   /* Controls layout: responsive 2–3 columns to reduce scrolling */
   .hz-controlsCompact .hz-controlsRows{
     display:flex;
@@ -3391,8 +3414,8 @@ hz_q2TableView = {
       "Right (%)": fmtPct,
       "Δ (pp)": fmtPP
     },
-    rows: 16,
-    height: "540px",
+    rows: tableData.length,
+    height: null,
     width: {
       "Crop": 220,
       "Hazard": 180,
@@ -3404,6 +3427,39 @@ hz_q2TableView = {
       "Δ (pp)": 120
     }
   })
+}
+
+hz_q2SummaryExport = {
+  const state = hz_q2DisplayState ?? {}
+  const rows = Array.isArray(state.displayRows) ? state.displayRows : []
+  if (!rows.length) return { filename: "most_exposed_crops", data: [] }
+
+  const showPct = !!hz_q2_relative
+  const showDiff = !!hz_q2_difference
+
+  const tableData = rows.map((r) => ({
+    "Crop": r.crop,
+    "Hazard": r.hazard,
+    "Left (abs)": Number(r?.total1 ?? 0),
+    "Right (abs)": Number(r?.total2 ?? 0),
+    "Δ (abs)": Number(r?.diff ?? 0),
+    "Left (%)": Number(r?.perc1 ?? 0),
+    "Right (%)": Number(r?.perc2 ?? 0),
+    "Δ (pp)": Number(r?.perc_diff ?? 0)
+  }))
+
+  const columns = showDiff
+    ? (showPct
+        ? ["Crop", "Hazard", "Δ (pp)"]
+        : ["Crop", "Hazard", "Δ (abs)"])
+    : (showPct
+        ? ["Crop", "Hazard", "Left (%)", "Right (%)"]
+        : ["Crop", "Hazard", "Left (abs)", "Right (abs)"])
+
+  return {
+    filename: "most_exposed_crops",
+    data: tableData.map((row) => Object.fromEntries(columns.map((col) => [col, row[col]])))
+  }
 }
 ```
 
@@ -3635,8 +3691,8 @@ hz_q2InsightView = {
         hz_t("sections.q2.insight.columns.topAlone"),
         hz_t("sections.q2.insight.columns.topCompound")
       ],
-      rows: 5,
-      height: "260px",
+      rows: left.table.length,
+      height: null,
       format: {
         [hz_t("sections.q2.insight.columns.unit")]: fmtAbs,
         [hz_t("sections.q2.insight.columns.pct")]: fmtPct
@@ -3652,8 +3708,8 @@ hz_q2InsightView = {
         hz_t("sections.q2.insight.columns.topAlone"),
         hz_t("sections.q2.insight.columns.topCompound")
       ],
-      rows: 5,
-      height: "260px",
+      rows: right.table.length,
+      height: null,
       format: {
         [hz_t("sections.q2.insight.columns.unit")]: fmtAbs,
         [hz_t("sections.q2.insight.columns.pct")]: fmtPct
@@ -3670,13 +3726,15 @@ hz_q2InsightView = {
         hz_t("sections.q2.insight.columns.topDeltaAlone"),
         hz_t("sections.q2.insight.columns.topDeltaCompound")
       ],
-      rows: 5,
-      height: "260px",
+      rows: diffTable.length,
+      height: null,
       format: {
         [hz_t("sections.q2.insight.columns.deltaUnit")]: fmtAbsSigned,
         [hz_t("sections.q2.insight.columns.deltaPct")]: fmtPP
       }
     })}
+
+    ${hz_renderSummaryDownloadButton(hz_q2SummaryExport, "most_exposed_crops")}
   </div>`
 }
 ```
@@ -4491,8 +4549,8 @@ hz_q5TableView = {
       "Δ% vs baseline": fmtPct,
       "CI width": fmtAbs
     },
-    rows: 14,
-    height: "580px",
+    rows: data.length,
+    height: null,
     width: {
       "Hazard": 150,
       "Scenario": 120,
@@ -4505,6 +4563,75 @@ hz_q5TableView = {
       "CI width": 120
     }
   })
+}
+
+hz_q5SummaryExport = {
+  if (hz_q5Meta?.error) return { filename: "exposure_by_ssp_time_gcm", data: [] }
+
+  const rows = hz_q5PlotRows ?? []
+  if (!rows.length) return { filename: "exposure_by_ssp_time_gcm", data: [] }
+
+  const hasUnc = !!hz_q5Meta?.has_value_sd
+  const out = (rows ?? [])
+    .filter(r => {
+      const h = String(r?.hazard ?? "").trim()
+      const s = String(r?.scenario ?? "").trim()
+      const tf = String(r?.timeframe ?? "").trim()
+      return (r && tf &&
+              h && h.toLowerCase() !== "null" &&
+              s && s.toLowerCase() !== "null")
+    })
+    .map((r) => {
+      const b = hz_q5BaselineFor(r.hazard)
+      const v = (r.value == null ? null : Number(r.value))
+      const bb = (b == null ? null : Number(b))
+      const delta = (bb == null || v == null || !Number.isFinite(bb) || !Number.isFinite(v))
+        ? null
+        : (v - bb)
+      const pct = (bb == null || !Number.isFinite(bb) || bb === 0 || delta == null || !Number.isFinite(delta))
+        ? null
+        : (100 * delta / bb)
+      const ciwRaw = (!hasUnc || r.value_low == null || r.value_high == null)
+        ? null
+        : (Number(r.value_high) - Number(r.value_low))
+      const ciw = (ciwRaw == null || !Number.isFinite(ciwRaw) || ciwRaw <= 0) ? null : ciwRaw
+      return ({
+        "Hazard": String(r.hazard ?? ""),
+        "Scenario": String(r.scenario ?? "").toUpperCase(),
+        "Period": String(r.timeframe ?? ""),
+        "Year": Number(r.year),
+        "Value": v,
+        "Baseline": (bb == null || !Number.isFinite(bb)) ? null : bb,
+        "Δ vs baseline": (delta == null || !Number.isFinite(delta)) ? null : Number(delta),
+        "Δ% vs baseline": (pct == null || !Number.isFinite(pct)) ? null : Number(pct),
+        "CI width": ciw
+      })
+    })
+
+  out.sort((a, b) =>
+    String(a["Hazard"]).localeCompare(String(b["Hazard"])) ||
+    (Number(a["Year"]) - Number(b["Year"])) ||
+    String(a["Scenario"]).localeCompare(String(b["Scenario"]))
+  )
+
+  const scaleMode = String(hz_q5_scale ?? "abs")
+  const valueLabel = (scaleMode === "idx") ? "Index" : "Value"
+  const data = out.map((d) => ({
+    "Hazard": d["Hazard"],
+    "Scenario": d["Scenario"],
+    "Period": d["Period"],
+    "Year": d["Year"],
+    [valueLabel]: d["Value"],
+    "Baseline": d["Baseline"],
+    "Δ vs baseline": d["Δ vs baseline"],
+    "Δ% vs baseline": d["Δ% vs baseline"],
+    "CI width": d["CI width"]
+  }))
+
+  return {
+    filename: "exposure_by_ssp_time_gcm",
+    data
+  }
 }
 
 hz_q5_tableHost = html`
@@ -4712,6 +4839,7 @@ hz_q5Insight = {
           ? hz_t("sections.q5.insight.uncertaintyMissing")
           : hz_t("sections.q5.insight.uncertaintyNoSd")}`}</div>`}
       </div>
+      ${hz_renderSummaryDownloadButton(hz_q5SummaryExport, "exposure_by_ssp_time_gcm")}
     </div>
   `
 }
@@ -5206,6 +5334,13 @@ hz_mapHost  = html`<div class="hz-mapWrap"><div class="hz-loading">Loading map�
 hz_recordsActionsHost = html`<div class="hz-actions"></div>`
 hz_recordsHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading records…</div></div>`
 
+hz_renderSummaryDownloadButton = (spec, fallbackName = "summary_table") => {
+  const rows = Array.isArray(spec?.data) ? spec.data : []
+  if (!rows.length) return html``
+  const name = String(spec?.filename ?? fallbackName).replace(/\.csv$/i, "")
+  return html`<div class="hz-actions hz-summaryDownload">${downloadButton(rows, name, "Download Data")}</div>`
+}
+
 // Register UI elements for cross-cell updates
 hz_registerUi = {
   const ui = (globalThis.__ATLAS_HZ_UI__ ??= {})
@@ -5276,6 +5411,31 @@ hz_q1_applyView = {
   return null
 }
 
+hz_q1SummaryExport = {
+  const rows = Array.isArray(hz_q1DisplayRows) ? hz_q1DisplayRows : []
+  if (!rows.length) return { filename: "exposure_breakdown_by_hazard", data: [] }
+
+  const usePct = !!hz_relative
+  const useDiff = !!hz_difference
+  const tableData = rows.map((r) => ({
+    "Hazard": r.hazard,
+    "Left (abs)": Number(r?.total1 ?? 0),
+    "Right (abs)": Number(r?.total2 ?? 0),
+    "Δ (abs)": Number(r?.total_diff ?? (Number(r?.total2 ?? 0) - Number(r?.total1 ?? 0))),
+    "Left (%)": Number(r?.perc1 ?? 0),
+    "Right (%)": Number(r?.perc2 ?? 0),
+    "Δ (pp)": Number(r?.pct_diff ?? 0)
+  }))
+
+  const columns = useDiff
+    ? ["Hazard", usePct ? "Δ (pp)" : "Δ (abs)"]
+    : ["Hazard", usePct ? "Left (%)" : "Left (abs)", usePct ? "Right (%)" : "Right (abs)"]
+
+  return {
+    filename: "exposure_breakdown_by_hazard",
+    data: tableData.map((row) => Object.fromEntries(columns.map((col) => [col, row[col]])))
+  }
+}
 
 hz_dashboardShell = hz_noJumpRoot(html`
   <div class="hz-card">
@@ -5322,6 +5482,13 @@ viewof hz_q2_topN = hz_noJumpInput(Inputs.range([1, Math.max(1, hz_q2_selectedCo
 }))
 
 viewof hz_q2_chartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
+
+viewof hz_q3_viewMode = Inputs.radio(["chart", "table"], {
+  label: "",
+  value: "chart",
+  format: (v) => ({ chart: "Chart", table: "Summary table" }[v] ?? v)
+})
+hz_q3_viewMode.classList?.add?.("hz-viewToggle")
 
 viewof hz_q3_relative = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q3_showCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
@@ -6021,17 +6188,39 @@ hz_q5_mountFilters = hz_mountNodeOnce(hz_q5_filtersHost, hz_q5sync_filtersPanel)
 // Q3 — Hazard overlap 
 
 hz_q3_chartHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading chart…</div></div>`
+hz_q3_tableHost = html`<div class="hz-tableWrap hz-tableHost"><div class="hz-loading">Loading table…</div></div>`
 
 // Q3 busy overlay controller
 hz_q3_ui = {
   const ui = (globalThis.__ATLAS_HZ_UI_Q3__ ??= {})
   ui.chartWrap = hz_q3_chartHost
+  ui.tableWrap = hz_q3_tableHost
   ui._busyCount = ui._busyCount ?? 0
   ui.setBusy = (on) => {
     ui._busyCount = Math.max(0, ui._busyCount + (on ? 1 : -1))
     const busy = ui._busyCount > 0
     try { ui.chartWrap?.classList.toggle("hz-chartWrap--busy", busy) } catch (_) {}
+    try { ui.tableWrap?.classList.toggle("hz-tableWrap--busy", busy) } catch (_) {}
   }
+  return null
+}
+
+hz_q3_chartCard = html`<div class="hz-sideCard">
+  <div class="hz-sideCard__header"><div id="hz-q3-chart-title" class="hz-sideCard__title">Chart</div></div>
+  <div class="hz-sideCard__body">${hz_q3_chartHost}</div>
+</div>`;
+
+hz_q3_tableCard = html`<div class="hz-sideCard">
+  <div class="hz-sideCard__header"><div id="hz-q3-table-title" class="hz-sideCard__title">Summary table</div></div>
+  <div class="hz-sideCard__body">${hz_q3_tableHost}</div>
+</div>`;
+
+hz_q3_applyView = {
+  const mode = (hz_q3_viewMode || "chart")
+  try { hz_q3_chartCard.style.display = (mode === "chart") ? "" : "none" } catch (_) {}
+  try { hz_q3_tableCard.style.display = (mode === "table") ? "" : "none" } catch (_) {}
+  try { hz_q3_settingsWrap.style.visibility = "visible" } catch (_) {}
+  try { hz_blurFocusChain(hz_q3_dashboardCard) } catch (_) {}
   return null
 }
 
@@ -6056,6 +6245,486 @@ hz_q3RowsL = hz_q3Resp.left ?? []
 hz_q3RowsR = hz_q3Resp.right ?? []
 hz_q3DenomByCrop = hz_q3Resp.denom_by_crop ?? []
 hz_q3DenomTotal = (hz_q3DenomByCrop ?? []).reduce((s, d) => s + (Number(d?.value_tot) || 0), 0)
+
+hz_q3TableView = {
+  if (!hz_q3Resp?.ok) return html`<div class="hz-muted">No data.</div>`
+
+  const num = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? v : 0
+  }
+  const clampPct = (x) => Math.max(-100, Math.min(100, x))
+
+  const leftRows = Array.isArray(hz_q3RowsL) ? hz_q3RowsL : []
+  const rightRows = Array.isArray(hz_q3RowsR) ? hz_q3RowsR : []
+  const denomByCrop = Array.isArray(hz_q3DenomByCrop) ? hz_q3DenomByCrop : []
+  const denomMap = new Map(denomByCrop.map(d => [d?.crop, num(d?.value_tot)]))
+  const denomTotal = num(hz_q3DenomTotal) || Array.from(denomMap.values()).reduce((a,b) => a + b, 0)
+
+  const anyMap = (rows) => {
+    const m = new Map()
+    for (const r of rows) {
+      if (String(r?.hazard ?? "") !== "any") continue
+      const crop = r?.crop
+      if (!crop) continue
+      m.set(crop, num(r?.total))
+    }
+    return m
+  }
+  const anyL = anyMap(leftRows)
+  const anyR = anyMap(rightRows)
+
+  const withNoHazard = (rows, any) => {
+    const out = rows.slice()
+    const crops = new Set([...Array.from(denomMap.keys()), ...rows.map(r => r?.crop).filter(Boolean)])
+    for (const crop of crops) {
+      const tot = num(denomMap.get(crop))
+      const exposed = num(any.get(crop))
+      out.push({ hazard: "no hazard", crop, total: Math.max(0, tot - exposed) })
+    }
+    return out
+  }
+  const L0 = withNoHazard(leftRows, anyL)
+  const R0 = withNoHazard(rightRows, anyR)
+
+  const toExclusive = (rows) => {
+    const out = []
+    for (const r of rows) {
+      const h0 = String(r?.hazard ?? "")
+      const crop = r?.crop
+      if (!crop) continue
+      const v = num(r?.total)
+      if (h0 === "any") continue
+      if (h0 === "dry") out.push({ hazard: "dry (only)", crop, total: v })
+      else if (h0 === "heat") out.push({ hazard: "heat (only)", crop, total: v })
+      else if (h0 === "wet") out.push({ hazard: "wet (only)", crop, total: v })
+      else if (h0 === "no hazard") out.push({ hazard: "no hazard", crop, total: v })
+      else if (h0 === "dry+heat" || h0 === "dry+wet" || h0 === "heat+wet" || h0 === "dry+heat+wet") out.push({ hazard: h0, crop, total: v })
+    }
+    return out
+  }
+
+  const simplifyExclusive = (rows) => {
+    const bucket = (h) => {
+      if (h === "no hazard") return "no hazard"
+      const core = String(h ?? "").replace(" (only)", "")
+      const n = core.split("+").filter(Boolean).length
+      if (n === 1) return "1 hazard"
+      if (n === 2) return "2 hazards"
+      if (n === 3) return "3 hazards"
+      return null
+    }
+    const agg = new Map()
+    for (const r of rows) {
+      const crop = r?.crop
+      if (!crop) continue
+      const b = bucket(String(r?.hazard ?? ""))
+      if (!b) continue
+      const key = `${crop}||${b}`
+      agg.set(key, (agg.get(key) || 0) + num(r?.total))
+    }
+    const out = []
+    for (const [key, total] of agg.entries()) {
+      const [crop, hazard] = key.split("||")
+      out.push({ crop, hazard, total })
+    }
+    return out
+  }
+
+  const toOverlapping = (rows) => {
+    const agg = new Map()
+    const add = (crop, haz, v) => {
+      const key = `${crop}||${haz}`
+      agg.set(key, (agg.get(key) || 0) + v)
+    }
+    for (const r of rows) {
+      const crop = r?.crop
+      if (!crop) continue
+      const h = String(r?.hazard ?? "")
+      const v = num(r?.total)
+      if (!h) continue
+      if (h === "no hazard") { add(crop, "no hazard", v); continue }
+      if (h === "any") continue
+      if (h.includes("dry")) add(crop, "dry (any)", v)
+      if (h.includes("heat")) add(crop, "heat (any)", v)
+      if (h.includes("wet")) add(crop, "wet (any)", v)
+    }
+    const out = []
+    for (const [key, total] of agg.entries()) {
+      const [crop, hazard] = key.split("||")
+      out.push({ crop, hazard, total })
+    }
+    return out
+  }
+
+  const showCompound = !!hz_q3_showCompound
+  const simplify = !!hz_q3_simplifyCompound
+  const showNoHaz = !!hz_q3_includeNoHazard
+
+  const L = showCompound ? toExclusive(L0) : toOverlapping(L0)
+  const R = showCompound ? toExclusive(R0) : toOverlapping(R0)
+
+  const Lb = (showCompound && simplify) ? simplifyExclusive(L) : L
+  const Rb = (showCompound && simplify) ? simplifyExclusive(R) : R
+
+  const hazardCore = showCompound
+    ? (simplify
+        ? ["1 hazard", "2 hazards", "3 hazards"]
+        : ["dry (only)", "heat (only)", "wet (only)", "dry+heat", "dry+wet", "heat+wet", "dry+heat+wet"])
+    : ["dry (any)", "heat (any)", "wet (any)"]
+
+  const hazardDomain = showNoHaz ? hazardCore.concat(["no hazard"]) : hazardCore.slice()
+
+  const key = (crop, hazard) => `${crop}||${hazard}`
+  const mapSide = (rows) => {
+    const m = new Map()
+    for (const r of rows) {
+      const crop = r?.crop
+      const haz = String(r?.hazard ?? "")
+      if (!crop || !haz) continue
+      if (!hazardDomain.includes(haz)) continue
+      m.set(key(crop, haz), num(r?.total))
+    }
+    return m
+  }
+  const mL = mapSide(Lb)
+  const mR = mapSide(Rb)
+
+  const cropsAll = new Set([
+    ...Array.from(denomMap.keys()),
+    ...Lb.map(r => r?.crop).filter(Boolean),
+    ...Rb.map(r => r?.crop).filter(Boolean)
+  ])
+
+  const score = (crop) => num(anyL.get(crop)) + num(anyR.get(crop))
+  const topCropsSource = Array.from(cropsAll).sort((a,b) => score(b) - score(a))
+  const topN = Math.max(1, Math.min(Math.max(1, topCropsSource.length || 1), Number(hz_q3_topN) || topCropsSource.length || 1))
+  const topCrops = topCropsSource.slice(0, topN)
+  const topSet = new Set(topCrops)
+
+  const otherTotals = new Map()
+  for (const haz of hazardDomain) {
+    for (const crop of cropsAll) {
+      if (topSet.has(crop)) continue
+      const k = key(crop, haz)
+      const prev = otherTotals.get(haz) || { left: 0, right: 0 }
+      prev.left += num(mL.get(k))
+      prev.right += num(mR.get(k))
+      otherTotals.set(haz, prev)
+    }
+  }
+
+  const cropDomain = topCrops.concat(["Other"])
+  const cropOrder = new Map(cropDomain.map((crop, i) => [crop, i]))
+  const hazOrder = new Map(hazardDomain.map((haz, i) => [haz, i]))
+  const showPct = !!hz_q3_relative
+
+  const tableData = []
+  for (const haz of hazardDomain) {
+    for (const crop of cropDomain) {
+      let left = 0
+      let right = 0
+      if (crop === "Other") {
+        const tot = otherTotals.get(haz) || { left: 0, right: 0 }
+        left = tot.left
+        right = tot.right
+      } else {
+        left = num(mL.get(key(crop, haz)))
+        right = num(mR.get(key(crop, haz)))
+      }
+      if (left === 0 && right === 0) continue
+      const diff = right - left
+      const leftPct = clampPct(denomTotal ? (100 * left / denomTotal) : 0)
+      const rightPct = clampPct(denomTotal ? (100 * right / denomTotal) : 0)
+      const diffPct = rightPct - leftPct
+      tableData.push({
+        "Hazard": haz,
+        "Crop": crop,
+        "Left (abs)": left,
+        "Right (abs)": right,
+        "Δ (abs)": diff,
+        "Left (%)": leftPct,
+        "Right (%)": rightPct,
+        "Δ (pp)": diffPct
+      })
+    }
+  }
+
+  tableData.sort((a, b) => {
+    const hazCmp = (hazOrder.get(a?.["Hazard"]) ?? 9999) - (hazOrder.get(b?.["Hazard"]) ?? 9999)
+    if (hazCmp !== 0) return hazCmp
+    return (cropOrder.get(a?.["Crop"]) ?? 9999) - (cropOrder.get(b?.["Crop"]) ?? 9999)
+  })
+
+  if (!tableData.length) return html`<div class="hz-muted">No data.</div>`
+
+  const fmtAbs = (v) => hz_formatNumber(Number(v ?? 0), { digits: 2, compact: false })
+  const fmtPct = (v) => {
+    const x = Number(v)
+    if (!Number.isFinite(x)) return "—"
+    return `${hz_formatNumber(x, { digits: 2, compact: false })}%`
+  }
+  const fmtPP = (v) => {
+    const x = Number(v)
+    if (!Number.isFinite(x)) return "—"
+    const sign = x > 0 ? "+" : ""
+    return `${sign}${hz_formatNumber(x, { digits: 2, compact: false })} pp`
+  }
+  const fmtSignedAbs = (v) => {
+    const x = Number(v)
+    if (!Number.isFinite(x)) return "—"
+    const sign = x > 0 ? "+" : ""
+    return `${sign}${hz_formatNumber(x, { digits: 2, compact: false })}`
+  }
+
+  const columns = showPct
+    ? ["Hazard", "Crop", "Left (%)", "Right (%)", "Δ (pp)"]
+    : ["Hazard", "Crop", "Left (abs)", "Right (abs)", "Δ (abs)"]
+
+  return hz_atlasTable(tableData, {
+    columns,
+    format: {
+      "Left (abs)": fmtAbs,
+      "Right (abs)": fmtAbs,
+      "Δ (abs)": fmtSignedAbs,
+      "Left (%)": fmtPct,
+      "Right (%)": fmtPct,
+      "Δ (pp)": fmtPP
+    },
+    rows: tableData.length,
+    height: null,
+    width: {
+      "Hazard": 180,
+      "Crop": 220,
+      "Left (abs)": 140,
+      "Right (abs)": 140,
+      "Δ (abs)": 140,
+      "Left (%)": 120,
+      "Right (%)": 120,
+      "Δ (pp)": 120
+    }
+  })
+}
+
+hz_q3SummaryExport = {
+  if (!hz_q3Resp?.ok) return { filename: "greatest_hazards_to_commodities", data: [] }
+
+  const num = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? v : 0
+  }
+  const clampPct = (x) => Math.max(-100, Math.min(100, x))
+
+  const leftRows = Array.isArray(hz_q3RowsL) ? hz_q3RowsL : []
+  const rightRows = Array.isArray(hz_q3RowsR) ? hz_q3RowsR : []
+  const denomByCrop = Array.isArray(hz_q3DenomByCrop) ? hz_q3DenomByCrop : []
+  const denomMap = new Map(denomByCrop.map(d => [d?.crop, num(d?.value_tot)]))
+  const denomTotal = num(hz_q3DenomTotal) || Array.from(denomMap.values()).reduce((a,b) => a + b, 0)
+
+  const anyMap = (rows) => {
+    const m = new Map()
+    for (const r of rows) {
+      if (String(r?.hazard ?? "") !== "any") continue
+      const crop = r?.crop
+      if (!crop) continue
+      m.set(crop, num(r?.total))
+    }
+    return m
+  }
+  const anyL = anyMap(leftRows)
+  const anyR = anyMap(rightRows)
+
+  const withNoHazard = (rows, any) => {
+    const out = rows.slice()
+    const crops = new Set([...Array.from(denomMap.keys()), ...rows.map(r => r?.crop).filter(Boolean)])
+    for (const crop of crops) {
+      const tot = num(denomMap.get(crop))
+      const exposed = num(any.get(crop))
+      out.push({ hazard: "no hazard", crop, total: Math.max(0, tot - exposed) })
+    }
+    return out
+  }
+  const L0 = withNoHazard(leftRows, anyL)
+  const R0 = withNoHazard(rightRows, anyR)
+
+  const toExclusive = (rows) => {
+    const out = []
+    for (const r of rows) {
+      const h0 = String(r?.hazard ?? "")
+      const crop = r?.crop
+      if (!crop) continue
+      const v = num(r?.total)
+      if (h0 === "any") continue
+      if (h0 === "dry") out.push({ hazard: "dry (only)", crop, total: v })
+      else if (h0 === "heat") out.push({ hazard: "heat (only)", crop, total: v })
+      else if (h0 === "wet") out.push({ hazard: "wet (only)", crop, total: v })
+      else if (h0 === "no hazard") out.push({ hazard: "no hazard", crop, total: v })
+      else if (h0 === "dry+heat" || h0 === "dry+wet" || h0 === "heat+wet" || h0 === "dry+heat+wet") out.push({ hazard: h0, crop, total: v })
+    }
+    return out
+  }
+
+  const simplifyExclusive = (rows) => {
+    const bucket = (h) => {
+      if (h === "no hazard") return "no hazard"
+      const core = String(h ?? "").replace(" (only)", "")
+      const n = core.split("+").filter(Boolean).length
+      if (n === 1) return "1 hazard"
+      if (n === 2) return "2 hazards"
+      if (n === 3) return "3 hazards"
+      return null
+    }
+    const agg = new Map()
+    for (const r of rows) {
+      const crop = r?.crop
+      if (!crop) continue
+      const b = bucket(String(r?.hazard ?? ""))
+      if (!b) continue
+      const key = `${crop}||${b}`
+      agg.set(key, (agg.get(key) || 0) + num(r?.total))
+    }
+    const out = []
+    for (const [key, total] of agg.entries()) {
+      const [crop, hazard] = key.split("||")
+      out.push({ crop, hazard, total })
+    }
+    return out
+  }
+
+  const toOverlapping = (rows) => {
+    const agg = new Map()
+    const add = (crop, haz, v) => {
+      const key = `${crop}||${haz}`
+      agg.set(key, (agg.get(key) || 0) + v)
+    }
+    for (const r of rows) {
+      const crop = r?.crop
+      if (!crop) continue
+      const h = String(r?.hazard ?? "")
+      const v = num(r?.total)
+      if (!h) continue
+      if (h === "no hazard") { add(crop, "no hazard", v); continue }
+      if (h === "any") continue
+      if (h.includes("dry")) add(crop, "dry (any)", v)
+      if (h.includes("heat")) add(crop, "heat (any)", v)
+      if (h.includes("wet")) add(crop, "wet (any)", v)
+    }
+    const out = []
+    for (const [key, total] of agg.entries()) {
+      const [crop, hazard] = key.split("||")
+      out.push({ crop, hazard, total })
+    }
+    return out
+  }
+
+  const showCompound = !!hz_q3_showCompound
+  const simplify = !!hz_q3_simplifyCompound
+  const showNoHaz = !!hz_q3_includeNoHazard
+
+  const L = showCompound ? toExclusive(L0) : toOverlapping(L0)
+  const R = showCompound ? toExclusive(R0) : toOverlapping(R0)
+
+  const Lb = (showCompound && simplify) ? simplifyExclusive(L) : L
+  const Rb = (showCompound && simplify) ? simplifyExclusive(R) : R
+
+  const hazardCore = showCompound
+    ? (simplify
+        ? ["1 hazard", "2 hazards", "3 hazards"]
+        : ["dry (only)", "heat (only)", "wet (only)", "dry+heat", "dry+wet", "heat+wet", "dry+heat+wet"])
+    : ["dry (any)", "heat (any)", "wet (any)"]
+
+  const hazardDomain = showNoHaz ? hazardCore.concat(["no hazard"]) : hazardCore.slice()
+
+  const key = (crop, hazard) => `${crop}||${hazard}`
+  const mapSide = (rows) => {
+    const m = new Map()
+    for (const r of rows) {
+      const crop = r?.crop
+      const haz = String(r?.hazard ?? "")
+      if (!crop || !haz) continue
+      if (!hazardDomain.includes(haz)) continue
+      m.set(key(crop, haz), num(r?.total))
+    }
+    return m
+  }
+  const mL = mapSide(Lb)
+  const mR = mapSide(Rb)
+
+  const cropsAll = new Set([
+    ...Array.from(denomMap.keys()),
+    ...Lb.map(r => r?.crop).filter(Boolean),
+    ...Rb.map(r => r?.crop).filter(Boolean)
+  ])
+
+  const score = (crop) => num(anyL.get(crop)) + num(anyR.get(crop))
+  const topCropsSource = Array.from(cropsAll).sort((a,b) => score(b) - score(a))
+  const topN = Math.max(1, Math.min(Math.max(1, topCropsSource.length || 1), Number(hz_q3_topN) || topCropsSource.length || 1))
+  const topCrops = topCropsSource.slice(0, topN)
+  const topSet = new Set(topCrops)
+
+  const otherTotals = new Map()
+  for (const haz of hazardDomain) {
+    for (const crop of cropsAll) {
+      if (topSet.has(crop)) continue
+      const k = key(crop, haz)
+      const prev = otherTotals.get(haz) || { left: 0, right: 0 }
+      prev.left += num(mL.get(k))
+      prev.right += num(mR.get(k))
+      otherTotals.set(haz, prev)
+    }
+  }
+
+  const cropDomain = topCrops.concat(["Other"])
+  const cropOrder = new Map(cropDomain.map((crop, i) => [crop, i]))
+  const hazOrder = new Map(hazardDomain.map((haz, i) => [haz, i]))
+  const showPct = !!hz_q3_relative
+
+  const tableData = []
+  for (const haz of hazardDomain) {
+    for (const crop of cropDomain) {
+      let left = 0
+      let right = 0
+      if (crop === "Other") {
+        const tot = otherTotals.get(haz) || { left: 0, right: 0 }
+        left = tot.left
+        right = tot.right
+      } else {
+        left = num(mL.get(key(crop, haz)))
+        right = num(mR.get(key(crop, haz)))
+      }
+      if (left === 0 && right === 0) continue
+      const diff = right - left
+      const leftPct = clampPct(denomTotal ? (100 * left / denomTotal) : 0)
+      const rightPct = clampPct(denomTotal ? (100 * right / denomTotal) : 0)
+      const diffPct = rightPct - leftPct
+      tableData.push({
+        "Hazard": haz,
+        "Crop": crop,
+        "Left (abs)": left,
+        "Right (abs)": right,
+        "Δ (abs)": diff,
+        "Left (%)": leftPct,
+        "Right (%)": rightPct,
+        "Δ (pp)": diffPct
+      })
+    }
+  }
+
+  tableData.sort((a, b) => {
+    const hazCmp = (hazOrder.get(a?.["Hazard"]) ?? 9999) - (hazOrder.get(b?.["Hazard"]) ?? 9999)
+    if (hazCmp !== 0) return hazCmp
+    return (cropOrder.get(a?.["Crop"]) ?? 9999) - (cropOrder.get(b?.["Crop"]) ?? 9999)
+  })
+
+  const columns = showPct
+    ? ["Hazard", "Crop", "Left (%)", "Right (%)", "Δ (pp)"]
+    : ["Hazard", "Crop", "Left (abs)", "Right (abs)", "Δ (abs)"]
+
+  return {
+    filename: "greatest_hazards_to_commodities",
+    data: tableData.map((row) => Object.fromEntries(columns.map((col) => [col, row[col]])))
+  }
+}
 
 hz_q3Charts = {
   const _langTick = masterLanguage
@@ -6489,10 +7158,16 @@ hz_q3Charts = {
     </div>
     <div class="hz-upsetCaption">${subtitle}</div>
     <div class="hz-qInsight">${insight}</div>
+    ${hz_renderSummaryDownloadButton(hz_q3SummaryExport, "greatest_hazards_to_commodities")}
   `
 }
 hz_q3_mountChart = {
   hz_q3_chartHost.replaceChildren(hz_q3Charts)
+  return null
+}
+
+hz_q3_mountTable = {
+  hz_q3_tableHost.replaceChildren(hz_q3TableView)
   return null
 }
 
@@ -6504,13 +7179,14 @@ hz_q3_dashboardCard = hz_noJumpRoot(html`
     ${hz_q3_filtersHost}
 
     <div class="hz-qToolbar">
-      <div class="hz-qToolbar__left"></div>
+      <div class="hz-qToolbar__left">${viewof hz_q3_viewMode}</div>
       ${hz_q3_settingsWrap}
     </div>
 
     <div class="hz-vizWrap">
       <div class="hz-qResults">
-        ${hz_q3_chartHost}
+        ${hz_q3_chartCard}
+        ${hz_q3_tableCard}
       </div>
     </div>
   </div>
@@ -6564,8 +7240,8 @@ hz_q4TableView = {
             "Right (%)": fmtPct,
             "Δ (pp)": fmtPP
           },
-          rows: 12,
-          height: "520px",
+          rows: tableData.length,
+          height: null,
           width: {
             "Geography": 200,
             "Hazard": 160,
@@ -6608,8 +7284,8 @@ hz_q4TableView = {
           "Right (%)": fmtPct,
           "Δ (pp)": fmtPP
         },
-        rows: 12,
-        height: "520px",
+        rows: rows.length,
+        height: null,
         width: {
           "Geography": 220,
           "Left (abs)": 140,
@@ -6622,6 +7298,48 @@ hz_q4TableView = {
       })}
     </div>
   `
+}
+
+hz_q4SummaryExport = {
+  const detailRows = hz_q4RowsChart ?? []
+  const showPct = !!hz_rel
+
+  if (detailRows.length) {
+    const tableData = detailRows.map((d) => ({
+      "Geography": d.admin,
+      "Hazard": d.hazard,
+      "Left (abs)": Number(d.total1 ?? 0),
+      "Right (abs)": Number(d.total2 ?? 0),
+      "Δ (abs)": Number(d.total2 ?? 0) - Number(d.total1 ?? 0),
+      "Left (%)": Number(d.value1 ?? 0),
+      "Right (%)": Number(d.value2 ?? 0),
+      "Δ (pp)": Number(d.delta ?? 0)
+    }))
+    const columns = showPct
+      ? ["Geography", "Hazard", "Left (%)", "Right (%)", "Δ (pp)"]
+      : ["Geography", "Hazard", "Left (abs)", "Right (abs)", "Δ (abs)"]
+    return {
+      filename: "most_exposed_geographies",
+      data: tableData.map((row) => Object.fromEntries(columns.map((col) => [col, row[col]])))
+    }
+  }
+
+  const rows = (hz_q4Rows ?? []).map((d) => ({
+    "Geography": d?.name ?? "Unknown",
+    "Left (abs)": Number(d?.total1 ?? 0),
+    "Right (abs)": Number(d?.total2 ?? 0),
+    "Δ (abs)": Number(d?.total2 ?? 0) - Number(d?.total1 ?? 0),
+    "Left (%)": Number(d?.value1 ?? 0),
+    "Right (%)": Number(d?.value2 ?? 0),
+    "Δ (pp)": Number(d?.delta ?? 0)
+  }))
+  const columns = showPct
+    ? ["Geography", "Left (%)", "Right (%)", "Δ (pp)"]
+    : ["Geography", "Left (abs)", "Right (abs)", "Δ (abs)"]
+  return {
+    filename: "most_exposed_geographies",
+    data: rows.map((row) => Object.fromEntries(columns.map((col) => [col, row[col]])))
+  }
 }
 
 hz_q4Insight = {
@@ -6707,8 +7425,8 @@ hz_q4Insight = {
         <div class="hz-insightSubhead">${title}</div>
         ${hz_atlasTable(rows, {
           columns: [hz_t("sections.q4.insight.columns.hazard"), hz_t("sections.q4.insight.columns.topGeography"), hz_t("sections.q4.insight.columns.exposure"), hz_t("sections.q4.insight.columns.pctOfTotal")],
-          rows: 6,
-          height: "300px",
+          rows: rows.length,
+          height: null,
           format: {
             [hz_t("sections.q4.insight.columns.exposure")]: fmtAbs,
             [hz_t("sections.q4.insight.columns.pctOfTotal")]: fmtPct
@@ -6761,8 +7479,8 @@ hz_q4Insight = {
         <div class="hz-insightSubhead">${title}</div>
         ${hz_atlasTable(rows, {
           columns: [hz_t("sections.q4.insight.columns.hazard"), hz_t("sections.q4.insight.columns.geoAbs"), hz_t("sections.q4.insight.columns.deltaAbs"), hz_t("sections.q4.insight.columns.geoPctChange"), hz_t("sections.q4.insight.columns.deltaPctChange")],
-          rows: 6,
-          height: "300px",
+          rows: rows.length,
+          height: null,
           format: {
             [hz_t("sections.q4.insight.columns.deltaAbs")]: (v) => (v == null ? "—" : fmtDeltaAbs(v)),
             [hz_t("sections.q4.insight.columns.deltaPctChange")]: (v) => (v == null ? "—" : fmtDeltaPct(v))
@@ -6810,6 +7528,7 @@ hz_q4Insight = {
         ${mkChangeTable(hz_t("sections.q4.insight.titles.increase"), "increase")}
         ${mkChangeTable(hz_t("sections.q4.insight.titles.decrease"), "decrease")}
       </div>
+      ${hz_renderSummaryDownloadButton(hz_q4SummaryExport, "most_exposed_geographies")}
     </div>
   `
 }
@@ -7495,13 +8214,16 @@ hz_updateChart = {
           : hz_t("sections.q1.insight.decreased")
 
         hz_q1_insightHost.replaceChildren(
-          md`${[
-            `**${hz_t("sections.q1.insight.heading")}**`,
-            "",
-            `- ${hz_tpl("sections.q1.insight.line1", { s1, total1: fmtV(total1), unit, compound1: fmtV(compound1), share1: fmtPct(share1) })}`,
-            `- ${hz_tpl("sections.q1.insight.line2", { s2, total2: fmtV(total2), unit, compound2: fmtV(compound2), share2: fmtPct(share2) })}`,
-            `- ${hz_tpl("sections.q1.insight.line3", { totalVerb, deltaTotal: fmtV(Math.abs(dTotal)), shareVerb, deltaShare: fmtPct(Math.abs(dShare)) })}`
-          ].join("\n\n")}`
+          html`<div>
+            ${md`${[
+              `**${hz_t("sections.q1.insight.heading")}**`,
+              "",
+              `- ${hz_tpl("sections.q1.insight.line1", { s1, total1: fmtV(total1), unit, compound1: fmtV(compound1), share1: fmtPct(share1) })}`,
+              `- ${hz_tpl("sections.q1.insight.line2", { s2, total2: fmtV(total2), unit, compound2: fmtV(compound2), share2: fmtPct(share2) })}`,
+              `- ${hz_tpl("sections.q1.insight.line3", { totalVerb, deltaTotal: fmtV(Math.abs(dTotal)), shareVerb, deltaShare: fmtPct(Math.abs(dShare)) })}`
+            ].join("\n\n")}`}
+            ${hz_renderSummaryDownloadButton(hz_q1SummaryExport, "exposure_breakdown_by_hazard")}
+          </div>`
         )
       }
     } else {
@@ -7735,8 +8457,8 @@ hz_updateChart = {
         "Right (%)": fmtPct,
         "Δ (pp)": fmtPP
       },
-      rows: 12,
-      height: "540px",
+      rows: tableData.length,
+      height: null,
       width: {
         "Hazard": 240,
         "Left (abs)": 140,
@@ -7779,8 +8501,8 @@ hz_updateChart = {
     hz_atlasTable(tableRows, {
       columns: tableColumns,
       format: tableFormat,
-      rows: 12,
-      height: "540px"
+      rows: tableRows.length,
+      height: null
     })
   )
 
@@ -7944,7 +8666,7 @@ hz_updateRecords = {
     hz_atlasTable(recordsRows, {
       columns: ["admin0", "admin1", "admin2", "scenario", "timeframe", "hazard", "hazard_vars", "crop", "value"],
       rows: 20,
-      height: "560px",
+      height: null,
       format: {
         "value": (v) => {
           const x = Number(v)
@@ -8068,6 +8790,10 @@ hz_syncQ3StaticLabels = {
     hz_setNodeText("#hz-q3-label-freex", hz_t("sections.q3.ui.freeXAxis"))
     hz_setNodeText("#hz-q3-label-topn", hz_t("sections.q3.ui.numberOfCommodities"))
     hz_setNodeText("#hz-q3-label-height", hz_t("sections.q3.ui.height"))
+    hz_setNodeText("#hz-q3-chart-title", hz_t("sections.q3.ui.chartTitle"))
+    hz_setNodeText("#hz-q3-table-title", hz_t("sections.q3.ui.summaryTableTitle"))
+    hz_safeChoiceLabel(viewof hz_q3_viewMode, 0, hz_t("general.view.chart"))
+    hz_safeChoiceLabel(viewof hz_q3_viewMode, 1, hz_t("general.view.summaryTable"))
   }
   apply()
   requestAnimationFrame(apply)
