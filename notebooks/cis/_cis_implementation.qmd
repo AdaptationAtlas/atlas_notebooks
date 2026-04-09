@@ -6,14 +6,6 @@
 // access (TV, internet, cellphone). It identifies regions where CIS capacity
 // exists but communication channels may limit uptake, and vice versa.
 //
-// Key Concepts:
-// - Access Types: TV, Internet, Cellphone, and Combined average
-// - Gap Analysis: Difference between readiness and access levels
-// - Multiple Visualizations: Map, Dumbbell chart, Scatter plot, Table
-//
-// The bivariate approach mirrors Section 2, but uses access instead of hazard
-// on the second dimension. "High × High" = optimal CIS deployment zones.
-//
 // Data Sources:
 // - CIS_access.parquet: Digital access percentages at admin levels
 // - Section 1 cisData: CIS readiness indicators (reused)
@@ -44,14 +36,6 @@ Inputs.form(
 ```
 
 ```{ojs}
-// ============================================================================
-// ACCESS DATA LOADING AND CLEANING
-// ============================================================================
-// Load digital access data (TV, internet, cellphone percentages) and clean
-// null values. Access data is stored as percentages (0-100) and normalized
-// to 0-1 scale for comparison with CIS readiness.
-// ============================================================================
-
 s3AccessDB = await DuckDBClient.of({
   access_data: FileAttachment("/data/cis/CIS_access.parquet")
 });
@@ -81,20 +65,8 @@ s3AccessDataRaw = {
   `);
 }
 
-// ============================================================================
-// ADMIN0 DATA PREPARATION
-// ============================================================================
-// Section 3 is currently country-level. Use the admin0 CIS readiness rows
-// directly so the readiness values stay aligned with Sections 1 and 2.
-// ============================================================================
-
-// Load CIS readiness at Admin0 (country) level
+// Load CIS readiness at Admin0 (country) level (possibly current limit)
 s3CisReadinessAdmin0 = {
-  if (typeof cisDB === 'undefined' || !cisDB) {
-    console.error("cisDB is not available - Section 1 must load first");
-    return [];
-  }
-
   const adminWhere = buildAdminSelectionWhereClause({
     admin0: selectedAdmin0 || [],
     mode: "admin0_only",
@@ -119,6 +91,7 @@ s3CisReadinessAdmin0 = {
 }
 
 // Aggregate access data to Admin0 (country) level
+// TODO: Check if this is actually needed...
 s3AccessAdmin0 = {
   const grouped = d3.rollup(
     s3AccessDataRaw.filter(d => d.gaul0_code !== null),
@@ -140,13 +113,6 @@ s3AccessAdmin0 = {
   });
 }
 
-// ============================================================================
-// DATA JOINING: Combine CIS Readiness with Access Data
-// ============================================================================
-// Join the aggregated CIS readiness with aggregated access data.
-// Use Admin 1/2 levels if data available and selected, otherwise default to Admin 0
-// ============================================================================
-
 section3Data = {
   // Determine which data level to use
   // If s3HasAdmin1Data is true, we should use the same logic as Section 1/2
@@ -154,6 +120,8 @@ section3Data = {
   // but logic can be expanded here if Admin 1 data is confirmed available.
   
   return s3CisReadinessAdmin0.map(cis => {
+     //TODO: @Brayden make sure admin 1 exists and is allowed
+
     // Find matching access data by country name or ISO3 code
     const access = s3AccessAdmin0.find(a => 
       a.admin0_name === cis.admin0_name || a.iso3 === cis.iso3
@@ -301,27 +269,9 @@ s3CurrentAccessRawField =
 ```
 
 ```{ojs}
-// ============================================================================
-// FILTERED & SORTED DATA PREPARATION
-// ============================================================================
-
-// Use full section data (country filter controls removed)
-s3FilteredData = {
-  if (!section3Data || section3Data.length === 0) {
-    return [];
-  }
-  return section3Data;
-}
-```
-
-```{ojs}
 s3AccessCutoffs = {
-  if (!s3FilteredData || s3FilteredData.length === 0) {
-    return { low: 0.33, moderate: 0.67 };  // Default fallback
-  }
-  
   // Extract values for the currently selected access type
-  const values = s3FilteredData
+  const values = section3Data
     .map(d => d[s3CurrentAccessField])
     .filter(v => v !== null && !isNaN(v))
     .sort((a, b) => a - b);
@@ -339,14 +289,6 @@ s3AccessCutoffs = {
 ```
 
 ```{ojs}
-// ============================================================================
-// BIVARIATE CLASSIFICATION FOR ACCESS
-// ============================================================================
-// Similar to Section 2's bivariateClassify, but uses access level instead
-// of hazard severity. The "High × High" zone indicates optimal regions
-// for CIS deployment (high capacity AND high communication reach).
-// ============================================================================
-
 classifyS3Readiness = (value) => classifyThreshold("cis_readiness_index", value, 0);
 
 function bivariateClassifyAccess(readiness, access, accessCutoffs) {
@@ -386,11 +328,7 @@ s3BivariateColors = {
 ```{ojs}
 // Process data with bivariate classification
 s3ProcessedData = {
-  if (!s3FilteredData || s3FilteredData.length === 0) {
-    return [];
-  }
-  
-  return s3FilteredData.map(d => {
+  return section3Data.map(d => {
     const accessValue = d[s3CurrentAccessField];
     const classification = bivariateClassifyAccess(
       d.cis_readiness_avg,
@@ -1107,9 +1045,9 @@ s3DownloadButton = {
 
 ```{ojs}
 s3Insights = {
-  const avgReadiness = d3.mean(s3FilteredData, d => d.cis_readiness_avg);
+  const avgReadiness = d3.mean(section3Data, d => d.cis_readiness_avg);
   const avgAccess = d3.mean(
-    s3FilteredData.filter(d => d[s3CurrentAccessField] !== null && !isNaN(d[s3CurrentAccessField])),
+    section3Data.filter(d => d[s3CurrentAccessField] !== null && !isNaN(d[s3CurrentAccessField])),
     d => d[s3CurrentAccessField]
   );
   
@@ -1137,7 +1075,7 @@ s3Insights = {
     ? `**${optimalZones.length} countries** (${(optimalZones.length / s3ProcessedData.length * 100).toFixed(1)}%) fall in the optimal zone with both high CIS readiness and high ${s3CurrentAccessLabel.toLowerCase()}, representing prime opportunities for scaling climate services.`
     : `No countries currently fall in the optimal zone for ${s3CurrentAccessLabel.toLowerCase()}.`;
   
-  yield html`
+  return html`
     <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;">
       <h4 style="margin-top: 0;">Key Insights</h4>
       <p style="margin: 10px 0;">${md([insight1])}</p>

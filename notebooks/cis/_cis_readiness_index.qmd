@@ -15,18 +15,6 @@ section1Title = _lang(cis.section1Title);
 # `{ojs} section1Title` {#section1}
 
 ```{ojs}
-// ============================================================================
-// DATA LOADING: CIS Indicator Data
-// ============================================================================
-// Uses DuckDB + Parquet for efficient data loading. This approach:
-// 1. Loads data directly from columnar Parquet format (faster than CSV)
-// 2. Enables SQL queries if needed for server-side filtering
-// 3. Provides better memory efficiency for large datasets
-//
-// Data Source: CIS_nb_data.parquet contains Climate Information Services
-// indicators at Admin 0/1/2 levels across Sub-Saharan Africa.
-// ============================================================================
-
 cisDB = await DuckDBClient.of({
   cis_data: FileAttachment("/data/cis/CIS_nb_data.parquet"),
 });
@@ -158,18 +146,6 @@ currentAdminLevel = {
   if (selectedAdmin2.length === 0) return 2;  // Region selected, no district → admin2
   return 2; // Districts selected → still admin2, but with highlighting
 }
-
-// ============================================================================
-// DATA FILTERING: Filter CIS Data Based on Admin Level
-// ============================================================================
-// The data structure uses NULL values to indicate admin level:
-// - Admin0 row: admin1_name IS NULL, admin2_name IS NULL
-// - Admin1 row: admin1_name IS NOT NULL, admin2_name IS NULL  
-// - Admin2 row: admin1_name IS NOT NULL, admin2_name IS NOT NULL
-//
-// This allows storing all admin levels in a single flat table.
-// ============================================================================
-
 filteredData = {
   const adminWhere = buildAdminSelectionWhereClause({
     admin0: selectedAdmin0 || [],
@@ -186,8 +162,6 @@ filteredData = {
 }
 
 // Track which Admin2 regions are selected for highlighting on maps
-// When empty, all admin2 regions in the view are shown equally
-// When populated, only these districts get visual emphasis
 highlightedAdmin2 = selectedAdmin2.length > 0 ? selectedAdmin2 : []
 ```
 
@@ -352,8 +326,8 @@ s11MapData = {
 // Section 1.1 Maps
 {
   if (s11ViewType === "Map") {
-    const width = 2000;
-    const height = 1000;
+    //TODO: see if this can be removed
+    const height = 600;
     const useRaw = s11MapMode === "Raw values";
     const highlightConfig = {
       filter: (d) => d.properties.isHighlighted,
@@ -368,7 +342,6 @@ s11MapData = {
         ${makeChoropleth({
           features: s11MapData,
           width: width / 2,
-          height,
           fill: useRaw
             ? d => d.properties.weatherStation
             : d => d.properties.weatherStationClass,
@@ -380,7 +353,8 @@ s11MapData = {
           } : classificationScale("wstation_density", ["#fee5d9", "#fcae91", "#fb6a4a"]),
           channels: {
             region: {
-              label: "Region",
+              //TODO: replace this with country, admin1, admin2 (also better titles and translations)
+              label: "Region", 
               value: (d) => d.properties.regionName
             },
             weatherStation: {
@@ -452,10 +426,10 @@ s11MapData = {
         : `${d.admin2_name}, ${d.admin1_name}`;
       return {
         "Admin Name": adminName,
-      "Weather Station (Raw)": d["wstation_density"]?.toFixed(3) || "N/A",
-      "Weather Station (Class)": classifyThreshold("wstation_density", d["wstation_density"], d),
-      "Cloud Cover (Raw)": d["cloud-coverage_meanannual"]?.toFixed(3) || "N/A",
-      "Cloud Cover (Class)": classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d)
+        "Weather Station (Raw)": d["wstation_density"]?.toFixed(3) || "N/A",
+        "Weather Station (Class)": classifyThreshold("wstation_density", d["wstation_density"], d),
+        "Cloud Cover (Raw)": d["cloud-coverage_meanannual"]?.toFixed(3) || "N/A",
+        "Cloud Cover (Class)": classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d)
       };
     });
     
@@ -477,7 +451,6 @@ downloadButton(
           ? `${d.admin1_name}, ${d.admin0_name}`
           : `${d.admin2_name}, ${d.admin1_name}`;
     return {
-      "Admin Name": adminName,
       "Weather Station Density": d["wstation_density"],
       "Weather Station Class": classifyThreshold(
         "wstation_density",
@@ -575,7 +548,7 @@ s12MapData = {
   
   // Filter boundaries based on current selection
   // Instead of filtering by property names, filter by matching with filteredData
-  let filteredBoundaries = boundaries;
+  let filteredBoundaries = boundaries; //TODO: This occurs multiple times, clean up/reuse 
   if (currentAdminLevel === 2) {
     // When showing admin2, only include boundaries that match our filtered data
     const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
@@ -912,7 +885,7 @@ s13Data = {
   }).filter(d => d.shortTerm != null || d.longTerm != null);
   
   // Sort data
-  if (s13SortBy === "Short-term skill") {
+  if (s13SortBy === "Short-term skill") { //TODO: We can use bulit in OJS plot fn instead
     data.sort((a, b) => (b.shortTerm || 0) - (a.shortTerm || 0));
   } else if (s13SortBy === "Long-term skill") {
     data.sort((a, b) => (b.longTerm || 0) - (a.longTerm || 0));
@@ -1040,7 +1013,7 @@ s13Data = {
       const delta = short != null && long != null ? long - short : null;
       
       // Calculate sort value based on selected sort mode
-      let sortValue = 0;
+      let sortValue = 0; //TODO: sorting again....
       if (s13SortBy === "Short-term skill") {
         sortValue = short || 0;
       } else if (s13SortBy === "Long-term skill") {
@@ -1107,7 +1080,7 @@ s13Data = {
       marginLeft: marginLeft,
       marginTop: 40,
       marginBottom: 60,
-      width: 900,
+      width: width,
       height: height,
       y: { axis: null },
       x: { 
@@ -1159,7 +1132,7 @@ s13Data = {
       "Admin Name": d.admin,
       "Short-term": d.shortTerm?.toFixed(3) || "N/A",
       "Long-term": d.longTerm?.toFixed(3) || "N/A",
-      "Δ": d.delta?.toFixed(3) || "N/A",
+      "Delta": d.delta?.toFixed(3) || "N/A",
       "Interpretation": d.interpretation,
       "CIS Implication": d.implication
     }));
@@ -1255,7 +1228,7 @@ s14MapData = {
   
   // Filter boundaries based on current selection
   // Instead of filtering by property names, filter by matching with filteredData
-  let filteredBoundaries = boundaries;
+  let filteredBoundaries = boundaries;  //TODO: Same boundary filtering again...
   if (currentAdminLevel === 2) {
     // When showing admin2, only include boundaries that match our filtered data
     const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
@@ -1396,7 +1369,7 @@ s14MapData = {
         ? `${d.admin1_name}, ${d.admin0_name}`
         : `${d.admin2_name}, ${d.admin1_name}`;
       return {
-        "Admin Name": adminName,
+        "Admin Name": adminName, //TODO: Admin name again
         "CIS Readiness (Raw)": d["cis_readiness_index"]?.toFixed(3) || "N/A",
         "CIS Readiness (Class)": classifyThreshold("cis_readiness_index", d["cis_readiness_index"], d),
         "Weather Stn (Raw)": d["wstation_density"]?.toFixed(3) || "N/A",
@@ -1460,7 +1433,7 @@ s14MapData = {
     // Use Observable Plot.cell for the heatmap
     return htl.html`<div style="max-height: 700px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 10px;">
       ${Plot.plot({
-        width: 900,
+        width: width,
         height: height,
         marginLeft: marginLeft,
         marginTop: 80,  // More space for rotated axis labels

@@ -2,17 +2,6 @@
 // ============================================================================
 // SECTION 2: CIS READINESS × CLIMATE HAZARD INTERSECTION
 // ============================================================================
-// This file analyzes the intersection between CIS readiness and climate hazard
-// exposure (drought and waterlogging). It uses a bivariate mapping approach
-// to identify regions that are both high-exposure AND high-readiness (optimal
-// zones for CIS deployment) or high-exposure but low-readiness (priority gaps).
-//
-// Key Concepts:
-// - Bivariate Classification: 3×3 grid combining hazard severity and CIS readiness
-// - NDWS (Normalized Difference Water Stress): Drought indicator (days)
-// - NDWL0 (Normalized Difference Water Level): Waterlogging indicator (days)
-// - Diamond Legend: Rotated 45° to intuitively show the two dimensions
-//
 // Data Sources:
 // - haz-means_adm_historic.parquet: Historical hazard means at admin levels
 // - thresholds.json: Pre-computed classification thresholds for CIS readiness
@@ -43,14 +32,6 @@ Inputs.form(
 ```{ojs}
 //| echo: false
 
-// ============================================================================
-// HAZARD DATA LOADING AND PROCESSING
-// ============================================================================
-// Load climate hazard data and pivot from long to wide format.
-// The source data has one row per (region, hazard_type) combination.
-// We need to pivot so each region has separate columns for drought/waterlogging.
-// ============================================================================
-
 hazardDB = await DuckDBClient.of({
   hazard_data: FileAttachment("/data/cis/nexgddpHazards_monthMean_jagermeyr_rounded.parquet")
 });
@@ -62,7 +43,7 @@ hazardData = {
     admin0: selectedAdmin0 || [],
     admin1: selectedAdmin1 || []
   });
-
+  //TODO: I think this should be filtering, so hazard can be based on selection
   return await hazardDB.query(`
     SELECT
       iso3,
@@ -77,20 +58,8 @@ hazardData = {
   `);
 }
 
-// ============================================================================
-// DATA PIVOTING: Transform Long Format to Wide Format
-// ============================================================================
-// Input format (long):  | region | hazard     | value |
-//                       | Kenya  | NDWS-mean  | 18.5  |
-//                       | Kenya  | NDWL0-mean | 3.2   |
-//
-// Output format (wide): | region | drought_ndws | waterlogging_ndwl0 |
-//                       | Kenya  | 18.5         | 3.2                |
-//
-// This uses D3.group to aggregate by region, then extracts values by hazard type.
-// ============================================================================
-
 hazardPivoted = {
+   // TODO: why/is this needed?
   // Create a composite key for each unique region (all admin levels)
   const grouped = d3.group(hazardData, d => `${d.iso3}_${d.admin0_name}_${d.admin1_name}_${d.admin2_name}`);
   
@@ -109,13 +78,6 @@ hazardPivoted = {
     };
   });
 }
-
-// ============================================================================
-// DATA JOINING: Combine CIS Readiness with Hazard Exposure
-// ============================================================================
-// Join the hazard data with CIS readiness data (from Section 1) to create
-// a unified dataset for bivariate analysis. Match on all admin fields.
-// ============================================================================
 
 combinedData = filteredData.map(cis => {
   // Find matching hazard row by exact admin name match
@@ -140,8 +102,8 @@ combinedData = filteredData.map(cis => {
 // - CIS Readiness: Low/Moderate/High (using thresholds.json)
 // - Hazard Severity: Low/Moderate/High (using hazard-specific thresholds)
 //
-// Hazard thresholds are based on climate science conventions:
-// - Drought (NDWS): <15 days = Low, 15-20 = Moderate, >20 = High
+// Hazard thresholds are based on climate science conventions:  //TODO: @BRAYDEN Check the thresholds ASAP. Smells like GPT bs.
+// - Drought (NDWS): <15 days = Low, 15-20 = Moderate, >20 = High //Important: this gets replaced with Haz X Exposure data anyway
 // - Waterlogging (NDWL0): <2 days = Low, 2-5 = Moderate, >5 = High
 //
 // The resulting bivariateClass (e.g., "High × High") drives map coloring.
@@ -157,12 +119,10 @@ function bivariateClassify(readiness, hazard, hazardType, readinessLevel = curre
   // Classify hazard using hazard-type-specific thresholds
   let hazardClass;
   if (hazardType === "NDWS-mean") {
-    // Drought: measured in stress days per year
     if (hazard < 15) hazardClass = "Low";
     else if (hazard < 20) hazardClass = "Moderate";
     else hazardClass = "High";
   } else if (hazardType === "NDWL0-mean") {
-    // Waterlogging: measured in waterlogged days per year
     if (hazard < 2) hazardClass = "Low";
     else if (hazard < 5) hazardClass = "Moderate";
     else hazardClass = "High";
@@ -174,19 +134,6 @@ function bivariateClassify(readiness, hazard, hazardType, readinessLevel = curre
     bivariateClass: `${readinessClass} × ${hazardClass}`
   };
 }
-
-// ============================================================================
-// BIVARIATE COLOR PALETTE: 3×3 Grid Colors
-// ============================================================================
-// Color scheme designed to highlight the "High × High" optimal zone
-// (dark purple) while showing the full spectrum of readiness×hazard combos.
-//
-// Color logic:
-// - Rows (vertical): CIS Readiness increases → more purple/blue
-// - Columns (horizontal): Hazard Severity increases → more saturated
-// - "High × High" = Priority zone for CIS deployment (darkest, most distinct)
-// - "Low × High" = Investment gap (high hazard but low readiness)
-// ============================================================================
 
 bivariateColors = {
   return {
@@ -229,7 +176,7 @@ viewof s2ViewToggle = Inputs.radio(
 //| echo: false
 
 // Reuse admin level from Section 1
-s2CurrentAdminLevel = currentAdminLevel;
+// s2CurrentAdminLevel = currentAdminLevel;
 
 // Process and classify data
 s2ProcessedData = {
@@ -256,7 +203,7 @@ s2ProcessedData = {
 
 // Prepare map data at the appropriate admin level
 s2MapData = {
-  const level = s2CurrentAdminLevel;
+  const level = currentAdminLevel; //TODO: This filtering has to go / be re-used across notebook
   
   if (level === 0) {
     // Group by admin0
@@ -306,9 +253,9 @@ s2MapData = {
 
 // Load appropriate boundaries based on Section 1's admin level
 s2Boundaries = {
-  if (s2CurrentAdminLevel === 0) {
+  if (currentAdminLevel === 0) {
     return admin0Boundaries;
-  } else if (s2CurrentAdminLevel === 1) {
+  } else if (currentAdminLevel === 1) {
     return admin1Boundaries;
   } else {
     return admin2Boundaries;
@@ -317,13 +264,13 @@ s2Boundaries = {
 
 // Join boundaries with data
 s2GeoData = {
-  const gaulCodeField = s2CurrentAdminLevel === 0 ? 'gaul0_code' :
-                        s2CurrentAdminLevel === 1 ? 'gaul1_code' :
+  const gaulCodeField = currentAdminLevel === 0 ? 'gaul0_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
                         'gaul2_code';
   
   // Filter boundaries based on current selection - show all regions, not just those with data
-  let filteredBoundaries = s2Boundaries;
-  if (s2CurrentAdminLevel === 2) {
+  let filteredBoundaries = s2Boundaries; //TODO: Same admin filtering again
+  if (currentAdminLevel === 2) {
     // When showing admin2, filter by admin selection (but keep all regions, not just those with data)
     filteredBoundaries = {
       ...s2Boundaries,
@@ -333,7 +280,7 @@ s2GeoData = {
         return matchesAdmin0 && matchesAdmin1;
       })
     };
-  } else if (s2CurrentAdminLevel === 1) {
+  } else if (currentAdminLevel === 1) {
     // When showing admin1, filter by admin0 selection
     filteredBoundaries = {
       ...s2Boundaries,
@@ -349,13 +296,13 @@ s2GeoData = {
     let match = s2MapData.find(d => d[gaulCodeField] === gaulCode);
     
     // Fallback: try matching by admin names if GAUL code fails
-    if (!match && s2CurrentAdminLevel === 2) {
+    if (!match && currentAdminLevel === 2) {
       match = s2MapData.find(d => 
         d.admin0_name === feature.properties.admin0_name &&
         d.admin1_name === feature.properties.admin1_name &&
         d.admin2_name === feature.properties.admin2_name
       );
-    } else if (!match && s2CurrentAdminLevel === 1) {
+    } else if (!match && currentAdminLevel === 1) {
       match = s2MapData.find(d => 
         d.admin0_name === feature.properties.admin0_name &&
         d.admin1_name === feature.properties.admin1_name
@@ -363,7 +310,7 @@ s2GeoData = {
     }
     
     // Check if this admin2 region is highlighted
-    const isHighlighted = s2CurrentAdminLevel === 2 && 
+    const isHighlighted = currentAdminLevel === 2 && 
                           highlightedAdmin2.length > 0 && 
                           highlightedAdmin2.includes(feature.properties.admin2_name);
     
@@ -449,9 +396,9 @@ s2BivariateMap = {
     channels: {
       region: {
         label: "Region",
-        value: (d) => s2CurrentAdminLevel === 0
+        value: (d) => currentAdminLevel === 0
           ? d.properties.admin0_name
-          : s2CurrentAdminLevel === 1
+          : currentAdminLevel === 1
           ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
           : `${d.properties.admin2_name}, ${d.properties.admin1_name}`
       },
@@ -492,6 +439,7 @@ s2BivariateMap = {
 // Render map or table based on toggle
 {
   if (s2ViewToggle === "map") {
+    //TODO: why yield here?
     const hazardLegendLabel = s2HazardType === "drought" ? "Drought Severity" : "Waterlogging Severity";
     yield html`
       <div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
@@ -511,17 +459,13 @@ s2BivariateMap = {
       </div>
     `;
   } else {
-    // Clean up any leftover tooltips from map view when switching to table
-    d3.select(".bivariateTip").remove();
-    d3.select(".bivariateLegendTip").remove();
-    
     // Table view
     const hazardName = s2HazardType === "drought" ? "Drought (Days)" : "Waterlogging (Days)";
     
     const tableData = s2MapData.map(d => {
-      const adminName = s2CurrentAdminLevel === 0 
+      const adminName = currentAdminLevel === 0 
         ? d.admin0_name 
-        : s2CurrentAdminLevel === 1
+        : currentAdminLevel === 1
         ? `${d.admin1_name}, ${d.admin0_name}`
         : `${d.admin2_name}, ${d.admin1_name}`;
       
@@ -577,9 +521,9 @@ s2BivariateMap = {
 downloadButton(
   s2MapData.map((d) => {
     const adminName =
-      s2CurrentAdminLevel === 0
+      currentAdminLevel === 0
         ? d.admin0_name
-        : s2CurrentAdminLevel === 1
+        : currentAdminLevel === 1
           ? `${d.admin1_name}, ${d.admin0_name}`
           : `${d.admin2_name}, ${d.admin1_name}`;
 
@@ -588,7 +532,7 @@ downloadButton(
 
     return {
       "Admin Level":
-        s2CurrentAdminLevel === 0 ? "0" : s2CurrentAdminLevel === 1 ? "1" : "2",
+        currentAdminLevel === 0 ? "0" : currentAdminLevel === 1 ? "1" : "2",
       "Admin Name": adminName,
       "CIS Readiness Raw": d.cis_readiness_index?.toFixed(3) || "N/A",
       "CIS Readiness Class": d.readinessClass,
@@ -597,7 +541,7 @@ downloadButton(
       "Bivariate Category": d.bivariateClass,
     };
   }),
-  `cis_hazard_intersection_${s2HazardType}_admin${s2CurrentAdminLevel}`,
+  `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`,
   _lang(cis.downloadLabel),
 );
 ```
