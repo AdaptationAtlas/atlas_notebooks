@@ -4,28 +4,54 @@ function dataTable(
     height = "400px",
     zebra = false,
     rows = 25,
-    width, // default to max available
-    ...tableOptions // passed to Inputs.table
+    width,
+    wrapCells = true,
+    horizontalScroll = true,
+    ...tableOptions
   } = {}
 ) {
   const table = Inputs.table(data, {
     height,
     rows,
     width,
-    select: false, // disable checkbox
+    select: false,
     ...tableOptions
   });
 
   table.classList.add("atlasDataTable");
 
-  const style = document.createElement("style");
+  const wrapper = html`<div class="atlasDataTableWrap"></div>`;
+  wrapper.appendChild(table);
 
+  const style = document.createElement("style");
   style.textContent = `
-    .atlasDataTable,
-    .atlasDataTable table {
+    .atlasDataTableWrap {
       width: 100%;
+      max-width: 100%;
+      overflow-x: ${horizontalScroll ? "auto" : "visible"};
+      overflow-y: visible;
+      -webkit-overflow-scrolling: touch;
+      box-sizing: border-box;
     }
-    
+
+    /* Outer host must stay within page width */
+    .atlasDataTable {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-width: 0 !important;
+      box-sizing: border-box;
+      overflow: visible !important;
+    }
+
+    /* Only inner table may grow for horizontal scroll */
+    .atlasDataTable table {
+      min-width: 100%;
+      width: max-content;
+      max-width: none;
+      table-layout: auto;
+      border-collapse: collapse;
+    }
+
     /* Header */
     .atlasDataTable thead th {
       background-color: #f3f4f6 !important;
@@ -34,19 +60,45 @@ function dataTable(
       position: sticky;
       top: 0;
       z-index: 2;
+      vertical-align: top;
+      box-sizing: border-box;
     }
 
     /* Cells */
     .atlasDataTable td {
-      padding-left: 15px !important;
+      padding: 12px 15px !important;
+      vertical-align: top;
+      line-height: 1.35;
+      box-sizing: border-box;
     }
 
-    /* Add margin between sort chevron and header */
+    /* Let headers and cells fully show text */
+    .atlasDataTable thead th,
+    .atlasDataTable tbody td,
+    .atlasDataTable thead th *,
+    .atlasDataTable tbody td * {
+      ${
+        wrapCells
+          ? `
+      white-space: normal !important;
+      overflow-wrap: anywhere !important;
+      word-break: break-word !important;
+      `
+          : `
+      white-space: nowrap !important;
+      `
+      }
+      overflow: visible !important;
+      text-overflow: clip !important;
+      max-width: none !important;
+    }
+
+    /* Add margin between sort chevron and header text */
     .atlasDataTable thead th > span {
       margin-right: 6px;
     }
 
-    /* Hide leftover checkbox column */
+    /* Hide leftover checkbox column if present */
     .atlasDataTable th:first-child,
     .atlasDataTable td:first-child {
       display: none;
@@ -57,36 +109,33 @@ function dataTable(
       background-color: #f1f5f9 !important;
     }
 
-    /* Optional Zebra striping */
-    ${
-      zebra
-        ? `
-      .atlasDataTable tbody tr:nth-child(odd) {
-        background: #f9fafb !important;
-      }`
-        : ""
-    }
+    ${zebra ? `
+    .atlasDataTable tbody tr:nth-child(odd) {
+      background: #f9fafb !important;
+    }` : ""}
   `;
 
-  table.appendChild(style);
-  return table;
+  wrapper.appendChild(style);
+  return wrapper;
 }
 
 function filterableDataTable(
   data,
   {
-    ...tableArgs // passed to Inputs.table
+    ...tableArgs
   } = {}
 ) {
   const filter = Inputs.search(data);
 
-  const tableHost = html`<div></div>`;
-  const container = html`<div style="display:grid; gap:8px; padding-top:50px"></div>`;
-  container.append(filter, tableHost);
+  const tableHost = html`<div style="min-width:0;"></div>`;
+  const container = html`
+    <div style="display:grid; gap:8px; max-width:100%; min-width:0;">
+      <div style="max-width:100%; min-width:0;">${filter}</div>
+    </div>
+  `;
+  container.appendChild(tableHost);
 
   const render = () => {
-    //HACK: get OJS inputs working together when defined in the same cell
-
     tableHost.replaceChildren(dataTable(filter.value, tableArgs));
   };
 
