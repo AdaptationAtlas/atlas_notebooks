@@ -1017,7 +1017,11 @@ html, body { overflow-anchor: none; }
 # `{ojs} heading1` {#overview}
 
 ```{ojs}
-md`${_lang(nbText.sections.intro.text)}`;
+{
+  const overviewText = _lang(hz_textObj(nbText?.sections?.intro?.text)) || "";
+  const overviewHelper = _lang(hz_textObj(nbText?.sections?.overview?.helperLine)) || "";
+  return md`${overviewText}${overviewHelper ? "\n\n" + overviewHelper : ""}`;
+}
 ```
 
 ```{=html}
@@ -4022,7 +4026,8 @@ viewof hz_q5_hazards = hz_safeEnhancedMultiSelect(
 viewof hz_q5_scale = Inputs.radio(
   new Map([
     ["Absolute value", "abs"],
-    ["Relative to historic baseline", "idx"]
+    ["Relative to historic baseline", "idx"],
+    ["Difference from historic baseline", "diff"]
   ]),
   { label: "", value: "abs" }
 )
@@ -4225,24 +4230,67 @@ hz_q5Filtered = {
   return out
 }
 
-// Apply scale transform (absolute vs index-to-historic)
+// Apply scale transform (absolute vs index-to-historic vs difference-from-historic)
 hz_q5PlotRows = {
   const mode = String(hz_q5_scale ?? "abs")
-  if (mode !== "idx") return (hz_q5Filtered ?? []).filter(d => !/hist|historic/i.test(String(d?.scenario ?? "")))
-
   const base = hz_q5BaselinesByHazard
+
+  const attachRawBaseline = (r) => ({
+    ...r,
+    baseline_raw: (() => {
+      const b = base?.get?.(r?.hazard)
+      return Number.isFinite(Number(b)) ? Number(b) : null
+    })(),
+    value_raw: (r?.value == null ? null : Number(r.value)),
+    value_low_raw: (r?.value_low == null ? null : Number(r.value_low)),
+    value_high_raw: (r?.value_high == null ? null : Number(r.value_high)),
+    value_sd_raw: (r?.value_sd == null ? null : Number(r.value_sd))
+  })
+
+  if (mode === "abs") {
+    return (hz_q5Filtered ?? [])
+      .filter(d => !/hist|historic/i.test(String(d?.scenario ?? "")))
+      .map(attachRawBaseline)
+  }
+
   const scaleRow = (r) => {
     const b = base?.get?.(r.hazard)
     if (b == null || b === 0) return null
-    const sc = 100 / b
-    const num = (x) => (x == null ? null : x * sc)
-    return {
-      ...r,
-      value: num(r.value),
-      value_sd: num(r.value_sd),
-      value_low: num(r.value_low),
-      value_high: num(r.value_high),
+
+    if (mode === "idx") {
+      const sc = 100 / b
+      const num = (x) => (x == null ? null : x * sc)
+      return {
+        ...r,
+        baseline_raw: Number(b),
+        value_raw: (r?.value == null ? null : Number(r.value)),
+        value_low_raw: (r?.value_low == null ? null : Number(r.value_low)),
+        value_high_raw: (r?.value_high == null ? null : Number(r.value_high)),
+        value_sd_raw: (r?.value_sd == null ? null : Number(r.value_sd)),
+        value: num(r.value),
+        value_sd: num(r.value_sd),
+        value_low: num(r.value_low),
+        value_high: num(r.value_high)
+      }
     }
+
+    if (mode === "diff") {
+      const diff = (x) => (x == null ? null : Number(x) - Number(b))
+      return {
+        ...r,
+        baseline_raw: Number(b),
+        value_raw: (r?.value == null ? null : Number(r.value)),
+        value_low_raw: (r?.value_low == null ? null : Number(r.value_low)),
+        value_high_raw: (r?.value_high == null ? null : Number(r.value_high)),
+        value_sd_raw: (r?.value_sd == null ? null : Number(r.value_sd)),
+        value: diff(r.value),
+        value_sd: (r?.value_sd == null ? null : Number(r.value_sd)),
+        value_low: diff(r.value_low),
+        value_high: diff(r.value_high)
+      }
+    }
+
+    return attachRawBaseline(r)
   }
 
   const out = []
@@ -4280,6 +4328,8 @@ hz_q5BaselineRules = {
     const b = hz_q5BaselinesByHazard?.get?.(h)
     if (mode === "idx") {
       if (b != null) out.push({ hazard: h, baseline: 100 })
+    } else if (mode === "diff") {
+      if (b != null) out.push({ hazard: h, baseline: 0 })
     } else {
       if (b != null) out.push({ hazard: h, baseline: b })
     }
@@ -4320,7 +4370,9 @@ hz_q5Plot = {
   const fmtScenario = (s) => String(s ?? "").toUpperCase()
   const yLabel = (scaleMode === "idx")
     ? "Exposure index (historic = 100)"
-    : (hz_varLabelAbs ?? "Exposure")
+    : (scaleMode === "diff")
+      ? "Difference from historic baseline"
+      : (hz_varLabelAbs ?? "Exposure")
   const yLabelDisplay = String(yLabel ?? "").replace(/^↑\s*/, "").trim()
 
   const normalizedDomain = (dom) => {
@@ -4597,6 +4649,7 @@ hz_q5BaselineFor = (haz) => {
   const h = String(haz ?? "")
   const mode = String(hz_q5_scale ?? "abs")
   if (mode === "idx") return 100
+  if (mode === "diff") return 0
   const v = hz_q5BaselinesByHazard?.get?.(h)
   return (v == null) ? null : Number(v)
 }
@@ -4622,6 +4675,7 @@ hz_q5TableView = {
   }
 
   const hasUnc = !!hz_q5Meta?.has_value_sd
+  const scaleMode = String(hz_q5_scale ?? "abs")
 
   const out = (rows ?? [])
     .filter(r => {
@@ -4633,17 +4687,22 @@ hz_q5TableView = {
               s && s.toLowerCase() !== "null")
     })
     .map((r) => {
-      const b = hz_q5BaselineFor(r.hazard)
+      const bShown = hz_q5BaselineFor(r.hazard)
+      const bRaw = (r?.baseline_raw == null ? null : Number(r.baseline_raw))
       const v = (r.value == null ? null : Number(r.value))
-      const bb = (b == null ? null : Number(b))
+      const bbShown = (bShown == null ? null : Number(bShown))
 
-      const delta = (bb == null || v == null || !Number.isFinite(bb) || !Number.isFinite(v))
+      const delta = (bbShown == null || v == null || !Number.isFinite(bbShown) || !Number.isFinite(v))
         ? null
-        : (v - bb)
+        : (v - bbShown)
 
-      const pct = (bb == null || !Number.isFinite(bb) || bb === 0 || delta == null || !Number.isFinite(delta))
-        ? null
-        : (100 * delta / bb)
+      const pct = (scaleMode === "diff")
+        ? ((bRaw == null || !Number.isFinite(bRaw) || bRaw === 0 || v == null || !Number.isFinite(v))
+            ? null
+            : (100 * v / bRaw))
+        : ((bbShown == null || !Number.isFinite(bbShown) || bbShown === 0 || delta == null || !Number.isFinite(delta))
+            ? null
+            : (100 * delta / bbShown))
 
       const ciwRaw = (!hasUnc || r.value_low == null || r.value_high == null)
         ? null
@@ -4657,7 +4716,8 @@ hz_q5TableView = {
         "Period": String(r.timeframe ?? ""),
         "Year": Number(r.year),
         "Value": v,
-        "Baseline": (bb == null || !Number.isFinite(bb)) ? null : bb,
+        "Baseline": (bbShown == null || !Number.isFinite(bbShown)) ? null : bbShown,
+        "Historic baseline": (bRaw == null || !Number.isFinite(bRaw)) ? null : bRaw,
         "Δ vs baseline": (delta == null || !Number.isFinite(delta)) ? null : Number(delta),
         "Δ% vs baseline": (pct == null || !Number.isFinite(pct)) ? null : Number(pct),
         "CI width": ciw
@@ -4671,8 +4731,8 @@ hz_q5TableView = {
     String(a["Scenario"]).localeCompare(String(b["Scenario"]))
   )
 
-  const scaleMode = String(hz_q5_scale ?? "abs")
-  const valueLabel = (scaleMode === "idx") ? "Index" : "Value"
+  const valueLabel = (scaleMode === "idx") ? "Index" : (scaleMode === "diff" ? "Difference" : "Value")
+  const baselineLabel = (scaleMode === "diff") ? "Historic baseline" : "Baseline"
 
   // Rename columns dynamically
   const data = out.map((d) => ({
@@ -4680,11 +4740,16 @@ hz_q5TableView = {
     [valueLabel]: d["Value"]
   }))
 
+  const columns = (scaleMode === "diff")
+    ? ["Hazard", "Scenario", "Period", "Year", valueLabel, baselineLabel, "Δ% vs baseline", "CI width"]
+    : ["Hazard", "Scenario", "Period", "Year", valueLabel, "Baseline", "Δ vs baseline", "Δ% vs baseline", "CI width"]
+
   return hz_atlasTable(data, {
-    columns: ["Hazard", "Scenario", "Period", "Year", valueLabel, "Baseline", "Δ vs baseline", "Δ% vs baseline", "CI width"],
+    columns,
     format: {
       "Year": (x) => Number.isFinite(Number(x)) ? String(Math.round(Number(x))) : "—",
       [valueLabel]: fmtAbsFull,
+      [baselineLabel]: fmtAbsFull,
       "Baseline": fmtAbsFull,
       "Δ vs baseline": fmtAbsFull,
       "Δ% vs baseline": fmtPct,
@@ -4698,6 +4763,7 @@ hz_q5TableView = {
       "Period": 150,
       "Year": 90,
       [valueLabel]: 150,
+      [baselineLabel]: 150,
       "Baseline": 150,
       "Δ vs baseline": 150,
       "Δ% vs baseline": 140,
@@ -4713,6 +4779,7 @@ hz_q5SummaryExport = {
   if (!rows.length) return { filename: "exposure_by_ssp_time_gcm", data: [] }
 
   const hasUnc = !!hz_q5Meta?.has_value_sd
+  const scaleMode = String(hz_q5_scale ?? "abs")
   const out = (rows ?? [])
     .filter(r => {
       const h = String(r?.hazard ?? "").trim()
@@ -4723,15 +4790,20 @@ hz_q5SummaryExport = {
               s && s.toLowerCase() !== "null")
     })
     .map((r) => {
-      const b = hz_q5BaselineFor(r.hazard)
+      const bShown = hz_q5BaselineFor(r.hazard)
+      const bRaw = (r?.baseline_raw == null ? null : Number(r.baseline_raw))
       const v = (r.value == null ? null : Number(r.value))
-      const bb = (b == null ? null : Number(b))
-      const delta = (bb == null || v == null || !Number.isFinite(bb) || !Number.isFinite(v))
+      const bbShown = (bShown == null ? null : Number(bShown))
+      const delta = (bbShown == null || v == null || !Number.isFinite(bbShown) || !Number.isFinite(v))
         ? null
-        : (v - bb)
-      const pct = (bb == null || !Number.isFinite(bb) || bb === 0 || delta == null || !Number.isFinite(delta))
-        ? null
-        : (100 * delta / bb)
+        : (v - bbShown)
+      const pct = (scaleMode === "diff")
+        ? ((bRaw == null || !Number.isFinite(bRaw) || bRaw === 0 || v == null || !Number.isFinite(v))
+            ? null
+            : (100 * v / bRaw))
+        : ((bbShown == null || !Number.isFinite(bbShown) || bbShown === 0 || delta == null || !Number.isFinite(delta))
+            ? null
+            : (100 * delta / bbShown))
       const ciwRaw = (!hasUnc || r.value_low == null || r.value_high == null)
         ? null
         : (Number(r.value_high) - Number(r.value_low))
@@ -4742,7 +4814,8 @@ hz_q5SummaryExport = {
         "Period": String(r.timeframe ?? ""),
         "Year": Number(r.year),
         "Value": v,
-        "Baseline": (bb == null || !Number.isFinite(bb)) ? null : bb,
+        "Baseline": (bbShown == null || !Number.isFinite(bbShown)) ? null : bbShown,
+        "Historic baseline": (bRaw == null || !Number.isFinite(bRaw)) ? null : bRaw,
         "Δ vs baseline": (delta == null || !Number.isFinite(delta)) ? null : Number(delta),
         "Δ% vs baseline": (pct == null || !Number.isFinite(pct)) ? null : Number(pct),
         "CI width": ciw
@@ -4755,16 +4828,16 @@ hz_q5SummaryExport = {
     String(a["Scenario"]).localeCompare(String(b["Scenario"]))
   )
 
-  const scaleMode = String(hz_q5_scale ?? "abs")
-  const valueLabel = (scaleMode === "idx") ? "Index" : "Value"
+  const valueLabel = (scaleMode === "idx") ? "Index" : (scaleMode === "diff" ? "Difference" : "Value")
+  const baselineLabel = (scaleMode === "diff") ? "Historic baseline" : "Baseline"
   const data = out.map((d) => ({
     "Hazard": d["Hazard"],
     "Scenario": d["Scenario"],
     "Period": d["Period"],
     "Year": d["Year"],
     [valueLabel]: d["Value"],
-    "Baseline": d["Baseline"],
-    "Δ vs baseline": d["Δ vs baseline"],
+    [baselineLabel]: d[baselineLabel],
+    ...(scaleMode === "diff" ? {} : { "Δ vs baseline": d["Δ vs baseline"] }),
     "Δ% vs baseline": d["Δ% vs baseline"],
     "CI width": d["CI width"]
   }))
@@ -4967,7 +5040,9 @@ hz_q5Insight = {
   const scaleMode = String(hz_q5_scale ?? "abs")
   const lead = (scaleMode === "idx")
     ? hz_t("sections.q5.insight.leadIndexed")
-    : hz_t("sections.q5.insight.leadCompared")
+    : (scaleMode === "diff")
+      ? hz_t("sections.q5.insight.leadDifference")
+      : hz_t("sections.q5.insight.leadAbsolute")
 
   return html`
     <div class="hz-q4InsightBlock">
@@ -9125,8 +9200,9 @@ hz_syncQ5StaticLabels = {
     hz_setNodeText("#hz-q5-loading-table", hz_t("sections.q5.ui.loadingTable"))
     hz_safeChoiceLabel(viewof hz_q5_view, 0, hz_t("general.view.chart"))
     hz_safeChoiceLabel(viewof hz_q5_view, 1, hz_t("general.view.summaryTable"))
-    hz_safeChoiceLabel(viewof hz_q5_scale, 0, hz_t("sections.q5.ui.actualExposure"))
-    hz_safeChoiceLabel(viewof hz_q5_scale, 1, hz_t("sections.q5.ui.relativeToHistoricBaseline"))
+    hz_safeChoiceLabel(viewof hz_q5_scale, 0, hz_t("sections.q5.ui.actualExposure") || "Absolute value")
+    hz_safeChoiceLabel(viewof hz_q5_scale, 1, hz_t("sections.q5.ui.relativeToHistoricBaseline") || "Relative to historic baseline")
+    hz_safeChoiceLabel(viewof hz_q5_scale, 2, hz_t("sections.q5.ui.differenceFromHistoricBaseline") || "Difference from historic baseline")
   }
   apply()
   requestAnimationFrame(() => {
