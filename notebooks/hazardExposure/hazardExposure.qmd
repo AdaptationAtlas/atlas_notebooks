@@ -14,6 +14,13 @@ date-edited: today
 ATLAS_HZ_CONFIG = Object.freeze({
   apiBaseUrl: "https://atlasapi.jcdevops.com"
 })
+
+// ============================================================
+// LAYOUT NOTE
+// ============================================================
+// Display order is controlled by `hz_questionsStack`:
+// Q4 -> Q1 -> Q2 -> Q3 -> Q5.
+//
 ```
 
 
@@ -1697,35 +1704,9 @@ hz_defaultCommodityBootstrap = {
 
 ```{ojs}
 //| output: false
-viewof hz_compareMode = {
-  const root = document.createElement('label')
-  root.className = 'hz-inlineToggle hz-inlineToggle--compact'
-  root.style.display = 'inline-flex'
-  root.style.alignItems = 'center'
-  root.style.gap = '8px'
-
-  const cb = document.createElement('input')
-  cb.type = 'checkbox'
-
-  const txt = document.createElement('span')
-  txt.textContent = 'Δ (Right − Left)'
-  txt.style.fontSize = '12px'
-  txt.style.color = 'var(--hz-muted,#64748b)'
-
-  const set = (checked, { silent = false } = {}) => {
-    cb.checked = !!checked
-    root.value = cb.checked ? 'diff' : 'side'
-    if (!silent) root.dispatchEvent(new Event('input', { bubbles: true }))
-  }
-
-  cb.addEventListener('change', () => set(cb.checked))
-  root.append(cb, txt)
-  set(false, { silent: true })
-  return hz_noJumpInput(root)
-}
-
-viewof hz_topN = Inputs.range([5, 50], { label: "No. geographies to show", step: 1, value: 25 })
-viewof hz_groupOther = Inputs.toggle({ label: 'Group remaining hazards into "Other" (Q1)', value: false })
+// ============================================================
+// Q1 — VIEW CONTROLS
+// ============================================================
 viewof hz_rel = Inputs.toggle({ label: "", value: false })
 hz_isRelative = !!hz_rel
 viewof hz_q1ChartHeight = Inputs.range([360, 900], { label: "", step: 10, value: 520 })
@@ -2112,9 +2093,7 @@ hz_apiPostJson = async (path, body, { signal } = {}) => {
 // Debounced + cached API call.
 //| output: false
 
-// Map view
-// ============================================================
-
+// Q4 map color control
 viewof hz_mapMetric = {
   const labels = {
     right: "Right",
@@ -2124,213 +2103,27 @@ viewof hz_mapMetric = {
   const values = ["right", "left", "delta"]
   const root = Inputs.radio(values, {
     label: "Color by",
-    value: (hz_compareMode === "diff") ? "delta" : "right",
+    value: "right",
     format: (v) => labels[v] || String(v)
   })
   root.classList.add("hz-mapMetric")
   return root
 }
 
-hz_mapMetricEff = hz_mapMetric || ((hz_compareMode === "diff") ? "delta" : "right")
-
-hz_mapReqExtra = ({ group_child: true })
-
-hz_mapRespL = {
-  if (hz_viewMode !== "map") return null
-  const out = await hz_apiDebouncedCached("mapL", "/api/v1/hz/by-admin", hz_sideReq(hz_src1, hz_s1, hz_mapReqExtra), { debounceMs: 120 })
-  return (out && typeof out === "object" && ("ok" in out)) ? out : null
-}
-
-hz_mapRespR = {
-  if (hz_viewMode !== "map") return null
-  const out = await hz_apiDebouncedCached("mapR", "/api/v1/hz/by-admin", hz_sideReq(hz_src2, hz_s2, hz_mapReqExtra), { debounceMs: 120 })
-  return (out && typeof out === "object" && ("ok" in out)) ? out : null
-}
-
-hz_mapMeta = {
-  if (hz_viewMode !== "map") return { ok: false, loading: false, error: "hidden" }
-  if (!hz_mapRespL || !hz_mapRespR) return { ok: false, loading: true, error: null }
-  const ok = Boolean(hz_mapRespL?.ok && hz_mapRespR?.ok)
-  const err = (!ok) ? String(hz_mapRespL?.error || hz_mapRespR?.error || "Map query failed") : null
-  return { ok, loading: false, error: err }
-}
-
-hz_mapRowsL = (hz_mapRespL?.data ?? [])
-hz_mapRowsR = (hz_mapRespR?.data ?? [])
-
-hz_mapLevel = {
-  const a2 = (hz_geoFilter?.admin2 ?? []).filter(Boolean)
-  const a1 = (hz_geoFilter?.admin1 ?? []).filter(Boolean)
-  const a0 = (hz_geoFilter?.admin0 ?? []).filter(Boolean).filter(x => String(x).toLowerCase() !== "all")
-  if (a2.length) return 2
-  if (a1.length) return 2
-  if (a0.length) return 1
-  return 0
-}
-
-hz_mapLevelLabel = (hz_mapLevel === 2) ? "Admin2" : (hz_mapLevel === 1) ? "Admin1" : "Admin0"
-
-hz_mapSub = {
-  const a2 = (hz_geoFilter?.admin2 ?? []).filter(Boolean)
-  const a1 = (hz_geoFilter?.admin1 ?? []).filter(Boolean)
-  const a0 = (hz_geoFilter?.admin0 ?? []).filter(Boolean).filter(x => String(x).toLowerCase() !== "all")
-  if (hz_mapLevel === 2 && a1.length && !a2.length) return `Showing Admin2 (children of selected Admin1).`
-  if (hz_mapLevel === 2 && a2.length) return `Showing selected Admin2 areas.`
-  if (hz_mapLevel === 1 && a0.length) return `Showing Admin1 (children of selected Admin0).`
-  return `Showing Admin0 across SSA.`
-}
+hz_mapMetricEff = hz_mapMetric || "right"
 
 hz_guessNameKey = (feature, level) => {
   const props = feature?.properties ?? {}
   const keys = Object.keys(props)
   const prefer = (level === 0)
-    ? ["admin0_name", "ADM0_NAME", "NAME_0", "name", "NAME", "country", "COUNTRY"]
+    ? ["gaul0_name", "admin0_name", "ADM0_NAME", "NAME_0", "name", "NAME", "country", "COUNTRY"]
     : (level === 1)
-      ? ["admin1_name", "ADM1_NAME", "NAME_1", "name", "NAME"]
-      : ["admin2_name", "ADM2_NAME", "NAME_2", "name", "NAME"]
+      ? ["gaul1_name", "admin1_name", "ADM1_NAME", "NAME_1", "name", "NAME"]
+      : ["gaul2_name", "admin2_name", "ADM2_NAME", "NAME_2", "name", "NAME"]
 
   for (const k of prefer) if (k in props) return k
-  const re = (level === 0) ? /(adm0|admin0|name_0|country)/i : (level === 1) ? /(adm1|admin1|name_1)/i : /(adm2|admin2|name_2)/i
+  const re = (level === 0) ? /(gaul0|adm0|admin0|name_0|country)/i : (level === 1) ? /(gaul1|adm1|admin1|name_1)/i : /(gaul2|adm2|admin2|name_2)/i
   return keys.find(k => re.test(k)) || keys.find(k => /name/i.test(k)) || null
-}
-
-hz_mapPlot = {
-  if (hz_viewMode !== "map") return html``
-  if (hz_mapMeta.loading) return html`<div class="hz-loading">Loading map…</div>`
-  if (!hz_mapMeta.ok) return html`<div class="warn"><b>Map query failed:</b><br>${hz_mapMeta.error}</div>`
-
-  // Value lookups
-  const mapL = new Map((hz_mapRowsL ?? []).map(d => [String(d.admin ?? ""), +d.total]))
-  const mapR = new Map((hz_mapRowsR ?? []).map(d => [String(d.admin ?? ""), +d.total]))
-  const names = new Set([...mapL.keys(), ...mapR.keys()].filter(Boolean))
-
-  const metric = hz_mapMetricEff || "right"
-  const lookup = (name) => {
-    const vL = mapL.get(name)
-    const vR = mapR.get(name)
-    if (metric === "left") return vL
-    if (metric === "right") return vR
-    return (Number(vR ?? 0) - Number(vL ?? 0))
-  }
-
-  const boundsObj = await getAdminBoundaries([hz_mapLevel])
-  const fc = boundsObj?.[`admin${hz_mapLevel}`]
-  const feats = Array.isArray(fc?.features) ? fc.features : []
-  if (!feats.length) return html`<div class="warn"><b>No boundary features found</b> for ${hz_mapLevelLabel}.</div>`
-
-  const nameKey = hz_guessNameKey(feats[0], hz_mapLevel)
-  const getName = (f) => {
-    const p = f?.properties ?? {}
-    return (nameKey && p[nameKey] != null) ? String(p[nameKey]) : ""
-  }
-
-// Scope features to the user's geographic selection (more intuitive than filtering by join results)
-const a0 = (hz_geoFilter?.admin0 ?? []).filter(Boolean).filter(x => String(x).toLowerCase() !== "all")
-const a1 = (hz_geoFilter?.admin1 ?? []).filter(Boolean)
-const a2 = (hz_geoFilter?.admin2 ?? []).filter(Boolean)
-
-const guessKey = (levelWanted) => {
-  const props0 = feats?.[0]?.properties ?? {}
-  const keys = Object.keys(props0)
-  const prefer = (levelWanted === 0)
-    ? ["admin0_name", "ADM0_NAME", "NAME_0", "country", "COUNTRY", "name", "NAME"]
-    : (levelWanted === 1)
-      ? ["admin1_name", "ADM1_NAME", "NAME_1", "name", "NAME"]
-      : ["admin2_name", "ADM2_NAME", "NAME_2", "name", "NAME"]
-  for (const k of prefer) if (k in props0) return k
-  const re = (levelWanted === 0) ? /(adm0|admin0|name_0|country)/i
-    : (levelWanted === 1) ? /(adm1|admin1|name_1)/i
-    : /(adm2|admin2|name_2)/i
-  return keys.find(k => re.test(k)) || keys.find(k => /name/i.test(k)) || null
-}
-
-const admin0Key = guessKey(0)
-const admin1Key = guessKey(1)
-const getAdmin0 = (f) => {
-  const p = f?.properties ?? {}
-  return (admin0Key && p[admin0Key] != null) ? String(p[admin0Key]) : ""
-}
-const getAdmin1 = (f) => {
-  const p = f?.properties ?? {}
-  return (admin1Key && p[admin1Key] != null) ? String(p[admin1Key]) : ""
-}
-
-let featsUse = feats
-
-// If a country is selected, show only its children at admin1
-if (hz_mapLevel === 1 && a0.length) {
-  featsUse = featsUse.filter(f => a0.includes(getAdmin0(f)))
-}
-
-// If an admin1 is selected, show only its children at admin2
-if (hz_mapLevel === 2) {
-  if (a1.length) featsUse = featsUse.filter(f => a1.includes(getAdmin1(f)))
-  else if (a2.length) featsUse = featsUse.filter(f => a2.includes(getName(f)))
-}
-
-// Keep only valid geometries
-featsUse = featsUse.filter(f => f?.geometry && f.geometry.coordinates && f.geometry.coordinates.length)
-
-if (!featsUse.length) {
-  return html`<div class="warn"><b>No boundary features found for the current selection.</b><br>
-    Try clearing the most specific boundary filter (Admin2 → Admin1 → Admin0).</div>`
-}
-
-const fcUse = { type: "FeatureCollection", features: featsUse }
-
-const joinHits = featsUse.some(f => names.has(getName(f)))
-const joinNote = (!joinHits)
-  ? html`<div class="hz-muted hz-note">Note: could not match by-admin names to boundary properties; showing boundaries without fill.</div>`
-  : null
-
-const isDelta = (metric === "delta")
-  const label = isDelta ? "Δ exposure (Right − Left)" : (metric === "left" ? "Exposure (Left)" : "Exposure (Right)")
-
-const fcSelectedA2 = (() => {
-  const picked = new Set((a2 ?? []).map(String))
-  const features = picked.size
-    ? featsUse.filter(f => picked.has(getName(f)))
-    : []
-  return { type: "FeatureCollection", features }
-})()
-
-  const plot = Plot.plot({
-    projection: { type: "mercator", domain: fcUse, inset: 10 },
-    height: 440,
-    color: isDelta
-      ? { type: "diverging", legend: true, label, pivot: 0 }
-      : { legend: true, label },
-    marks: [
-      Plot.geo(fcUse, {
-        fill: f => {
-          const n = getName(f)
-          const v = lookup(n)
-          return (v == null) ? NaN : v
-        },
-        stroke: "white",
-        strokeWidth: 0.4,
-        title: f => {
-          const n = getName(f)
-          const v = lookup(n)
-          const vv = (v == null) ? "n/a" : fmtAbs(v)
-          const picked = (a2 ?? []).includes(n) ? "\nSelected Admin2" : ""
-          return `${n}\n${label}: ${vv}${picked}`
-        }
-      }),
-      ...(fcSelectedA2.features.length ? [
-        Plot.geo(fcSelectedA2, {
-          fill: "none",
-          stroke: "#111827",
-          strokeWidth: 2
-        })
-      ] : [])
-    ]
-  })
-
-  const box = html`<div class="hz-mapPlot"></div>`
-  if (joinNote) box.appendChild(joinNote)
-  box.appendChild(plot)
-  return box
 }
 
 hz_apiDebouncedCached = async (groupKey, path, body, { ttlMs = 60000, debounceMs = 250 } = {}) => {
@@ -3154,12 +2947,17 @@ hz_q2DisplayState = {
   const valRight = hz_q2_relative ? "perc2" : "total2"
   const valDiff  = hz_q2_relative ? "perc_diff" : "diff"
 
-  const rankBy = (valKey, onlyPositive = false) => {
+  // Rank/top-N crops using the explicit any-hazard row only.
+  // This avoids double-counting in non-compound mode, where dry(any), heat(any), and wet(any) overlap.
+  const anyRankRows = (Array.isArray(hz_q2Set_noncompound) ? hz_q2Set_noncompound : [])
+    .filter((r) => String(r?.hazard ?? "") === "any")
+
+  const rankByAny = (valKey, onlyPositive = false) => {
+    const source = anyRankRows.length ? anyRankRows : rows.filter((r) => String(r?.hazard ?? "") !== "no hazard")
     const m = new Map()
-    for (const r of rows) {
+    for (const r of source) {
       const crop = r?.crop
       if (!crop) continue
-      if (String(r?.hazard ?? "") === "no hazard") continue
       const v = Number(r?.[valKey] ?? 0)
       if (!Number.isFinite(v)) continue
       if (onlyPositive && v <= 0) continue
@@ -3177,18 +2975,18 @@ hz_q2DisplayState = {
 
   const crops = (() => {
     if (hz_q2_difference) {
-      return rankBy(valDiff, includeDecreases ? false : true).slice(0, n)
+      return rankByAny(valDiff, includeDecreases ? false : true).slice(0, n)
     }
-    const topL = rankBy(valLeft, false).slice(0, n)
-    const topR = rankBy(valRight, false).slice(0, n)
+    const topL = rankByAny(valLeft, false).slice(0, n)
+    const topR = rankByAny(valRight, false).slice(0, n)
     return Array.from(new Set([...topL, ...topR]))
   })()
 
   const score = (crop) => {
+    const source = anyRankRows.length ? anyRankRows : rows.filter((r) => String(r?.hazard ?? "") !== "no hazard")
     let s = 0
-    for (const r of rows) {
+    for (const r of source) {
       if (r?.crop !== crop) continue
-      if (String(r?.hazard ?? "") === "no hazard") continue
       s += Math.abs(Number(r?.[valRight] ?? 0)) + Math.abs(Number(r?.[valLeft] ?? 0))
     }
     return s
@@ -3829,110 +3627,6 @@ hz_q2InsightView = {
 }
 ```
 
-```{ojs}
-//| output: false
-// ============================================================
-// Q3 — HAZARD OVERLAP
-// ============================================================
-// Q3 — hazard by crop
-hz_q3RespL = ({
-  ok: !!hz_q2Resp?.ok,
-  cached: !!hz_q2Resp?.cached,
-  t_ms: Number(hz_q2Resp?.t_ms || 0),
-  error: hz_q2Resp?.error || null,
-  data: hz_q2Resp?.left ?? []
-})
-
-hz_q3RespR = ({
-  ok: !!hz_q2Resp?.ok,
-  cached: !!hz_q2Resp?.cached,
-  t_ms: Number(hz_q2Resp?.t_ms || 0),
-  error: hz_q2Resp?.error || null,
-  data: hz_q2Resp?.right ?? []
-})
-
-hz_q3DataL = hz_q3RespL?.data ?? []
-hz_q3DataR = hz_q3RespR?.data ?? []
-
-hz_q3Meta = ({
-  ok: !!hz_q2Meta?.ok,
-  cached: !!hz_q2Meta?.cached,
-  t_ms: Number(hz_q2Meta?.t_ms || 0),
-  error: hz_q2Meta?.error || null
-})
-
-hz_q3Chart = {
-  const L = hz_q3DataL ?? []
-  const R = hz_q3DataR ?? []
-  if (!L.length && !R.length) return html`<div class="hz-muted">No data.</div>`
-
-  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
-  const fmtAbs = (x) => hz_formatNumber(x, { digits: 2 })
-
-  // Top crops by combined exposure (Left + Right)
-  const cropTotals = new Map()
-  const bump = (crop, v) => cropTotals.set(crop, (cropTotals.get(crop) || 0) + Number(v || 0))
-  for (const d of R) bump(d.crop, d.total)
-  for (const d of L) bump(d.crop, d.total)
-
-  const maxCrops = Math.min(10, Number(hz_topN || 10))
-  const crops = Array.from(cropTotals.entries())
-    .sort((a,b) => b[1] - a[1])
-    .slice(0, maxCrops)
-    .map(([c]) => c)
-
-  const hazards = Array.from(new Set([...L.map(d => d.hazard), ...R.map(d => d.hazard)])).sort()
-
-  const filter = (data) =>
-    data
-      .filter(d => crops.includes(d.crop) && hazards.includes(d.hazard))
-      .map(d => ({ crop: d.crop, hazard: d.hazard, total: Number(d.total || 0) }))
-
-  // Shared categorical color scale (keeps left/right colors aligned)
-  const color = hz_hazardColorConfig(hazards, false)
-  const legend = Plot.legend({ color: hz_hazardColorConfig(hazards, true), columns: 3 })
-
-  const plotStack = (data, title) => html`
-    <div class="hz-mini hz-mini--stack">
-      <div class="hz-mini__title">${title}</div>
-      ${Plot.plot({
-        height: Math.max(320, crops.length * 26, Number(hz_chartHeight ?? 520)),
-        marginLeft: 160,
-        marginRight: 18,
-        marginTop: 10,
-        marginBottom: 28,
-        x: { label: (hz_varLabelAbs ?? "Exposure"), grid: true, tickFormat: fmtAbs },
-        y: { domain: crops, label: null },
-        color,
-          marks: [
-          Plot.barX(filter(data), Plot.stackX({
-            x: "total",
-            y: "crop",
-            fill: "hazard",
-            tip: {
-              format: {
-                crop: true,
-                hazard: true,
-                total: fmtAbs
-              }
-            }
-          })),
-          Plot.ruleX([0])
-        ]
-      })}
-    </div>
-  `
-
-  return html`
-    <div class="hz-legendRow">${legend}</div>
-    <div class="hz-grid2 hz-grid2--equal">
-      ${plotStack(L, "Left")}
-      ${plotStack(R, "Right")}
-    </div>
-  `
-}
-
-```
 
 ```{ojs}
 //| output: false
@@ -3992,8 +3686,519 @@ hz_q4HazMeta = ({
   error: hz_q4HazRespL?.error || hz_q4HazRespR?.error || null
 })
 
-// Q5 — Scenario trajectories + uncertainty
+// Q4 helper rows: normalize hazard-by-admin payload
+hz_q4HazRowsL_norm = {
+  const src = Array.isArray(hz_q4HazDataL) && hz_q4HazDataL.length ? hz_q4HazDataL : (hz_q4DataL ?? []).map((d) => ({ ...d, hazard: "any" }))
+  return src
+    .map((d) => ({
+      admin: String(d?.admin_name ?? d?.admin ?? d?.name ?? "Unknown"),
+      hazard: String(d?.hazard ?? "any"),
+      total: Number(d?.total ?? d?.value ?? 0)
+    }))
+    .filter((d) => d.admin && Number.isFinite(d.total))
+}
 
+hz_q4HazRowsR_norm = {
+  const src = Array.isArray(hz_q4HazDataR) && hz_q4HazDataR.length ? hz_q4HazDataR : (hz_q4DataR ?? []).map((d) => ({ ...d, hazard: "any" }))
+  return src
+    .map((d) => ({
+      admin: String(d?.admin_name ?? d?.admin ?? d?.name ?? "Unknown"),
+      hazard: String(d?.hazard ?? "any"),
+      total: Number(d?.total ?? d?.value ?? 0)
+    }))
+    .filter((d) => d.admin && Number.isFinite(d.total))
+}
+
+hz_q4NonCompoundBuckets = (rows) => {
+  const byAdmin = new Map()
+  const add = (admin, hazard, v) => {
+    const key = `${admin}||${hazard}`
+    byAdmin.set(key, (byAdmin.get(key) || 0) + v)
+  }
+
+  for (const r of (rows ?? [])) {
+    const h = String(r?.hazard ?? "")
+    const admin = String(r?.admin ?? "")
+    if (!admin) continue
+    const v = Number(r?.total ?? 0)
+    if (!Number.isFinite(v)) continue
+
+    if (h === "any") add(admin, "any", v)
+
+    if (h && h !== "any" && h !== "no hazard") {
+      if (h.includes("dry")) add(admin, "dry (any)", v)
+      if (h.includes("heat")) add(admin, "heat (any)", v)
+      if (h.includes("wet")) add(admin, "wet (any)", v)
+    }
+  }
+
+  const out = []
+  for (const [key, total] of byAdmin.entries()) {
+    const [admin, hazard] = key.split("||")
+    out.push({ admin, hazard, total })
+  }
+  return out
+}
+
+hz_q4CompoundExclusive = (rows) => {
+  const out = []
+  for (const r of (rows ?? [])) {
+    const h0 = String(r?.hazard ?? "")
+    const admin = String(r?.admin ?? "")
+    if (!admin) continue
+    const v = Number(r?.total ?? 0)
+    if (!Number.isFinite(v)) continue
+
+    if (h0 === "dry") out.push({ hazard: "dry (only)", admin, total: v })
+    else if (h0 === "heat") out.push({ hazard: "heat (only)", admin, total: v })
+    else if (h0 === "wet") out.push({ hazard: "wet (only)", admin, total: v })
+    else if (h0 === "dry+heat" || h0 === "dry+wet" || h0 === "heat+wet" || h0 === "dry+heat+wet") out.push({ hazard: h0, admin, total: v })
+  }
+  return out
+}
+
+hz_q4CompoundSimplified = (rows) => {
+  const bucket = (h) => {
+    const h0 = String(h).replace(" (only)", "")
+    const n = h0.split("+").filter(Boolean).length
+    if (n === 1) return "1 hazard"
+    if (n === 2) return "2 hazards"
+    if (n === 3) return "3 hazards"
+    return null
+  }
+
+  const agg = new Map()
+  for (const r of (rows ?? [])) {
+    const admin = String(r?.admin ?? "")
+    if (!admin) continue
+    const b = bucket(String(r?.hazard ?? ""))
+    if (!b) continue
+    const key = `${admin}||${b}`
+    const v = Number(r?.total ?? 0)
+    if (!Number.isFinite(v)) continue
+    agg.set(key, (agg.get(key) || 0) + v)
+  }
+
+  const out = []
+  for (const [key, total] of agg.entries()) {
+    const [admin, hazard] = key.split("||")
+    out.push({ admin, hazard, total })
+  }
+  return out
+}
+
+hz_q4HazMerge = (rowsL, rowsR) => {
+  const keyOf = (d) => `${d?.admin ?? ""}||${d?.hazard ?? ""}`
+  const mapL = new Map((rowsL ?? []).map((d) => [keyOf(d), Number(d?.total ?? 0)]))
+  const mapR = new Map((rowsR ?? []).map((d) => [keyOf(d), Number(d?.total ?? 0)]))
+  const keys = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
+
+  return keys.map((k) => {
+    const [admin, hazard] = k.split("||")
+    const total1 = Number(mapL.get(k) || 0)
+    const total2 = Number(mapR.get(k) || 0)
+    return { admin, hazard, total1, total2, diff: total2 - total1 }
+  })
+}
+
+hz_q4Set_compound_full = hz_q4HazMerge(hz_q4CompoundExclusive(hz_q4HazRowsL_norm), hz_q4CompoundExclusive(hz_q4HazRowsR_norm))
+hz_q4Set_compound_simple = hz_q4HazMerge(hz_q4CompoundSimplified(hz_q4CompoundExclusive(hz_q4HazRowsL_norm)), hz_q4CompoundSimplified(hz_q4CompoundExclusive(hz_q4HazRowsR_norm)))
+hz_q4Set_noncompound = hz_q4HazMerge(hz_q4NonCompoundBuckets(hz_q4HazRowsL_norm), hz_q4NonCompoundBuckets(hz_q4HazRowsR_norm))
+
+// Q4 percentage denominator.
+// Total any-hazard exposure across the selected geographies, not the rows
+hz_q4PctDenominator = {
+  const nnum = (x) => {
+    const v = Number(x)
+    return Number.isFinite(v) ? v : 0
+  }
+
+  const choose = (...values) => {
+    for (const v of values) {
+      const x = nnum(v)
+      if (x > 0) return x
+    }
+    return 0
+  }
+
+  const anyTotalL = (hz_q4Set_noncompound ?? [])
+    .filter((d) => String(d?.hazard ?? "") === "any")
+    .reduce((s, d) => s + nnum(d?.total1), 0)
+
+  const anyTotalR = (hz_q4Set_noncompound ?? [])
+    .filter((d) => String(d?.hazard ?? "") === "any")
+    .reduce((s, d) => s + nnum(d?.total2), 0)
+
+  // Fallback 1: sum the mutually exclusive compound buckets.
+  const compoundTotalL = (hz_q4Set_compound_full ?? []).reduce((s, d) => s + nnum(d?.total1), 0)
+  const compoundTotalR = (hz_q4Set_compound_full ?? []).reduce((s, d) => s + nnum(d?.total2), 0)
+
+  // Fallback 2 only: /by-admin with group_hazard
+  const adminTotalL = (hz_q4DataL ?? []).reduce((s, d) => s + nnum(d?.total ?? d?.value), 0)
+  const adminTotalR = (hz_q4DataR ?? []).reduce((s, d) => s + nnum(d?.total ?? d?.value), 0)
+
+  return {
+    total1: choose(anyTotalL, compoundTotalL, adminTotalL),
+    total2: choose(anyTotalR, compoundTotalR, adminTotalR)
+  }
+}
+
+hz_q4HazSetActive = {
+  if (!!hz_q4_showCompound) {
+    return hz_q4_simplifyCompound ? (hz_q4Set_compound_simple ?? []) : (hz_q4Set_compound_full ?? [])
+  }
+  return hz_q4Set_noncompound ?? []
+}
+
+hz_q4HazLevels = (
+  !!hz_q4_showCompound
+    ? (!!hz_q4_simplifyCompound
+        ? ["1 hazard", "2 hazards", "3 hazards"]
+        : ["dry (only)", "heat (only)", "wet (only)", "dry+heat", "dry+wet", "heat+wet", "dry+heat+wet"])
+    : ["dry (any)", "heat (any)", "wet (any)", "any"]
+)
+
+hz_q4RowsChart = {
+  const set = Array.isArray(hz_q4HazSetActive) ? hz_q4HazSetActive : []
+  const hazLevels = Array.isArray(hz_q4HazLevels) ? hz_q4HazLevels : []
+  if (!set.length) return []
+
+  const totalL_all = Number(hz_q4PctDenominator?.total1 ?? 0)
+  const totalR_all = Number(hz_q4PctDenominator?.total2 ?? 0)
+
+  const valL = (r) =>
+    hz_rel
+      ? (totalL_all ? (100 * Number(r?.total1 ?? 0) / totalL_all) : 0)
+      : Number(r?.total1 ?? 0)
+
+  const valR = (r) =>
+    hz_rel
+      ? (totalR_all ? (100 * Number(r?.total2 ?? 0) / totalR_all) : 0)
+      : Number(r?.total2 ?? 0)
+
+  const rankMap = new Map()
+  if (hz_q4_difference) {
+    const useAny = hazLevels.includes("any")
+    if (useAny) {
+      for (const r of set) {
+        if (String(r?.hazard ?? "") !== "any") continue
+        rankMap.set(String(r?.admin ?? ""), Math.abs(valR(r) - valL(r)))
+      }
+    } else {
+      const tmp = new Map()
+      for (const r of set) {
+        const admin = String(r?.admin ?? "")
+        tmp.set(admin, (tmp.get(admin) || 0) + (valR(r) - valL(r)))
+      }
+      for (const [admin, delta] of tmp.entries()) rankMap.set(admin, Math.abs(delta))
+    }
+  } else {
+    const useAny = hazLevels.includes("any")
+    if (useAny) {
+      for (const r of set) {
+        if (String(r?.hazard ?? "") !== "any") continue
+        rankMap.set(String(r?.admin ?? ""), valR(r))
+      }
+    } else {
+      for (const r of set) {
+        const admin = String(r?.admin ?? "")
+        rankMap.set(admin, (rankMap.get(admin) || 0) + valR(r))
+      }
+    }
+  }
+
+  const n = Math.max(1, Number(hz_q4_topNEff ?? 10) || 10)
+  const topAdmins = Array.from(rankMap.entries())
+    .sort((a,b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([a]) => a)
+
+  const idx = new Map(topAdmins.map((a, i) => [a, i]))
+  const hidx = new Map(hazLevels.map((h, i) => [h, i]))
+
+  const out = set
+    .filter((r) => topAdmins.includes(String(r?.admin ?? "")) && hazLevels.includes(String(r?.hazard ?? "")))
+    .map((r) => {
+      const left = valL(r)
+      const right = valR(r)
+      return {
+        admin: String(r?.admin ?? ""),
+        hazard: String(r?.hazard ?? ""),
+        total1: Number(r?.total1 ?? 0),
+        total2: Number(r?.total2 ?? 0),
+        value1: left,
+        value2: right,
+        delta: right - left
+      }
+    })
+    .sort((a,b) => (idx.get(a.admin) - idx.get(b.admin)) || (hidx.get(a.hazard) - hidx.get(b.hazard)))
+
+  return out
+}
+
+hz_q4Chart = {
+  const rows = hz_q4RowsChart ?? []
+  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
+
+  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
+  const admins = Array.from(new Set(rows.map((d) => d.admin)))
+  const hazLevels = hz_q4HazLevels ?? []
+
+  const groupGap = 1
+  const slotPx = hz_q4_showCompound ? 14 : 15
+  const perAdmin = Math.max(
+    hz_q4_showCompound ? 70 : 62,
+    hazLevels.length * slotPx + groupGap * 12
+  )
+
+  const height = Math.max(
+    360,
+    admins.length * perAdmin,
+    Number(hz_q4_chartHeight ?? 520)
+  )
+
+  const plotW =
+    (hz_plotWidth ?? 0) >= 980
+      ? Math.floor((hz_plotWidth - 16) / 2)
+      : hz_plotWidth
+
+  const xLabel = hz_rel ? "Share of total any-hazard exposure (%)" : (hz_varLabelAbs ?? "Exposure")
+  const xLabelDiff = hz_rel ? "Δ share, percentage points (Right − Left)" : "Δ exposure (Right − Left)"
+  const fmt = (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })}%` : hz_formatNumber(x, { digits: 2 })
+  const fmtDiff = (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })} pp` : hz_formatNumber(x, { digits: 2 })
+  const tickFmt = (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })}%` : hz_formatNumber(x, { digits: 0 })
+
+  const sharedColor = hz_hazardColorConfig(hazLevels, true)
+  const legend = Plot.legend({ color: sharedColor, columns: Math.min(4, Math.max(1, hazLevels.length || 1)) })
+
+  const slotKey = (admin, hazard) => `${admin}__haz__${hazard}`
+  const gapKey = (admin) => `${admin}__gap__`
+
+  const buildGroupedLayout = (sourceRows, hazards) => {
+    const domain = []
+    const tickLabelMap = new Map()
+    const midIdx = Math.floor((hazards.length - 1) / 2)
+    const midHazard = hazards[midIdx] ?? hazards[0] ?? null
+
+    for (const admin of admins) {
+      for (const hazard of hazards) domain.push(slotKey(admin, hazard))
+      if (midHazard) tickLabelMap.set(slotKey(admin, midHazard), admin)
+      domain.push(gapKey(admin))
+    }
+
+    const data = (sourceRows ?? [])
+      .filter((d) => admins.includes(d?.admin) && hazards.includes(String(d?.hazard ?? "")))
+      .map((d) => ({
+        ...d,
+        admin: d.admin,
+        hazard: String(d.hazard),
+        value: Number(d?.value ?? 0),
+        slot: slotKey(d.admin, String(d.hazard))
+      }))
+
+    return { data, domain, tickLabelMap }
+  }
+
+  const groupedBarMark = (layout) => Plot.barX(layout.data, {
+    x: "value",
+    y: "slot",
+    fill: "hazard",
+    insetTop: 1,
+    insetBottom: 1
+  })
+
+  const groupedTipMark = (layout, valueFormatter, valueLabel = null) => {
+    // Keep the tooltip label short. Observable Plot uses the x-axis label in
+    // the tooltip by default, and the full Q4 percentage label is too long.
+    const safeValueLabel = valueLabel ?? (hz_rel ? "Share (%)" : "Exposure")
+
+    return Plot.tip(
+      layout.data,
+      Plot.pointerY({
+        x: "value",
+        y: "slot",
+        fill: "hazard",
+        maxRadius: 80,
+        channels: {
+          adminLabel: { value: (d) => d?.admin ?? "—", label: "Geography" },
+          hazardLabel: { value: (d) => d?.hazard ?? "—", label: "Hazard" },
+          valueLabel: { value: (d) => Number(d?.value ?? 0), label: safeValueLabel }
+        },
+        format: {
+          adminLabel: true,
+          hazardLabel: true,
+          valueLabel: (v) => valueFormatter(v),
+          x: false,
+          y: false,
+          fill: false
+        }
+      })
+    )
+  }
+
+  const makeGroupedSidePlot = (title, valueKey) => {
+    const sourceRows = rows
+      .filter((r) => admins.includes(r?.admin) && hazLevels.includes(String(r?.hazard ?? "")))
+      .map((r) => ({
+        admin: r.admin,
+        hazard: String(r.hazard),
+        value: Number(r?.[valueKey] ?? 0)
+      }))
+
+    const layout = buildGroupedLayout(sourceRows, hazLevels)
+
+    const plot = hz_tuneCategoricalPlot(
+      Plot.plot({
+        className: "hz-plot--q4",
+        style: { fontSize: "20px" },
+        height,
+        width: plotW,
+        marginLeft: 290,
+        marginRight: 18,
+        marginTop: 10,
+        marginBottom: 84,
+        x: { label: xLabel, labelAnchor: "center", labelOffset: 52, grid: true, tickFormat: tickFmt },
+        y: {
+          domain: layout.domain,
+          label: null,
+          tickFormat: (d) => layout.tickLabelMap.get(d) ?? "",
+          tickSize: 0
+        },
+        color: { ...sharedColor, legend: false },
+        marks: [Plot.ruleX([0]), groupedBarMark(layout), groupedTipMark(layout, fmt, hz_rel ? "Share (%)" : "Exposure")]
+      }),
+      { yTickFontSize: 22, xTickFontSize: 14, yWrapChars: 18 }
+    )
+
+    return html`
+      <div class="hz-mini hz-mini--stack">
+        <div class="hz-mini__title">${title}</div>
+        ${plot}
+      </div>
+    `
+  }
+
+  if (hz_q4_difference) {
+    const diffSourceRows = rows.map((r) => ({
+      admin: r.admin,
+      hazard: String(r.hazard),
+      value: Number(r?.delta ?? 0)
+    }))
+    const layout = buildGroupedLayout(diffSourceRows, hazLevels)
+
+    const diffPlot = hz_tuneCategoricalPlot(
+      Plot.plot({
+        className: "hz-plot--q4",
+        style: { fontSize: "20px" },
+        height,
+        width: hz_plotWidth,
+        marginLeft: 290,
+        marginRight: 18,
+        marginTop: 10,
+        marginBottom: 86,
+        x: {
+          grid: true,
+          label: xLabelDiff,
+          labelAnchor: "center",
+          labelOffset: 52,
+          tickFormat: (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })}` : hz_formatNumber(x, { digits: 0 })
+        },
+        y: {
+          domain: layout.domain,
+          label: null,
+          tickFormat: (d) => layout.tickLabelMap.get(d) ?? "",
+          tickSize: 0
+        },
+        color: { ...sharedColor, legend: false },
+        marks: [
+          Plot.ruleX([0]),
+          groupedBarMark(layout),
+          groupedTipMark(layout, fmtDiff, hz_rel ? "Δ (pp)" : "Δ exposure")
+        ]
+      }),
+      { yTickFontSize: 22, xTickFontSize: 14, yWrapChars: 18 }
+    )
+
+    return html`
+      <div class="hz-chartLegend">${legend}</div>
+      ${diffPlot}
+      <div class="hz-upsetCaption">${subtitle}</div>
+      ${(!hz_q4HazMeta?.ok && !(hz_q4HazDataL?.length || hz_q4HazDataR?.length))
+        ? html`<div class="hz-upsetCaption">Hazard-by-admin API not available yet; showing fallback "any" totals only.</div>`
+        : html``}
+    `
+  }
+
+  return html`
+    <div class="hz-chartLegend">${legend}</div>
+    <div class="hz-grid2 hz-grid2--equal">
+      ${makeGroupedSidePlot(hz_s1.label, "value1")}
+      ${makeGroupedSidePlot(hz_s2.label, "value2")}
+    </div>
+    <div class="hz-upsetCaption">${subtitle}</div>
+    ${(!hz_q4HazMeta?.ok && !(hz_q4HazDataL?.length || hz_q4HazDataR?.length))
+      ? html`<div class="hz-upsetCaption">Hazard-by-admin API not available yet; showing fallback "any" totals only.</div>`
+      : html``}
+  `
+}
+
+viewof hz_viewMode = {
+  // Q1 only: Chart + Summary table
+  const form = Inputs.radio(
+    ["chart", "table"],
+    {
+      label: "",
+      value: "chart",
+      format: (v) => ({ chart: "Chart", table: "Summary table" }[v] ?? v),
+    }
+  )
+
+  form.classList.add("hz-viewToggle")
+
+  const getScroller = () =>
+    document.scrollingElement ||
+    document.querySelector("#quarto-content") ||
+    document.documentElement ||
+    document.body
+
+  const preserveAnchor = () => {
+    const sc = getScroller()
+    const y0 = sc.scrollTop
+    const anchor = document.getElementById("q1")
+    const a0 = anchor ? anchor.getBoundingClientRect().top : 0
+
+    const restore = () => {
+      const sc2 = getScroller()
+      const anchor2 = document.getElementById("q1")
+      const a1 = anchor2 ? anchor2.getBoundingClientRect().top : 0
+      sc2.scrollTop = y0 + (a1 - a0)
+    }
+
+    // Restore after reactive reflow
+    setTimeout(() => {
+      restore()
+      requestAnimationFrame(restore)
+      requestAnimationFrame(restore)
+    }, 0)
+  }
+
+  form.addEventListener(
+    "change",
+    () => {
+      try {
+        document.activeElement?.blur?.()
+      } catch (_) {}
+      preserveAnchor()
+    },
+    true
+  )
+
+  return form
+}
+
+// ============================================================
+// Q5 — SCENARIO TRAJECTORIES + UNCERTAINTY
+// ============================================================
 // Q5 controls
 viewof hz_q5_view = Inputs.radio(
   new Map([
@@ -4396,6 +4601,13 @@ hz_q5Plot = {
         if (Number.isFinite(hi)) vals.push(hi)
       }
     }
+
+    // Keep the historic reference line inside the y-domain.
+    // Absolute mode uses the raw historic baseline; index mode uses 100; difference mode uses 0.
+    const bRule = (hz_q5BaselineRules ?? []).find((d) => String(d?.hazard ?? "") === String(haz))
+    const baseline = Number(bRule?.baseline)
+    if (Number.isFinite(baseline)) vals.push(baseline)
+
     return vals
   }
 
@@ -4528,14 +4740,63 @@ hz_q5Plot = {
         curve: "linear"
       })] : []),
       Plot.dot(finiteRows, {
-        x: "xj",
-        y: "value",
-        z: "scenario",
-        stroke: "scenario",
-        fill: "scenario",
-        r: 4.5,
-        title: titleFor
-      })
+  x: "xj",
+  y: "value",
+  z: "scenario",
+  stroke: "scenario",
+  fill: "scenario",
+  r: 4.5
+}),
+Plot.tip(
+  finiteRows,
+  Plot.pointer({
+    x: "xj",
+    y: "value",
+    stroke: "scenario",
+    maxRadius: 70,
+    channels: {
+      scenarioLabel: {
+        value: (d) => fmtScenario(d?.scenario),
+        label: "Scenario"
+      },
+      periodLabel: {
+        value: (d) => String(d?.timeframe ?? "—"),
+        label: "Period"
+      },
+      hazardLabel: {
+        value: (d) => hz_formatQ5Hazard(d?.hazard),
+        label: "Hazard"
+      },
+      yearLabel: {
+        value: (d) => Math.round(Number(d?.year)),
+        label: "Year"
+      },
+      valueLabel: {
+        value: (d) => Number(d?.value),
+        label: scaleMode === "idx"
+          ? "Index"
+          : scaleMode === "diff"
+            ? "Difference"
+            : "Value"
+      },
+      baselineLabel: {
+        value: (d) => Number(d?.baseline_raw),
+        label: "Historic baseline"
+      }
+    },
+    format: {
+      scenarioLabel: true,
+      periodLabel: true,
+      hazardLabel: true,
+      yearLabel: true,
+      valueLabel: (v) => fmt(v),
+      baselineLabel: (v) => Number.isFinite(Number(v)) ? fmtAbs(v) : "—",
+      x: false,
+      y: false,
+      stroke: false
+    }
+  })
+)
     ]
   }
 
@@ -4674,7 +4935,7 @@ hz_q5TableView = {
     return Number.isFinite(v) ? `${hz_formatNumber(v, { digits: 2, compact: false })}%` : "—"
   }
 
-  const hasUnc = !!hz_q5Meta?.has_value_sd
+  const hasUnc = !!hz_q5Meta?.has_value_sd || (rows ?? []).some(r => r?.value_low != null && r?.value_high != null)
   const scaleMode = String(hz_q5_scale ?? "abs")
 
   const out = (rows ?? [])
@@ -4778,7 +5039,7 @@ hz_q5SummaryExport = {
   const rows = hz_q5PlotRows ?? []
   if (!rows.length) return { filename: "exposure_by_ssp_time_gcm", data: [] }
 
-  const hasUnc = !!hz_q5Meta?.has_value_sd
+  const hasUnc = !!hz_q5Meta?.has_value_sd || (rows ?? []).some(r => r?.value_low != null && r?.value_high != null)
   const scaleMode = String(hz_q5_scale ?? "abs")
   const out = (rows ?? [])
     .filter(r => {
@@ -4956,21 +5217,31 @@ hz_q5Insight = {
     for (const r of byScen.values()) latest.push(r)
   }
 
-  const hasUnc = !!hz_q5Meta?.has_value_sd
+  const hasUnc = !!hz_q5Meta?.has_value_sd || (rows ?? []).some(r => r?.value_low != null && r?.value_high != null)
+  const scaleMode = String(hz_q5_scale ?? "abs")
   const abs = Math.abs
 
   const withDeltas = latest.map((r) => {
-    const b = hz_q5BaselineFor(r.hazard)
+    const bShown = hz_q5BaselineFor(r.hazard)
+    const bRaw = (r?.baseline_raw == null ? null : Number(r.baseline_raw))
     const v = (r.value == null ? null : Number(r.value))
-    const bb = (b == null ? null : Number(b))
+    const bbShown = (bShown == null ? null : Number(bShown))
 
-    const delta = (bb == null || v == null || !Number.isFinite(bb) || !Number.isFinite(v))
-      ? null
-      : (v - bb)
+    // In difference mode, r.value is already future − historic baseline.
+    // Use the raw historic baseline for percentage change so the insight table does not show blank Δ%.
+    const delta = (scaleMode === "diff")
+      ? ((v == null || !Number.isFinite(v)) ? null : v)
+      : ((bbShown == null || v == null || !Number.isFinite(bbShown) || !Number.isFinite(v))
+          ? null
+          : (v - bbShown))
 
-    const pct = (bb == null || !Number.isFinite(bb) || bb === 0 || delta == null || !Number.isFinite(delta))
-      ? null
-      : (100 * delta / bb)
+    const pct = (scaleMode === "diff")
+      ? ((bRaw == null || !Number.isFinite(bRaw) || bRaw === 0 || delta == null || !Number.isFinite(delta))
+          ? null
+          : (100 * delta / bRaw))
+      : ((bbShown == null || !Number.isFinite(bbShown) || bbShown === 0 || delta == null || !Number.isFinite(delta))
+          ? null
+          : (100 * delta / bbShown))
 
     const ciwRaw = (!hasUnc || r.value_low == null || r.value_high == null)
       ? null
@@ -4978,7 +5249,7 @@ hz_q5Insight = {
 
     const ciw = (ciwRaw == null || !Number.isFinite(ciwRaw) || ciwRaw <= 0) ? null : ciwRaw
 
-    return { ...r, baseline: bb, delta, pct, ciw }
+    return { ...r, baseline: bbShown, historic_baseline: bRaw, delta, pct, ciw }
   })
 
   // Largest increase (positive Δ) + smallest change (min |Δ|) per hazard
@@ -5037,7 +5308,6 @@ hz_q5Insight = {
     [hz_t("sections.q5.insight.columns.ciWidth")]: fmtFull(r.ciw)
   }))
 
-  const scaleMode = String(hz_q5_scale ?? "abs")
   const lead = (scaleMode === "idx")
     ? hz_t("sections.q5.insight.leadIndexed")
     : (scaleMode === "diff")
@@ -5083,564 +5353,15 @@ hz_q4Rows = {
   return rows.slice(0, Math.max(1, Number(hz_q4_topNEff ?? 10) || 10))
 }
 
-// Q4 helper rows: normalize hazard-by-admin payload
-hz_q4HazRowsL_norm = {
-  const src = Array.isArray(hz_q4HazDataL) && hz_q4HazDataL.length ? hz_q4HazDataL : (hz_q4DataL ?? []).map((d) => ({ ...d, hazard: "any" }))
-  return src
-    .map((d) => ({
-      admin: String(d?.admin_name ?? d?.admin ?? d?.name ?? "Unknown"),
-      hazard: String(d?.hazard ?? "any"),
-      total: Number(d?.total ?? d?.value ?? 0)
-    }))
-    .filter((d) => d.admin && Number.isFinite(d.total))
-}
-
-hz_q4HazRowsR_norm = {
-  const src = Array.isArray(hz_q4HazDataR) && hz_q4HazDataR.length ? hz_q4HazDataR : (hz_q4DataR ?? []).map((d) => ({ ...d, hazard: "any" }))
-  return src
-    .map((d) => ({
-      admin: String(d?.admin_name ?? d?.admin ?? d?.name ?? "Unknown"),
-      hazard: String(d?.hazard ?? "any"),
-      total: Number(d?.total ?? d?.value ?? 0)
-    }))
-    .filter((d) => d.admin && Number.isFinite(d.total))
-}
-
-hz_q4NonCompoundBuckets = (rows) => {
-  const byAdmin = new Map()
-  const add = (admin, hazard, v) => {
-    const key = `${admin}||${hazard}`
-    byAdmin.set(key, (byAdmin.get(key) || 0) + v)
-  }
-
-  for (const r of (rows ?? [])) {
-    const h = String(r?.hazard ?? "")
-    const admin = String(r?.admin ?? "")
-    if (!admin) continue
-    const v = Number(r?.total ?? 0)
-    if (!Number.isFinite(v)) continue
-
-    if (h === "any") add(admin, "any", v)
-
-    if (h && h !== "any" && h !== "no hazard") {
-      if (h.includes("dry")) add(admin, "dry (any)", v)
-      if (h.includes("heat")) add(admin, "heat (any)", v)
-      if (h.includes("wet")) add(admin, "wet (any)", v)
-    }
-  }
-
-  const out = []
-  for (const [key, total] of byAdmin.entries()) {
-    const [admin, hazard] = key.split("||")
-    out.push({ admin, hazard, total })
-  }
-  return out
-}
-
-hz_q4CompoundExclusive = (rows) => {
-  const out = []
-  for (const r of (rows ?? [])) {
-    const h0 = String(r?.hazard ?? "")
-    const admin = String(r?.admin ?? "")
-    if (!admin) continue
-    const v = Number(r?.total ?? 0)
-    if (!Number.isFinite(v)) continue
-
-    if (h0 === "dry") out.push({ hazard: "dry (only)", admin, total: v })
-    else if (h0 === "heat") out.push({ hazard: "heat (only)", admin, total: v })
-    else if (h0 === "wet") out.push({ hazard: "wet (only)", admin, total: v })
-    else if (h0 === "dry+heat" || h0 === "dry+wet" || h0 === "heat+wet" || h0 === "dry+heat+wet") out.push({ hazard: h0, admin, total: v })
-  }
-  return out
-}
-
-hz_q4CompoundSimplified = (rows) => {
-  const bucket = (h) => {
-    const h0 = String(h).replace(" (only)", "")
-    const n = h0.split("+").filter(Boolean).length
-    if (n === 1) return "1 hazard"
-    if (n === 2) return "2 hazards"
-    if (n === 3) return "3 hazards"
-    return null
-  }
-
-  const agg = new Map()
-  for (const r of (rows ?? [])) {
-    const admin = String(r?.admin ?? "")
-    if (!admin) continue
-    const b = bucket(String(r?.hazard ?? ""))
-    if (!b) continue
-    const key = `${admin}||${b}`
-    const v = Number(r?.total ?? 0)
-    if (!Number.isFinite(v)) continue
-    agg.set(key, (agg.get(key) || 0) + v)
-  }
-
-  const out = []
-  for (const [key, total] of agg.entries()) {
-    const [admin, hazard] = key.split("||")
-    out.push({ admin, hazard, total })
-  }
-  return out
-}
-
-hz_q4HazMerge = (rowsL, rowsR) => {
-  const keyOf = (d) => `${d?.admin ?? ""}||${d?.hazard ?? ""}`
-  const mapL = new Map((rowsL ?? []).map((d) => [keyOf(d), Number(d?.total ?? 0)]))
-  const mapR = new Map((rowsR ?? []).map((d) => [keyOf(d), Number(d?.total ?? 0)]))
-  const keys = Array.from(new Set([...mapL.keys(), ...mapR.keys()]))
-
-  return keys.map((k) => {
-    const [admin, hazard] = k.split("||")
-    const total1 = Number(mapL.get(k) || 0)
-    const total2 = Number(mapR.get(k) || 0)
-    return { admin, hazard, total1, total2, diff: total2 - total1 }
-  })
-}
-
-hz_q4Set_compound_full = hz_q4HazMerge(hz_q4CompoundExclusive(hz_q4HazRowsL_norm), hz_q4CompoundExclusive(hz_q4HazRowsR_norm))
-hz_q4Set_compound_simple = hz_q4HazMerge(hz_q4CompoundSimplified(hz_q4CompoundExclusive(hz_q4HazRowsL_norm)), hz_q4CompoundSimplified(hz_q4CompoundExclusive(hz_q4HazRowsR_norm)))
-hz_q4Set_noncompound = hz_q4HazMerge(hz_q4NonCompoundBuckets(hz_q4HazRowsL_norm), hz_q4NonCompoundBuckets(hz_q4HazRowsR_norm))
-
-hz_q4HazSetActive = {
-  if (!!hz_q4_showCompound) {
-    return hz_q4_simplifyCompound ? (hz_q4Set_compound_simple ?? []) : (hz_q4Set_compound_full ?? [])
-  }
-  return hz_q4Set_noncompound ?? []
-}
-
-hz_q4HazLevels = (
-  !!hz_q4_showCompound
-    ? (!!hz_q4_simplifyCompound
-        ? ["1 hazard", "2 hazards", "3 hazards"]
-        : ["dry (only)", "heat (only)", "wet (only)", "dry+heat", "dry+wet", "heat+wet", "dry+heat+wet"])
-    : ["dry (any)", "heat (any)", "wet (any)", "any"]
-)
-
-hz_q4RowsChart = {
-  const set = Array.isArray(hz_q4HazSetActive) ? hz_q4HazSetActive : []
-  const hazLevels = Array.isArray(hz_q4HazLevels) ? hz_q4HazLevels : []
-  if (!set.length) return []
-
-  const totalL_all = set.reduce((s, r) => s + Number(r?.total1 ?? 0), 0)
-  const totalR_all = set.reduce((s, r) => s + Number(r?.total2 ?? 0), 0)
-  const valL = (r) => hz_rel ? (totalL_all ? (100 * Number(r?.total1 ?? 0) / totalL_all) : 0) : Number(r?.total1 ?? 0)
-  const valR = (r) => hz_rel ? (totalR_all ? (100 * Number(r?.total2 ?? 0) / totalR_all) : 0) : Number(r?.total2 ?? 0)
-
-  const rankMap = new Map()
-  if (hz_q4_difference) {
-    const useAny = hazLevels.includes("any")
-    if (useAny) {
-      for (const r of set) {
-        if (String(r?.hazard ?? "") !== "any") continue
-        rankMap.set(String(r?.admin ?? ""), Math.abs(valR(r) - valL(r)))
-      }
-    } else {
-      const tmp = new Map()
-      for (const r of set) {
-        const admin = String(r?.admin ?? "")
-        tmp.set(admin, (tmp.get(admin) || 0) + (valR(r) - valL(r)))
-      }
-      for (const [admin, delta] of tmp.entries()) rankMap.set(admin, Math.abs(delta))
-    }
-  } else {
-    const useAny = hazLevels.includes("any")
-    if (useAny) {
-      for (const r of set) {
-        if (String(r?.hazard ?? "") !== "any") continue
-        rankMap.set(String(r?.admin ?? ""), valR(r))
-      }
-    } else {
-      for (const r of set) {
-        const admin = String(r?.admin ?? "")
-        rankMap.set(admin, (rankMap.get(admin) || 0) + valR(r))
-      }
-    }
-  }
-
-  const n = Math.max(1, Number(hz_q4_topNEff ?? 10) || 10)
-  const topAdmins = Array.from(rankMap.entries())
-    .sort((a,b) => b[1] - a[1])
-    .slice(0, n)
-    .map(([a]) => a)
-
-  const idx = new Map(topAdmins.map((a, i) => [a, i]))
-  const hidx = new Map(hazLevels.map((h, i) => [h, i]))
-
-  const out = set
-    .filter((r) => topAdmins.includes(String(r?.admin ?? "")) && hazLevels.includes(String(r?.hazard ?? "")))
-    .map((r) => {
-      const left = valL(r)
-      const right = valR(r)
-      return {
-        admin: String(r?.admin ?? ""),
-        hazard: String(r?.hazard ?? ""),
-        total1: Number(r?.total1 ?? 0),
-        total2: Number(r?.total2 ?? 0),
-        value1: left,
-        value2: right,
-        delta: right - left
-      }
-    })
-    .sort((a,b) => (idx.get(a.admin) - idx.get(b.admin)) || (hidx.get(a.hazard) - hidx.get(b.hazard)))
-
-  return out
-}
-
-hz_q4Chart = {
-  const rows = hz_q4RowsChart ?? []
-  if (!rows.length) return html`<div class="hz-muted">No data.</div>`
-
-  const subtitle = `${hz_geoLabel} • ${hz_commodityLabel} • Left: ${hz_s1.label} • Right: ${hz_s2.label}`
-  const admins = Array.from(new Set(rows.map((d) => d.admin)))
-  const hazLevels = hz_q4HazLevels ?? []
-
-  const groupGap = 1
-  const slotPx = hz_q4_showCompound ? 14 : 15
-  const perAdmin = Math.max(
-    hz_q4_showCompound ? 70 : 62,
-    hazLevels.length * slotPx + groupGap * 12
-  )
-
-  const height = Math.max(
-    360,
-    admins.length * perAdmin,
-    Number(hz_q4_chartHeight ?? 520)
-  )
-
-  const plotW =
-    (hz_plotWidth ?? 0) >= 980
-      ? Math.floor((hz_plotWidth - 16) / 2)
-      : hz_plotWidth
-
-  const xLabel = hz_rel ? "Percent of selected total (%)" : (hz_varLabelAbs ?? "Exposure")
-  const xLabelDiff = hz_rel ? "Δ percentage points (Right − Left)" : "Δ exposure (Right − Left)"
-  const fmt = (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })}%` : hz_formatNumber(x, { digits: 2 })
-  const fmtDiff = (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })} pp` : hz_formatNumber(x, { digits: 2 })
-  const tickFmt = (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })}%` : hz_formatNumber(x, { digits: 0 })
-
-  const sharedColor = hz_hazardColorConfig(hazLevels, true)
-  const legend = Plot.legend({ color: sharedColor, columns: Math.min(4, Math.max(1, hazLevels.length || 1)) })
-
-  const slotKey = (admin, hazard) => `${admin}__haz__${hazard}`
-  const gapKey = (admin) => `${admin}__gap__`
-
-  const buildGroupedLayout = (sourceRows, hazards) => {
-    const domain = []
-    const tickLabelMap = new Map()
-    const midIdx = Math.floor((hazards.length - 1) / 2)
-    const midHazard = hazards[midIdx] ?? hazards[0] ?? null
-
-    for (const admin of admins) {
-      for (const hazard of hazards) domain.push(slotKey(admin, hazard))
-      if (midHazard) tickLabelMap.set(slotKey(admin, midHazard), admin)
-      domain.push(gapKey(admin))
-    }
-
-    const data = (sourceRows ?? [])
-      .filter((d) => admins.includes(d?.admin) && hazards.includes(String(d?.hazard ?? "")))
-      .map((d) => ({
-        ...d,
-        admin: d.admin,
-        hazard: String(d.hazard),
-        value: Number(d?.value ?? 0),
-        slot: slotKey(d.admin, String(d.hazard))
-      }))
-
-    return { data, domain, tickLabelMap }
-  }
-
-  const groupedBarMark = (layout) => Plot.barX(layout.data, {
-    x: "value",
-    y: "slot",
-    fill: "hazard",
-    insetTop: 1,
-    insetBottom: 1
-  })
-
-  const groupedTipMark = (layout, valueFormatter) => Plot.tip(
-    layout.data,
-    Plot.pointerY({
-      x: "value",
-      y: "slot",
-      fill: "hazard",
-      maxRadius: 80,
-      channels: {
-        adminLabel: { value: (d) => d?.admin ?? "—", label: "Geography" },
-        hazardLabel: { value: (d) => d?.hazard ?? "—", label: "Hazard" }
-      },
-      format: {
-        adminLabel: true,
-        hazardLabel: true,
-        x: (v) => valueFormatter(v),
-        y: false,
-        fill: false
-      }
-    })
-  )
-
-  const makeGroupedSidePlot = (title, valueKey) => {
-    const sourceRows = rows
-      .filter((r) => admins.includes(r?.admin) && hazLevels.includes(String(r?.hazard ?? "")))
-      .map((r) => ({
-        admin: r.admin,
-        hazard: String(r.hazard),
-        value: Number(r?.[valueKey] ?? 0)
-      }))
-
-    const layout = buildGroupedLayout(sourceRows, hazLevels)
-
-    const plot = hz_tuneCategoricalPlot(
-      Plot.plot({
-        className: "hz-plot--q4",
-        style: { fontSize: "20px" },
-        height,
-        width: plotW,
-        marginLeft: 290,
-        marginRight: 18,
-        marginTop: 10,
-        marginBottom: 84,
-        x: { label: xLabel, labelAnchor: "center", labelOffset: 52, grid: true, tickFormat: tickFmt },
-        y: {
-          domain: layout.domain,
-          label: null,
-          tickFormat: (d) => layout.tickLabelMap.get(d) ?? "",
-          tickSize: 0
-        },
-        color: { ...sharedColor, legend: false },
-        marks: [Plot.ruleX([0]), groupedBarMark(layout), groupedTipMark(layout, fmt)]
-      }),
-      { yTickFontSize: 22, xTickFontSize: 14, yWrapChars: 18 }
-    )
-
-    return html`
-      <div class="hz-mini hz-mini--stack">
-        <div class="hz-mini__title">${title}</div>
-        ${plot}
-      </div>
-    `
-  }
-
-  if (hz_q4_difference) {
-    const diffSourceRows = rows.map((r) => ({
-      admin: r.admin,
-      hazard: String(r.hazard),
-      value: Number(r?.delta ?? 0)
-    }))
-    const layout = buildGroupedLayout(diffSourceRows, hazLevels)
-
-    const diffPlot = hz_tuneCategoricalPlot(
-      Plot.plot({
-        className: "hz-plot--q4",
-        style: { fontSize: "20px" },
-        height,
-        width: hz_plotWidth,
-        marginLeft: 290,
-        marginRight: 18,
-        marginTop: 10,
-        marginBottom: 86,
-        x: {
-          grid: true,
-          label: xLabelDiff,
-          labelAnchor: "center",
-          labelOffset: 52,
-          tickFormat: (x) => hz_rel ? `${hz_formatNumber(x, { digits: 2 })}` : hz_formatNumber(x, { digits: 0 })
-        },
-        y: {
-          domain: layout.domain,
-          label: null,
-          tickFormat: (d) => layout.tickLabelMap.get(d) ?? "",
-          tickSize: 0
-        },
-        color: { ...sharedColor, legend: false },
-        marks: [
-          Plot.ruleX([0]),
-          groupedBarMark(layout),
-          groupedTipMark(layout, fmtDiff)
-        ]
-      }),
-      { yTickFontSize: 22, xTickFontSize: 14, yWrapChars: 18 }
-    )
-
-    return html`
-      <div class="hz-chartLegend">${legend}</div>
-      ${diffPlot}
-      <div class="hz-upsetCaption">${subtitle}</div>
-      ${(!hz_q4HazMeta?.ok && !(hz_q4HazDataL?.length || hz_q4HazDataR?.length))
-        ? html`<div class="hz-upsetCaption">Hazard-by-admin API not available yet; showing fallback "any" totals only.</div>`
-        : html``}
-    `
-  }
-
-  return html`
-    <div class="hz-chartLegend">${legend}</div>
-    <div class="hz-grid2 hz-grid2--equal">
-      ${makeGroupedSidePlot(hz_s1.label, "value1")}
-      ${makeGroupedSidePlot(hz_s2.label, "value2")}
-    </div>
-    <div class="hz-upsetCaption">${subtitle}</div>
-    ${(!hz_q4HazMeta?.ok && !(hz_q4HazDataL?.length || hz_q4HazDataR?.length))
-      ? html`<div class="hz-upsetCaption">Hazard-by-admin API not available yet; showing fallback "any" totals only.</div>`
-      : html``}
-  `
-}
-
-viewof hz_viewMode = {
-  // Q1 only: Chart + Summary table
-  const form = Inputs.radio(
-    ["chart", "table"],
-    {
-      label: "",
-      value: "chart",
-      format: (v) => ({ chart: "Chart", table: "Summary table" }[v] ?? v),
-    }
-  )
-
-  form.classList.add("hz-viewToggle")
-
-  const getScroller = () =>
-    document.scrollingElement ||
-    document.querySelector("#quarto-content") ||
-    document.documentElement ||
-    document.body
-
-  const preserveAnchor = () => {
-    const sc = getScroller()
-    const y0 = sc.scrollTop
-    const anchor = document.getElementById("q1")
-    const a0 = anchor ? anchor.getBoundingClientRect().top : 0
-
-    const restore = () => {
-      const sc2 = getScroller()
-      const anchor2 = document.getElementById("q1")
-      const a1 = anchor2 ? anchor2.getBoundingClientRect().top : 0
-      sc2.scrollTop = y0 + (a1 - a0)
-    }
-
-    // Restore after reactive reflow
-    setTimeout(() => {
-      restore()
-      requestAnimationFrame(restore)
-      requestAnimationFrame(restore)
-    }, 0)
-  }
-
-  form.addEventListener(
-    "change",
-    () => {
-      try {
-        document.activeElement?.blur?.()
-      } catch (_) {}
-      preserveAnchor()
-    },
-    true
-  )
-
-  return form
-}
-
-viewof hz_recordsSide = {
-  const options = [
-    { value: "left",  label: "Left" },
-    { value: "right", label: "Right" }
-  ];
-
-  const root = document.createElement("div");
-  root.className = "hz-tabs hz-tabs--small";
-
-  const buttons = new Map();
-  const paint = (v) => {
-    for (const [val, btn] of buttons.entries()) btn.classList.toggle("is-active", val === v);
-  };
-
-  const set = (v, { silent = false } = {}) => {
-    if (root.value === v) return;
-    root.value = v;
-    paint(v);
-    if (!silent) root.dispatchEvent(new Event("input", { bubbles: true }));
-  };
-
-  for (const op of options) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "hz-tab";
-    btn.textContent = op.label;
-    btn.onclick = () => set(op.value);
-    buttons.set(op.value, btn);
-    root.appendChild(btn);
-  }
-
-  set("left", { silent: true });
-  return root;
-}
-
-viewof hz_recordsSort = {
-  const options = ["value_desc", "value_asc"]
-  const labelMap = { value_desc: "Value ↓", value_asc: "Value ↑" }
-  const sel = Inputs.select(options, {
-    value: "value_desc",
-    label: null,
-    format: (d) => labelMap[d] ?? String(d)
-  });
-  sel.classList.add("hz-select");
-  return sel;
-}
-
-viewof hz_recordsPageSize = {
-  const options = [50, 100, 200, 500]
-  const sel = Inputs.select(options, {
-    value: 100,
-    label: null,
-    format: (d) => `${d} rows`
-  });
-  sel.classList.add("hz-select");
-  return sel;
-}
-
-viewof hz_recordsPage = {
-  const root = document.createElement("div");
-  root.className = "hz-pager";
-  root.value = 1;
-
-  const prev = document.createElement("button");
-  prev.type = "button";
-  prev.className = "hz-btn hz-btn--sm";
-  prev.textContent = "Prev";
-
-  const label = document.createElement("div");
-  label.className = "hz-pager__label";
-
-  const next = document.createElement("button");
-  next.type = "button";
-  next.className = "hz-btn hz-btn--sm";
-  next.textContent = "Next";
-
-  const paint = () => { label.textContent = `Page ${root.value}`; };
-
-  const set = (v, { silent = false } = {}) => {
-    const n = Math.max(1, Number(v || 1));
-    if (root.value === n) return;
-    root.value = n;
-    paint();
-    if (!silent) root.dispatchEvent(new Event("input", { bubbles: true }));
-  };
-
-  prev.onclick = () => set(root.value - 1);
-  next.onclick = () => set(root.value + 1);
-
-  root.appendChild(prev);
-  root.appendChild(label);
-  root.appendChild(next);
-
-  paint();
-  return root;
-}
 ```
 
 ```{ojs}
 //| output: false
 // ============================================================
-// SHARED SHELL, HOSTS, GENERIC TABLE/CSV HELPERS, FINAL MOUNTING
+// SHARED SHELL + FINAL MOUNTING
+// ============================================================
+// This large legacy shell still powers Q1.
+// Q2, Q3, Q4, and Q5 now have their own dashboard cards below.
 // ============================================================
 // Render main shell
 hz_dashMount = html`<div class="hz-mount"><div class="hz-loading">Loading dashboard…</div></div>`
@@ -5651,9 +5372,6 @@ hz_q2_insightHost = html`<div class="hz-qOverview hz-qInsight"><div class="hz-lo
 hz_tableActionsHost = html`<div class="hz-actions"></div>`
 
 hz_tableHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading table…</div></div>`
-hz_mapHost  = html`<div class="hz-mapWrap"><div class="hz-loading">Loading map…</div></div>`
-hz_recordsActionsHost = html`<div class="hz-actions"></div>`
-hz_recordsHost  = html`<div class="hz-tableWrap"><div class="hz-loading">Loading records…</div></div>`
 
 hz_renderSummaryDownloadButton = (spec, fallbackName = "summary_table") => {
   const rows = Array.isArray(spec?.data) ? spec.data : []
@@ -5667,8 +5385,6 @@ hz_registerUi = {
   const ui = (globalThis.__ATLAS_HZ_UI__ ??= {})
   ui.chartWrap = hz_chartHost
   ui.tableWrap = hz_tableHost
-  ui.mapWrap = hz_mapHost
-  ui.recordsWrap = hz_recordsHost
 
   ui._busyCount = ui._busyCount ?? 0
   ui.setBusy = (on) => {
@@ -5676,8 +5392,6 @@ hz_registerUi = {
     const busy = ui._busyCount > 0
     try { ui.chartWrap?.classList.toggle("hz-chartWrap--busy", busy) } catch (_) {}
     try { ui.tableWrap?.classList.toggle("hz-tableWrap--busy", busy) } catch (_) {}
-    try { ui.mapWrap?.classList.toggle("hz-mapWrap--busy", busy) } catch (_) {}
-    try { ui.recordsWrap?.classList.toggle("hz-tableWrap--busy", busy) } catch (_) {}
   }
 
   return null
@@ -5808,6 +5522,7 @@ viewof hz_q3_relative = hz_noJumpInput(Inputs.toggle({ label: "", value: false }
 viewof hz_q3_showCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q3_simplifyCompound = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q3_includeNoHazard = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
+viewof hz_q3_includeDecreases = hz_noJumpInput(Inputs.toggle({ label: "", value: true }))
 viewof hz_q3_freeX = hz_noJumpInput(Inputs.toggle({ label: "", value: false }))
 viewof hz_q3_topN = hz_noJumpInput(Inputs.range([1, Math.max(1, (hz_selectedCommoditiesForReq ?? []).length || 1)], {
   label: "",
@@ -5859,7 +5574,6 @@ viewof hz_q4_simplifyCompound = Inputs.toggle({ label: "", value: false })
 viewof hz_q4_includeMapCaption = hz_noJumpInput(Inputs.toggle({ label: "", value: true }))
 
 hz_noJumpInput(viewof hz_rel)
-hz_noJumpInput(viewof hz_topN)
 hz_noJumpInput(viewof hz_mapMetric)
 
 hz_safeEnhancedMultiSelect = (options, cfg = {}) => {
@@ -6536,7 +6250,11 @@ hz_q3_mountFilters = hz_mountNodeOnce(hz_q3_filtersHost, hz_q3sync_filtersPanel)
 hz_q4_mountFilters = hz_mountNodeOnce(hz_q4_filtersHost, hz_q4sync_filtersPanel)
 hz_q5_mountFilters = hz_mountNodeOnce(hz_q5_filtersHost, hz_q5sync_filtersPanel)
 
-// Q3 — Hazard overlap 
+// ============================================================
+// Q3 — ACTIVE MODULE: HAZARD OVERLAP
+// ============================================================
+// Active Q3 code starts here. It reuses the shared Q2 API response,
+// then builds Q3-specific table/chart outputs and dashboard card.
 
 hz_q3_chartHost = html`<div class="hz-chartWrap hz-chartHost"><div class="hz-loading">Loading chart…</div></div>`
 hz_q3_tableHost = html`<div class="hz-tableWrap hz-tableHost"><div class="hz-loading">Loading table…</div></div>`
@@ -6582,6 +6300,7 @@ hz_q3_settingsWrap = html`
       <div class="hz-miniSetting"><span id="hz-q3-label-showcompound">Show compound hazards</span>${viewof hz_q3_showCompound}</div>
       <div class="hz-miniSetting"><span id="hz-q3-label-simplifycompound">Simplify compound hazards</span>${viewof hz_q3_simplifyCompound}</div>
       <div class="hz-miniSetting"><span id="hz-q3-label-includenohazard">Include no hazard</span>${viewof hz_q3_includeNoHazard}</div>
+      <div class="hz-miniSetting"><span id="hz-q3-label-includedecreases">Include decreases</span>${viewof hz_q3_includeDecreases}</div>
       <div class="hz-miniSetting"><span id="hz-q3-label-freex">Free X axis</span>${viewof hz_q3_freeX}</div>
       <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q3-label-topn">Number of commodities</span>${viewof hz_q3_topN}</div>
       <div class="hz-miniSetting hz-miniSetting--range"><span id="hz-q3-label-height">Height</span>${viewof hz_q3_chartHeight}</div>
@@ -7207,7 +6926,7 @@ hz_q3Charts = {
   const showCompound = !!hz_q3_showCompound
   const simplify = !!hz_q3_simplifyCompound
   const showNoHaz = !!hz_q3_includeNoHazard
-  const includeDecreases = false
+  const includeDecreases = !!hz_q3_includeDecreases
 
   const L = showCompound ? toExclusive(L0) : toOverlapping(L0)
   const R = showCompound ? toExclusive(R0) : toOverlapping(R0)
@@ -7604,6 +7323,12 @@ hz_q4TableView = {
             "Δ (pp)": 120
           }
         })}
+        ${showPct
+          ? html`<div class="hz-upsetCaption">
+              Percentages use total any-hazard exposure across the selected geographies as the denominator.
+              Non-compound rows such as dry (any), heat (any), and wet (any) are inclusive and should not be summed.
+            </div>`
+          : html``}
       </div>
     `
   }
@@ -7647,6 +7372,11 @@ hz_q4TableView = {
           "Δ (pp)": 120
         }
       })}
+      ${showPct
+        ? html`<div class="hz-upsetCaption">
+            Percentages use total any-hazard exposure across the selected geographies as the denominator.
+          </div>`
+        : html``}
     </div>
   `
 }
@@ -7885,6 +7615,11 @@ hz_q4Insight = {
     </div>
   `
 }
+
+// ============================================================
+// Q4 — ACTIVE MODULE: ADMIN GEOGRAPHY DISPLAY, TABLE, MAP, INSIGHTS
+// ============================================================
+// Note: the active Q4 request/calculation code is above in the Q4 module.
 
 // Q4 — raw records view
 
@@ -8234,6 +7969,11 @@ hz_q4_dashboardCard = html`
 </div>
 `
 
+// ============================================================
+// Q5 — ACTIVE MODULE: DASHBOARD CARD / FINAL MOUNTS
+// ============================================================
+// Active Q5 request/calculation/plot/table/insight code is above in the Q5 module.
+
 // Q5: stable insights mount 
 hz_q5_insightNode = html`<div></div>`
 hz_q5_insightMount = {
@@ -8405,72 +8145,22 @@ hz_downloadCsv = (filename, rows) => {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 250)
 }
 
-// Build chart *safely* (catch DuckDB/Arrow/Plot errors so UI still renders)
+// Build Q1 chart/table safely.
+// Q2–Q5 now render through their own question-specific modules.
 hz_updateChart = {
   const _langTick = masterLanguage
-  const q = (hz_activeQuestion || "q1")
-  const view = (hz_viewMode || "both")
+  const view = (hz_viewMode || "chart")
   const wantsChart = (view === "chart" || view === "both")
   const wantsTable = (view === "table" || view === "both")
-  const wantsRecords = (view === "records")
   const errors = []
 
-  // Records-only view: status pill reflects /records endpoint; rendering handled by hz_updateRecords.
-  if (wantsRecords) {
-    const r = hz_recordsResp
-    if (!r) {
-      return html``
-    }
-    if (!r.ok) {
-      return html``
-    }
-    return html``
-  }
-
-  // Map view: choropleth by admin (uses by-admin endpoint + getAdminBoundaries)
-  if (hz_viewMode === "map") {
-    const meta = hz_mapMeta || { loading: true, ok: false }
-
-    // Loading
-    if (meta.loading) {
-      hz_mapHost.replaceChildren(html`<div class="hz-loading">Loading map…</div>`)
-      return html``
-    }
-
-    // Error
-    if (!meta.ok) {
-      const err = html`<div class="warn"><b>Map error:</b><br>${String(meta.error || "Map query failed")}</div>`
-      hz_mapHost.replaceChildren(err)
-      return html``
-    }
-
-    // Ready
-    hz_mapHost.replaceChildren(hz_mapPlot)
-    return html``
-  }
-
-  const pick = () => {
-    if (q === "q1") return { meta: hz_q1Meta, chart: hz_q1Chart }
-    if (q === "q2") return { meta: hz_q2Meta, chart: hz_q2Chart }
-    if (q === "q3") return { meta: hz_q3Meta, chart: hz_q3Chart }
-    if (q === "q4") return { meta: hz_q4Meta, chart: hz_q4Chart }
-    return { meta: hz_q1Meta, chart: hz_q1Chart }
-  }
-
-  const { meta, chart } = pick()
+  const meta = hz_q1Meta
+  const chart = hz_q1Chart
 
   if (!meta?.ok) {
     errors.push({ side: "api", error: meta?.error || "API call failed" })
   }
 
-  // Status pill
-  if (errors.length) {
-  } else {
-    const tag = meta?.cached ? "Cached" : "Ready"
-    const ms = Number.isFinite(meta?.t_ms) ? ` (${meta.t_ms} ms)` : ""
-  }
-
-  // Chart area
   if (wantsChart) {
     if (errors.length) {
       hz_chartHost.replaceChildren(
@@ -8489,95 +8179,88 @@ hz_updateChart = {
     hz_chartHost.replaceChildren(html`<div class="hz-muted">Chart hidden.</div>`)
   }
 
-// Q1 Dynamic Insight (text)
-
+  // Q1 Dynamic Insight (text)
   try {
-    if ((hz_activeQuestion || "q1") === "q1") {
-      if (errors.length) {
-        hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">${hz_t("sections.q1.insight.unavailableApi")}</div>`)
-        // still allow chart/table error rendering above
-      }
-      const merged = Array.isArray(hz_merged) ? hz_merged : []
-      const norm = (h) => String(h ?? "").trim().toLowerCase()
-      const isAny = (h) => {
-        const n = norm(h)
-        return n === "any" || n === "any hazard" || n === "total" || n === "all"
-      }
-      const isNoHaz = (h) => {
-        const n = norm(h)
-        return n === "no hazard" || n === "no_hazard" || n === "none"
-      }
-      const isIntersection = (h) => {
-        const n = norm(h)
-        if (!n) return false
-        if (isAny(h) || isNoHaz(h) || n === "other") return false
-        return true
-      }
+    if (errors.length) {
+      hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">${hz_t("sections.q1.insight.unavailableApi")}</div>`)
+    }
 
-      const rows = merged.map((r) => {
-        const hazard = r.hazard ?? r.Hazard ?? r.name ?? r.key ?? "Unknown"
-        const total1 = Number(r.total1 ?? r.left ?? r.value1 ?? r.total_left ?? 0)
-        const total2 = Number(r.total2 ?? r.right ?? r.value2 ?? r.total_right ?? 0)
-        return { hazard, total1, total2 }
-      })
+    const merged = Array.isArray(hz_merged) ? hz_merged : []
+    const norm = (h) => String(h ?? "").trim().toLowerCase()
+    const isAny = (h) => {
+      const n = norm(h)
+      return n === "any" || n === "any hazard" || n === "total" || n === "all"
+    }
+    const isNoHaz = (h) => {
+      const n = norm(h)
+      return n === "no hazard" || n === "no_hazard" || n === "none"
+    }
+    const isIntersection = (h) => {
+      const n = norm(h)
+      if (!n) return false
+      if (isAny(h) || isNoHaz(h) || n === "other") return false
+      return true
+    }
 
-      if (!rows.length) {
-        hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">${hz_t("sections.q1.insight.noData")}</div>`)
-      } else {
-        const anyRow = rows.find((r) => isAny(r.hazard))
-        const sumIntersections = (k) =>
-          rows
-            .filter((r) => isIntersection(r.hazard))
-            .reduce((a, r) => a + Number(r[k] ?? 0), 0)
+    const rows = merged.map((r) => {
+      const hazard = r.hazard ?? r.Hazard ?? r.name ?? r.key ?? "Unknown"
+      const total1 = Number(r.total1 ?? r.left ?? r.value1 ?? r.total_left ?? 0)
+      const total2 = Number(r.total2 ?? r.right ?? r.value2 ?? r.total_right ?? 0)
+      return { hazard, total1, total2 }
+    })
 
-        const total1 = anyRow ? Number(anyRow.total1 ?? 0) : sumIntersections("total1")
-        const total2 = anyRow ? Number(anyRow.total2 ?? 0) : sumIntersections("total2")
-
-        const isCompound = (h) => String(h ?? "").replace(/\s+/g, "").includes("+")
-        const compound1 =
-          rows
-            .filter((r) => isIntersection(r.hazard) && isCompound(r.hazard))
-            .reduce((a, r) => a + Number(r.total1 ?? 0), 0)
-        const compound2 =
-          rows
-            .filter((r) => isIntersection(r.hazard) && isCompound(r.hazard))
-            .reduce((a, r) => a + Number(r.total2 ?? 0), 0)
-
-        const share1 = total1 > 0 ? (compound1 / total1) * 100 : 0
-        const share2 = total2 > 0 ? (compound2 / total2) * 100 : 0
-
-        const dTotal = total2 - total1
-        const dShare = share2 - share1
-
-        const fmtV = (x) => hz_formatNumber(x, { digits: 2 })
-        const fmtPct = (x) => `${hz_formatNumber(x, { digits: 1 })}%`
-        const unit = hz_varLabel || "Value"
-
-        const s1 = hz_s1?.label ?? "Baseline"
-        const s2 = hz_s2?.label ?? "Future"
-
-        const totalVerb = dTotal >= 0
-          ? hz_t("sections.q1.insight.increased")
-          : hz_t("sections.q1.insight.decreased")
-        const shareVerb = dShare >= 0
-          ? hz_t("sections.q1.insight.increased")
-          : hz_t("sections.q1.insight.decreased")
-
-        hz_q1_insightHost.replaceChildren(
-          html`<div>
-            ${md`${[
-              `**${hz_t("sections.q1.insight.heading")}**`,
-              "",
-              `- ${hz_tpl("sections.q1.insight.line1", { s1, total1: fmtV(total1), unit, compound1: fmtV(compound1), share1: fmtPct(share1) })}`,
-              `- ${hz_tpl("sections.q1.insight.line2", { s2, total2: fmtV(total2), unit, compound2: fmtV(compound2), share2: fmtPct(share2) })}`,
-              `- ${hz_tpl("sections.q1.insight.line3", { totalVerb, deltaTotal: fmtV(Math.abs(dTotal)), shareVerb, deltaShare: fmtPct(Math.abs(dShare)) })}`
-            ].join("\n\n")}`}
-            ${hz_renderSummaryDownloadButton(hz_q1SummaryExport, "exposure_breakdown_by_hazard")}
-          </div>`
-        )
-      }
+    if (!rows.length) {
+      hz_q1_insightHost.replaceChildren(html`<div class="hz-muted">${hz_t("sections.q1.insight.noData")}</div>`)
     } else {
-      hz_q1_insightHost.replaceChildren()
+      const anyRow = rows.find((r) => isAny(r.hazard))
+      const sumIntersections = (k) =>
+        rows
+          .filter((r) => isIntersection(r.hazard))
+          .reduce((a, r) => a + Number(r[k] ?? 0), 0)
+
+      const total1 = anyRow ? Number(anyRow.total1 ?? 0) : sumIntersections("total1")
+      const total2 = anyRow ? Number(anyRow.total2 ?? 0) : sumIntersections("total2")
+
+      const isCompound = (h) => String(h ?? "").replace(/\s+/g, "").includes("+")
+      const compound1 = rows
+        .filter((r) => isIntersection(r.hazard) && isCompound(r.hazard))
+        .reduce((a, r) => a + Number(r.total1 ?? 0), 0)
+      const compound2 = rows
+        .filter((r) => isIntersection(r.hazard) && isCompound(r.hazard))
+        .reduce((a, r) => a + Number(r.total2 ?? 0), 0)
+
+      const share1 = total1 > 0 ? (compound1 / total1) * 100 : 0
+      const share2 = total2 > 0 ? (compound2 / total2) * 100 : 0
+
+      const dTotal = total2 - total1
+      const dShare = share2 - share1
+
+      const fmtV = (x) => hz_formatNumber(x, { digits: 2 })
+      const fmtPct = (x) => `${hz_formatNumber(x, { digits: 1 })}%`
+      const unit = hz_varLabel || "Value"
+
+      const s1 = hz_s1?.label ?? "Baseline"
+      const s2 = hz_s2?.label ?? "Future"
+
+      const totalVerb = dTotal >= 0
+        ? hz_t("sections.q1.insight.increased")
+        : hz_t("sections.q1.insight.decreased")
+      const shareVerb = dShare >= 0
+        ? hz_t("sections.q1.insight.increased")
+        : hz_t("sections.q1.insight.decreased")
+
+      hz_q1_insightHost.replaceChildren(
+        html`<div>
+          ${md`${[
+            `**${hz_t("sections.q1.insight.heading")}**`,
+            "",
+            `- ${hz_tpl("sections.q1.insight.line1", { s1, total1: fmtV(total1), unit, compound1: fmtV(compound1), share1: fmtPct(share1) })}`,
+            `- ${hz_tpl("sections.q1.insight.line2", { s2, total2: fmtV(total2), unit, compound2: fmtV(compound2), share2: fmtPct(share2) })}`,
+            `- ${hz_tpl("sections.q1.insight.line3", { totalVerb, deltaTotal: fmtV(Math.abs(dTotal)), shareVerb, deltaShare: fmtPct(Math.abs(dShare)) })}`
+          ].join("\n\n")}`}
+          ${hz_renderSummaryDownloadButton(hz_q1SummaryExport, "exposure_breakdown_by_hazard")}
+        </div>`
+      )
     }
   } catch (e) {
     try {
@@ -8585,7 +8268,6 @@ hz_updateChart = {
     } catch (_) {}
   }
 
-  // Table area
   const clearTable = (msg) => {
     try { hz_tableActionsHost.replaceChildren() } catch (_) {}
     hz_tableHost.replaceChildren(html`<div class="hz-muted">${msg}</div>`)
@@ -8601,165 +8283,46 @@ hz_updateChart = {
     return html``
   }
 
-  const showPct = !!(hz_relative || hz_rel)
-  const fmtAbs = (v) => hz_formatNumber(v, { digits: 2, compact: true })
+  const rows = Array.isArray(hz_q1DisplayRows) ? hz_q1DisplayRows : []
+  const usePct = !!hz_relative
+  const useDiff = !!hz_difference
   const fmtAbsFull = (v) => hz_formatNumber(v, { digits: 2, compact: false })
   const fmtPct = (v) => {
     const x = Number(v)
     if (!Number.isFinite(x)) return "—"
     return `${hz_formatNumber(x, { digits: 2, compact: false })}%`
   }
+  const fmtPP = (v) => {
+    const x = Number(v)
+    if (!Number.isFinite(x)) return "—"
+    const sign = x > 0 ? "+" : ""
+    return `${sign}${hz_formatNumber(x, { digits: 2, compact: false })} pp`
+  }
 
-  const payload = (() => {
-    if (q === "q1") {
-      const rows = Array.isArray(hz_q1DisplayRows) ? hz_q1DisplayRows : []
-      const usePct = !!hz_relative
-      const useDiff = !!hz_difference
+  const headers = useDiff
+    ? ["Hazard", usePct ? "Δ (pp)" : "Δ (abs)"]
+    : ["Hazard", usePct ? "Left %" : "Left total", usePct ? "Right %" : "Right total"]
 
-      if (useDiff) {
-        const headers = ["Hazard", usePct ? "Δ (pp)" : "Δ (abs)"]
-        const data = rows.map(r => [
-          r.hazard,
-          Number(usePct ? (r.pct_diff ?? 0) : (r.total_diff ?? (Number(r.total2 ?? 0) - Number(r.total1 ?? 0))))
-        ])
-        const columns = [
-          { name: "Hazard" },
-          { name: usePct ? "Δ (pp)" : "Δ", sort: true, formatter: (c) => usePct ? fmtPct(c) : fmtAbs(c) }
-        ]
-        return { filename: "q1_by_hazard.csv", headers, data, columns }
-      }
-
-      const headers = ["Hazard", usePct ? "Left %" : "Left total", usePct ? "Right %" : "Right total"]
-      const data = rows.map(r => [
+  const data = useDiff
+    ? rows.map((r) => [
+        r.hazard,
+        Number(usePct ? (r.pct_diff ?? 0) : (r.total_diff ?? (Number(r.total2 ?? 0) - Number(r.total1 ?? 0))))
+      ])
+    : rows.map((r) => [
         r.hazard,
         Number(usePct ? (r.perc1 ?? 0) : (r.total1 ?? 0)),
         Number(usePct ? (r.perc2 ?? 0) : (r.total2 ?? 0))
       ])
-      const columns = [
-        { name: "Hazard" },
-        { name: "Left", sort: true, formatter: (c) => usePct ? fmtPct(c) : fmtAbs(c) },
-        { name: "Right", sort: true, formatter: (c) => usePct ? fmtPct(c) : fmtAbs(c) }
-      ]
-      return { filename: "q1_by_hazard.csv", headers, data, columns }
-    }
 
-    if (q === "q2") {
-      const rows = Array.isArray(hz_q2Rows) ? hz_q2Rows : []
-      const sum1 = rows.reduce((a,r) => a + Number(r.total1 ?? 0), 0)
-      const sum2 = rows.reduce((a,r) => a + Number(r.total2 ?? 0), 0)
-      const headers = ["Crop","Left total","Right total","Δ (abs)","Left %","Right %","Δ (pp)"]
-      const data = rows.map(r => {
-        const t1 = Number(r.total1 ?? 0), t2 = Number(r.total2 ?? 0)
-        const p1 = sum1 ? (t1/sum1*100) : 0
-        const p2 = sum2 ? (t2/sum2*100) : 0
-        return [r.crop, t1, t2, (t2 - t1), p1, p2, (p2 - p1)]
-      })
-      const columns = [
-        { name: "Crop" },
-        { name: "Left", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Right", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Δ", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Left %", sort: true, formatter: (c) => fmtPct(c) },
-        { name: "Right %", sort: true, formatter: (c) => fmtPct(c) },
-        { name: "Δ (pp)", sort: true, formatter: (c) => fmtPct(c) }
-      ]
-      return { filename: "q2_by_crop.csv", headers, data, columns }
-    }
-
-    if (q === "q3") {
-      // Match chart selection: top crops by (Left+Right)
-      const L = Array.isArray(hz_q3DataL) ? hz_q3DataL : []
-      const R = Array.isArray(hz_q3DataR) ? hz_q3DataR : []
-      const cropTotals = new Map()
-      const bump = (crop, v) => cropTotals.set(crop, (cropTotals.get(crop) || 0) + Number(v || 0))
-      for (const d of R) bump(d.crop, d.total)
-      for (const d of L) bump(d.crop, d.total)
-
-      const maxCrops = Math.min(10, Number(hz_topN || 10))
-      const crops = Array.from(cropTotals.entries())
-        .sort((a,b) => b[1] - a[1])
-        .slice(0, maxCrops)
-        .map(([c]) => c)
-
-      // Top hazards by combined total (keeps table compact)
-      const hazTotals = new Map()
-      const bumpH = (haz, v) => hazTotals.set(haz, (hazTotals.get(haz) || 0) + Number(v || 0))
-      for (const d of R) bumpH(d.hazard, d.total)
-      for (const d of L) bumpH(d.hazard, d.total)
-
-      const maxHaz = Math.min(12, Array.from(hazTotals.keys()).length)
-      const hazards = Array.from(hazTotals.entries())
-        .sort((a,b) => b[1] - a[1])
-        .slice(0, maxHaz)
-        .map(([h]) => h)
-
-      const key = (crop, hazard) => `${crop}|||${hazard}`
-      const mapL = new Map(L.filter(d => crops.includes(d.crop) && hazards.includes(d.hazard)).map(d => [key(d.crop, d.hazard), Number(d.total || 0)]))
-      const mapR = new Map(R.filter(d => crops.includes(d.crop) && hazards.includes(d.hazard)).map(d => [key(d.crop, d.hazard), Number(d.total || 0)]))
-
-      const pairs = []
-      for (const c of crops) for (const h of hazards) pairs.push([c,h])
-
-      const headers = ["Crop","Hazard","Left total","Right total","Δ (abs)"]
-      const data = pairs.map(([crop, hazard]) => {
-        const t1 = mapL.get(key(crop,hazard)) || 0
-        const t2 = mapR.get(key(crop,hazard)) || 0
-        return [crop, hazard, t1, t2, (t2 - t1)]
-      }).sort((a,b) => (b[3] - a[3]) || (b[2] - a[2]))
-
-      const columns = [
-        { name: "Crop" },
-        { name: "Hazard" },
-        { name: "Left", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Right", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Δ", sort: true, formatter: (c) => fmtAbs(c) }
-      ]
-      return { filename: "q3_hazard_x_crop.csv", headers, data, columns }
-    }
-
-    if (q === "q4") {
-      const rows = Array.isArray(hz_q4Rows) ? hz_q4Rows : []
-      const sum1 = rows.reduce((a,r) => a + Number(r.total1 ?? 0), 0)
-      const sum2 = rows.reduce((a,r) => a + Number(r.total2 ?? 0), 0)
-
-      const headers = ["Admin","Left total","Right total","Δ (abs)","Left %","Right %","Δ (pp)"]
-      const data = rows.map(r => {
-        const t1 = Number(r.total1 ?? 0), t2 = Number(r.total2 ?? 0)
-        const p1 = sum1 ? (t1/sum1*100) : 0
-        const p2 = sum2 ? (t2/sum2*100) : 0
-        return [r.admin_name, t1, t2, (t2 - t1), p1, p2, (p2 - p1)]
-      })
-
-      const columns = [
-        { name: "Admin" },
-        { name: "Left", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Right", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Δ", sort: true, formatter: (c) => fmtAbs(c) },
-        { name: "Left %", sort: true, formatter: (c) => fmtPct(c) },
-        { name: "Right %", sort: true, formatter: (c) => fmtPct(c) },
-        { name: "Δ (pp)", sort: true, formatter: (c) => fmtPct(c) }
-      ]
-      return { filename: "q4_by_admin.csv", headers, data, columns }
-    }
-
-    return null
-  })()
-
-  if (!payload) {
-    clearTable("No table available for this view yet.")
-    return html``
-  }
-
-  // Actions: download CSV
   const dl = document.createElement("button")
   dl.className = "hz-btn"
   dl.textContent = "Download CSV"
-  dl.onclick = () => hz_downloadCsv(payload.filename, [payload.headers, ...payload.data])
+  dl.onclick = () => hz_downloadCsv("q1_by_hazard.csv", [headers, ...data])
 
   const rowsMeta = document.createElement("div")
   rowsMeta.className = "hz-muted"
   rowsMeta.style.marginRight = "10px"
-  rowsMeta.textContent = `${payload.data.length.toLocaleString()} rows`
+  rowsMeta.textContent = `${data.length.toLocaleString()} rows`
 
   const actionsWrap = document.createElement("div")
   actionsWrap.style.display = "flex"
@@ -8767,37 +8330,24 @@ hz_updateChart = {
   actionsWrap.style.gap = "10px"
   actionsWrap.appendChild(rowsMeta)
   actionsWrap.appendChild(dl)
-
   hz_tableActionsHost.replaceChildren(actionsWrap)
 
-  // Q1: render summary with shared Atlas table component
-  if (q === "q1") {
-    const rows = Array.isArray(hz_q1DisplayRows) ? hz_q1DisplayRows : []
-    const usePct = !!hz_relative
-    const useDiff = !!hz_difference
+  const tableData = rows.map((r) => ({
+    "Hazard": r.hazard,
+    "Left (abs)": r.total1,
+    "Right (abs)": r.total2,
+    "Δ (abs)": r.total_diff,
+    "Left (%)": r.perc1,
+    "Right (%)": r.perc2,
+    "Δ (pp)": r.pct_diff
+  }))
 
-    const fmtPP = (v) => {
-      const x = Number(v)
-      if (!Number.isFinite(x)) return "—"
-      const sign = x > 0 ? "+" : ""
-      return `${sign}${hz_formatNumber(x, { digits: 2, compact: false })} pp`
-    }
+  const q1Columns = useDiff
+    ? ["Hazard", usePct ? "Δ (pp)" : "Δ (abs)"]
+    : ["Hazard", usePct ? "Left (%)" : "Left (abs)", usePct ? "Right (%)" : "Right (abs)"]
 
-    const tableData = rows.map((r) => ({
-      "Hazard": r.hazard,
-      "Left (abs)": r.total1,
-      "Right (abs)": r.total2,
-      "Δ (abs)": r.total_diff,
-      "Left (%)": r.perc1,
-      "Right (%)": r.perc2,
-      "Δ (pp)": r.pct_diff
-    }))
-
-    const q1Columns = useDiff
-      ? ["Hazard", usePct ? "Δ (pp)" : "Δ (abs)"]
-      : ["Hazard", usePct ? "Left (%)" : "Left (abs)", usePct ? "Right (%)" : "Right (abs)"]
-
-    const view = hz_atlasTable(tableData, {
+  hz_tableHost.replaceChildren(
+    hz_atlasTable(tableData, {
       columns: q1Columns,
       format: {
         "Left (abs)": fmtAbsFull,
@@ -8819,226 +8369,11 @@ hz_updateChart = {
         "Δ (pp)": 120
       }
     })
-
-    hz_tableHost.replaceChildren(view)
-    return html``
-  }
-
-  const tableRows = (payload.data ?? []).map((row) => {
-    const out = {}
-    ;(payload.columns ?? []).forEach((col, i) => {
-      const key = typeof col === "string" ? col : (col?.name ?? `col_${i}`)
-      out[key] = Array.isArray(row) ? row[i] : row?.[key]
-    })
-    return out
-  })
-
-  const tableColumns = (payload.columns ?? []).map((col, i) =>
-    typeof col === "string" ? col : (col?.name ?? `col_${i}`)
-  )
-
-  const tableFormat = Object.fromEntries(
-    (payload.columns ?? [])
-      .map((col, i) => {
-        const key = typeof col === "string" ? col : (col?.name ?? `col_${i}`)
-        const fmt = (typeof col === "object" && typeof col?.formatter === "function") ? col.formatter : null
-        return fmt ? [key, fmt] : null
-      })
-      .filter(Boolean)
-  )
-
-  hz_tableHost.replaceChildren(
-    hz_atlasTable(tableRows, {
-      columns: tableColumns,
-      format: tableFormat,
-      rows: tableRows.length,
-      height: null
-    })
   )
 
   return html``
 }
 
-// ------------------------------------------------------------
-// Raw records (paged) — server-backed
-// ------------------------------------------------------------
-
-hz_recordsReq = {
-  if (hz_viewMode !== "records") return null
-
-  const side = (hz_recordsSide || "left")
-  const src = (side === "right") ? hz_src2 : hz_src1
-  const scen = (side === "right") ? hz_s2 : hz_s1
-
-  const req = {
-    dataset_url: src?.url,
-    scen: { scenario: scen?.scenario, timeframe: scen?.timeframe },
-    geo: hz_geoFilterReq,
-    commodities: hz_selectedCommoditiesForReq ?? [],
-    hazard_vars: null,
-    method: hz_method,
-    commodity_group: hz_selectedCommodGroup,
-    page: Number(hz_recordsPage || 1)
-  }
-
-  const ps = Number(hz_recordsPageSize)
-  if (Number.isFinite(ps) && ps > 0) req.page_size = ps
-
-  const s = hz_recordsSort
-  if (typeof s === "string" && s) req.sort = s
-
-  return req
-}
-
-hz_recordsResp = (hz_recordsReq)
-  ? await hz_apiDebouncedCached("records", "/api/v1/hz/records", hz_recordsReq, { ttlMs: 30000, debounceMs: 150 })
-  : null
-
-hz_recordsRows = hz_recordsResp?.rows ?? []
-hz_recordsHasMore = !!hz_recordsResp?.has_more
-
-hz_recordsPagerSync = {
-  const pager = globalThis.__ATLAS_HZ_REC_PAGER__
-  if (pager) {
-    pager.prev.disabled = Number(hz_recordsPage || 1) <= 1
-    pager.next.disabled = !hz_recordsHasMore
-    pager.label.textContent = `Page ${Number(hz_recordsPage || 1)}`
-  }
-  return html``
-}
-
-hz_recordsResetPage = {
-  if (hz_viewMode !== "records") return html``
-
-  // When these change, jump back to page 1
-  hz_recordsSide
-  hz_recordsSort
-  hz_recordsPageSize
-
-  const pager = globalThis.__ATLAS_HZ_REC_PAGER__
-  if (pager?.set) pager.set(1, { silent: false })
-  return html``
-}
-
-hz_exportRecordsCsv = async ({ scope = "all" } = {}) => {
-  const req = hz_recordsReq
-  if (!req) return
-
-  // "all" means: let the server export up to its EXPORT_MAX_ROWS guardrail (default 200k).
-  const body = (scope === "all")
-    ? { ...req, page: 1, page_size: 200000 }
-    : req
-
-  const url = hz_apiBaseUrl + "/api/v1/hz/records_csv"
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  })
-
-  if (!res.ok) {
-    const txt = await res.text()
-    throw new Error(txt || ("HTTP " + res.status))
-  }
-
-  const blob = await res.blob()
-  const stamp = new Date().toISOString().slice(0,19).replaceAll(":","").replace("T","_")
-  const name = `records_export_${stamp}.csv`
-
-  const a = document.createElement("a")
-  a.href = URL.createObjectURL(blob)
-  a.download = name
-  document.body.appendChild(a)
-  a.click()
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 300)
-}
-
-hz_updateRecords = {
-  if (hz_viewMode !== "records") return html``
-
-  const resp = hz_recordsResp
-  if (!resp?.rows || !resp?.ok) {
-    hz_recordsActionsHost.replaceChildren()
-    const msg = resp?.error || "No data"
-    hz_recordsHost.replaceChildren(
-      html`<div class="warn"><b>Could not load records</b><br/><div class="hz-muted">${String(msg)}</div></div>`
-    )
-    return html``
-  }
-
-  // Actions
-  const actions = document.createElement("div")
-  actions.style.display = "flex"
-  actions.style.gap = "8px"
-  actions.style.flexWrap = "wrap"
-  actions.style.justifyContent = "flex-end"
-  actions.style.alignItems = "center"
-
-  const badge = document.createElement("div")
-  badge.className = "hz-muted"
-  badge.style.fontWeight = "900"
-  badge.style.fontSize = "12px"
-  badge.textContent = `Rows: ${hz_recordsRows.length}${hz_recordsHasMore ? "+" : ""}`
-
-  const btnAll = document.createElement("button")
-  btnAll.className = "hz-btn hz-btn--sm"
-  btnAll.textContent = "Export (server, max 200k)"
-  btnAll.onclick = async () => {
-    try {
-      btnAll.disabled = true
-      btnAll.textContent = "Exporting…"
-      await hz_exportRecordsCsv({ scope: "all" })
-    } catch (e) {
-      alert(`Export failed: ${String(e?.message || e)}`)
-    } finally {
-      btnAll.disabled = false
-      btnAll.textContent = "Export (server, max 200k)"
-    }
-  }
-
-  actions.appendChild(badge)
-  actions.appendChild(btnAll)
-  hz_recordsActionsHost.replaceChildren(actions)
-
-  const recordsRows = hz_recordsRows.map((r) => ({
-    "admin0": r.admin0_name ?? null,
-    "admin1": r.admin1_name ?? null,
-    "admin2": r.admin2_name ?? null,
-    "scenario": r.scenario ?? null,
-    "timeframe": r.timeframe ?? null,
-    "hazard": r.hazard ?? null,
-    "hazard_vars": r.hazard_vars ?? null,
-    "crop": r.crop ?? null,
-    "value": (r.value === null || r.value === undefined) ? null : Number(r.value)
-  }))
-
-  hz_recordsHost.replaceChildren(
-    hz_atlasTable(recordsRows, {
-      columns: ["admin0", "admin1", "admin2", "scenario", "timeframe", "hazard", "hazard_vars", "crop", "value"],
-      rows: 20,
-      height: null,
-      format: {
-        "value": (v) => {
-          const x = Number(v)
-          return Number.isFinite(x) ? hz_formatNumber(x, { digits: 2, compact: true }) : "—"
-        }
-      },
-      width: {
-        "admin0": 130,
-        "admin1": 150,
-        "admin2": 150,
-        "scenario": 110,
-        "timeframe": 110,
-        "hazard": 120,
-        "hazard_vars": 150,
-        "crop": 120,
-        "value": 110
-      }
-    })
-  )
-
-  return html``
-}
 hz_setNodeText = (selector, text) => {
   const el = hz_dashMount?.querySelector?.(selector)
   if (el) el.textContent = String(text ?? "")
@@ -9137,6 +8472,7 @@ hz_syncQ3StaticLabels = {
     hz_setNodeText("#hz-q3-label-showcompound", hz_t("sections.q3.ui.showCompoundHazards"))
     hz_setNodeText("#hz-q3-label-simplifycompound", hz_t("sections.q3.ui.simplifyCompoundHazards"))
     hz_setNodeText("#hz-q3-label-includenohazard", hz_t("sections.q3.ui.includeNoHazard"))
+    hz_setNodeText("#hz-q3-label-includedecreases", hz_t("sections.q2.ui.includeDecreases"))
     hz_setNodeText("#hz-q3-label-freex", hz_t("sections.q3.ui.freeXAxis"))
     hz_setNodeText("#hz-q3-label-topn", hz_t("sections.q3.ui.numberOfCommodities"))
     hz_setNodeText("#hz-q3-label-height", hz_t("sections.q3.ui.height"))
@@ -9259,10 +8595,7 @@ hz_bootstrap = {
   hz_syncQ5StaticLabels
   hz_syncMountedText
   hz_registerUi
-  hz_recordsPagerSync
-  hz_recordsResetPage
   await hz_updateChart
-  await hz_updateRecords
   return html``
 }
 
