@@ -42,97 +42,51 @@ s3AccessDB = await DuckDBClient.of({
 
 // Query access data with SQL-side admin filtering (shared helper from Section 2)
 s3AccessDataRaw = {
-  const adminWhere = buildAdminSelectionWhereClause({
-    admin0: selectedAdmin0 || [],
-    admin1: selectedAdmin1 || [],
-    mode: "admin0_only"
-  });
+  const adminWhere = sqlAdminQuery(selectedAdmin0, selectedAdmin1);
 
   return await s3AccessDB.query(`
-    SELECT
-      admin0_name,
-      admin1_name,
-      admin2_name,
-      iso3,
-      gaul0_code,
-      gaul1_code,
-      gaul2_code,
-      tv,
-      internet,
-      cellphone
+    SELECT *
     FROM access_data
     WHERE ${adminWhere}
   `);
 }
 
-// Load CIS readiness at Admin0 (country) level (possibly current limit)
-s3CisReadinessAdmin0 = {
-  const adminWhere = buildAdminSelectionWhereClause({
-    admin0: selectedAdmin0 || [],
-    mode: "admin0_only",
-  });
+// Load CIS readiness at the same admin level as the current selection.
+s3CisReadiness = {
+  const adminWhere = sqlAdminQuery(selectedAdmin0, selectedAdmin1);
 
   const rows = await cisDB.query(`
     SELECT *
     FROM cis_data
     WHERE ${adminWhere}
-      AND admin1_name IS NULL
-      AND admin2_name IS NULL
   `);
 
   return rows.map((row) => {
     return {
       admin0_name: row.admin0_name,
+      admin1_name: row.admin1_name,
+      admin2_name: row.admin2_name,
       iso3: row.iso3,
       gaul0_code: row.gaul0_code,
-      cis_readiness_avg: row.cis_readiness_index,
-    };
-  });
-}
-
-// Aggregate access data to Admin0 (country) level
-// TODO: Check if this is actually needed...
-s3AccessAdmin0 = {
-  const grouped = d3.rollup(
-    s3AccessDataRaw.filter(d => d.gaul0_code !== null),
-    v => ({
-      tv_avg: d3.mean(v, d => d.tv),
-      internet_avg: d3.mean(v, d => d.internet),
-      cellphone_avg: d3.mean(v, d => d.cellphone),
-      iso3: v[0].iso3,
-      gaul0_code: v[0].gaul0_code
-    }),
-    d => d.admin0_name
-  );
-
-  return Array.from(grouped, ([admin0_name, data]) => {
-    return {
-      admin0_name: admin0_name,
-      ...data
+      gaul1_code: row.gaul1_code,
+      gaul2_code: row.gaul2_code,
+      cis_readiness_index: row.cis_readiness_index,
     };
   });
 }
 
 section3Data = {
-  // Determine which data level to use
-  // If s3HasAdmin1Data is true, we should use the same logic as Section 1/2
-  // For now, sticking to Admin 0 aggregation as per original design safe default,
-  // but logic can be expanded here if Admin 1 data is confirmed available.
-  
-  return s3CisReadinessAdmin0.map(cis => {
-     //TODO: @Brayden make sure admin 1 exists and is allowed
-
-    // Find matching access data by country name or ISO3 code
-    const access = s3AccessAdmin0.find(a => 
-      a.admin0_name === cis.admin0_name || a.iso3 === cis.iso3
-    );
-    
-    if (!access) return null;
+  return s3AccessDataRaw.map(access => {
+    // Match CIS readiness at the same admin level as the access row.
+     const cis = s3CisReadiness.find(a => 
+       a.admin0_name === access.admin0_name && a.admin1_name === access.admin1_name
+     );
+     if (!cis) return null;
     
     // Calculate combined access: average of available indicators
     // This provides a single "overall access" metric
     const combined_access = (() => {
-      const values = [access.tv_avg, access.internet_avg, access.cellphone_avg]
+      const values = [access.tv, access.internet, access.cellphone]
         .filter(v => v !== null && !isNaN(v));
       return values.length > 0 
         ? values.reduce((a, b) => a + b, 0) / values.length 
@@ -140,19 +94,23 @@ section3Data = {
     })();
     
     return {
-      admin0_name: cis.admin0_name,
-      iso3: cis.iso3 || access.iso3,
-      gaul0_code: cis.gaul0_code || access.gaul0_code,
-      cis_readiness_avg: cis.cis_readiness_avg,
+      admin0_name: access.admin0_name,
+      admin1_name: access.admin1_name,
+      admin2_name: access.admin2_name,
+      iso3: access.iso3,
+      gaul0_code: access.gaul0_code,
+      gaul1_code: access.gaul1_code,
+      gaul2_code: access.gaul2_code,
+      cis_readiness_index: cis.cis_readiness_index,
       // Raw access percentages (0-100 scale)
-      tv_pct: access.tv_avg,
-      internet_pct: access.internet_avg,
-      cellphone_pct: access.cellphone_avg,
+      tv_pct: access.tv,
+      internet_pct: access.internet,
+      cellphone_pct: access.cellphone,
       combined_pct: combined_access,
       // Normalized access values (0-1 scale, for comparison with CIS readiness)
-      tv_norm: access.tv_avg !== null ? access.tv_avg / 100 : null,
-      internet_norm: access.internet_avg !== null ? access.internet_avg / 100 : null,
-      cellphone_norm: access.cellphone_avg !== null ? access.cellphone_avg / 100 : null,
+      tv_norm: access.tv !== null ? access.tv / 100 : null,
+      internet_norm: access.internet !== null ? access.internet / 100 : null,
+      cellphone_norm: access.cellphone !== null ? access.cellphone / 100 : null,
       combined_norm: combined_access !== null ? combined_access / 100 : null
     };
   }).filter(d => d !== null);
@@ -289,10 +247,11 @@ s3AccessCutoffs = {
 ```
 
 ```{ojs}
-classifyS3Readiness = (value) => classifyThreshold("cis_readiness_index", value, 0);
+classifyS3Readiness = (value, rowOrLevel = currentAdminLevel) =>
+  classifyThreshold("cis_readiness_index", value, rowOrLevel);
 
-function bivariateClassifyAccess(readiness, access, accessCutoffs) {
-  const readinessClass = classifyS3Readiness(readiness);
+function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = currentAdminLevel) {
+  const readinessClass = classifyS3Readiness(readiness, rowOrLevel);
 
   // Classify access level (using dynamic tercile cutoffs)
   let accessClass;
@@ -331,16 +290,17 @@ s3ProcessedData = {
   return section3Data.map(d => {
     const accessValue = d[s3CurrentAccessField];
     const classification = bivariateClassifyAccess(
-      d.cis_readiness_avg,
+      d.cis_readiness_index,
       accessValue,
-      s3AccessCutoffs
+      s3AccessCutoffs,
+      d
     );
     
     return {
       ...d,
       accessValue,
       ...classification,
-      gap: accessValue !== null && !isNaN(accessValue) ? accessValue - d.cis_readiness_avg : null
+      gap: accessValue !== null && !isNaN(accessValue) ? accessValue - d.cis_readiness_index : null
     };
   });
 }
@@ -356,7 +316,7 @@ s3SortedData = {
   const data = [...s3ProcessedData];
   
   if (s3SortBy === "readiness") {
-    return data.sort((a, b) => (b.cis_readiness_avg || 0) - (a.cis_readiness_avg || 0));
+    return data.sort((a, b) => (b.cis_readiness_index || 0) - (a.cis_readiness_index || 0));
   } else if (s3SortBy === "combined") {
     return data.sort((a, b) => (b.combined_norm || 0) - (a.combined_norm || 0));
   } else if (s3SortBy === "internet") {
@@ -435,8 +395,10 @@ s3GeoData = {
   // Map data to boundaries
   const features = filteredBoundaries.features.map(feature => {
     // Find the parent admin0 for this feature (data is at country level)
-    const parentCountry = feature.properties.admin0_name;
-    const countryData = s3ProcessedData.find(d => d.admin0_name === parentCountry);
+    const admin0key = feature.properties.admin0_name;
+    const admin1key = feature.properties.admin1_name;
+
+    const countryData = s3ProcessedData.find(d => d.admin0_name === admin0key && d.admin1_name === admin1key);
     
     if (!countryData) return null;
     
@@ -590,8 +552,8 @@ function createS3BivariateMap() {
       readiness: {
         label: _lang(cis.s3ReadinessLabel),
         value: (d) =>
-          d.properties.cis_readiness_avg != null
-            ? d.properties.cis_readiness_avg.toFixed(2)
+          d.properties.cis_readiness_index != null
+            ? d.properties.cis_readiness_index.toFixed(2)
             : "N/A",
       },
       readinessClass: {
@@ -655,7 +617,7 @@ function makeS3DumbbellTip() {
     fontSize: 14,
     channels: {
       country: { label: "Country", value: d => d.admin0_name },
-      readiness: { label: _lang(cis.s3ReadinessLabel), value: d => d.cis_readiness_avg },
+      readiness: { label: _lang(cis.s3ReadinessLabel), value: d => d.cis_readiness_index },
       access: { label: s3CurrentAccessLabel, value: d => d.accessValue },
       gap: { label: _lang(cis.s3GapLabel), value: d => d.gap }
     },
@@ -678,7 +640,7 @@ function renderS3DumbbellPlot(data) {
   const chartHeight = Math.max(600, data.length * 25);
   const dataWithAccess = data.filter(d => d.accessValue !== null && !isNaN(d.accessValue));
   const xDomain = d3.extent([
-    ...data.map(d => d.cis_readiness_avg || 0),
+    ...data.map(d => d.cis_readiness_index || 0),
     ...data.map(d => d.accessValue || 0)
   ]);
   const tip = makeS3DumbbellTip();
@@ -703,7 +665,7 @@ function renderS3DumbbellPlot(data) {
     marks: [
       Plot.axisX({anchor: "bottom", label: "Value"}),
       Plot.link(dataWithAccess, {
-        x1: "cis_readiness_avg",
+        x1: "cis_readiness_index",
         x2: "accessValue",
         y1: "admin0_name",
         y2: "admin0_name",
@@ -714,7 +676,7 @@ function renderS3DumbbellPlot(data) {
         strokeWidth: 2
       }),
       Plot.dot(data, {
-        x: "cis_readiness_avg",
+        x: "cis_readiness_index",
         y: "admin0_name",
         fill: "#377eb8",
         r: 5,
@@ -814,7 +776,7 @@ function getS3ScatterFacetLayout(accessTypes) {
 }
 
 function getS3ScatterPointColor(d) {
-  const readinessClass = classifyS3Readiness(d.cis_readiness_avg);
+  const readinessClass = classifyS3Readiness(d.cis_readiness_index, d);
   const accessClass =
     d.accessValue >= s3AccessCutoffs.moderate
       ? "High"
@@ -836,7 +798,7 @@ function renderS3ScatterNote() {
 function renderS3ScatterPlot(facetData) {
   const accessTypes = getS3ScatterAccessTypes();
   const {getFx, getFy} = getS3ScatterFacetLayout(accessTypes);
-  const xExtent = d3.extent(facetData, d => d.cis_readiness_avg);
+  const xExtent = d3.extent(facetData, d => d.cis_readiness_index);
   const xDomain = (xExtent[0] == null || xExtent[1] == null) ? [0, 1] : xExtent;
 
   return Plot.plot({
@@ -886,7 +848,7 @@ function renderS3ScatterPlot(facetData) {
       }),
       Plot.frame(),
       Plot.dot(facetData, {
-        x: "cis_readiness_avg",
+        x: "cis_readiness_index",
         y: "accessValue",
         fx: d => getFx(d.accessType),
         fy: d => getFy(d.accessType),
@@ -899,7 +861,7 @@ function renderS3ScatterPlot(facetData) {
         facetData,
         Plot.pointer({
           fontSize: 14,
-          x: "cis_readiness_avg",
+          x: "cis_readiness_index",
           y: "accessValue",
           fx: d => getFx(d.accessType),
           fy: d => getFy(d.accessType),
@@ -910,7 +872,7 @@ function renderS3ScatterPlot(facetData) {
             },
             readiness: {
               label: _lang(cis.s3ReadinessLabel),
-              value: d => d.cis_readiness_avg
+              value: d => d.cis_readiness_index
             },
             access: {
               label: "Access",
@@ -947,7 +909,7 @@ function renderS3TableView() {
     columns: [
       "admin0_name",
       "iso3",
-      "cis_readiness_avg",
+      "cis_readiness_index",
       "readinessClass",
       "tv_pct",
       "tv_norm",
@@ -962,7 +924,7 @@ function renderS3TableView() {
     header: {
       admin0_name: "Country",
       iso3: "ISO3",
-      cis_readiness_avg: "CIS Readiness (Raw)",
+      cis_readiness_index: "CIS Readiness (Raw)",
       readinessClass: "CIS Class",
       tv_pct: "TV Access (%)",
       tv_norm: "TV",
@@ -975,7 +937,7 @@ function renderS3TableView() {
       gap: "Gap"
     },
     format: {
-      cis_readiness_avg: d => d?.toFixed(3) || "N/A",
+      cis_readiness_index: d => d?.toFixed(3) || "N/A",
       tv_pct: d => d !== null ? d.toFixed(1) : "N/A",
       tv_norm: d => d !== null ? d.toFixed(3) : "N/A",
       internet_pct: d => d !== null ? d.toFixed(1) : "N/A",
@@ -1021,7 +983,7 @@ s3DownloadButton = {
       s3SortedData.map(d => ({
         "Country": d.admin0_name || "N/A",
         "ISO3": d.iso3 || "N/A",
-        "CIS Readiness Raw": safeFormat(d.cis_readiness_avg, 3),
+        "CIS Readiness Raw": safeFormat(d.cis_readiness_index, 3),
         "CIS Readiness Class": d.readinessClass || "N/A",
         "TV Access %": safeFormat(d.tv_pct, 1),
         "TV Access": safeFormat(d.tv_norm, 3),
@@ -1044,7 +1006,7 @@ s3DownloadButton = {
 
 ```{ojs}
 s3Insights = {
-  const avgReadiness = d3.mean(section3Data, d => d.cis_readiness_avg);
+  const avgReadiness = d3.mean(section3Data, d => d.cis_readiness_index);
   const avgAccess = d3.mean(
     section3Data.filter(d => d[s3CurrentAccessField] !== null && !isNaN(d[s3CurrentAccessField])),
     d => d[s3CurrentAccessField]
@@ -1052,7 +1014,7 @@ s3Insights = {
   
   // Find countries with high readiness but low access (capacity-access gap)
   const capacityGaps = s3ProcessedData.filter(d => 
-    d.cis_readiness_avg > 0.6 && d.accessValue !== null && !isNaN(d.accessValue) && d.accessValue < 0.4
+    d.cis_readiness_index > 0.6 && d.accessValue !== null && !isNaN(d.accessValue) && d.accessValue < 0.4
   );
   
   // Find optimal zones (high readiness + high access)
