@@ -1,0 +1,957 @@
+# Climate Rationale notebook — short-term issues backlog
+
+**For:** the developer team / Claude Code, taking direction from Pete.
+**From:** Pete Stewart (compiled by Claude from a code review, the live-site PDF print, the Togo SAT climate rationale, and Pete's section-by-section walkthrough).
+**Date:** 2026-05-13.
+**Scope cap:** bugs, usability, copy, methods, references, CAP attribution, and the lightweight content improvements that flow from Pete's walkthrough. Anything that needs a new control, a new dataset, or substantial UI redesign is in the **Deferred** list at the bottom of this file — visible but explicitly out of scope.
+
+---
+
+## Pete's stated priorities (drives PR ordering)
+
+In Pete's words, the most important improvements are:
+
+1. **Methodological transparency** — every figure has source, hyperlinks, brief method. Methods section is filled in. Anomalies / uncertainty / extreme-events terms are explained.
+2. **Robust statistical trend analysis** — *deferred (needs Harold + new code).*
+3. **Better figure customization** — *deferred (new UI controls).*
+4. **Improved performance and loading feedback** — at minimum, loading spinners so plots don't look broken while data is fetching.
+5. **Proper state synchronization across selectors** — choosing a country in one section currently doesn't reliably propagate to others.
+6. **Downloadable summary tables, particularly for hazard exposure** — Togo-style table is the gold standard.
+
+This file's PR groupings are ordered to land #4–#6 + #1 first, with the highest-impact bug fixes ahead of them. The two deferred priorities (#2 and #3) are listed at the end of the file with enough context that they're not lost.
+
+---
+
+## How to read this file
+
+Each issue is a self-contained block:
+
+- `id` — short stable identifier (e.g. `CR-001`)
+- `title` — one-line summary
+- `type` — `bug` (silent wrong behaviour), `ux` (visible defect), `copy` (text edit), `methods` (technical narrative), `refs` (citation/source), `i18n` (translation gap), `attribution` (CAP/programme credits), `feature` (new small piece of content/output requested by Pete)
+- `severity` — `high` (blocks the GCF use case or visibly destroys trust), `med` (clearly wrong but partial), `low` (polish)
+- `where` — file, approximate line, and a URL anchor on the live preview
+- `what-users-see` — the literal user-facing observation (from the PDF print and Pete's walkthrough)
+- `why-wrong` — the root cause in one or two sentences
+- `proposed-change` — exact replacement copy or code-level direction
+- `before-string` — verbatim string the developer should search for to make the change unambiguous
+
+Issues are grouped into proposed PRs at the bottom. Each PR is independent.
+
+---
+
+## How to use this file (for Claude Code)
+
+Work the file top-down by PR group. For each PR:
+
+1. Create a feature branch off `notebooks/climateRationale` named `fix/cr-<pr-slug>` (e.g. `fix/cr-typos-captions`).
+2. For each issue inside the PR, perform a single search for the `before-string` in the listed file. If it doesn't match, **stop and ask** — do not improvise.
+3. Apply the `proposed-change`.
+4. Commit per PR (not per issue) with a Conventional Commit header (`fix(climateRationale): …` / `feat(climateRationale): …`).
+5. Open one PR per group against `develop` (not `main`).
+6. **Do not delete** dead code or commented blocks — flag them in the PR description for Pete's review.
+
+Repository: <https://github.com/AdaptationAtlas/atlas_notebooks> · long-lived branch `notebooks/climateRationale` (not `main`).
+Live preview: <https://notebooks-climaterationale.adaptation-atlas-nb.pages.dev/notebooks/climateRationale/notebook>.
+Reference example (target output style): the Togo SAT climate rationale report (Alliance/CIAT, March 2025) — exact tables and figures cited where relevant.
+
+---
+
+## Decisions applied — 2026-05-13
+
+Pete answered seven open questions on 2026-05-13. The proposed-changes below have been updated to reflect those decisions. Quick reference:
+
+- **Q1 (CR-034 selector design) — BLOCKED ON BRAYDEN.** "Brayden has his system for this." Don't redesign; ask him first.
+- **Q2 (CR-001 HSH-max → TAVG) — BLOCKED ON BRAYDEN.** The HSH-max choice may have been deliberate. Leave bug in place until Brayden confirms.
+- **Q3 (CR-049 dominant-hazard rule) — RESOLVED.** Highest exposed VoP, ties alphabetical (matches Togo Table 5).
+- **Q4 (CR-046 hazard tail mapping) — RESOLVED.** PTOT both tails; everything else high-only. Mapping table in CR-046 below.
+- **Q5 (CR-026 Overview links) — PARTIALLY RESOLVED.** One link only: GCF Information Note on Climate Rationale. Togo example deferred (separate Examples section once a stable URL exists). Dedicated Overview content from CACC1 is a separate work item Pete will surface to Cesare.
+- **Q6 (CR-017 SSP labels) — RESOLVED.** IPCC canonical form (`SSP1-2.6`, `SSP2-4.5`, `SSP3-7.0`, `SSP5-8.5`) on user-facing labels. Also new explanation block + authoritative link (captured as new issue CR-053).
+- **Q7 (CR-021 French translation) — RESOLVED.** AI drafts, Pete reviews. Split into per-section draft PRs.
+
+Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC` or `needs Brayden` there is a hard block on the relevant PR.
+
+---
+
+## Issues
+
+### CR-001 — Future Projections quick-insight reports physically impossible warming
+
+- **id:** CR-001
+- **title:** Future Projections Quick Insight shows up to 22°C of warming by 2040 — wildly wrong, kills credibility on sight
+- **type:** bug
+- **severity:** high
+- **where:** `notebooks/climateRationale/notebook.qmd` · `climateProjectionInsight` builder, lines ~1326–1500 · anchor `#futureProjections`
+- **what-users-see:**
+  > Kenya is projected to warm by 6.42°C between 2021 and 2040 under a climate scenario (SSP585), corresponding to 3.38°C per decade. Model uncertainty remains substantial, with warming projections ranging from 8.93°C (coolest) to 22.38°C (warmest).
+- **why-wrong:** Two compounding bugs:
+  1. The "temperature" paragraph filters on `d.hazard === "HSH-max"` (notebook.qmd ~1455). HSH-max is the **Human Heat Stress index** in number-of-days, not °C. A heat-stress days value is then formatted with `°C`.
+  2. `scenarioLabels` object (~line 1345) includes `ssp126/ssp245/ssp370` but not `ssp585`, so the label falls back to the literal string "climate", producing "under a climate scenario (SSP585)".
+- **proposed-change (RECOMMENDED, but see status):**
+  1. Swap `"HSH-max"` → `"TAVG"` in `climateProjectionInsight`'s temperature filter.
+  2. Add `ssp585: "very high-emissions"` to `scenarioLabels`.
+- **STATUS (2026-05-13, updated):**
+  - **Part 2 (`ssp585` scenarioLabel) — SHIPPED** as part of PR-A. The "under a climate scenario (SSP585)" fallback no longer fires.
+  - **Part 1 (HSH-max → TAVG filter swap) — STILL BLOCKED ON BRAYDEN** (DECISIONS.md Q2). The HSH-max filter may have been deliberate. Do **not** apply this swap yet.
+  - **Related: see [[CR-054]]** — even after Part 1 is resolved, the insight only ever surfaces TAVG + PTOT regardless of the user's Climate Variable selection. The Q2 design discussion with Brayden should cover both the filter choice (this ticket) and the broader selector-driven-insight question (CR-054).
+- **before-string:**
+  ```js
+  const tempData = byScenario[primaryScenario].filter(
+        (d) => d.hazard === "HSH-max",
+      );
+  ```
+  and
+  ```js
+  const scenarioLabels = {
+      ssp126: "very stringent mitigation",
+      ssp245: "moderately stringent mitigation",
+      ssp370: "high-emissions",
+    };
+  ```
+
+### CR-002 — Future Projections precip insight reports per-decade rate as per-year and mixes anomalies with raw values
+
+- **id:** CR-002
+- **title:** Precipitation Quick Insight units inconsistent
+- **type:** bug
+- **severity:** high
+- **where:** `notebooks/climateRationale/notebook.qmd` · `climateProjectionInsight` precipitation paragraph (~1499–1538), template at ~1329 · anchor `#futureProjections`
+- **what-users-see:**
+  > Precipitation projections under SSP585 indicate a change of 22.0 mm per year between 2021 and 2040 on average across Kenya. Precipitation uncertainty remains, with projections ranging from 432.1 to 617.1 mm per year across models.
+- **why-wrong:** `precipChange` is `precipTrend.perDecade.toFixed(1)` (per-decade) but the template says "per year". `minPrecip` / `maxPrecip` use `Math.min(...uPrecipData.map(d => d.mean))` (raw means, not anomalies), so the "432–617" sentence describes absolute precipitation, not the projected-change envelope.
+- **proposed-change:** Fix the template wording: `mm per year` → `mm per decade` for `precipChange`, and clarify that the 432–617 envelope is the absolute model range (not anomaly).
+- **before-string:**
+  ```js
+  const precipitationTemplate =
+      "Precipitation projections under :::scenario::: indicate a change of :::precipChange::: mm per year between :::startYear::: and :::endYear::: on average across :::admin:::. :::precipComparison::: Precipitation uncertainty remains, with projections ranging from :::minPrecip::: to :::maxPrecip::: mm per year across models.";
+  ```
+
+### CR-003 — Recent Changes Quick Insight talks about temperature when user selected Precipitation
+
+- **id:** CR-003
+- **title:** Quick Insight under Recent Changes does not reflect the selected Climate Variable
+- **type:** ux
+- **severity:** high
+- **where:** `notebooks/climateRationale/notebook.qmd` · `climateInsight` (~1132–1213) · anchor `#recentChanges`
+- **what-users-see:** Climate Variable = "Total Precipitation"; Quick Insight says "Kenya warmed by 1.10°C…" anyway.
+- **why-wrong:** `climateInsight` always builds both temperature (TAVG) and precipitation (PTOT) paragraphs regardless of `climateVarSelect`.
+- **proposed-change:** Order the insight so the selected variable's paragraph comes first; the other becomes an "Also note:" follow-up. Drop nothing — readers want both, just in the right order.
+- **before-string:**
+  ```js
+  if (tempTrend) {
+        parts.push(
+          Lang.reduceReplaceTemplateItems(climateTemplates.temperature, [
+  ```
+
+### CR-008 — Future-period dropdown options don't match parquet partition labels
+
+- **id:** CR-008
+- **title:** Future Projections / Extreme Events show blank plots for end-of-century timeframes
+- **type:** bug
+- **severity:** high
+- **where:** `notebooks/climateRationale/notebook.qmd` · `futurePeriods` array · lines ~909–914 · anchor `#futureProjections`
+- **what-users-see:** Selecting `2061-2081` or `2080-2100` renders empty plots silently — no error.
+- **why-wrong:** `futurePeriods = ["2021-2040", "2041-2060", "2061-2081", "2080-2100"]` but the parquet files are partitioned as `period=2061-2080` and `period=2081-2100`. The SQL `WHERE timeperiod = '${futurePeriodSelect}'` matches zero rows.
+- **proposed-change:** Correct the strings. Add an inline comment that period strings must match the partition labels in `nbData.json`.
+- **before-string:**
+  ```js
+  futurePeriods = [
+    "2021-2040",
+    "2041-2060",
+    "2061-2081",
+    "2080-2100"
+  ]
+  ```
+
+### CR-009 — Hazard Exposure plot ignores user-selected Timeframe and Scenario
+
+- **id:** CR-009
+- **title:** Section 6 (Crop & Livestock Exposure): scenarioForm() inputs have no effect
+- **type:** bug
+- **severity:** high
+- **where:** `notebooks/climateRationale/notebook.qmd` · `stackbars_hazardExposure` (~2414–2420) · anchor `#hazardExposure`
+- **what-users-see:** Section 6 displays the same `historic` + `ssp585` panel regardless of which scenarios/timeframe the user picks.
+- **why-wrong:** Hardcoded filter:
+  ```js
+  ["1995-2014", "2021-2040"].includes(d.timeframe) &&
+  ["historic", "ssp245", "ssp585"].includes(d.scenario),
+  ```
+  ignores `futurePeriodSelect` and `futureScenarioSelect`.
+- **proposed-change:** Replace with `["1995-2014", futurePeriodSelect]` and `["historic", ...futureScenarioSelect.map(s => s.toLowerCase())]`. Verify the underlying parquet contains rows for every (scenario × timeframe) combination — fall back to the existing "no data" tile at line ~2466 if a combination is missing.
+- **before-string:**
+  ```js
+  let baseFiltered = dataWithCategory.filter(
+      (d) =>
+        d.hazard !== "any" &&
+        ["1995-2014", "2021-2040"].includes(d.timeframe) &&
+        ["historic", "ssp245", "ssp585"].includes(d.scenario),
+    );
+  ```
+
+### CR-022 — `climateProjectionInsight` templates are hard-coded English strings inside OJS code
+
+- **id:** CR-022
+- **title:** Future Projections insight templates bypass the translation pipeline
+- **type:** i18n
+- **severity:** med (lands with PR-A because it's the same code block as CR-001 / CR-002)
+- **where:** `notebooks/climateRationale/notebook.qmd` · `climateProjectionInsight` · lines ~1326–1340 · anchor `#futureProjections`
+- **why-wrong:** `temperatureTemplate`, `precipitationTemplate`, `tempComparisonTemplate`, `precipComparisonTemplate`, `adminSummaryTemplate` are string literals inside the OJS cell. They never pass through `_lang()`.
+- **proposed-change:** Move all five templates into `nbText.sections.futureProjections.quickInsight.*` with `.en` and `.fr` keys, then `_lang()` them inside the builder. Suggested key shape: `futureProjections.quickInsight.{temperature,precipitation,tempComparison,precipComparison,adminSummary}.{en,fr}`. Translation copy is part of PR-J (French i18n) — schema migration only here.
+- **before-string:**
+  ```js
+  const temperatureTemplate =
+      ":::admin::: is projected to warm by :::tempChange:::°C between :::startYear::: and :::endYear::: under a :::scenarioLabel::: scenario (:::scenario:::), corresponding to :::tempPerDecade:::°C per decade. :::tempComparison::: Model uncertainty remains substantial, with warming projections ranging from :::minAnomaly:::°C (coolest) to :::maxAnomaly:::°C (warmest).";
+  ```
+
+### CR-013 — Methods section heading has no body text
+
+- **id:** CR-013
+- **title:** Appendix > Methods is an empty heading
+- **type:** methods
+- **severity:** high (Pete's #1 priority — methodological transparency)
+- **where:** `notebooks/climateRationale/notebook.qmd` · `### Methods` heading · line ~305 · anchor `#methodsData`
+- **what-users-see:** Heading "Methods", nothing under it.
+- **proposed-change:** Insert a methods narrative covering: geography (GAUL 2024 admin levels; SSA scope), climate variables and derivation from NEX-GDDP-CMIP6, baseline + SSP scenario projections, z-score classification for extreme events, hazard-exposure intersection method, socioeconomic context sources. **Draft already in `2026-05-13 ClimateRationale_review_and_planning.docx` Appendix A** — Pete-approved, copy it in.
+- **before-string:**
+  ```
+  ### Methods
+
+  ## Source code {#source-code}
+  ```
+
+### CR-014 — Data Sources cards show "No description provided" for every dataset
+
+- **id:** CR-014
+- **title:** nbData.json description fields all empty → Data Sources appendix is content-less
+- **type:** refs / methods
+- **severity:** med
+- **where:** `data/climateRationale/nbData.json` · every `description` field is `""`
+- **proposed-change:** Populate `description` for each of the 10 datasets. **Draft already in the planning .docx Appendix A and on `fix/cr-short-term-2026-05` branch** — copy that JSON in.
+- **before-string (sample, all 10 identical):**
+  ```
+  "description": "",
+  ```
+
+### CR-015 — Add CAP Acknowledgements section
+
+- **id:** CR-015
+- **title:** Add Acknowledgements section between Summary and Appendix
+- **type:** attribution
+- **severity:** med
+- **where:** `notebooks/climateRationale/notebook.qmd` (new H1 between Summary and Appendix) + `data/climateRationale/nbText.json` (new `general.acknowledgements`, EN + FR)
+- **proposed-change:** Insert after the Summary section:
+  ```qmd
+  # `{ojs} acknowledgementsHeading` {#acknowledgements}
+
+  `{ojs} _lang(nbText.general.acknowledgements.text)`
+  ```
+  Add `acknowledgementsHeading = _lang(nbText.general.acknowledgements.title);` to the existing OJS block. Add to `nbText.general`:
+  ```json
+  "acknowledgements": {
+    "title": {"en": "Acknowledgements", "fr": "Remerciements"},
+    "text": {
+      "en": "This notebook was developed as part of the Africa Agriculture Adaptation Atlas, led by the Alliance of Bioversity International and CIAT, with initial support from the Bill & Melinda Gates Foundation. Continued development of this notebook is supported by the [CGIAR Climate Action Program](https://www.cgiar.org/cgiar-research-portfolio-2025-2030/climate-action).",
+      "fr": "Ce notebook a été développé dans le cadre de l'Atlas d'Adaptation Agricole pour l'Afrique, dirigé par l'Alliance of Bioversity International and CIAT, avec le soutien initial de la Fondation Bill & Melinda Gates. Le développement continu de ce notebook est soutenu par le [Programme d'Action Climatique du CGIAR](https://www.cgiar.org/cgiar-research-portfolio-2025-2030/climate-action)."
+    }
+  }
+  ```
+
+### CR-039 — Anomaly concept needs an inline explanation
+
+- **id:** CR-039
+- **title:** Explain "anomaly" the first time it appears (and why baseline = 1995–2014)
+- **type:** methods / copy
+- **severity:** med (Pete's #1 priority)
+- **where:** `data/climateRationale/nbText.json` · new key `sections.recentChanges.help.anomaly` · render via a help-toggle or callout in `notebook.qmd` just above the Recent Changes plot, anchor `#recentChanges`
+- **why-wrong:** Plot Y-axis says "anomaly", legend says "anomaly", but no user-facing definition is provided. Reviewers don't know what the zero line represents, what the baseline is, or how to interpret bars above/below zero.
+- **proposed-change:** Add a small inline callout (Bootstrap alert or a `<details>` block, language-toggleable) with copy along these lines:
+  > **About anomalies.** Values are shown as anomalies relative to the 1995–2014 historical reference period. The zero line represents the 1995–2014 average for the selected season and variable. Bars above zero indicate years (or future projections) wetter / warmer / more frequent than the 1995–2014 average; bars below zero indicate the opposite. Anomaly framing makes change easier to read across regions with very different baseline climates.
+- **before-string:** *(new content — render at the top of the Recent Changes plot section, before the plot)*
+
+### CR-040 — Future Projections needs source attribution and ensemble description on the figure
+
+- **id:** CR-040
+- **title:** Source line under Future Projections plot: NEX-GDDP-CMIP6, GCM list, ensemble method
+- **type:** methods / refs
+- **severity:** med (Pete's #1 priority)
+- **where:** `notebooks/climateRationale/notebook.qmd` · `timeseries_futureProjections` plot config · caption line ~2188+ · anchor `#futureProjections`
+- **proposed-change:** Add a `caption: multiLineText([...], "atlasFigCaption")` block to the plot config along the lines of:
+  > Source: NEX-GDDP-CMIP6 v2 (NASA Earth Exchange Global Daily Downscaled Projections, CMIP6). Ensemble mean across the 28 CMIP6 GCMs included in the v2 release; shaded ribbon shows the min–max envelope across these models. Anomalies relative to the 1995–2014 historical baseline.
+  Confirm the 28-GCM count with Brayden before merge — the actual number depends on the v2 release used by the Atlas pipeline.
+- **before-string:** *(no existing caption — new addition to the plot config)*
+
+### CR-041 — Future Projections needs a one-line explanation of the shaded ribbon
+
+- **id:** CR-041
+- **title:** Explain what the shaded "uncertainty" ribbon means
+- **type:** methods / copy
+- **severity:** med
+- **where:** same as CR-040 (`timeseries_futureProjections` caption + an inline help callout above the plot if room)
+- **proposed-change:** In the same caption (or as a help-block above): "The shaded envelope is the range across the 28 CMIP6 models in the ensemble (min–max), not a confidence interval. The line is the ensemble mean."
+
+### CR-044 — Extreme Events terminology is opaque to non-technical users
+
+- **id:** CR-044
+- **title:** Explain z-score / unusual / extreme; note that the terms can be inverted in some reports
+- **type:** methods / copy
+- **severity:** med (Pete's #1 priority)
+- **where:** `data/climateRationale/nbText.json` · new key `sections.extremeEvents.help.zscore` rendered via help-toggle above the plot · anchor `#extremeEvents`
+- **proposed-change:** Add a help callout (language-toggleable) along these lines:
+  > **About this plot.** Each year of historical data (1995–2014) and each year of the future projection is converted to a z-score — the number of standard deviations above or below the local long-term mean for the selected season and variable. Years with **|z| ≥ 2** are classified as "extreme" (rarely seen); years with **1 ≤ |z| < 2** are classified as "unusual" (less common than typical). The plot counts how many such years occur in the historical period vs. each future scenario.
+  >
+  > Other Adaptation Atlas outputs (e.g. the Togo Sustainable Agricultural Transformation report) sometimes use the opposite convention — labelling **|z| = 1** as "extreme" and **|z| = 2** as "unusual". When citing this notebook, please use this notebook's convention (|z| ≥ 2 = extreme).
+- **before-string:** *(new content)*
+
+### CR-050 — Hazard Exposure plot lacks source and method attribution
+
+- **id:** CR-050
+- **title:** Hazard Exposure: add source line and short method blurb
+- **type:** methods / refs
+- **severity:** med
+- **where:** `notebooks/climateRationale/notebook.qmd` · `stackbars_hazardExposure` plot config · anchor `#hazardExposure`
+- **proposed-change:** Add a caption block:
+  > Hazard exposure = subnational value of production (USD 2021) intersected with the occurrence of severe single- or multi-hazard events (drought NDWS, heat NTx35/THI-max, waterlogging NDWL0). Severity thresholds follow Jägermeyr et al. (2021). Production from MapSPAM 2020 (Adaptation Atlas variant) for crops and Gridded Livestock of the World v4 (2020) for livestock. Hazards from the NEX-GDDP-CMIP6 ensemble mean. Source: African Agriculture Adaptation Atlas — https://adaptationatlas.cgiar.org.
+- **before-string:** *(no existing caption on `stackbars_hazardExposure`)*
+
+### CR-051 — Every figure should have a source / hyperlink / method blurb
+
+- **id:** CR-051
+- **title:** Standardise per-figure attribution: source, hyperlink, one-line method
+- **type:** methods / refs
+- **severity:** med (Pete's #1 priority; pattern explicitly modelled on Togo Table 5 attribution: "Hazard exposure data taken from The African Adaptation Atlas (https://adaptationatlas.cgiar.org) and related datasets")
+- **where:** every plot config in `notebooks/climateRationale/notebook.qmd` — Key Facts (poverty, GDP, land use, commodity), Recent Changes (diverging bar + warming stripes + table), Future Projections, Extreme Events, Hazard Exposure.
+- **proposed-change:** Use the `caption: multiLineText([...], "atlasFigCaption")` argument on every Plot.plot() call. Each caption: one line of source + URL + brief method (period, baseline, ensemble, units). Move data-source strings out of inline literals into `nbText.sections.<section>.figures.<figureName>.caption` so they're translatable and de-duplicated.
+- **note for Claude Code:** Pair this PR with CR-014 (which populates the Data Sources cards) so the appendix and the figure captions tell the same story. Don't replace the existing captions on poverty / GDP / land use / commodity — those already have captions; only standardise wording and add hyperlinks.
+
+### CR-032 — MapSPAM provenance note
+
+- **id:** CR-032
+- **title:** Add provenance note about MapSPAM derivation
+- **type:** copy / refs
+- **severity:** low
+- **where:** `notebooks/climateRationale/notebook.qmd` · `exposureBars_keyFacts` caption (~1701) · or as part of CR-051 standardisation
+- **proposed-change:** Append to the existing MapSPAM caption: "MapSPAM 2020 production values are derived from nationally-reported agricultural census data and subnational agricultural statistics; consult country-level census references for context."
+- **before-string:**
+  ```
+  "Data is from 2020, measured in 2021 US dollars",
+  "Source: MapSpam 2020 SSA Adaptation Atlas",
+  ```
+
+### CR-034 — Admin selectors are not synchronised across sections
+
+- **id:** CR-034
+- **title:** Country/Region selection in one section doesn't reliably propagate to others
+- **type:** bug / ux
+- **severity:** high (Pete's #5 priority — explicitly raised on the walkthrough)
+- **where:** `notebooks/climateRationale/notebook.qmd` · per-section selector instances at lines ~56–57, 98–99, 170–171, 212–213, 252–253 · `components/_adminSelectorsMulti.qmd`
+- **what-users-see:** Pete's walkthrough: "changing Angola to Kenya may update some sections but not others"; selector shows one country while the plot below shows another.
+- **why-wrong:** Each analytical section instantiates its own `renderA0Multi` / `renderA1Multi` (e.g. `section1A0 = renderA0Multi(...)`, `section2A0 = renderA0Multi(...)`, …). Each pair owns its own internal state. They share the upstream `admin0Select` / `admin1Select` viewofs but the rendered widgets diverge once a user clicks in only one section.
+- **STATUS (2026-05-13):** **APPLIED — Option (a) single global selector.** Pete chose to bypass the Brayden block. The five `sectionNA0`/`sectionNA1`/`inputTemplate(...)` blocks have been removed; a single `globalA0`/`globalA1` selector pair lives in a sticky bar right after the Overview section. All downstream `admin0Select` / `admin1Select` references continue to work unchanged (they always pointed at the same global viewofs defined in `components/_adminSelectorsMulti.qmd`). Surface to Brayden so his cross-notebook system can adopt or supersede this pattern.
+- **proposed-change (applied):**
+  - **(a) Single global selector at the top.** Promote one admin0+admin1 widget to a sticky top bar (above the Key Facts section), feeding every section. Pros: matches user mental model, fastest to ship, fewest moving parts. Cons: less freedom to compare different sets of regions in different sections.
+  - **(b) Keep per-section widgets but two-way bind them.** (Not applied.) Use `Inputs.bind` (already used elsewhere in the notebook for the language toggle and the production-type select) so changes in any one section's selector update all the others.
+- **before-string:** *(structural change — see the five `sectionNA0 = renderA0Multi(...)` / `sectionNA1 = renderA1Multi(...)` pairs, lines ~56–57, 98–99, 170–171, 212–213, 252–253)*
+
+### CR-035 — Admin name labels are cropped off the right of every faceted plot
+
+- **id:** CR-035
+- **title:** Faceted plot region labels truncated (only "(KEN)" visible)
+- **type:** ux
+- **severity:** med (visible on every multi-region rendering)
+- **where:** `notebooks/climateRationale/notebook.qmd` · every `Plot.plot({ facet: { ... y: "adminName" }})` configuration — `barplot_recentChanges`, `warmingStripes_recentChanges`, `timeseries_futureProjections`, `bars_extremeEvents`, `stackbars_hazardExposure`.
+- **why-wrong:** Default Plot.plot facet labels run into the right edge; admin1 names ("Plateaux", "Centrale", "Coastal" etc.) are long and the chart width minus marginRight is too small.
+- **proposed-change:** Add `marginRight: 120` (or similar) and/or rotate/wrap the facet label using `fy: { tickFormat: d => wrapTickLabel(d, 14) }` — the project already has `wrapTickLabel` in `helpers/std.ojs`. Test with the longest country/region names (e.g. "Democratic Republic of the Congo", "Northern Province").
+- **before-string:** *(touches multiple plot configs; do one at a time and screenshot test each)*
+
+### CR-042 — Axis position and orientation differ between Recent Changes and Future Projections
+
+- **id:** CR-042
+- **title:** X- and Y-axis position should be consistent across the climate-change plots
+- **type:** ux
+- **severity:** low
+- **where:** `notebooks/climateRationale/notebook.qmd` · `barplot_recentChanges` (y-axis left) vs `timeseries_futureProjections` (y-axis right) · anchors `#recentChanges`, `#futureProjections`
+- **proposed-change:** Pick one convention (recommend Y on left — the Recent Changes default — for left-to-right reading). Update the Future Projections config: remove `y: { axis: "right" }`. Verify the legend/title don't overlap once moved.
+- **before-string:**
+  ```js
+    y: {
+        axis: "right",
+        grid: true,
+        label: _variableAxis,
+        tickSize: 0,
+      },
+  ```
+
+### CR-019 — Extreme Events y-axis shows fractional ticks on integer counts
+
+- **id:** CR-019
+- **title:** Extreme Events plot Y-axis: 0.2, 0.4, … on event counts
+- **type:** ux
+- **severity:** low
+- **where:** `notebooks/climateRationale/notebook.qmd` · `bars_extremeEvents` y scale (~2336)
+- **proposed-change:** `y: { label: "Number of events", grid: true, tickFormat: "d", interval: 1 }`.
+- **before-string:**
+  ```js
+  y: {
+        label: "Number of events",
+        grid: true,
+      },
+  ```
+
+### CR-045 — Plot title should show the selected climate variable (Extreme Events)
+
+- **id:** CR-045
+- **title:** Extreme Events plot title doesn't say which variable it represents
+- **type:** ux
+- **severity:** med
+- **where:** `notebooks/climateRationale/notebook.qmd` · `bars_extremeEvents` (no `title` set) · anchor `#extremeEvents`
+- **proposed-change:** Add `title: \`Extreme events: ${_lang(climateVarSelect.name)}\`` to the Plot config, mirroring the pattern in `barplot_recentChanges`/`timeseries_futureProjections`.
+- **before-string:**
+  ```js
+  return Plot.plot({
+      width,
+      height: 500,
+      marginLeft: 60,
+      marginBottom: 60,
+
+      facet: {
+        data: _data,
+      },
+  ```
+
+### CR-046 — Directional hazards: low values aren't always "hazardous"
+
+- **id:** CR-046
+- **title:** Extreme Events plot shows "low" categories even for hazards where only high values are dangerous (e.g. NTx35 heat-stress days)
+- **type:** ux / methods
+- **severity:** med
+- **where:** `notebooks/climateRationale/notebook.qmd` · `bars_extremeEvents` (~2300) and `aggregateEvents`/`classifyZ` (~700–730)
+- **why-wrong:** For PTOT, both wet and dry tails are operationally meaningful. For other hazards, the low tail is usually irrelevant or even desirable.
+- **Tail mapping — RESOLVED by Pete 2026-05-13 (DECISIONS.md Q4):**
+
+  | Variable id | Tails | Note |
+  |---|---|---|
+  | `PTOT` | `both` | both droughts and floods matter |
+  | `TAVG` | `high-only` | warming is the hazard, not cooling |
+  | `NTx35` | `high-only` | days over 35°C — hazard by definition |
+  | `NTx40` | `high-only` | days over 40°C — hazard by definition |
+  | `NDWS` | `high-only` | more water-stress days = worse |
+  | `NDWL0` | `high-only` | more waterlogging days = worse |
+  | `THI-max` | `high-only` | heat-stressed cattle |
+  | `HSH-max` | `high-only` | human heat-stress / labour-day losses |
+
+- **proposed-change:**
+  1. Add a `tails: "both" | "high-only"` field to each entry under `data/shared/generalTranslations.json` → `hazardVariables`, following the mapping above.
+  2. In `bars_extremeEvents` (~2300), drop `extreme_low` and `unusual_low` from the `categories` array when the active variable's `tails === "high-only"`. Read the active variable from `climateVarSelect.id` and look up its `tails` value.
+  3. Adjust the help-callout copy from CR-044 to add one line indicating which tail the user is currently seeing (e.g. "Only above-average events are shown for this variable").
+- **before-string:**
+  ```js
+  const categories = [
+      "extreme_low",
+      "unusual_low",
+      "unusual_high",
+      "extreme_high",
+    ];
+  ```
+
+### CR-052 — No loading-state feedback during slow data fetches
+
+- **id:** CR-052
+- **title:** Plots appear broken while DuckDB-WASM fetches and parses parquet
+- **type:** ux
+- **severity:** med (Pete's #4 priority)
+- **where:** every `loaderDiv("plotName")` in `notebooks/climateRationale/notebook.qmd` (helpers/uiComponents.ojs already exports `loaderDiv`)
+- **what-users-see:** Pete's walkthrough on Extreme Events: "changing timeframe can cause long delays. The plot may appear broken while data are loading."
+- **proposed-change:** Audit each `renderToDiv(...)` block (Recent Changes, Future Projections, Extreme Events, Hazard Exposure). Each one already has a `loaderDiv` slot — confirm the loader spinner is visible during the data-promise resolution, not just on initial page load. If `loaderDiv` doesn't currently re-show on selector change, add it (the simplest pattern: clear the div content and show the loader at the start of the render closure, then `replaceChildren` the viz at the end).
+- **before-string:**
+  ```js
+  renderToDiv("plotExtremeEvents", () => {
+      if (viewExtremeEvents === "plot") return bars_extremeEvents();
+      return dataTable(extremeEvents_plotData);
+    });
+  ```
+
+### CR-027 — Commodity production download is missing the units column
+
+- **id:** CR-027
+- **title:** Commodity download CSV/JSON lacks units of value
+- **type:** bug
+- **severity:** med (Pete's #6 priority — downloadable tables)
+- **where:** `notebooks/climateRationale/notebook.qmd` · `downloadButton(exposure_plotData, "commodityProduction")` line ~91 · anchor `#keyFacts`
+- **why-wrong:** `exposure_plotData` rows have `iso3, admin1_name, crop, value, category` but no column describing the unit (nominal USD 2021).
+- **proposed-change:** Either (a) decorate `exposure_plotData` with `unit: "nominal-usd-2021"` and `value_year: 2020` at the point of SQL projection, or (b) pass an `extraColumns` argument to `downloadButton` that injects metadata as a static column or as a header comment. Preferred: (a) — keeps the data tabular and machine-readable.
+- **before-string:**
+  ```js
+  exposure_plotData = {
+    const resp = await db.query(`
+    SELECT
+      iso3,
+      admin1_name,
+      crop,
+      value
+    FROM exposure
+  ```
+
+### CR-028 — Poverty / GDP / land-use tables have no download button
+
+- **id:** CR-028
+- **title:** Add download buttons under the poverty, GDP, and land-use Key Facts plots
+- **type:** feature
+- **severity:** med (Pete's #6 priority)
+- **where:** `notebooks/climateRationale/notebook.qmd` · just below `povBar_keyFacts()`, `gdpBar_keyFacts()`, `areaBar_keyFacts()` (lines ~62–66) · anchor `#keyFacts`
+- **proposed-change:** Mirror the existing pattern (line ~91) for each — `\`{ojs} downloadButton(pov_plotData, "poverty")\``, `\`{ojs} downloadButton(gdp_plotData, "gdp-by-sector")\``, `\`{ojs} downloadButton(landuse_plotData, "landuse")\``. Each download should include a unit/year column (analogous to CR-027).
+- **before-string:**
+  ```qmd
+  ```{ojs}
+  povBar_keyFacts();
+
+  gdpBar_keyFacts();
+
+  areaBar_keyFacts();
+  ```
+  ```
+
+### CR-029 — Provide a single combined "Key Facts" download
+
+- **id:** CR-029
+- **title:** Combined Key Facts download (one CSV with poverty, GDP, land-use, commodity)
+- **type:** feature
+- **severity:** low (Pete's #6 priority; nice-to-have on top of CR-028)
+- **where:** `notebooks/climateRationale/notebook.qmd` · new download button at the end of the Key Facts section
+- **proposed-change:** Long-format CSV with columns `iso3, admin1_name, metric, sub_group, year, value, unit, source`. Builder concatenates the four tables, mapping metric ∈ {poverty, gdp, landuse, commodity}. Source field carries the same provenance string the per-figure captions show. Lower priority than CR-028 — land it in the same PR if cheap.
+
+### CR-031 — Source citations should be hyperlinks, not bare text
+
+- **id:** CR-031
+- **title:** Add `<a href="...">` URLs to every "Source:" string
+- **type:** refs
+- **severity:** low (Pete's #1 priority)
+- **where:** every figure caption in `notebooks/climateRationale/notebook.qmd` (poverty, GDP, land use, commodity, …)
+- **proposed-change:** Replace plain "Source: World Bank Global Subnational Atlas of Poverty (GSAP), 2023 release." with markdown-linked equivalents. `multiLineText` already renders HTML; switch to a small helper or pass `html` runs. Targets:
+  - World Bank GSAP 2023 → <https://datacatalog.worldbank.org/search/dataset/0042041>
+  - FAOSTAT → <https://www.fao.org/faostat/>
+  - World Bank WDI → <https://databank.worldbank.org/source/world-development-indicators>
+  - MapSPAM Atlas variant → Adaptation Atlas page (<https://adaptationatlas.cgiar.org>)
+  - NEX-GDDP-CMIP6 v2 → <https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6>
+  - GLW 4 → <https://data.apps.fao.org/catalog/iso/9d1e149b-d63f-4213-978b-317a8eb42d02>
+- **note:** Lands together with CR-051 (per-figure standardisation).
+
+### CR-049 — Hazard Exposure: add a Togo-style summary table
+
+- **id:** CR-049
+- **title:** Replace/augment the stacked-bar with a summary table mirroring Togo SAT Table 5
+- **type:** feature
+- **severity:** high (Pete's #6 priority — "Charts alone are insufficient for this purpose. Proposal writers need exact values to cite in text.")
+- **where:** `notebooks/climateRationale/notebook.qmd` · new content directly below `stackbars_hazardExposure` block · anchor `#hazardExposure`
+- **target output (verbatim from Togo SAT report, p.19, Table 5):**
+  | Region | Main climate hazards | SSP245 Total US$ Exposed VoP, Maize | SSP585 Total US$ Exposed VoP, Maize | SSP245 Total US$ Exposed VoP, Soybeans | SSP585 Total US$ Exposed VoP, Soybeans | SSP245 Total US$ Exposed VoP, Rice | SSP585 Total US$ Exposed VoP, Rice |
+  |---|---|---|---|---|---|---|---|
+  | Plateaux | Dry only | 6.1M (6.1%) | 2.8M (2.8%) | 0.12M (5.4%) | 0.05M (2.3%) | 0.5M (5.1%) | 0.25M (2.5%) |
+  | Kara | Heat only | 8.9M (46.5%) | 7.0M (36.4%) | 1.6M (64.6%) | 1.4M (57.7%) | $3.7M (54.4%) | $3.1M (45.6%) |
+  | … | … | … | … | … | … | … | … |
+- **Dominant-hazard rule — RESOLVED by Pete 2026-05-13 (DECISIONS.md Q3):** "Highest exposed VoP per (region × scenario × commodity), ties broken alphabetically." Matches Togo Table 5 implicitly.
+- **proposed-change:**
+  1. New OJS cell `hazardExposure_summaryTable_data` that pivots `hazardExposure_plotData` to: rows = (admin1, dominant-hazard), columns = (scenario × commodity) with formatted USD + percent-of-regional-VoP-exposed.
+  2. **Dominant-hazard implementation:** group `hazardExposure_plotData` by (`iso3`, `admin1_name`, `scenario`, `crop`); within each group find `argmax(value) over hazard` (ties broken by `String.prototype.localeCompare` on the hazard string).
+  3. Render via the existing `dataTable` helper (`components/atlasTable.ojs`) or via a new compact HTML table component if richer formatting is needed.
+  4. Add a `downloadButton` for the underlying long-form data.
+  5. Columns mirror Togo Table 5 exactly: Region, Main climate hazards, then one (USD, %) pair per (scenario × commodity).
+  6. **Document the dominant-hazard rule in the table caption** so reviewers know how the "Main climate hazards" column was derived.
+- **note for Claude Code:** This is the single biggest feature ask in this PR set. Likely 1–2 days of work. **Suggest a working preview deploy before merging** so Pete can compare side-by-side with Togo Table 5.
+
+### CR-026 — Overview section should link to GCF guidance
+
+- **id:** CR-026
+- **title:** Add a single "Further reading" link to the Overview
+- **type:** content / refs
+- **severity:** med
+- **where:** `data/climateRationale/nbText.json` · new `sections.intro.furtherReading.{en,fr}` rendered as a one-liner below the intro paragraph · anchor `#overview`
+- **Pete's decision — RESOLVED 2026-05-13 (DECISIONS.md Q5):** Minimal scope. Just **one** GCF link.
+- **proposed-change:** Add a single short paragraph below the intro:
+  > For background on what GCF expects in a climate rationale, see the [GCF Information Note on Climate Rationale](https://www.greenclimate.fund/document/information-note-climate-rationale).
+  Translate to French (`fr`) the same way. **URL to be confirmed by Pete before merge** — best-effort guess. Do NOT add the CN template / FP-PAP / Sectoral Guide / Togo SAT links here.
+- **out of scope for this PR — captured as deferred items:**
+  - **CR-NEW-cacc1-overview:** CACC1 (Cesare's programme) is being asked to produce dedicated Overview content on how to write a climate rationale. When that lands, it replaces / extends this single link.
+  - **CR-NEW-examples-section:** Add a new "Examples" section near the Summary that links to worked examples (starting with the Togo SAT report once a stable public URL exists).
+  Both deferred — see "Deferred — medium-term items" at the bottom of this file.
+
+### CR-004 — `agricultual` typo
+
+- **id:** CR-004
+- **type:** copy
+- **severity:** low (max embarrassment factor — every country)
+- **where:** `data/climateRationale/nbText.json` · `sections.keyFacts.quickInsight.production.allAdmins.en`
+- **before-string:**
+  ```
+  "en": "In :::admin:::, :::group::: is the highest-value agricultual subsector (:::groupValue:::), and :::topCommodity::: has the highest individual value of production (:::topValue:::)."
+  ```
+
+### CR-005 — Poverty bar caption cites GSAP 2025 (doesn't exist)
+
+- **id:** CR-005
+- **type:** refs
+- **severity:** med
+- **where:** `notebooks/climateRationale/notebook.qmd` · `povBar_keyFacts` caption · line ~1968–1969
+- **proposed-change:**
+  > Data uses 2017 PPP. Poverty threshold is $4.20 USD/day (2017 PPP).
+  > Source: World Bank Global Subnational Atlas of Poverty (GSAP), 2023 release.
+- **before-string:**
+  ```js
+  "Data uses purchasing power parity (PPP) values for 2023. Poverty threshold is $4.20 USD/day.",
+        "Source: World Bank GSAP 2025.",
+  ```
+
+### CR-006 — GDP bar caption cites FAOSTAT (should be World Bank WDI)
+
+- **id:** CR-006
+- **type:** refs
+- **severity:** med
+- **where:** `notebooks/climateRationale/notebook.qmd` · `gdpBar_keyFacts` caption · line ~1883
+- **proposed-change:**
+  > Data is from 2022, measured in constant 2015 US dollars.
+  > Source: World Bank World Development Indicators (WDI).
+- **before-string:**
+  ```js
+  ["Data is from 2022, measured in 2015 US dollars", "Source: FAOSTAT"],
+  ```
+
+### CR-007 — MapSpam → MapSPAM (acronym casing)
+
+- **id:** CR-007
+- **type:** copy
+- **severity:** low
+- **where:** `notebooks/climateRationale/notebook.qmd` · `exposureBars_keyFacts` caption · line ~1702
+- **before-string:**
+  ```
+  "Source: MapSpam 2020 SSA Adaptation Atlas",
+  ```
+
+### CR-010 — Tooltip label `lable` → `label`
+
+- **id:** CR-010
+- **type:** bug
+- **severity:** low
+- **where:** `notebooks/climateRationale/notebook.qmd` · `stackbars_hazardExposure` channels · line ~2549
+- **before-string:**
+  ```js
+                scenario: {
+                  lable: "Scenario",
+                  value: (d) => d.scenario,
+                },
+  ```
+
+### CR-011 — `% of populatio,n` → `% of population`
+
+- **id:** CR-011
+- **type:** copy
+- **severity:** low
+- **where:** `notebooks/climateRationale/notebook.qmd` · `povBar_keyFacts` channels · line ~1976
+- **before-string:**
+  ```js
+        rate: {
+          value: (d) => d.pov_rate + "%",
+          label: "% of populatio,n",
+        },
+  ```
+
+### CR-012 — French heading: Evenements extremes → Événements extrêmes
+
+- **id:** CR-012
+- **type:** i18n
+- **severity:** low
+- **where:** `notebooks/climateRationale/notebook.qmd` · `heading5` · line ~328
+- **proposed-change:** Add accents and populate `nbText.sections.extremeEvents.title.fr` so the hardcoded fallback can be removed.
+- **before-string:**
+  ```js
+  heading5 = _lang({ en: "Extreme Events", fr: "Evenements extremes" }); //nbText.sections.extremeEvents.title
+  ```
+
+### CR-018 — "1 extreme high events" singular/plural
+
+- **id:** CR-018
+- **type:** copy
+- **severity:** low
+- **where:** `data/climateRationale/nbText.json` · `sections.extremeEvents.quickInsight.country.en` and `.admin.en`
+- **proposed-change:** Reword to a count-agnostic sentence (suggested wording in the earlier draft of this file).
+
+### CR-020 — Key Facts intro narrows scope to GCF
+
+- **id:** CR-020
+- **type:** copy
+- **severity:** low
+- **where:** `data/climateRationale/nbText.json` · `sections.keyFacts.introText.en`
+- **proposed-change:** "the country targeted by your GCF project proposal" → "the target country of your climate rationale or investment case".
+- **note:** Same edit in `sections.recentChanges.introText.en` (`contextualizing a GCF proposal` → `contextualizing a climate rationale`).
+
+### CR-025a — "(crops, livestock, water resources)" — water resources not actually selectable
+
+- **id:** CR-025a
+- **type:** copy
+- **severity:** low (from Majambo feedback)
+- **where:** `data/climateRationale/nbText.json` · `sections.intro.text.en`
+- **proposed-change:** `(crops, livestock, water resources)` → `(crops and livestock)`.
+
+### CR-033 — Section title: "Recent Changes in Key Climatic Indicator(s)"
+
+- **id:** CR-033
+- **type:** copy
+- **severity:** low (Pete's walkthrough)
+- **where:** `data/climateRationale/nbText.json` · `sections.recentChanges.title.en` (and `.fr`)
+- **proposed-change:** "Recent Changes in Key Climate Indicator" → "Recent Changes in Key Climatic Indicators" (plural; "climatic" reads more naturally to a technical audience). Update French equivalent.
+- **before-string:**
+  ```
+  "en": "Recent Changes in Key Climate Indicator",
+  ```
+
+### CR-017 — Internal field names leak to users as legend / axis / radio labels
+
+- **id:** CR-017
+- **title:** `in_poverty`, `divergingBar`, `extreme_low`, `dry+heat`, `historic`, `cereals` (lower-case), `ssp585` visible to end users
+- **type:** ux / copy
+- **severity:** med
+- **where:** multiple plot configs and radio inputs in `notebook.qmd`. Specific call sites: lines ~78, 105, 178, 218, 261, 1960, 2301, 2455.
+- **SSP label decision — RESOLVED by Pete 2026-05-13 (DECISIONS.md Q6):** Use **IPCC canonical form** on every user-facing legend / axis / tooltip / radio:
+  - `ssp126` → `SSP1-2.6`
+  - `ssp245` → `SSP2-4.5`
+  - `ssp370` → `SSP3-7.0`
+  - `ssp585` → `SSP5-8.5`
+  Internal data-keys stay as `ssp126` / `ssp245` / `ssp370` / `ssp585`. Pair this with the new CR-053 (explanation block + link) so users encounter the canonical labels and a definition together.
+- **Other label mappings (recommended; confirm in PR-I review):**
+
+  | Domain value | User-facing label |
+  |---|---|
+  | `in_poverty` | "In poverty" |
+  | `not_poverty` | "Not in poverty" |
+  | `divergingBar` | "Diverging bars" |
+  | `warmingStripes` | "Warming stripes" |
+  | `plot` / `table` | "Plot" / "Table" |
+  | `extreme_low` / `unusual_low` / `unusual_high` / `extreme_high` | "Extreme low" / "Unusual low" / "Unusual high" / "Extreme high" |
+  | `wet` / `dry` / `heat` / `dry+heat` / `dry+wet` / `heat+wet` / `heat+wet+dry` | "Wet" / "Dry" / "Heat" / "Dry + Heat" / "Dry + Wet" / "Heat + Wet" / "Heat + Wet + Dry" |
+  | `historic` | "Historic (1995–2014)" |
+  | crop categories like `cereals`, `non-edible-crops` | already translated via `cropTranslations` for the top-level `viewof prod_type`; propagate the same `format` function to the bound select at line ~261 |
+
+- **proposed-change:** Centralise the mappings in `data/shared/generalTranslations.json` (per-domain entries) so they translate. Use `Inputs.radio(values, { format })` and `Plot.plot({ color: { domain, label, tickFormat } })` to surface the labels. Update every call site.
+
+- **STATUS (2026-05-13, updated):**
+  - **SHIPPED in PR-I (this session):** `viewTypes` (Diverging bars / Warming stripes / Plot / Table) wired on the three radio inputs; `extremeCategories` on `bars_extremeEvents` color + fx axis; `hazardCombos` on `stackbars_hazardExposure` color legend. Translation keys added to `data/shared/generalTranslations.json` with `"fr": "TODO"` for PR-J.
+  - **DEFERRED — SSP canonical labels:** Skipped per session call. Internal data keys (`ssp126/245/370/585`, `SSP126…`) still leak as user-facing labels in `scenarioForm`'s checkbox, the `timeseries_futureProjections` legend, and tooltips on every climate plot.
+  - **DEFERRED — poverty `in_poverty`/`not_poverty` legend:** The `createStackedBarChart` helper in `notebook.qmd` currently passes `fillLabelFormatter` as Plot's `color.label` (a string slot), which is the wrong receiver. Needs a helper fix (probably `color.tickFormat`) before the user-facing labels can be surfaced. Track here, do not extend this ticket.
+  - **DEFERRED — `historic` scenario label:** Still surfaces as bare `"historic"` in the scenario legend / tooltips. Same as SSP: needs a per-scenario user-label mapping.
+  - **DEFERRED — bound `Inputs.select` for `prod_type` at line ~261:** the upstream `viewof prod_type` already formats via `cropTranslations`; the bound copy at line ~261 still shows raw category keys ("All Commodities" only when null). Propagate the same `format` callback.
+
+### CR-053 — Explain SSP scenarios in the notebook + link to authoritative source [NEW 2026-05-13]
+
+- **id:** CR-053
+- **title:** Add an SSP explanation block and authoritative link
+- **type:** methods / copy
+- **severity:** med (Pete's #1 priority — methodological transparency)
+- **where:** `notebooks/climateRationale/notebook.qmd` · new help-callout above the Future Projections plot · anchor `#futureProjections`. Copy lives in `data/climateRationale/nbText.json` under new key `sections.futureProjections.help.ssp.{en,fr}`.
+- **why-wrong:** Pete on the walkthrough: "We should explain the scenarios to the user and link to where they can find out more info." Currently SSP labels appear with no context.
+- **proposed-change:**
+  1. Create new `nbText.json` key `sections.futureProjections.help.ssp` with EN and FR text. Draft EN copy:
+     > **About SSP scenarios.** The four future scenarios shown — SSP1-2.6, SSP2-4.5, SSP3-7.0 and SSP5-8.5 — are Shared Socioeconomic Pathways defined by the IPCC. They span a range from very stringent global mitigation (SSP1-2.6, ~1.5 °C warming by 2100) through moderate emissions (SSP2-4.5) to high-emissions futures (SSP3-7.0) and very high emissions assuming continued fossil-fuel-intensive growth (SSP5-8.5). The pathway you choose changes the projected climate but does not change the underlying physical models. See the [IPCC AR6 WG1 Atlas](https://www.ipcc.ch/report/ar6/wg1/) and the [IIASA SSP database](https://tntcat.iiasa.ac.at/SspDb/) for definitions.
+  2. Render via the same pattern as CR-039 (anomalies) and CR-044 (extreme events terminology) — a `<details>` or Bootstrap alert callout above the Future Projections plot, language-toggleable.
+  3. URLs to be confirmed by Pete before merge.
+- **before-string:** *(new content)*
+
+### CR-021 — French translation backlog
+
+- **id:** CR-021
+- **type:** i18n
+- **severity:** med
+- **where:** `data/climateRationale/nbText.json` (multiple keys) + `data/shared/generalTranslations.json`
+- **affected keys:** see prior draft. Includes the `hsh` hazard variable (empty FR), `direction.greater/less` (`"TODO"`), all `quickInsight.*.fr` entries that are TODO/empty, `summary.text.fr`, `extremeEvents.*.fr`, plus any new FR keys introduced by CR-053 / CR-039 / CR-044.
+- **Reviewer decision — RESOLVED by Pete 2026-05-13 (DECISIONS.md Q7):** AI drafts, Pete reviews.
+- **proposed-change (workflow):**
+  - Claude Code drafts French translations for every `"fr": "TODO"` and every empty `"fr": ""` key, plus any new FR keys added by PR-B.
+  - **Style guide:** preserve `:::placeholder:::` template syntax verbatim; formal but readable French suitable for GCF audiences; preserve markdown links exactly; do NOT translate proper nouns (Adaptation Atlas, CGIAR, World Bank, etc.) unless an official French form exists ("Banque mondiale" yes; "CGIAR" stays "CGIAR").
+  - **Split into per-section draft PRs** so Pete's review is bounded — suggested split: (i) keyFacts.quickInsight.*, (ii) recentChanges.quickInsight.*, (iii) futureProjections.quickInsight.* + new help.ssp + help.anomaly + help.zscore, (iv) extremeEvents.*, (v) summary + general.direction + general.acknowledgements.
+  - **Each PR description:** include a side-by-side EN / proposed-FR diff per key so Pete reviews without context-switching to the JSON file.
+  - Mark each PR `draft`. **Only merge after Pete-approval.**
+
+### CR-023 — Doubled-slash URLs for helpers/components on the live deploy
+
+- **id:** CR-023
+- **type:** bug
+- **severity:** low
+- **where:** `notebooks/climateRationale/notebook.qmd` · top-of-file imports (~10–25)
+- **what-users-see:** Nothing directly. Network requests render as `https://host//helpers/uiComponents.ojs` (note `//`).
+- **proposed-change:** Check `_quarto.yml` for trailing slash in `site-url` and resolve the doubled slash.
+
+### CR-024 — Year hardcodes in figure captions
+
+- **id:** CR-024
+- **type:** copy / refs
+- **severity:** low
+- **where:** captions on `gdpBar_keyFacts` (~1883), `areaBar_keyFacts` (~1926), `exposureBars_keyFacts` (~1701)
+- **proposed-change:** Replace hardcoded year strings with `SELECT MAX(year)` lookups at data-load. Lower priority — flag for a later sweep.
+
+### CR-054 — Future Projections Quick Insight ignores the Climate Variable selector [NEW 2026-05-13]
+
+- **id:** CR-054
+- **title:** `climateProjectionInsight` only ever describes TAVG/HSH-max + PTOT, regardless of what the user picked
+- **type:** ux / architecture
+- **severity:** high (parallels CR-003, but for Future Projections)
+- **where:** `notebooks/climateRationale/notebook.qmd` · `climateProjectionInsight` builder (~1326–1640) · anchor `#futureProjections`
+- **what-users-see:** Selecting NDWS, NTx35, NDWL0, THI-max, etc. in the Climate Variable selector has no effect on the Quick Insight text below the timeseries plot. Only 2 of the ~9 available variables are ever surfaced.
+- **why-wrong:** The temperature paragraph filter (hazard === HSH-max or TAVG per Q2) and the precipitation paragraph filter (hazard === PTOT) are both hardcoded. `climateVarSelect.id` is never consulted in the insight builder.
+- **proposed-change:** Design decision — likely options:
+  1. Mirror CR-003: reorder the existing TAVG/PTOT paragraphs based on `climateVarSelect.id` being PTOT or not. Cheap; partial coverage.
+  2. Generalize: build a per-hazard insight template for every variable the selector exposes, picked by `climateVarSelect.id`.
+  3. Reframe: keep the insight as fixed *context* (always TAVG + PTOT) and remove the user expectation that selector → insight. Tighten the variable label wording.
+- **STATUS (2026-05-13):** **BLOCKED ON BRAYDEN** — paired with Q2 / CR-001. The "right" shape of this insight depends on the same architectural intent Brayden needs to clarify (heat-stress-days vs °C, single-variable vs context narrative).
+- **before-string:** n/a (architectural).
+
+### CR-057 — Confirm historical climate data source for Recent Changes / Extreme Events captions [NEW 2026-05-13]
+
+- **id:** CR-057
+- **title:** Verify that the `historic_climate_timeseries` parquet is NEX-GDDP-CMIP6 historical scenario (model hindcast), not observational CHIRPS/CHIRTS
+- **type:** methods / refs
+- **severity:** med (mis-attribution would erode user trust)
+- **where:** `notebooks/climateRationale/notebook.qmd` captions on `barplot_recentChanges`, `warmingStripes_recentChanges`, `bars_extremeEvents`; `data/climateRationale/nbData.json` entry for `historic_climate_timeseries`.
+- **what we found (2026-05-13):** The parquet's s3 path is `source=nex-gddp-cmip6/.../period=1995-2014/baseline=1995-2014/variable=ensemble_season_timeseries.parquet`. Multi-script trace ([hazards@nexgddp/R/04_indices/calc_*.R](https://github.com/AdaptationAtlas/hazards/tree/nexgddp/R/04_indices); [hazards_prototype/R/0_server_setup.R:50-51, 137-147](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/R/0_server_setup.R); [1_make_timeseries.R:61, 289](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/R/1_make_timeseries.R); [2.1_create_monthly_haz_tables.R:121,126-131](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/R/2.1_create_monthly_haz_tables.R)) showed that `climdat_source = "nexgddp"` routes all hazard-index inputs through `/common_data/nex-gddp-cmip6/{var}/{ssp}/{gcm}/` for **both** historical and future periods. The `nexgddp`-branch `calc_*.R` scripts use NEX-GDDP daily TIFFs as input even for `ssp == "historical"`. No CHIRPS/CHIRTS path is active. Captions updated to "Source: NASA NEX-GDDP-CMIP6 historical scenario (ensemble mean across 18 GCMs, r1i1p1f1, 1995–2014)".
+- **why-this-matters:** Users may interpret "Historical" as observational. NEX-GDDP-CMIP6 historical is the bias-corrected GCM hindcast — daily variability is the model's, only climatology is calibrated against the GMFD reanalysis upstream. There is no observational anchor on a year-by-year basis (e.g., the 1997-98 El Niño signal in the parquet is whatever each GCM produced, not what was observed). This should be made explicit in the captions and the Methods section (CR-013).
+- **proposed-change (ask Brayden):**
+  1. Confirm that the climate rationale notebook is indeed meant to read NEX-GDDP-CMIP6 historical, **not** the AgERA5 1981-2022 observational baseline that `2.1_create_monthly_haz_tables.R:273-274` mentions as an alternative.
+  2. Confirm the 18-GCM ensemble is complete (no per-variable model exclusions).
+  3. Confirm the v2 bias-correction reference dataset (NASA's documentation cites GMFD v3 for v1; v2 may differ).
+- **STATUS (2026-05-13):** **BLOCKED ON BRAYDEN.** Captions shipped with the best evidence available; revisit after Brayden confirms.
+
+### CR-056 — Migrate plot caption text into nbText.json [NEW 2026-05-13]
+
+- **id:** CR-056
+- **title:** Move per-figure caption arrays out of inline literals in `notebook.qmd` and into `data/climateRationale/nbText.json` so captions are translatable
+- **type:** i18n / refactor
+- **severity:** low (PR-B / Pete's #1 priority cluster)
+- **where:** every `Plot.plot({ ..., caption: multiLineText(...) })` in `notebooks/climateRationale/notebook.qmd` (Key Facts 4 plots, Recent Changes 2, Future Projections, Extreme Events, Hazard Exposure — 9 plots total)
+- **why-wrong:** PR-B CR-031 + CR-051 added per-figure source attribution + hyperlinks inline in OJS, including `html\`Source: <a href="…">…</a>\`` runs. The captions are currently English-only and not surfaced via `_lang()`. CR-021 (French backlog) can't translate them until they live under `nbText.sections.<section>.figures.<figureName>.caption`.
+- **proposed-change:** For each plot, define a key `nbText.sections.<section>.figures.<figureName>.caption.{en,fr}` whose value is a markdown string (allowing inline anchors). Render via `_lang()` plus a small `linkedCaption()` helper that converts markdown links to `<a>` runs and passes lines to `multiLineText`. Pair with CR-021 to draft FR versions in the same PR.
+- **status (2026-05-13):** Hyperlinks + content shipped inline as part of PR-B (this session). Schema migration deferred to a follow-up PR so PR-B doesn't grow further.
+
+### CR-055 — PTOT precip Quick Insight templates carry hidden seasonal-window ambiguity [NEW 2026-05-13]
+
+- **id:** CR-055
+- **title:** "mm per decade" in precip insights conflates annual and 3-month seasonal accumulations
+- **type:** bug / methods
+- **severity:** med
+- **where:** `data/climateRationale/nbText.json` · `sections.futureProjections.quickInsight.precipitation` + `precipComparison` + `adminSummary`; same pattern likely affects `sections.recentChanges.quickInsight.precip`.
+- **what-users-see:** After CR-002 fix, the precip insight reads "change of X mm per decade…" but **X is computed from `mean` values whose units depend on the selected Season**. For Season = "annual" the mm scope is mm/year; for Season = "JFM" the mm scope is mm accumulated over Jan–Feb–Mar. The user has no way to tell from the text which unit applies.
+- **why-wrong:** Confirmed against upstream R script [`2.1_create_monthly_haz_tables.R`](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/R/2.1_create_monthly_haz_tables.R): PTOT `mean` is "total precipitation accumulated across the seasonal window (3-month or 12-month)". The `(last.mean − first.mean) / years × 10` calculation produces a per-decade rate, but its mm-unit shifts with the selected season.
+- **proposed-change:** Needs design discussion. Options:
+  1. Make the season scope explicit in the template: "X mm per decade across the selected season (`:::seasonName:::`)".
+  2. Always normalize to annual precipitation (multiply 3-month sums × 4, or only sum 12-month windows for the insight) so "mm per year per decade" is always true.
+  3. Restrict the precip insight to Season = annual; show a stub message otherwise.
+- **discovered:** 2026-05-13 during CR-002 implementation. Not in the original ISSUES.md sweep.
+- **before-string:** n/a (templates already updated by CR-002).
+
+### CR-058 — Future Projections / Extreme Events parquet load is multi-second, spinner can stick for ≥30s [NEW 2026-05-13]
+
+- **id:** CR-058
+- **title:** Future Projections and Extreme Events sections take a long time to load (parquet size + DuckDB-WASM)
+- **type:** performance
+- **severity:** med (perceived-broken; Pete observed the spinner persisting "long after the rest of the notebook has loaded")
+- **where:** `notebooks/climateRationale/notebook.qmd` · the `proj_plotData` and `extremeEvents_plotData` cells; underlying parquet pulls under `s3://digital-atlas/.../` for projections and extremes.
+- **what-users-see:** After the rest of the notebook renders, Future Projections and Extreme Events plots show the spinner for tens of seconds. Eventually they resolve. Confirmed not a bug — the data arrives — but the wait is long enough that users assume the plot has crashed.
+- **why-this-is-slow:** Multiple compounding factors:
+  - Projections / extremes parquets are ~100MB+ each (multi-GCM × scenario × period × admin1 grain).
+  - DuckDB-WASM pulls them over HTTP, parses on the main thread, and runs `parquet_scan` with `hive_partitioning` per query.
+  - Each selector change re-fires the query (no in-memory cache layer for the already-materialised admin0+admin1 subset).
+- **proposed-change (options, in order of effort):**
+  1. **Cheap (already partly done by PR-G CR-052):** make sure the spinner stays visible until the data resolves, and add a brief "Future projections data may take 30–60s to load" hint above the section so the wait is expected rather than scary.
+  2. **Medium:** push more of the filter into the SQL (project only the columns the plot uses; pre-filter to the selected `iso3` + `admin1Names` before pulling rows into the client). Verify whether `parquet_scan` with predicate pushdown is already trimming partitions, or whether the partitioning scheme on S3 doesn't include `iso3`.
+  3. **Medium-large:** split the upstream parquet by `iso3` at the pipeline step (`hazards_prototype` repo) so each country pulls a fraction of the rows. This is the highest-leverage fix but requires a coordinated re-bake of the data.
+  4. **Large:** move parquet parsing to a Web Worker so the main thread stays interactive while DuckDB-WASM works.
+- **discovered:** 2026-05-13 during PR-K walkthrough — Pete reported the spinner stuck on Future Projections / Extreme Events sections long after the rest of the notebook had finished loading. Resolved itself; logged for perf follow-up.
+- **before-string:** n/a (data layer, not a single line edit).
+
+---
+
+## Proposed PR groupings
+
+Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.
+
+| # | PR slug | Issues | Status | Effort |
+|---|---|---|---|---|
+| **A** | `fix/cr-insight-bugs-and-data-filters` | CR-001, CR-002, CR-003, CR-022, CR-008, CR-009 | CR-001 BLOCKED on Brayden (Q2); CR-009 BLOCKED on Brayden (Q9). CR-002, CR-003, CR-008, CR-022 are ready. **Land CR-002 / CR-003 / CR-008 first** — they're trust-critical and unblocked. | M |
+| **B** | `feat/cr-methods-sources-and-attribution` | CR-013, CR-014, CR-015, CR-039, CR-040, CR-041, CR-044, CR-050, CR-051, CR-031, CR-032, **CR-053** | CR-014 description text drafts and CR-040 GCM count need Brayden's confirmation. Everything else ready. **Pete priority #1.** | L |
+| **C** | `feat/cr-global-admin-selector` | CR-034 | **BLOCKED ON BRAYDEN** (Q1). Pete: "Brayden has his system for this." Do not start. Surface to Brayden first. | M |
+| **D** | `feat/cr-key-facts-downloads` | CR-027, CR-028, CR-029 | Ready. **Pete priority #6.** | S |
+| **E** | `feat/cr-hazard-exposure-summary-table` | CR-049 | Ready. Dominant-hazard rule = highest exposed VoP, ties alphabetical (Q3). **Pete priority #6.** **Land a working preview before merging** so Pete can compare to Togo Table 5. | L |
+| **F** | `fix/cr-plot-layout` | CR-035, CR-042, CR-019, CR-045, CR-046 | Ready. CR-046 tail mapping resolved (Q4). | M |
+| **G** | `feat/cr-loading-feedback` | CR-052 | Ready. **Pete priority #4.** | S |
+| **H** | `fix/cr-typos-captions-scope` | CR-004, CR-005, CR-006, CR-007, CR-010, CR-011, CR-012, CR-018, CR-020, CR-025a, CR-033, CR-026 | Ready. CR-026 scope cut to single GCF link only (Q5). | S |
+| **I** | `feat/cr-internal-labels` | CR-017 | Ready. SSP labels = IPCC canonical (Q6). | M |
+| **J** | `feat/cr-i18n-french` | CR-021 | Ready. AI drafts, Pete reviews — split into per-section draft PRs (Q7). Should land **after** PR-B, since PR-B introduces new FR keys. | S × 5 |
+| **K** | `chore/cr-url-and-year-cleanup` | CR-023, CR-024 | Polish. Land last or defer. | S |
+
+Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
+
+**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → E → J → C (when unblocked) → K.
+
+---
+
+## Open questions
+
+All seven of Pete's questions are now answered — full text in `DECISIONS.md`. **Remaining hard blockers**, both routed to Brayden:
+
+- **Q2 / CR-001:** Was the HSH-max filter in `climateProjectionInsight` deliberate (heat-stress framing rather than raw °C)? If yes, the fix is a different shape. If no, swap to `TAVG`.
+- **Q9 / CR-009:** Does `hazard_exposure.parquet` contain rows for every (SSP × period) combination once user selections are honoured? If not, what's the rendering fallback?
+- **Q1 / CR-034:** Selector synchronization — Brayden's call on which cross-notebook pattern applies.
+- **Q8 / CR-040:** Actual GCM count in the NEX-GDDP-CMIP6 v2 ensemble used by the Atlas pipeline (draft says 28; confirm).
+- **Q10 / CR-014:** Pete to skim the dataset description drafts in `context/01_planning_and_context.docx` Appendix A and correct before they go into `nbData.json`.
+- **PR-J / CR-021:** Who's the French reviewer — you, or a project teammate?
+- **CR-046 (directional hazards):** For each hazard, please confirm the "tail" mapping:
+  - PTOT (precipitation) — both tails (current)
+  - TAVG (mean temp) — high-only? both?
+  - NTx35 / NTx40 (heat-stress days) — high-only
+  - NDWS (water stress) — high-only? both?
+  - NDWL0 (waterlogging) — high-only? both?
+  - THI-max (cattle THI) — high-only
+  - HSH-max (human heat stress) — high-only
+
+---
+
+## Deferred — medium-term items captured during the walkthrough
+
+These are explicitly out of scope for this round per Pete's "focus on immediate issues" instruction. Listed here so they're not lost. Each is a candidate for a separate planning session.
+
+**Key Facts:**
+- Toggle commodity variable: VoP / harvested area / production quantity (needs new data + new UI control).
+- Plot-type toggle: bar / stacked bar / pie.
+- Percentage vs absolute toggle (for consistency between the four Key Facts plots).
+- Display total agricultural production value as a callout.
+
+**Recent Changes & Future Projections:**
+- Robust trend statistics: Sen's slope, Mann-Kendall, significance indicators. **Needs Harold's input.**
+- Downloadable trend tables with significance.
+- Absolute / anomaly view toggle.
+- Plot customization (color palette, dimensions, text size).
+- Faceted layout that doesn't compress vertically when many regions are selected (broader than CR-035 — needs layout redesign).
+- Better national-vs-regional comparison than overlay.
+- Custom GCM subset selection (advanced users).
+- Multi-timeframe overlay on Future Projections.
+- Alternative uncertainty visualisations (not error ribbons).
+- Trend-calculation-method choice: within timeframe vs. across all years; dynamic vs. precomputed.
+- Collapsible selector panel after a selection has been made.
+
+**Extreme Events:**
+- Multi-timeframe comparison for a single scenario.
+- Togo-style **historical wet/dry sequence plot** (Figure 5 of the Togo SAT report) — chronological view of anomaly years, useful for detecting climate whiplash.
+
+**Hazard Exposure:**
+- (Beyond CR-049): per-commodity hazard contribution charts.
+
+**General:**
+- Server-side data API (CDH-bound) replacing browser-side DuckDB for the heavy parquets (covered separately in the planning .docx Section D).
+- Spatial map view as a new "View Type" radio across sections (Majambo feedback — the single biggest user ask).
+- Longer historical series back to 1981 + user-selectable baseline period (Majambo feedback).
+- Admin-2 level data (Majambo feedback).
+- Multi-region project geometries / polygons of arbitrary shape (Majambo feedback).
+- Performance work generally (slow first paint; covered in planning .docx Section D).
+
+**Overview / framing — surfaced 2026-05-13 from Pete's Q5 answer:**
+- **CR-NEW-cacc1-overview** — Ask CACC1 (Cesare Scartozzi's programme) to produce dedicated Overview content: guidance on how to write a climate rationale, framing for GCF audiences, links to worked examples. **Pete to surface to Cesare.** When delivered, it replaces / extends the single GCF link in CR-026.
+- **CR-NEW-examples-section** — Add a new "Examples" section near the Summary (not the Overview) listing worked climate rationales. First entry would be the Togo SAT report; **blocked on a stable public URL for the Togo PDF** (host on the Atlas CDN first).
+
+---
+
+*Pete: annotate this file directly — strike, edit, add. Once you sign it off, dispatch one PR at a time to Claude Code (or all at once). The Togo SAT report stays the visual reference for "what good looks like".*
