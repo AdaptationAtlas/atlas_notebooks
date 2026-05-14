@@ -1027,9 +1027,18 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   6. **Downloads:** `downloadButton(productionTrends_plotData, "production-trends")` mirroring the Key Facts pattern ([[CR-027]] / [[CR-028]]). Combined download under the section.
   7. **i18n:** all new copy under `nbText.sections.productionTrends.*` with `{en, fr}`. French stubs ship as TODOs and roll into the next PR-J pass.
   8. **Admin level:** FAOSTAT is national-only. The section's title and intro should be explicit: "country-level trends" (no admin1 facet, unlike every other section).
-- **dependencies:** **BLOCKED on [[CR-064]]** (the previously-listed interim path [[CR-065]] was attempted 2026-05-14 and abandoned).
+- **dependencies:** Unblocked 2026-05-15 — [[CR-064]] landed (parquet at `s3://digital-atlas/domain=socioeconomic/type=production/source=faostat/region=ssa/variable=adm0_faostat.parquet`). [[CR-065]] interim scaffold remains abandoned.
 - **discovered:** 2026-05-14, chat-mode review.
-- **STATUS:** Open, **BLOCKED on [[CR-064]]** (FAOSTAT pipeline parquet on S3). Pete to coordinate the S3 upload via the `fao_landuse` pipeline owner. Once the S3 path exists, the notebook section is straightforward (single new H1 + line plot + caption + i18n stubs).
+- **STATUS:** 🔄 **Phase A landed 2026-05-15** on `dev/climateRationale`. Section placed between Overview and Key Facts. Shipped:
+  - New H1 `Agricultural Production Trends` + intro; new H3 `Agricultural Production` inside Key Facts with its own intro (so the MapSPAM-2020 plot has a proper heading instead of an in-chart subtitle); bidirectional "heads up" callouts on both sides flagging that FAOSTAT (constant 2014–2016 dollars, national, time-series) and MapSPAM (nominal 2021 dollars, subnational, single-snapshot) are **not directly comparable**, with links to Methods.
+  - Variable selector (vop_intd15 default, with vop_usd15 / production / yield); View Type selector (line / stacked bar / table); palette selector with interpolation-to-N when commodity count > palette length; single-track two-handle year-range slider defaulting to 2010–latest; top-N commodities slider (ranked by the *currently-selected variable* over the *currently-selected year window*) with manual commodities-checkbox override; bar outline; simplified Y-axis units (VoP multiplied ×1000 in SQL so the axis reads `Int$` / `US$` directly).
+  - Caption now an "About this plot" `<details>` fold (matches every other plot); long-form `downloadButton` below the plot.
+  - Methods section gained a new `### Agricultural production trends {#methods-production}` block covering FAOSTAT QV/QCL provenance, constant-vs-nominal value bases, FAOSTAT-vs-MapSPAM trade-offs, the 0.25 % filter rule, and a pointer to the upstream R script.
+  - "Methods" link patterns swept across every section H1 (Production Trends, Key Facts, Recent Changes, Future Projections, Extreme Events, Hazard Exposure) — moved from inline `<a class="section-methods-link">` to a `<p class="below-h1-methods-link">` below each H1 so the inline link no longer pollutes the nav sidebar TOC.
+  - `createCountryInsights()` helper updated: dropped the redundant `**{country}**` header above each Quick Insights block — the narrative inside each block already starts with "In {country}, …" / "Within {country}, …".
+  - EN + FR translations for `sections.productionTrends.{title, introText}` and `sections.keyFacts.{agProductionTitle, agProductionIntro}`; methods narrative shipped EN-only (FR stub rolls into PR-J).
+
+  **Phase B (pending):** Quick Insights for the Production Trends section (auto-narrative naming top-3 crops by value + strongest-growing crop by CAGR over the user's year window); cross-section "production summary" combining FAOSTAT national totals with MapSPAM admin1 breakdown. **Phase C (pending):** observational view sibling section ([[CR-062]]) once CHIRPS/ERA5 parquet lands.
 - **before-string:** n/a (new section).
 
 ### CR-066 — Relocate handover docs into the notebook + add notebook-scoped CLAUDE.md [NEW 2026-05-14]
@@ -1130,6 +1139,24 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **STATUS:** Open. Pipeline-side. **Blocks [[CR-049]]** Phase 1 and Phase 2.
 - **before-string:** n/a (schema + aggregation change).
 
+### CR-069 — Methods section should enumerate the GCMs in the NEX-GDDP-CMIP6 ensemble [NEW 2026-05-15]
+
+- **id:** CR-069
+- **title:** Add an explicit list of the GCMs (climate models) included in the NEX-GDDP-CMIP6 ensemble used by Recent Changes / Future Projections / Extreme Events — the notebook currently refers to "18 GCMs" without naming any of them.
+- **type:** methods / copy
+- **severity:** low–med (defensibility — proposal reviewers and methodologists will want to know which models; today they'd have to chase the NEX-GDDP-CMIP6 documentation themselves)
+- **where:** `data/climateRationale/nbText.json` · `general.methods.climateData.text` (and possibly a new sibling key for an expandable model list). Notebook surface: the Methods H1's "Climate data and variables" sub-section, where "18-GCM ensemble" is mentioned. Captions on `timeseries_futureProjections`, `barplot_recentChanges`, `warmingStripes_recentChanges`, `bars_extremeEvents` reference the ensemble but don't enumerate.
+- **why-this-matters:** Every plot caption and the Methods narrative cite "18 GCMs" or "18-GCM ensemble" but never names them. Proposal writers, technical reviewers, and anyone trying to compare results against IPCC AR6 atlas outputs need to know the model list — different ensemble compositions produce systematically different results (e.g. high-sensitivity models inflate the warming envelope). The Atlas pipeline pins a specific list via the v2 NEX-GDDP-CMIP6 release; that list should be visible to users, ideally with each model's institution, country, and ECS where known.
+- **proposed-change:**
+  1. **Get the canonical list from the pipeline.** Brayden / hazards_prototype owner: please confirm which 18 (or N) GCMs the current Atlas v2 bake uses. As a starting point, NEX-GDDP-CMIP6 v2 covers ~35 GCMs; the Atlas pipeline filters to a subset that's been validated for SSA. The filter logic lives in the hazards_prototype repo; produce a static `nex_gddp_models.json` (or similar) listing each model with `model_id`, `institution_id`, `country`, `ecs_K` (equilibrium climate sensitivity, K, from CMIP6 AR6 Table 7.SM.5 if available), `realization` (e.g. `r1i1p1f1`), and ideally a one-line note on known biases.
+  2. **Notebook integration:** add a new collapsible `<details>` block in the Methods H1's "Climate data and variables" sub-section (or as a separate H2 sibling). Render as a small table of (model, institution, country, ECS) so a reader can expand-and-skim without leaving the page. Keep it foldable so the methods narrative stays compact by default.
+  3. **Caption nudge:** wherever a plot caption says "18 GCMs", add a tooltip-link "(see Methods → ensemble list)" — minimal change to existing captions.
+  4. **i18n:** model names are international identifiers (e.g. `ACCESS-CM2`); institution names need FR translation only if there's an official French form (most don't — leave EN). Add the EN copy now, FR stubs roll into PR-J.
+- **dependencies:** Brayden / `hazards_prototype` maintainer to confirm the model list. Notebook-side wiring is straightforward once the list lands.
+- **discovered:** 2026-05-15, chat-mode review — Pete: "we need to list the GCMs in the ensemble."
+- **STATUS:** Open. Notebook-side once the model list is supplied (or compiled from the pipeline source). No urgency, but blocks any reviewer who wants to audit the ensemble composition.
+- **before-string:** *(new content; current placeholder is the "18 CMIP6 GCMs" mention in `data/climateRationale/nbText.json` `general.methods.climateData.text`)*
+
 ---
 
 **Upstream pipeline work — not notebook.** The tickets below are pipeline-side (typically the `hazards_prototype` repo, or the analogous FAOSTAT pre-fetch pipeline) and require a coordinated re-bake of the parquet data on S3. They are owned by the pipeline maintainer, not by Claude Code's notebook work. Listed here for traceability so they don't fall through the cracks; each one has a notebook-side follow-up that becomes a one-line swap once the parquet lands.
@@ -1191,7 +1218,7 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   6. **Location:** `s3://digital-atlas/.../data/shared/faostat_production.parquet` (mirror the existing `fao_landuse` layout). Add an `nbData.json` entry with description and source URL <https://www.fao.org/faostat/en/#data>.
 - **dependencies:** Pipeline maintainer (Brayden or whoever owns `fao_landuse`).
 - **discovered:** 2026-05-14, chat-mode review — paired with [[CR-063]].
-- **STATUS:** Open. Pipeline-side. **Sole unblock for [[CR-063]]** as of 2026-05-14 (the interim in-repo scaffold [[CR-065]] was attempted and abandoned — see CR-065 STATUS + [[CR-067]]).
+- **STATUS:** ✓ FIXED 2026-05-15 — parquet published by Brayden at `s3://digital-atlas/domain=socioeconomic/type=production/source=faostat/region=ssa/variable=adm0_faostat.parquet`. ~1 MB, ~261 k rows, 54 ISO3 (full African continent — see Atlas-SSA filter applied notebook-side), ~107 commodities pre-filter (~30 after 0.25 %-of-vop_intd15 filter per country), 4 variables (`production` t, `yield` kg/ha, `vop_usd15` thousand US$ constant 2014–2016, `vop_intd15` thousand Int$ constant 2014–2016 PPP), year range 1961–2024. Schema is 7-column long-format: `iso3, commodity, atlas_name, year, variable, unit, value`. Built by [hazards_prototype/R/0.4.5_create_faostat_long.R](https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/0.4.5_create_faostat_long.R) on the `develop` branch — upstream filter applies the 0.25 %-of-national-vop_intd15-over-last-5-years rule, drops FAO aggregate rollups + "n.e.c." catch-alls, and combines all spice items into one synthetic "Spices" entry. Consumed by [[CR-063]] Phase A.
 - **before-string:** n/a (schema + pipeline change).
 
 ### CR-065 — Temporary in-repo FAOSTAT scaffold while CR-064 is pending [NEW 2026-05-14]
@@ -1235,7 +1262,7 @@ Ordered by Pete's stated priorities. Each PR is independent; do not block any on
 | **K** | `chore/cr-url-and-year-cleanup` | CR-023, CR-024 | ✓ Done in `0c27624`. | S |
 | **L** | `feat/cr-recent-changes-uncertainty-band` | CR-061 | Not started. Notebook-only; unblocked. Once [[CR-060]] lands, swap `mean ± sd_anomaly` → `q17 / q83`. | S |
 | **M** | `chore/cr-relocate-handover-and-claude-md` | CR-066 | Not started. Mechanical `git mv` + new `notebooks/climateRationale/CLAUDE.md` + `.DS_Store` `.gitignore`. Unblocked. | S |
-| **N** | `feat/cr-production-trends` | CR-062, CR-063 | Not started. **BLOCKED on [[CR-064]]** (FAOSTAT on S3). The interim in-repo scaffold (CR-065) was attempted on 2026-05-14 and abandoned — the `local_path` loader is structurally broken in dev preview, see [[CR-067]]. CR-062 (observational view) also blocked on its own upstream parquet — ship skeleton + help-callout copy only when this PR opens. | M |
+| **N** | `feat/cr-production-trends` | CR-062, CR-063 | 🔄 [[CR-063]] **Phase A landed 2026-05-15** on `dev/climateRationale` (line / stacked bar / table views, year-range slider, top-N + per-commodity selectors, palette interpolation, FR i18n, Methods narrative, cross-reference callouts with the Key Facts MapSPAM plot). Phase B (Quick Insights for production trends) + Phase C ([[CR-062]] observational view) pending — CR-062 still blocked on its own upstream parquet. | M |
 | **O** | `fix/loader-local-path-via-fileattachment` | CR-067 | Not started. **No urgency** until someone tries `local_path` again, but blocks any retry of a CR-065-style in-repo scaffold pattern. | S |
 
 ### Upstream pipeline work — not notebook (no notebook PR until landed)
@@ -1246,12 +1273,12 @@ These items live in the `hazards_prototype` repo (or the analogous FAOSTAT pre-f
 |---|---|---|---|---|
 | **U-1** | [[CR-059]] — SPEI replaces raw-precip z-score for PTOT extreme-event classification | `bars_extremeEvents` reads SPEI for PTOT slice once schema lands | Open. Bundle with U-2 / U-3 in a single re-bake. | M (pipeline) |
 | **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | Open. Notebook ribbon swap is a follow-up once this lands. | M (pipeline) |
-| **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `s3://digital-atlas/.../faostat_production.parquet` | PR-N (CR-063) consumes the S3 path directly. | Open. **Sole unblock for [[CR-063]]** as of 2026-05-14 (the interim [[CR-065]] scaffold was attempted and abandoned). | M (pipeline) |
+| **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `s3://digital-atlas/.../adm0_faostat.parquet` | PR-N ([[CR-063]]) consumes the S3 path directly via the `production_timeseries` nbData entry. | ✓ FIXED 2026-05-15 by Brayden — parquet published; PR-N Phase A landed against it the same day. | M (pipeline) |
 | **U-4** | [[CR-068]] — `hazard_exposure` parquet adds `hazard = "none"` / unexposed row per cell | PR-E (CR-049) Phase 1 drops the cross-table join and reads the denominator directly from `hazard_exposure`. | Open. **Sole unblock for [[CR-049]]** Phase 1; Phase 1 attempted 2026-05-14 and rolled back when the cross-table denominator turned out to be unauditable. | M (pipeline) |
 
 Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
 
-**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → J → C (when unblocked) → K → E (strictly after [[CR-068]] lands) → N (strictly after [[CR-064]] lands; the CR-065 interim path is dead). O is low-urgency — fold in whenever someone needs `local_path` again. U-1 / U-2 / U-3 / U-4 are pipeline-side and land out-of-band; notebook-side follow-up swaps are cheap and can ride into the next maintenance PR after each parquet bake. **Suggested upstream-bake bundle:** ask Brayden / `hazards_prototype` maintainer to take U-1 (SPEI), U-2 (AR6 quantiles), U-3 (FAOSTAT-on-S3), and U-4 (no-hazard row) in a single coordinated re-bake — four pipeline tickets, one bake, four downstream PRs unblocked.
+**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → J → C (when unblocked) → K → E (strictly after [[CR-068]] lands) → **N Phase A landed 2026-05-15** (line / stacked bar / table; awaiting Phase B Quick Insights) → N Phase C (CR-062 observational view, blocked on its own upstream parquet). O is low-urgency — fold in whenever someone needs `local_path` again. U-3 ✓ FIXED 2026-05-15 (FAOSTAT-on-S3 landed); **remaining upstream-bake bundle for Brayden:** U-1 (SPEI / CR-059), U-2 (AR6 quantiles / CR-060), U-4 (no-hazard row / CR-068) — three pipeline tickets that can ride one coordinated re-bake to unblock PR-E and the AR6 caption swap.
 
 ---
 
