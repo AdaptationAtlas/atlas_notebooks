@@ -1124,7 +1124,7 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   6. **At swap:** `nbData.json` `local_path` → `s3_path`; `git rm scripts/faostat_temp/*.R data/shared/faostat_production_temp.parquet`; verify [[CR-063]] still renders against the real parquet.
 - **dependencies:** None — Claude Code session 2 can ship this without external sign-off. **[[CR-063]] depends on this (or [[CR-064]]).**
 - **discovered:** 2026-05-14, chat-mode review.
-- **STATUS:** Open, ready to start. Lowest-friction unblock for [[CR-063]].
+- **STATUS:** ✓ FIXED 2026-05-14 on `dev/climateRationale` (this commit). Parquet size: **0.48 MB** (505,242 bytes), **120,956 rows**, SHA-256 `6b8630b1912f0b09…`. Coverage: 44 / 44 SSA ISO3, 14 / 14 priority items, year range 1961–2024, 5 distinct elements (Area harvested / Yield / Production / Gross Production Value constant US$ / Gross Production Value constant I$). Two data-shape divergences from the original spec, decided with Pete during build: (1) include BOTH element 58 (constant US$) AND 152 (constant I$, PPP G-K) for the value column — spec said 152 alone but 152 in current FAOSTAT is I$, not US$; (2) yield element 5419 no longer exists in QCL — swapped to 5412 (kg/ha). DuckDB-CLI smoke-tested (same Parquet reader as DuckDB-WASM); browser-side preview validation deferred until [[CR-063]] wires the section.
 - **before-string:** n/a (new scaffold).
 
 ---
