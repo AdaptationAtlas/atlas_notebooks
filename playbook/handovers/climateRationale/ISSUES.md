@@ -1005,11 +1005,11 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **title:** New "Agricultural Production Trends" section mirroring Togo SAT report Figures 1 & 2 — line chart of production value (USD 2015) and volume (tonnes) per priority crop over time, optional stacked-bar total
 - **type:** feature / content
 - **severity:** med (the Togo SAT report leads with this framing; the Atlas notebook is missing the same context between Key Facts and Recent Changes)
-- **where:** `notebooks/climateRationale/notebook.qmd` · new section between Key Facts (`#keyFacts`) and Recent Changes (`#recentChanges`). Data sourced from the parquet shipped by [[CR-064]] (preferred) or [[CR-065]] (interim scaffold).
+- **where:** `notebooks/climateRationale/notebook.qmd` · new section between Key Facts (`#keyFacts`) and Recent Changes (`#recentChanges`). Data sourced from the S3-hosted parquet shipped by [[CR-064]]. (The in-repo scaffold path [[CR-065]] was attempted 2026-05-14 and abandoned — see CR-065 STATUS + [[CR-067]] for the loader-bug post-mortem.)
 - **why-wrong:** The Togo SAT climate rationale (the reference example linked at the top of this file) opens with two figures showing FAOSTAT production trends — area harvested + yield + total production value over time, broken down by major crop. This frames the climate rationale: "here's what the country produces today, here's how that's evolved, *now* let's look at how climate has changed and how it will change". The Atlas notebook today jumps straight from a one-year Key Facts snapshot into climate data, skipping the historical-production framing. Adding this section makes the notebook a closer drop-in replacement for the Togo SAT report shape and gives proposal writers the production-baseline narrative they need.
 - **proposed-change:**
   1. **Section heading:** new H1 "Agricultural Production Trends" with anchor `#productionTrends`. Place between Key Facts and Recent Changes so the narrative reads Key Facts → production trends → climate → projections → extremes → hazard exposure.
-  2. **Data dependency:** parquet from [[CR-064]] (production grade) or [[CR-065]] (temporary scaffold). Either path uses the same long-format schema, so the notebook code is identical.
+  2. **Data dependency:** S3-hosted parquet from [[CR-064]]. Long-format schema; see [[CR-064]] for the column list (iso3 / item / item_code / element / year / value / unit). The previously-proposed interim scaffold ([[CR-065]]) is abandoned — do NOT try to bundle a `local_path` parquet without first fixing [[CR-067]].
   3. **Plots — mirror Togo Figures 1 & 2:**
      - **Plot 1 — Production value over time.** Multi-line chart: x = year, y = gross production value (constant USD), one line per priority crop, scoped to the user's selected admin0. Add a stacked-bar / stacked-area toggle for total value across crops.
      - **Plot 2 — Volume and area.** Two-panel small-multiples: production tonnes (top) and area harvested ha (bottom), same x-axis, same priority-crop legend.
@@ -1019,9 +1019,9 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   6. **Downloads:** `downloadButton(productionTrends_plotData, "production-trends")` mirroring the Key Facts pattern ([[CR-027]] / [[CR-028]]). Combined download under the section.
   7. **i18n:** all new copy under `nbText.sections.productionTrends.*` with `{en, fr}`. French stubs ship as TODOs and roll into the next PR-J pass.
   8. **Admin level:** FAOSTAT is national-only. The section's title and intro should be explicit: "country-level trends" (no admin1 facet, unlike every other section).
-- **dependencies:** **BLOCKED on [[CR-064]] (preferred) or [[CR-065]] (interim).** Notebook code is otherwise straightforward.
+- **dependencies:** **BLOCKED on [[CR-064]]** (the previously-listed interim path [[CR-065]] was attempted 2026-05-14 and abandoned).
 - **discovered:** 2026-05-14, chat-mode review.
-- **STATUS:** Open, **BLOCKED on parquet ([[CR-064]] or [[CR-065]]).** Can be drafted skeleton-first against a small bundled sample to validate the layout.
+- **STATUS:** Open, **BLOCKED on [[CR-064]]** (FAOSTAT pipeline parquet on S3). Pete to coordinate the S3 upload via the `fao_landuse` pipeline owner. Once the S3 path exists, the notebook section is straightforward (single new H1 + line plot + caption + i18n stubs).
 - **before-string:** n/a (new section).
 
 ### CR-066 — Relocate handover docs into the notebook + add notebook-scoped CLAUDE.md [NEW 2026-05-14]
@@ -1042,6 +1042,58 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **discovered:** 2026-05-14, chat-mode review — workflow friction observed across session 1 (two directory trees per dev branch).
 - **STATUS:** Open, ready to start. Ship as PR-M.
 - **before-string:** n/a (mechanical move).
+
+### CR-067 — `local_path` dataset loader incompatible with Quarto preview's static-file server [NEW 2026-05-14]
+
+- **id:** CR-067
+- **title:** `generateDB()` cannot load `local_path` parquet entries via Quarto's dev preview — HTTP Range requests aren't honoured, DuckDB-WASM `read_parquet` fails, and the failure crashes the whole DuckDB connection rather than isolating to the single table
+- **type:** bug / infrastructure
+- **severity:** med (blocks any future in-repo parquet scaffold; tripped during the [[CR-065]] attempt; would trip the next person too)
+- **where:** `helpers/std.ojs` · `generateDB()` (~lines 6–32). Cross-notebook surface: any `data_obj` entry in any `nbData.json` that sets `local_path` instead of (or in addition to) `s3_path`. As of 2026-05-14 no notebook has a `local_path` entry — the [[CR-065]] attempt that surfaced this was rewound.
+- **why-wrong:** Three compounding issues, all discovered together during the [[CR-065]] attempt on 2026-05-14:
+  1. The loader builds `http://localhost:4040<local_path>` for `local_path` entries — a stale port hardcode. Quarto's default preview port has moved across releases (currently 5525 on Pete's machine, Quarto 1.9.37); any port mismatch turns the URL into a connection refused.
+  2. Quarto's preview static-file server does NOT honour HTTP Range requests. `GET` with `Range: bytes=0-15` returns the full file as a 200 OK — no `206 Partial Content`, no `Accept-Ranges: bytes`. Confirmed by curl probe on 2026-05-14.
+  3. DuckDB-WASM's `read_parquet()` over HTTP requires Range requests to read the parquet footer first (the schema metadata at the end of the file). Without Range support the footer read fails → CREATE TABLE rejects → **DuckDB-WASM doesn't isolate per-statement failures** in `generateDB()`'s `await _db.query(...)` loop. The whole `db` promise rejects, every downstream OJS cell that depends on `db` errors out, and the notebook renders as "nothing loads".
+- **proposed-change:** Replace the URL-prefix path with a `FileAttachment`-backed buffer registration so `local_path` entries are pre-loaded into DuckDB-WASM's virtual filesystem with no HTTP at all. Sketch:
+  ```js
+  // helpers/std.ojs
+  generateDB = async (data_obj, localFiles = {}) => {
+    // FileAttachments passed in by the caller (FileAttachment isn't
+    // available inside an imported .ojs module). DuckDBClient.of()
+    // registers each {key: fileAttachment} as a table.
+    const _db = await DuckDBClient.of(localFiles);
+    for (const d of data_obj) {
+      if (!d.key) continue;
+      if (d.local_path && localFiles[d.key]) continue; // already loaded
+      // existing remote read_parquet(s3_path) path unchanged
+      const path = d.s3_path;
+      // ... rest of current logic
+    }
+    return _db;
+  };
+
+  // notebook.qmd db cell — caller wires the FileAttachments
+  db = {
+    const localFiles = Object.fromEntries(
+      data_obj.filter(d => d.local_path).map(d => [d.key, FileAttachment(d.local_path)])
+    );
+    return await generateDB(
+      data_obj.filter(d => !d.sections.includes("futureProjections")),
+      localFiles
+    );
+  };
+  ```
+  Works in dev preview AND deploy (the deploy CDN serves the parquet as a static file; `FileAttachment` handles both transparently). No port hardcode, no Range-request dependency.
+- **dependencies:** None for the loader fix itself. Does NOT unblock [[CR-063]] — Pete's 2026-05-14 decision routes CR-063 strictly through [[CR-064]] (S3 path), independent of this loader fix.
+- **discovered:** 2026-05-14 during the [[CR-065]] in-repo FAOSTAT scaffold attempt. Pete's preview was on port 5525; the loader hardcodes 4040; the parquet wouldn't load; I patched the loader to a relative URL; that made things worse — DuckDB-WASM treated `/data/shared/…` as a virtual-FS lookup, the lookup failed, and the cascading reject crashed every other dataset. Reverted std.ojs, reverted nbData.json, rewound `1bca6f1`. Full post-mortem cross-referenced in [[CR-065]] STATUS.
+- **STATUS:** Open. Real bug. **No urgency** until someone tries `local_path` again — but **fix this before any retry of a CR-065-style in-repo scaffold**. Easy to mistake "the loader supports `local_path`" because the field exists in the schema; it doesn't actually work.
+- **before-string:**
+  ```js
+  let path = d.local_path || d.s3_path; // Prioritize local path for speed/dev ease
+  if (d.local_path) {
+    path = "http://localhost:4040" + path;
+  }
+  ```
 
 ---
 
@@ -1104,7 +1156,7 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   6. **Location:** `s3://digital-atlas/.../data/shared/faostat_production.parquet` (mirror the existing `fao_landuse` layout). Add an `nbData.json` entry with description and source URL <https://www.fao.org/faostat/en/#data>.
 - **dependencies:** Pipeline maintainer (Brayden or whoever owns `fao_landuse`).
 - **discovered:** 2026-05-14, chat-mode review — paired with [[CR-063]].
-- **STATUS:** Open. Pipeline-side. **[[CR-063]] depends on this (or [[CR-065]] as interim).**
+- **STATUS:** Open. Pipeline-side. **Sole unblock for [[CR-063]]** as of 2026-05-14 (the interim in-repo scaffold [[CR-065]] was attempted and abandoned — see CR-065 STATUS + [[CR-067]]).
 - **before-string:** n/a (schema + pipeline change).
 
 ### CR-065 — Temporary in-repo FAOSTAT scaffold while CR-064 is pending [NEW 2026-05-14]
@@ -1122,9 +1174,9 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   4. **Header comment in the fetcher script:** explicit *"TEMPORARY — delete once [[CR-064]] lands. Owner: Pete + Claude Code session 2."* block at the top.
   5. **Size guard:** target <5 MB committed. If the parquet grows past that, drop crops from the priority list rather than letting the binary balloon the repo.
   6. **At swap:** `nbData.json` `local_path` → `s3_path`; `git rm scripts/faostat_temp/*.R data/shared/faostat_production_temp.parquet`; verify [[CR-063]] still renders against the real parquet.
-- **dependencies:** None — Claude Code session 2 can ship this without external sign-off. **[[CR-063]] depends on this (or [[CR-064]]).**
+- **dependencies:** None — Claude Code session 2 could ship this without external sign-off. **[[CR-063]] depended on this (or [[CR-064]]).** Abandoned 2026-05-14 — see STATUS.
 - **discovered:** 2026-05-14, chat-mode review.
-- **STATUS:** ✓ FIXED 2026-05-14 on `dev/climateRationale` (this commit). Parquet size: **0.48 MB** (505,242 bytes), **120,956 rows**, SHA-256 `6b8630b1912f0b09…`. Coverage: 44 / 44 SSA ISO3, 14 / 14 priority items, year range 1961–2024, 5 distinct elements (Area harvested / Yield / Production / Gross Production Value constant US$ / Gross Production Value constant I$). Two data-shape divergences from the original spec, decided with Pete during build: (1) include BOTH element 58 (constant US$) AND 152 (constant I$, PPP G-K) for the value column — spec said 152 alone but 152 in current FAOSTAT is I$, not US$; (2) yield element 5419 no longer exists in QCL — swapped to 5412 (kg/ha). DuckDB-CLI smoke-tested (same Parquet reader as DuckDB-WASM); browser-side preview validation deferred until [[CR-063]] wires the section.
+- **STATUS:** ⚠️ ABANDONED 2026-05-14 — tried, failed in dev preview, rewound. **The data-generation half worked:** `scripts/fetch_faostat_temp.R` produced a 0.48 MB / 120,956-row parquet at `data/shared/faostat_production_temp.parquet`, validated end-to-end via DuckDB CLI (44 / 44 SSA ISO3, 14 / 14 priority items, 5 elements with correct units, year range 1961–2024). Two FAOSTAT data-shape divergences from the original spec were resolved with Pete during build: (a) include BOTH element 58 (constant US$) AND 152 (constant I$, PPP G-K) for the value column — spec said 152 alone but 152 in current FAOSTAT is I$, not US$; (b) yield element 5419 no longer exists in QCL → swapped to 5412 (kg/ha). Initial scaffold landed in commit `1bca6f1`. **What failed:** wiring the parquet via the new `nbData.json` `local_path` entry triggered a cascade. `helpers/std.ojs`'s `generateDB()` builds `http://localhost:4040<local_path>` for local entries — a stale port hardcode that breaks on every preview port except 4040. Patching it to a relative URL exposed a deeper problem: Quarto preview's static-file server doesn't honour HTTP Range requests, and DuckDB-WASM's `read_parquet()` over HTTP requires Range to read the parquet footer. The failing CREATE TABLE crashed the entire DuckDB-WASM connection (no per-statement isolation), taking down every dataset in the notebook ("nothing loads"). Full loader-bug post-mortem captured separately as [[CR-067]]. **Decision (Pete, 2026-05-14):** abandon the in-repo scaffold path entirely; FAOSTAT data will be added to S3 directly as part of [[CR-064]]. Commit `1bca6f1` rewound manually on `dev/climateRationale` (parquet + script + nbData entry + the original STATUS line all backed out of the working tree). **Future:** if a similar in-repo data scaffold is ever needed for another notebook, fix [[CR-067]] before re-attempting — this same trap will otherwise catch the next person.
 - **before-string:** n/a (new scaffold).
 
 ---
@@ -1148,7 +1200,8 @@ Ordered by Pete's stated priorities. Each PR is independent; do not block any on
 | **K** | `chore/cr-url-and-year-cleanup` | CR-023, CR-024 | ✓ Done in `0c27624`. | S |
 | **L** | `feat/cr-recent-changes-uncertainty-band` | CR-061 | Not started. Notebook-only; unblocked. Once [[CR-060]] lands, swap `mean ± sd_anomaly` → `q17 / q83`. | S |
 | **M** | `chore/cr-relocate-handover-and-claude-md` | CR-066 | Not started. Mechanical `git mv` + new `notebooks/climateRationale/CLAUDE.md` + `.DS_Store` `.gitignore`. Unblocked. | S |
-| **N** | `feat/cr-production-trends` | CR-062, CR-063, CR-065 | Not started. CR-065 (interim FAOSTAT scaffold) ships first, then CR-063 (notebook section) builds against it; CR-062 (observational view) **BLOCKED** on upstream parquet — ship skeleton + help-callout copy only this PR. | M |
+| **N** | `feat/cr-production-trends` | CR-062, CR-063 | Not started. **BLOCKED on [[CR-064]]** (FAOSTAT on S3). The interim in-repo scaffold (CR-065) was attempted on 2026-05-14 and abandoned — the `local_path` loader is structurally broken in dev preview, see [[CR-067]]. CR-062 (observational view) also blocked on its own upstream parquet — ship skeleton + help-callout copy only when this PR opens. | M |
+| **O** | `fix/loader-local-path-via-fileattachment` | CR-067 | Not started. **No urgency** until someone tries `local_path` again, but blocks any retry of a CR-065-style in-repo scaffold pattern. | S |
 
 ### Upstream pipeline work — not notebook (no notebook PR until landed)
 
@@ -1158,11 +1211,11 @@ These items live in the `hazards_prototype` repo (or the analogous FAOSTAT pre-f
 |---|---|---|---|---|
 | **U-1** | [[CR-059]] — SPEI replaces raw-precip z-score for PTOT extreme-event classification | `bars_extremeEvents` reads SPEI for PTOT slice once schema lands | Open. Bundle with U-2 / U-3 in a single re-bake. | M (pipeline) |
 | **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | Open. Notebook ribbon swap is a follow-up once this lands. | M (pipeline) |
-| **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `data/shared/faostat_production.parquet` | PR-N (CR-063) swaps `local_path` → `s3_path` and `git rm`s CR-065 scaffold. | Open. CR-063 depends on this or CR-065 (interim). | M (pipeline) |
+| **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `s3://digital-atlas/.../faostat_production.parquet` | PR-N (CR-063) consumes the S3 path directly. | Open. **Sole unblock for [[CR-063]]** as of 2026-05-14 (the interim [[CR-065]] scaffold was attempted and abandoned). | M (pipeline) |
 
 Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
 
-**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → E → J → C (when unblocked) → K → N (after CR-065 scaffold lands, or CR-064 if that arrives first). U-1 / U-2 / U-3 are pipeline-side and land out-of-band; notebook-side follow-up swaps are cheap and can ride into the next maintenance PR after each parquet bake.
+**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → E → J → C (when unblocked) → K → N (strictly after [[CR-064]] lands; the CR-065 interim path is dead). O is low-urgency — fold in whenever someone needs `local_path` again. U-1 / U-2 / U-3 are pipeline-side and land out-of-band; notebook-side follow-up swaps are cheap and can ride into the next maintenance PR after each parquet bake.
 
 ---
 
