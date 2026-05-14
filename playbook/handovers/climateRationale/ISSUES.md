@@ -863,6 +863,23 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **discovered:** 2026-05-13 during PR-K walkthrough — Pete reported the spinner stuck on Future Projections / Extreme Events sections long after the rest of the notebook had finished loading. Resolved itself; logged for perf follow-up.
 - **before-string:** n/a (data layer, not a single line edit).
 
+### CR-059 — Migrate precipitation extreme-event classification to SPEI (pipeline-side) [NEW 2026-05-14]
+
+- **id:** CR-059
+- **title:** Replace raw-precipitation z-score with SPEI for the PTOT extreme-event classification
+- **type:** methods / pipeline
+- **severity:** med (defensibility of the methodology; not a user-visible defect today)
+- **where:** Upstream of the notebook — `hazards_prototype` precipitation hazard computation and the `extreme_events`-style parquet schema. Notebook downstream surface: `bars_extremeEvents` in `notebooks/climateRationale/notebook.qmd` (the PTOT slice of the Extreme Events plot).
+- **why-this-matters:** A z-score of total seasonal precipitation is a coarse drought / wet-spell index. As potential evapotranspiration (PET) increases under warming, the same precipitation amount produces a drier effective water balance — so the historical-baseline PTOT z-score progressively *underestimates* drought severity in the future scenarios. The [Standardized Precipitation Evapotranspiration Index (SPEI)](https://spei.csic.es/) — Vicente-Serrano, Beguería & López-Moreno (2010), *Journal of Climate* — captures the water balance (P − PET) and is robust under warming. It is the more defensible drought / wet-spell metric and is what climate adaptation reports increasingly cite.
+- **proposed-change:**
+  1. **Upstream pipeline** (`hazards_prototype` repo): compute monthly SPEI per admin1 × season for the same NEX-GDDP-CMIP6 GCMs. Use a Penman–Monteith or Thornthwaite PET (PM preferred; Thornthwaite only needs T-mean, which we have).
+  2. **Parquet schema:** add SPEI as an additional hazard variable in `ensemble_season_timeseries.parquet` (alongside the existing PTOT / NTx35 / etc.). Per-GCM SPEI values would also unlock the proper per-GCM extreme-event count → ensemble aggregation pattern flagged in the extreme-events caption rollback note.
+  3. **Notebook:** add "SPEI" to `hazardVariables` in `data/shared/generalTranslations.json` with `tails: "both"` (analogous to PTOT). Update `extremeEvents_plotData` so the PTOT classification rolls through SPEI when the user picks it (or default to SPEI for drought / wet questions and keep PTOT as a separate "precipitation amount" view).
+  4. **Methods narrative:** add a short paragraph in `nbText.json.general.methods.extremeEvents` (or a new SPEI sub-section) explaining the definition, the threshold convention (|SPEI| ≥ 2 extreme, 1 ≤ |SPEI| < 2 unusual is the standard), and a citation to Vicente-Serrano et al. 2010.
+- **dependencies:** Brayden (or whoever owns `hazards_prototype`) needs to bake SPEI into the pipeline. This is the same forum that should also handle the per-GCM extreme-event aggregation called out in the rollback caveat in `bars_extremeEvents`. Bundling both into one pipeline pass would be efficient.
+- **discovered:** 2026-05-14, after the notebook-side ±σ uncertainty experiment was rolled back — Pete: *"we should add a note about SPEI which is something that would be better to use."*
+- **before-string:** n/a (pipeline + schema change; no single line edit in the notebook).
+
 ---
 
 ## Proposed PR groupings
