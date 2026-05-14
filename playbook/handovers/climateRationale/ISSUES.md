@@ -111,6 +111,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-002 — Future Projections precip insight reports per-decade rate as per-year and mixes anomalies with raw values
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-002
 - **title:** Precipitation Quick Insight units inconsistent
 - **type:** bug
@@ -128,6 +130,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-003 — Recent Changes Quick Insight talks about temperature when user selected Precipitation
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-003
 - **title:** Quick Insight under Recent Changes does not reflect the selected Climate Variable
 - **type:** ux
@@ -144,6 +148,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-008 — Future-period dropdown options don't match parquet partition labels
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-008
 - **title:** Future Projections / Extreme Events show blank plots for end-of-century timeframes
@@ -190,6 +196,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-022 — `climateProjectionInsight` templates are hard-coded English strings inside OJS code
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-022
 - **title:** Future Projections insight templates bypass the translation pipeline
 - **type:** i18n
@@ -204,6 +212,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-013 — Methods section heading has no body text
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-013
 - **title:** Appendix > Methods is an empty heading
@@ -221,6 +231,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-014 — Data Sources cards show "No description provided" for every dataset
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-014
 - **title:** nbData.json description fields all empty → Data Sources appendix is content-less
 - **type:** refs / methods
@@ -233,6 +245,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-015 — Add CAP Acknowledgements section
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-015
 - **title:** Add Acknowledgements section between Summary and Appendix
@@ -258,6 +272,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-039 — Anomaly concept needs an inline explanation
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-039
 - **title:** Explain "anomaly" the first time it appears (and why baseline = 1995–2014)
 - **type:** methods / copy
@@ -269,6 +285,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **before-string:** *(new content — render at the top of the Recent Changes plot section, before the plot)*
 
 ### CR-040 — Future Projections needs source attribution and ensemble description on the figure
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-040
 - **title:** Source line under Future Projections plot: NEX-GDDP-CMIP6, GCM list, ensemble method
@@ -282,6 +300,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-041 — Future Projections needs a one-line explanation of the shaded ribbon
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-041
 - **title:** Explain what the shaded "uncertainty" ribbon means
 - **type:** methods / copy
@@ -290,6 +310,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **proposed-change:** In the same caption (or as a help-block above): "The shaded envelope is the range across the 28 CMIP6 models in the ensemble (min–max), not a confidence interval. The line is the ensemble mean."
 
 ### CR-044 — Extreme Events terminology is opaque to non-technical users
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-044
 - **title:** Explain z-score / unusual / extreme; note that the terms can be inverted in some reports
@@ -304,6 +326,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-050 — Hazard Exposure plot lacks source and method attribution
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-050
 - **title:** Hazard Exposure: add source line and short method blurb
 - **type:** methods / refs
@@ -315,6 +339,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-051 — Every figure should have a source / hyperlink / method blurb
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-051
 - **title:** Standardise per-figure attribution: source, hyperlink, one-line method
 - **type:** methods / refs
@@ -324,6 +350,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **note for Claude Code:** Pair this PR with CR-014 (which populates the Data Sources cards) so the appendix and the figure captions tell the same story. Don't replace the existing captions on poverty / GDP / land use / commodity — those already have captions; only standardise wording and add hyperlinks.
 
 ### CR-032 — MapSPAM provenance note
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-032
 - **title:** Add provenance note about MapSPAM derivation
@@ -338,6 +366,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-034 — Admin selectors are not synchronised across sections
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-034
 - **title:** Country/Region selection in one section doesn't reliably propagate to others
@@ -354,6 +384,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-035 — Admin name labels are cropped off the right of every faceted plot
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-035
 - **title:** Faceted plot region labels truncated (only "(KEN)" visible)
 - **type:** ux
@@ -364,6 +396,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **before-string:** *(touches multiple plot configs; do one at a time and screenshot test each)*
 
 ### CR-042 — Axis position and orientation differ between Recent Changes and Future Projections
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-042
 - **title:** X- and Y-axis position should be consistent across the climate-change plots
@@ -383,6 +417,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-019 — Extreme Events y-axis shows fractional ticks on integer counts
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-019
 - **title:** Extreme Events plot Y-axis: 0.2, 0.4, … on event counts
 - **type:** ux
@@ -398,6 +434,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-045 — Plot title should show the selected climate variable (Extreme Events)
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-045
 - **title:** Extreme Events plot title doesn't say which variable it represents
@@ -419,6 +457,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-046 — Directional hazards: low values aren't always "hazardous"
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-046
 - **title:** Extreme Events plot shows "low" categories even for hazards where only high values are dangerous (e.g. NTx35 heat-stress days)
@@ -455,6 +495,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-052 — No loading-state feedback during slow data fetches
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-052
 - **title:** Plots appear broken while DuckDB-WASM fetches and parses parquet
 - **type:** ux
@@ -471,6 +513,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-027 — Commodity production download is missing the units column
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-027
 - **title:** Commodity download CSV/JSON lacks units of value
@@ -493,6 +537,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-028 — Poverty / GDP / land-use tables have no download button
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-028
 - **title:** Add download buttons under the poverty, GDP, and land-use Key Facts plots
 - **type:** feature
@@ -512,6 +558,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-029 — Provide a single combined "Key Facts" download
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-029
 - **title:** Combined Key Facts download (one CSV with poverty, GDP, land-use, commodity)
 - **type:** feature
@@ -520,6 +568,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **proposed-change:** Long-format CSV with columns `iso3, admin1_name, metric, sub_group, year, value, unit, source`. Builder concatenates the four tables, mapping metric ∈ {poverty, gdp, landuse, commodity}. Source field carries the same provenance string the per-figure captions show. Lower priority than CR-028 — land it in the same PR if cheap.
 
 ### CR-031 — Source citations should be hyperlinks, not bare text
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-031
 - **title:** Add `<a href="...">` URLs to every "Source:" string
@@ -560,6 +610,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-026 — Overview section should link to GCF guidance
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-026
 - **title:** Add a single "Further reading" link to the Overview
 - **type:** content / refs
@@ -576,6 +628,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-004 — `agricultual` typo
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-004
 - **type:** copy
 - **severity:** low (max embarrassment factor — every country)
@@ -586,6 +640,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-005 — Poverty bar caption cites GSAP 2025 (doesn't exist)
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-005
 - **type:** refs
@@ -602,6 +658,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-006 — GDP bar caption cites FAOSTAT (should be World Bank WDI)
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-006
 - **type:** refs
 - **severity:** med
@@ -616,6 +674,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-007 — MapSpam → MapSPAM (acronym casing)
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-007
 - **type:** copy
 - **severity:** low
@@ -626,6 +686,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-010 — Tooltip label `lable` → `label`
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-010
 - **type:** bug
@@ -641,6 +703,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-011 — `% of populatio,n` → `% of population`
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-011
 - **type:** copy
 - **severity:** low
@@ -655,6 +719,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-012 — French heading: Evenements extremes → Événements extrêmes
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-012
 - **type:** i18n
 - **severity:** low
@@ -667,6 +733,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-018 — "1 extreme high events" singular/plural
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-018
 - **type:** copy
 - **severity:** low
@@ -674,6 +742,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **proposed-change:** Reword to a count-agnostic sentence (suggested wording in the earlier draft of this file).
 
 ### CR-020 — Key Facts intro narrows scope to GCF
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-020
 - **type:** copy
@@ -684,6 +754,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-025a — "(crops, livestock, water resources)" — water resources not actually selectable
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-025a
 - **type:** copy
 - **severity:** low (from Majambo feedback)
@@ -691,6 +763,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **proposed-change:** `(crops, livestock, water resources)` → `(crops and livestock)`.
 
 ### CR-033 — Section title: "Recent Changes in Key Climatic Indicator(s)"
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-033
 - **type:** copy
@@ -703,6 +777,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   ```
 
 ### CR-017 — Internal field names leak to users as legend / axis / radio labels
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-017
 - **title:** `in_poverty`, `divergingBar`, `extreme_low`, `dry+heat`, `historic`, `cereals` (lower-case), `ssp585` visible to end users
@@ -740,6 +816,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-053 — Explain SSP scenarios in the notebook + link to authoritative source [NEW 2026-05-13]
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-053
 - **title:** Add an SSP explanation block and authoritative link
 - **type:** methods / copy
@@ -770,6 +848,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ### CR-023 — Doubled-slash URLs for helpers/components on the live deploy
 
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
+
 - **id:** CR-023
 - **type:** bug
 - **severity:** low
@@ -778,6 +858,8 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **proposed-change:** Check `_quarto.yml` for trailing slash in `site-url` and resolve the doubled slash.
 
 ### CR-024 — Year hardcodes in figure captions
+
+- **STATUS:** ✓ FIXED 2026-05-14 — commit `0c27624` on `dev/climateRationale`. Verified visually in local Quarto preview.
 
 - **id:** CR-024
 - **type:** copy / refs
@@ -888,17 +970,17 @@ Ordered by Pete's stated priorities. Each PR is independent; do not block any on
 
 | # | PR slug | Issues | Status | Effort |
 |---|---|---|---|---|
-| **A** | `fix/cr-insight-bugs-and-data-filters` | CR-001, CR-002, CR-003, CR-022, CR-008, CR-009 | CR-001 BLOCKED on Brayden (Q2); CR-009 BLOCKED on Brayden (Q9). CR-002, CR-003, CR-008, CR-022 are ready. **Land CR-002 / CR-003 / CR-008 first** — they're trust-critical and unblocked. | M |
-| **B** | `feat/cr-methods-sources-and-attribution` | CR-013, CR-014, CR-015, CR-039, CR-040, CR-041, CR-044, CR-050, CR-051, CR-031, CR-032, **CR-053** | CR-014 description text drafts and CR-040 GCM count need Brayden's confirmation. Everything else ready. **Pete priority #1.** | L |
-| **C** | `feat/cr-global-admin-selector` | CR-034 | **BLOCKED ON BRAYDEN** (Q1). Pete: "Brayden has his system for this." Do not start. Surface to Brayden first. | M |
-| **D** | `feat/cr-key-facts-downloads` | CR-027, CR-028, CR-029 | Ready. **Pete priority #6.** | S |
-| **E** | `feat/cr-hazard-exposure-summary-table` | CR-049 | Ready. Dominant-hazard rule = highest exposed VoP, ties alphabetical (Q3). **Pete priority #6.** **Land a working preview before merging** so Pete can compare to Togo Table 5. | L |
-| **F** | `fix/cr-plot-layout` | CR-035, CR-042, CR-019, CR-045, CR-046 | Ready. CR-046 tail mapping resolved (Q4). | M |
-| **G** | `feat/cr-loading-feedback` | CR-052 | Ready. **Pete priority #4.** | S |
-| **H** | `fix/cr-typos-captions-scope` | CR-004, CR-005, CR-006, CR-007, CR-010, CR-011, CR-012, CR-018, CR-020, CR-025a, CR-033, CR-026 | Ready. CR-026 scope cut to single GCF link only (Q5). | S |
-| **I** | `feat/cr-internal-labels` | CR-017 | Ready. SSP labels = IPCC canonical (Q6). | M |
-| **J** | `feat/cr-i18n-french` | CR-021 | Ready. AI drafts, Pete reviews — split into per-section draft PRs (Q7). Should land **after** PR-B, since PR-B introduces new FR keys. | S × 5 |
-| **K** | `chore/cr-url-and-year-cleanup` | CR-023, CR-024 | Polish. Land last or defer. | S |
+| **A** | `fix/cr-insight-bugs-and-data-filters` | CR-001, CR-002, CR-003, CR-022, CR-008, CR-009 | 🔄 Partial — 4 of 6 (CR-002/003/008/022 FIXED in `0c27624`; CR-001 Part 2 shipped, Part 1 BLOCKED on Brayden Q2; CR-009 BLOCKED on Brayden Q9). | M |
+| **B** | `feat/cr-methods-sources-and-attribution` | CR-013, CR-014, CR-015, CR-039, CR-040, CR-041, CR-044, CR-050, CR-051, CR-031, CR-032, **CR-053** | ✓ Done in `0c27624` (CR-040 GCM count and CR-014 description drafts still want Brayden's eyes for correctness). | L |
+| **C** | `feat/cr-global-admin-selector` | CR-034 | ✓ Done in `0c27624` — Pete bypassed the Brayden block; option (a) single global selector applied. Surface to Brayden for review. | M |
+| **D** | `feat/cr-key-facts-downloads` | CR-027, CR-028, CR-029 | ✓ Done in `0c27624`. | S |
+| **E** | `feat/cr-hazard-exposure-summary-table` | CR-049 | Not started. Dominant-hazard rule resolved (Q3). **Pete priority #6.** **Land a working preview before merging** so Pete can compare to Togo Table 5. | L |
+| **F** | `fix/cr-plot-layout` | CR-035, CR-042, CR-019, CR-045, CR-046 | ✓ Done in `0c27624`. | M |
+| **G** | `feat/cr-loading-feedback` | CR-052 | ✓ Done in `0c27624`. | S |
+| **H** | `fix/cr-typos-captions-scope` | CR-004, CR-005, CR-006, CR-007, CR-010, CR-011, CR-012, CR-018, CR-020, CR-025a, CR-033, CR-026 | ✓ Done in `0c27624`. | S |
+| **I** | `feat/cr-internal-labels` | CR-017 | ✓ Done in `0c27624` — SSP labels = IPCC canonical (Q6). | M |
+| **J** | `feat/cr-i18n-french` | CR-021 | 🔄 Partial — most existing FR keys filled in; new methods/SPEI/uncertainty keys still EN-only in `0c27624`. Pete review pending. | S × 5 |
+| **K** | `chore/cr-url-and-year-cleanup` | CR-023, CR-024 | ✓ Done in `0c27624`. | S |
 
 Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
 

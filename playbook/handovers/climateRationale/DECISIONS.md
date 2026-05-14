@@ -133,3 +133,55 @@ Track which PRs the colleague / Claude Code have opened. Update as work lands.
 | I | `feat/cr-internal-labels` | not started | — | — | Blocked on Q6 |
 | J | `feat/cr-i18n-french` | unblocked, ready | — | — | Q7 RESOLVED — AI drafts, Pete reviews. Split into per-section draft PRs (see Q7 action). |
 | K | `chore/cr-url-and-year-cleanup` | not started | — | — | Unblocked, low priority |
+
+---
+
+## Session state — 2026-05-14, end of session 1
+
+### Done this session
+
+Single commit on `dev/climateRationale`: **`0c27624`** — *feat(climateRationale): broad notebook iteration + CR-059 SPEI ticket*. 10 files changed, +2,332 / −846. STATUS lines for the fixed tickets added in this companion docs commit.
+
+Tickets fixed (full list):
+
+- **PR-A (partial, 4 of 6 done):** CR-002, CR-003, CR-008, CR-022. CR-001 Part 2 also shipped (the `ssp585` scenarioLabel); Part 1 still blocked on Brayden. CR-009 still blocked on Brayden.
+- **PR-B (all 12 done):** CR-013, CR-014, CR-015, CR-031, CR-032, CR-039, CR-040, CR-041, CR-044, CR-050, CR-051, CR-053. CR-014 dataset descriptions and CR-040 GCM count still want Brayden's eyes for factual correctness.
+- **PR-C (CR-034) done — Brayden block bypassed.** Pete chose option (a) single global selector. Surface to Brayden so his cross-notebook system can adopt / supersede.
+- **PR-D (all 3 done):** CR-027, CR-028, CR-029.
+- **PR-F (all 5 done):** CR-035, CR-042, CR-019, CR-045, CR-046.
+- **PR-G (CR-052) done.**
+- **PR-H (all 12 done):** CR-004, CR-005, CR-006, CR-007, CR-010, CR-011, CR-012, CR-018, CR-020, CR-025a, CR-026, CR-033.
+- **PR-I (CR-017) done.**
+- **PR-J (CR-021) partial:** existing FR translation TODOs were largely filled; new keys introduced in this commit (`general.methods.*`, `quickInsight.uncertainty`, `quickInsight.uncertaintyNote`, `extremeEvents.help.tailNote`, `recentChanges.help.anomalyTitle`, `futureProjections.help.sspTitle`, `extremeEvents.help.zscoreTitle`, `hazardVariables.<id>.description`) ship as EN-only with empty FR stubs. Need Pete review pass before they're considered ready.
+- **PR-K (both done):** CR-023, CR-024.
+
+Other significant work not tied to a single CR-NNN ticket:
+
+- All admin-faceted plots refactored to a shared 3-wide grid wrap helper layer (`filterAdminToggle`, `adminGridSplit`, `padFxDomain`, `gridFxTickFormat`, `baselineStdByAdmin`, `buildBaseline`, `applyZ`, `buildThresholdRows`, `extremeLevel`, `qualifiesAsExtreme`, `yTickWithUnit`, `captionDetails`, `noDataPlaceholder`).
+- Per-section palette pickers (diverging, sequential, categorical) sharing one `buildPaletteSelector` over native `Inputs.select` so styling matches every other `Inputs.select` widget. Per-`<option>` `background-image` preview works in Chromium browsers; below-the-select swatch is the cross-browser fallback.
+- `Include national` toggle in the global selector bar; admin0 / admin1 mixing now under user control.
+- Future Projections: SQL trimmed (drop min/max, add sd/sd_anomaly); ribbon switched to mean ± 1σ across the 18 GCMs (≈ IPCC AR6 "likely" range, called out in caption); Quick Insight templates rewritten to inline ± with a single uncertainty note at the end.
+- Recent Changes: highlight toggle outlines bars / enlarges trace dots with symbol-channel encoding (circle / square / triangle) and a legend that only renders when the toggle is on. Threshold ±σ / ±2σ rule labels anchored to the right margin.
+- Extreme Events: shared 1995–2014 baseline applied to both historic and future z-scoring (was previously per-window — produced inconsistent cutoffs). Side-by-side category bars within each scenario via `__sep_*` spacer bands; tails-aware (PTOT both, all other hazards high-only).
+- Key Facts: three captions (poverty, GDP, land use) combined into one collapsible `<details>` block.
+- Methods + Data Sources promoted to top-level H1s in the TOC; methods sub-sections are anchored Quarto H2s. "→ Methods" link inlined into each section H1 to save vertical space.
+- ISSUES.md gained CR-059 (SPEI pipeline-side migration ticket).
+
+### In flight / uncommitted
+
+Nothing in flight before this commit lands. Once `docs(climateRationale): mark FIXED issues + session-state note` lands, working tree clean.
+
+### Open questions for next session
+
+- **Brayden review still required** for CR-001 Part 1, CR-009, CR-014 description text, CR-040 GCM count, CR-054, CR-057. Suggest scheduling time with him before opening the PR for merge so his calls can ride in rather than as follow-ups.
+- **PR-E / CR-049 not started.** Togo-style hazard-exposure summary table is the largest remaining unblocked piece of work.
+- **CR-058 (load latency) not actively addressed.** Loader feedback (CR-052) makes the wait less scary, but the underlying ~30s parquet pull is unchanged. Pipeline-side `iso3`-partitioning is the highest-leverage fix.
+- **CR-056 (caption text → nbText.json) not done.** All plot captions are still inline `multiLineText(...)` blocks. Pairs naturally with the next French translation pass.
+- **CR-055 (PTOT seasonal-window unit ambiguity)** still unresolved — flagged in caption but not structurally fixed. Needs a design call (see ticket options 1–3).
+- **CR-059 (SPEI migration) is a pipeline ticket**, not a notebook one. Belongs in Brayden's queue alongside per-GCM extreme-event aggregation (called out in `bars_extremeEvents` caption rollback).
+- **Inter-model uncertainty whisker on Extreme Events** was attempted in-notebook (synthesise via ±sd reclassification) and rolled back — the whiskers were dominated by borderline-year effects rather than meaningful uncertainty. Proper fix is per-GCM classification in the upstream pipeline (CR-059 sibling).
+- **Cosmetic:** small risk that the in-`<option>` palette preview (`background-image` on options) renders inconsistently across Firefox / Safari. Below-the-select swatch is the fallback. Not blocking.
+
+### Suggested next step
+
+Open a PR from `dev/climateRationale` → `notebooks/climateRationale` and bring Brayden in for the review pass on the Brayden-blocked items listed above before merging upstream. Once those are settled, CR-049 (PR-E, Togo summary table) is the natural next unblocked piece of work to pick up.
