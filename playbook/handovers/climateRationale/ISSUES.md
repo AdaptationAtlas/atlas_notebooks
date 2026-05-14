@@ -945,6 +945,110 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **discovered:** 2026-05-13 during PR-K walkthrough — Pete reported the spinner stuck on Future Projections / Extreme Events sections long after the rest of the notebook had finished loading. Resolved itself; logged for perf follow-up.
 - **before-string:** n/a (data layer, not a single line edit).
 
+### CR-061 — Mirror ±1σ uncertainty band on Recent Changes plots [NEW 2026-05-14]
+
+- **id:** CR-061
+- **title:** Add an inter-model `mean ± 1σ` ribbon to `barplot_recentChanges` and `warmingStripes_recentChanges`, mirroring the Future Projections band shipped in session 1
+- **type:** methods / ux
+- **severity:** med (consistency between Recent Changes and Future Projections; honesty about model uncertainty in the historical scenario)
+- **where:** `notebooks/climateRationale/notebook.qmd` · `historic_climate_timeseries` SQL projection, plus `barplot_recentChanges` and `warmingStripes_recentChanges` plot configs · anchor `#recentChanges`
+- **why-wrong:** CR-057 confirmed Recent Changes is NEX-GDDP-CMIP6 *historical scenario* (model hindcast), not observational CHIRPS/CHIRTS. The 18-GCM ensemble has inter-model spread for the historical period just as it does for the future. Session 1 made the Future Projections ribbon visible (`mean ± sd_anomaly`); Recent Changes currently shows only the ensemble mean, which under-represents uncertainty and is visually inconsistent with the future panel right below it. A user comparing the two sections sees "uncertainty appears in the future, not the past" — implying observational certainty for the historical bars, which is wrong (see CR-057).
+- **proposed-change:**
+  1. **SQL:** the `historic_climate_timeseries` cell currently SELECTs `mean` / `mean_anomaly`. Add `sd` / `sd_anomaly` to the SELECT — same column names the future-projections SQL uses, so the existing `padFxDomain` / `buildBaseline` helpers can be reused unchanged.
+  2. **`barplot_recentChanges`:** add a `Plot.areaY` (or `Plot.ruleY` with `y1`/`y2`) ribbon layer keyed on `mean_anomaly − sd_anomaly` / `mean_anomaly + sd_anomaly`, faceted the same way as the bars. Render the ribbon **behind** the bars (lower z-order) so the bars remain the focal layer.
+  3. **`warmingStripes_recentChanges`:** less obvious — warming stripes are a categorical-color encoding, not a continuous ribbon. Options:
+     - (a) Add a thin "uncertainty stripe" above/below each year showing the ±1σ band as a secondary lighter color. Likely cluttered.
+     - (b) Render the existing stripes from `mean_anomaly` (status quo) and add an inline tooltip showing `mean ± 1σ` per year. Cheapest.
+     - (c) Switch to a small-multiples view: one row per GCM. Out of scope for this PR.
+     Recommend (b) for this ticket; flag (c) as a deferred design exploration.
+  4. **Captions:** update both plot captions to call out the ribbon as inter-model spread across the 18 GCMs, with the same "±1σ ≈ AR6 likely range (approximation; exact range when CR-060 lands)" caveat already used in `timeseries_futureProjections`.
+  5. **Quick Insight templates:** consider extending the Recent Changes insight to surface the ±1σ envelope alongside the trend value (analogous to the Future Projections insight, which now inlines `± sd_anomaly`). Probably a follow-up; keep this ticket scoped to the plot.
+- **dependencies:** Once [[CR-060]] lands, swap `mean_anomaly ± sd_anomaly` → `q17_anomaly` / `q83_anomaly` and drop the "approximation" caveat in the captions. Same swap as the future-projections ribbon.
+- **STATUS:** Open, unblocked. **Notebook-only — no upstream changes.**
+- **before-string:**
+  ```js
+  historic_climate_timeseries = {
+    const resp = await db.query(`
+    SELECT
+      ...
+      mean,
+      mean_anomaly
+    FROM ...
+  ```
+  (existing SELECT — confirm exact column list when implementing; `sd` / `sd_anomaly` are already present in the parquet, see `timeseries_futureProjections` SQL for precedent.)
+
+### CR-062 — Observational view (CHIRPS / CHIRTS / ERA5) as a separate Recent Changes plot [NEW 2026-05-14]
+
+- **id:** CR-062
+- **title:** Add an observational time series (CHIRPS for PTOT, CHIRTS or ERA5 for temperature) as a *separate* plot in the Recent Changes section, not as an overlay on the existing NEX-GDDP-CMIP6 historical bars
+- **type:** methods / feature
+- **severity:** med (closes the gap [[CR-057]] surfaced — users currently see model-hindcast data labelled "Historical" with no observational anchor)
+- **where:** `notebooks/climateRationale/notebook.qmd` · new plot in the Recent Changes section, alongside (not replacing) `barplot_recentChanges` and `warmingStripes_recentChanges`. Upstream parquet needed: `data/shared/observational_climate_timeseries.parquet` (or similar), baked from CHIRPS (PTOT) and ERA5 / CHIRTS (TAVG).
+- **why-wrong:** CR-057 confirmed the "Historical" panel is the NEX-GDDP-CMIP6 hindcast — a bias-corrected GCM run, not an observational record. Users (especially proposal writers) reasonably expect "Historical" to mean "what was actually measured". The honest fix is to render the *observed* time series as a separate, side-by-side plot — same admin1 grain, similar baseline period, but a different parquet sourced from observational reanalyses. Critically, these CANNOT be overlaid on the existing bars: CHIRPS and NEX-GDDP-CMIP6 have *different* baselines, *different* spatial aggregation schemes, and *different* climatologies. Overlaying would double-count discrepancies that are method-of-aggregation artefacts, not real signal. Two plots, clearly labelled, is the right shape.
+- **proposed-change:**
+  1. **Upstream pipeline (blocker):** publish `observational_climate_timeseries.parquet` at the same admin1 grain as the existing `historic_climate_timeseries`. Schema mirrors the existing parquet: `iso3, admin1_name, year, season, variable, mean, sd, mean_anomaly, sd_anomaly`. Anomalies computed against a baseline consistent with the variable's source (CHIRPS 1991–2020 is conventional for precipitation; ERA5 1991–2020 likewise) — document the chosen baseline in the parquet metadata.
+  2. **Scope — graded rollout:**
+     - **Phase A — PTOT only via CHIRPS.** Lowest-friction; CHIRPS is already widely cited in Atlas outputs.
+     - **Phase B — TAVG via ERA5 (or CHIRTS — pick one; ERA5 is more standard).**
+     - **Phase C — derived indicators (NDWS, NDWL0, NTx35, NTx40, HSH-max, THI-max).** Lower priority because the derived-indicator recipes upstream are climate-model-specific. Skip until A + B are validated.
+  3. **Notebook layout:** in the Recent Changes section, add a new sub-section heading "Observed climate (CHIRPS / ERA5)" rendering one plot per available variable. Keep the existing model-hindcast plots; add a help-callout explaining the distinction between "modelled historical" (1995–2014 NEX-GDDP scenario) and "observed" (CHIRPS / ERA5 reanalysis). Reuse [[CR-039]] anomaly help-callout copy with a small addendum.
+  4. **Captions:** explicit source + URL — CHIRPS <https://www.chc.ucsb.edu/data/chirps>, ERA5 <https://cds.climate.copernicus.eu>. Note the baseline period if it differs from 1995–2014.
+  5. **Methods narrative ([[CR-013]]):** add a paragraph distinguishing model-hindcast from observational data, and naming the sources used in each panel.
+- **dependencies:** **BLOCKED on upstream pipeline.** Brayden (or whoever owns the hazards pipeline) needs to bake the observational parquet. Bundle the request with [[CR-059]] / [[CR-060]] if a re-bake is happening anyway.
+- **discovered:** 2026-05-14, chat-mode review — natural follow-up to [[CR-057]].
+- **STATUS:** Open, **BLOCKED on upstream observational parquet.** Notebook-side stub work (skeleton plot + captions + help-callout copy) can begin once the parquet schema is agreed.
+- **before-string:** n/a (new section).
+
+### CR-063 — Add a FAOSTAT production-trends section to the notebook [NEW 2026-05-14]
+
+- **id:** CR-063
+- **title:** New "Agricultural Production Trends" section mirroring Togo SAT report Figures 1 & 2 — line chart of production value (USD 2015) and volume (tonnes) per priority crop over time, optional stacked-bar total
+- **type:** feature / content
+- **severity:** med (the Togo SAT report leads with this framing; the Atlas notebook is missing the same context between Key Facts and Recent Changes)
+- **where:** `notebooks/climateRationale/notebook.qmd` · new section between Key Facts (`#keyFacts`) and Recent Changes (`#recentChanges`). Data sourced from the parquet shipped by [[CR-064]] (preferred) or [[CR-065]] (interim scaffold).
+- **why-wrong:** The Togo SAT climate rationale (the reference example linked at the top of this file) opens with two figures showing FAOSTAT production trends — area harvested + yield + total production value over time, broken down by major crop. This frames the climate rationale: "here's what the country produces today, here's how that's evolved, *now* let's look at how climate has changed and how it will change". The Atlas notebook today jumps straight from a one-year Key Facts snapshot into climate data, skipping the historical-production framing. Adding this section makes the notebook a closer drop-in replacement for the Togo SAT report shape and gives proposal writers the production-baseline narrative they need.
+- **proposed-change:**
+  1. **Section heading:** new H1 "Agricultural Production Trends" with anchor `#productionTrends`. Place between Key Facts and Recent Changes so the narrative reads Key Facts → production trends → climate → projections → extremes → hazard exposure.
+  2. **Data dependency:** parquet from [[CR-064]] (production grade) or [[CR-065]] (temporary scaffold). Either path uses the same long-format schema, so the notebook code is identical.
+  3. **Plots — mirror Togo Figures 1 & 2:**
+     - **Plot 1 — Production value over time.** Multi-line chart: x = year, y = gross production value (constant USD), one line per priority crop, scoped to the user's selected admin0. Add a stacked-bar / stacked-area toggle for total value across crops.
+     - **Plot 2 — Volume and area.** Two-panel small-multiples: production tonnes (top) and area harvested ha (bottom), same x-axis, same priority-crop legend.
+     - **Optional Plot 3 — Yield.** kg/ha over time per priority crop. Higher-fidelity story but cluttered legend; defer if the section is already long.
+  4. **Quick Insight (analogous to other sections):** auto-generated paragraph naming the top 3 crops by recent production value and the strongest-growing crop by tonnage CAGR over the last 20 years. Templates in `nbText.sections.productionTrends.quickInsight.{en,fr}` with `:::placeholder:::` syntax.
+  5. **Captions:** source = FAOSTAT, URL = <https://www.fao.org/faostat/>, refresh-date column surfaced inline. Link the FAOSTAT methodology notes <https://www.fao.org/faostat/en/#methodology>.
+  6. **Downloads:** `downloadButton(productionTrends_plotData, "production-trends")` mirroring the Key Facts pattern ([[CR-027]] / [[CR-028]]). Combined download under the section.
+  7. **i18n:** all new copy under `nbText.sections.productionTrends.*` with `{en, fr}`. French stubs ship as TODOs and roll into the next PR-J pass.
+  8. **Admin level:** FAOSTAT is national-only. The section's title and intro should be explicit: "country-level trends" (no admin1 facet, unlike every other section).
+- **dependencies:** **BLOCKED on [[CR-064]] (preferred) or [[CR-065]] (interim).** Notebook code is otherwise straightforward.
+- **discovered:** 2026-05-14, chat-mode review.
+- **STATUS:** Open, **BLOCKED on parquet ([[CR-064]] or [[CR-065]]).** Can be drafted skeleton-first against a small bundled sample to validate the layout.
+- **before-string:** n/a (new section).
+
+### CR-066 — Relocate handover docs into the notebook + add notebook-scoped CLAUDE.md [NEW 2026-05-14]
+
+- **id:** CR-066
+- **title:** `git mv` `playbook/handovers/climateRationale/` → `notebooks/climateRationale/handover/`; add `notebooks/climateRationale/CLAUDE.md`; ignore `.DS_Store`
+- **type:** workflow / hygiene
+- **severity:** low (workflow only; not user-facing)
+- **where:** Repo root — `playbook/handovers/climateRationale/*`, new `notebooks/climateRationale/CLAUDE.md`, root `.gitignore`.
+- **why-wrong:** Today the climate-rationale handover docs live under `playbook/handovers/climateRationale/` — a top-level `playbook/` tree that's notebook-agnostic, which means dev branches for `climateRationale` need to touch *two* directory trees instead of one. Future notebook-scoped sessions (and future colleagues parachuting into the notebook) benefit from a single self-contained tree under `notebooks/climateRationale/`. The notebook-scoped CLAUDE.md captures the bits of context that aren't already encoded in DECISIONS.md / ISSUES.md — coding style, the i18n contract, the OneDrive-sync expectation, the "don't delete commented blocks without flagging" rule, etc.
+- **proposed-change:**
+  1. **Move handover docs:** `git mv playbook/handovers/climateRationale/ISSUES.md notebooks/climateRationale/handover/ISSUES.md` and the same for `DECISIONS.md`, `README.md`, and the PR template. Use `git mv` (preserve history) — not raw `mv`.
+  2. **Update internal links:** grep the moved files for any relative paths pointing back into `playbook/` and fix them; grep the rest of the repo for `playbook/handovers/climateRationale` and update references (the repo-root README if any, this file's "How to read" footer, any CI config).
+  3. **Notebook-scoped CLAUDE.md:** copy the OneDrive draft into `notebooks/climateRationale/CLAUDE.md`. Scope strictly to climateRationale — do not pull in cross-notebook directives that belong in a future repo-level CLAUDE.md.
+  4. **.gitignore:** append `.DS_Store` (current `git status` shows multiple untracked `.DS_Store` files at the repo root, in `notebooks/`, and in `playbook/`).
+  5. **Remove empty `playbook/` folders:** after the move, `playbook/handovers/climateRationale/` will be empty; `git rm -r` the now-empty `playbook/handovers/climateRationale/`. If `playbook/handovers/` becomes empty as a result, remove that too. **Do NOT remove `playbook/` itself without asking Pete** — it may be the seed of a future cross-notebook playbook tree.
+- **dependencies:** None on the mechanical move. The notebook-scoped CLAUDE.md depends on Pete's OneDrive draft, which is already drafted.
+- **discovered:** 2026-05-14, chat-mode review — workflow friction observed across session 1 (two directory trees per dev branch).
+- **STATUS:** Open, ready to start. Ship as PR-M.
+- **before-string:** n/a (mechanical move).
+
+---
+
+**Upstream pipeline work — not notebook.** The tickets below are pipeline-side (typically the `hazards_prototype` repo, or the analogous FAOSTAT pre-fetch pipeline) and require a coordinated re-bake of the parquet data on S3. They are owned by the pipeline maintainer, not by Claude Code's notebook work. Listed here for traceability so they don't fall through the cracks; each one has a notebook-side follow-up that becomes a one-line swap once the parquet lands.
+
+---
+
 ### CR-059 — Migrate precipitation extreme-event classification to SPEI (pipeline-side) [NEW 2026-05-14]
 
 - **id:** CR-059
@@ -961,6 +1065,67 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **dependencies:** Brayden (or whoever owns `hazards_prototype`) needs to bake SPEI into the pipeline. This is the same forum that should also handle the per-GCM extreme-event aggregation called out in the rollback caveat in `bars_extremeEvents`. Bundling both into one pipeline pass would be efficient.
 - **discovered:** 2026-05-14, after the notebook-side ±σ uncertainty experiment was rolled back — Pete: *"we should add a note about SPEI which is something that would be better to use."*
 - **before-string:** n/a (pipeline + schema change; no single line edit in the notebook).
+
+### CR-060 — Upstream parquet: add inter-model quantiles for AR6 "likely" range [NEW 2026-05-14]
+
+- **id:** CR-060
+- **title:** Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into the projection ensemble timeseries parquet so the notebook ribbon can become the exact IPCC AR6 17–83 % "likely" range instead of a `mean ± 1σ` approximation
+- **type:** methods / pipeline
+- **severity:** med (defensibility — the current ribbon is an AR6 *approximation*, not the AR6 quantity itself)
+- **where:** Upstream of the notebook — `hazards_prototype` ensemble-aggregation step that produces the projections `ensemble_season_timeseries.parquet`. Notebook downstream surface: `timeseries_futureProjections` in `notebooks/climateRationale/notebook.qmd` (the ribbon currently rendered as `mean ± sd_anomaly`); same swap applies to `barplot_recentChanges` / `warmingStripes_recentChanges` once [[CR-061]] lands.
+- **why-this-matters:** Session 1 swapped the Future Projections ribbon from `min–max` to `mean ± 1σ` and the caption now calls this an *approximation* of the IPCC AR6 "likely" range. Under a Gaussian assumption ±1σ covers ~68 % and the AR6 17–83 % interval is ~±0.95σ — close, but not equal, and the assumption breaks for skewed indices (heat-stress days, NDWS, NDWL0). The honest fix is to publish per-quantile values from the GCM ensemble and have the notebook plot those directly. `q5` / `q95` cover the AR6 *very likely* range (5–95 %) for an optional outer ribbon; `n_models` lets the caption be specific about ensemble size per (admin1 × scenario × period × variable) rather than quoting a global "≈18 GCMs" figure.
+- **proposed-change:**
+  1. **Upstream pipeline** (`hazards_prototype`): when aggregating GCMs to the admin1 × season × period grain, compute `q5`, `q17`, `q50` (median), `q83`, `q95`, and `n_models` per row alongside the existing `mean` and `sd`. Anomaly variants (`q17_anomaly`, `q83_anomaly`, etc.) computed against the same 1995–2014 baseline currently used for `sd_anomaly`.
+  2. **Parquet schema:** extend the projections `ensemble_season_timeseries.parquet` and the analogous extremes parquet. Keep `mean` / `sd` for backwards compatibility.
+  3. **Notebook follow-up (separate ticket, once CR-060 lands):** in `timeseries_futureProjections`, swap the ribbon `y1: d => d.mean − d.sd_anomaly` / `y2: d => d.mean + d.sd_anomaly` to `y1: d => d.q17_anomaly` / `y2: d => d.q83_anomaly`. Update the caption to drop "≈ AR6 likely range" and replace with "AR6 17–83 % likely range across the `n_models`-member ensemble". Consider an optional outer q5–q95 ribbon as a second pass. Same swap propagates into [[CR-061]] for the Recent Changes plots.
+- **dependencies:** Brayden / `hazards_prototype` maintainer. **Bundle with [[CR-059]] (SPEI) and [[CR-062]]'s observational parquet** so the pipeline re-bake happens once, not three times.
+- **discovered:** 2026-05-14, chat-mode review — flagged by Pete that the ±1σ ribbon caption needs an upstream fix to stop being an approximation.
+- **STATUS:** Open. Pipeline-side; no notebook PR until landed.
+- **before-string:** n/a (schema + aggregation change).
+
+### CR-064 — FAOSTAT pre-fetch into parquet on S3 (pipeline) [NEW 2026-05-14]
+
+- **id:** CR-064
+- **title:** Extend the `fao_landuse` pipeline to publish FAOSTAT QV (value) and QCL (production / area harvested / yield) for Atlas-scope countries × priority crops as a long-format parquet on S3
+- **type:** methods / pipeline
+- **severity:** med (unblocks [[CR-063]] production-trends section; without it CR-063 has nothing real to plot)
+- **where:** Upstream — pipeline currently producing `data/shared/fao_landuse.parquet` (or equivalent). Notebook downstream surface: a new `nbData.json` entry consumed by [[CR-063]].
+- **why-this-matters:** The Togo SAT report (Figures 1 & 2) leads with a production-trends story — yield, area, total value of production over time, per priority crop. The Atlas climate-rationale notebook today has Key Facts (one-year snapshot of VoP) and Recent Changes (climate), but no equivalent *production* time series. To mirror Togo's framing the notebook needs FAOSTAT QV (value) and QCL (production, area harvested, yield) baked into a parquet on S3 — pulling FAOSTAT bulk CSVs at notebook-render time is too slow and would hammer FAO's CDN.
+- **proposed-change:**
+  1. **Scope (countries):** all Atlas-scope SSA ISO3 codes already in `nbData.json` (~54).
+  2. **Crops + livestock (priority list):** Maize, Rice (paddy), Soybeans, Sorghum, Millet, Cassava, Wheat, Groundnuts (with shell), Cowpeas (dry), Yams, Beans (dry), Sweet potatoes, Bananas, Cattle meat (carcass weight). Long format makes it easy to add items later — append rows, no schema change.
+  3. **Variables:** FAOSTAT QV element 152 (gross production value, constant 2014–2016 USD if available, else current USD); FAOSTAT QCL elements 5510 (production, tonnes), 5312 (area harvested, ha), 5419 (yield, kg/ha). Time range 1961 → latest.
+  4. **Schema (long format):**
+     ```
+     iso3, country_name, item_code, item_name, element_code, element_name,
+     year, value, unit, source ("FAOSTAT QV" | "FAOSTAT QCL"), refresh_date
+     ```
+  5. **Refresh cadence:** annual, when FAOSTAT publishes the year's bulk download. The `refresh_date` column lets the notebook caption surface "FAOSTAT, accessed YYYY-MM-DD".
+  6. **Location:** `s3://digital-atlas/.../data/shared/faostat_production.parquet` (mirror the existing `fao_landuse` layout). Add an `nbData.json` entry with description and source URL <https://www.fao.org/faostat/en/#data>.
+- **dependencies:** Pipeline maintainer (Brayden or whoever owns `fao_landuse`).
+- **discovered:** 2026-05-14, chat-mode review — paired with [[CR-063]].
+- **STATUS:** Open. Pipeline-side. **[[CR-063]] depends on this (or [[CR-065]] as interim).**
+- **before-string:** n/a (schema + pipeline change).
+
+### CR-065 — Temporary in-repo FAOSTAT scaffold while CR-064 is pending [NEW 2026-05-14]
+
+- **id:** CR-065
+- **title:** One-off fetcher script (R or Python) that produces a small bundled parquet (`faostat_production_temp.parquet`) so [[CR-063]] can be developed without blocking on [[CR-064]]
+- **type:** scaffold / pipeline-bridge
+- **severity:** low (unblocks notebook-side dev; not user-facing)
+- **where:** New scripts under `scripts/faostat_temp/` (or `notebooks/climateRationale/scripts/`); bundled parquet at `data/shared/faostat_production_temp.parquet` (committed to git, target <5 MB).
+- **why-this-matters:** [[CR-064]] (pipeline-side FAOSTAT) is the right long-term home for this data but is gated on pipeline maintainer bandwidth. [[CR-063]] (production-trends notebook section) is otherwise unblocked and Pete wants it in the next session. A small bundled parquet under `data/shared/` lets the notebook section be built, reviewed, and merged against the same schema [[CR-064]] will eventually fulfil — when [[CR-064]] lands, the swap is a one-line `nbData.json` change plus a `git rm` of the script + bundled parquet.
+- **proposed-change:**
+  1. **Fetcher script:** prefer R (`FAOSTAT` package or raw bulk-download CSVs from <https://www.fao.org/faostat/en/#data/QV> and <https://www.fao.org/faostat/en/#data/QCL>) to match the rest of the pipeline repo's language. Pull the same scope as [[CR-064]] — ~54 SSA ISO3, ~14 crops + cattle meat, elements 152 / 5510 / 5312 / 5419.
+  2. **Output schema:** identical to [[CR-064]]'s long-format so the notebook code path doesn't change at swap time.
+  3. **Filename:** `data/shared/faostat_production_temp.parquet`. The `_temp` suffix **must** stay in the filename so reviewers (and future-us) can grep for it before merging anything that depends on it.
+  4. **Header comment in the fetcher script:** explicit *"TEMPORARY — delete once [[CR-064]] lands. Owner: Pete + Claude Code session 2."* block at the top.
+  5. **Size guard:** target <5 MB committed. If the parquet grows past that, drop crops from the priority list rather than letting the binary balloon the repo.
+  6. **At swap:** `nbData.json` `local_path` → `s3_path`; `git rm scripts/faostat_temp/*.R data/shared/faostat_production_temp.parquet`; verify [[CR-063]] still renders against the real parquet.
+- **dependencies:** None — Claude Code session 2 can ship this without external sign-off. **[[CR-063]] depends on this (or [[CR-064]]).**
+- **discovered:** 2026-05-14, chat-mode review.
+- **STATUS:** Open, ready to start. Lowest-friction unblock for [[CR-063]].
+- **before-string:** n/a (new scaffold).
 
 ---
 
@@ -981,10 +1146,23 @@ Ordered by Pete's stated priorities. Each PR is independent; do not block any on
 | **I** | `feat/cr-internal-labels` | CR-017 | ✓ Done in `0c27624` — SSP labels = IPCC canonical (Q6). | M |
 | **J** | `feat/cr-i18n-french` | CR-021 | 🔄 Partial — most existing FR keys filled in; new methods/SPEI/uncertainty keys still EN-only in `0c27624`. Pete review pending. | S × 5 |
 | **K** | `chore/cr-url-and-year-cleanup` | CR-023, CR-024 | ✓ Done in `0c27624`. | S |
+| **L** | `feat/cr-recent-changes-uncertainty-band` | CR-061 | Not started. Notebook-only; unblocked. Once [[CR-060]] lands, swap `mean ± sd_anomaly` → `q17 / q83`. | S |
+| **M** | `chore/cr-relocate-handover-and-claude-md` | CR-066 | Not started. Mechanical `git mv` + new `notebooks/climateRationale/CLAUDE.md` + `.DS_Store` `.gitignore`. Unblocked. | S |
+| **N** | `feat/cr-production-trends` | CR-062, CR-063, CR-065 | Not started. CR-065 (interim FAOSTAT scaffold) ships first, then CR-063 (notebook section) builds against it; CR-062 (observational view) **BLOCKED** on upstream parquet — ship skeleton + help-callout copy only this PR. | M |
+
+### Upstream pipeline work — not notebook (no notebook PR until landed)
+
+These items live in the `hazards_prototype` repo (or the analogous FAOSTAT pre-fetch pipeline) and are owned by the pipeline maintainer (Brayden et al.). Tracked here so the notebook-side follow-ups don't lose sight of them. Each one is a one-line swap on the notebook side once the parquet lands.
+
+| # | Issue | Notebook follow-up | Status | Effort |
+|---|---|---|---|---|
+| **U-1** | [[CR-059]] — SPEI replaces raw-precip z-score for PTOT extreme-event classification | `bars_extremeEvents` reads SPEI for PTOT slice once schema lands | Open. Bundle with U-2 / U-3 in a single re-bake. | M (pipeline) |
+| **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | Open. Notebook ribbon swap is a follow-up once this lands. | M (pipeline) |
+| **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `data/shared/faostat_production.parquet` | PR-N (CR-063) swaps `local_path` → `s3_path` and `git rm`s CR-065 scaffold. | Open. CR-063 depends on this or CR-065 (interim). | M (pipeline) |
 
 Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
 
-**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → E → J → C (when unblocked) → K.
+**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → E → J → C (when unblocked) → K → N (after CR-065 scaffold lands, or CR-064 if that arrives first). U-1 / U-2 / U-3 are pipeline-side and land out-of-band; notebook-side follow-up swaps are cheap and can ride into the next maintenance PR after each parquet bake.
 
 ---
 
