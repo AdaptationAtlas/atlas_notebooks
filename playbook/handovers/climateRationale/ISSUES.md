@@ -607,6 +607,14 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   5. Columns mirror Togo Table 5 exactly: Region, Main climate hazards, then one (USD, %) pair per (scenario × commodity).
   6. **Document the dominant-hazard rule in the table caption** so reviewers know how the "Main climate hazards" column was derived.
 - **note for Claude Code:** This is the single biggest feature ask in this PR set. Likely 1–2 days of work. **Suggest a working preview deploy before merging** so Pete can compare side-by-side with Togo Table 5.
+- **scope (Pete, 2026-05-14):** Phase 1 is the **value table** (Togo Table 5 — USD exposed VoP + %). The **area table** (Togo Table 6 — hectares exposed + %) is a natural Phase 2 extension: same pivot, swap `value` USD for the hectares column from the same parquet. Land Phase 1 first; Phase 2 follows once the table component is settled.
+- **Phase 1 scoping decisions (Pete, 2026-05-14):**
+  - **Row shape:** one row per (admin1 × hazard) — Togo-like. Each admin1 can appear multiple times, once per distinct dominant-hazard combo that wins at least one (scenario × crop) cell. Cells show *that specific hazard's* exposed VoP, not the dominant value. Matches Togo Table 5 exactly (Kara appears twice — Heat only + Dry and Heat).
+  - **% denominator:** total regional VoP per crop, sourced from the existing `exposure` dataset filtered to `(iso3, admin1_name, crop)`. The commented-out `exposureMap` seam at line ~1597 of `notebook.qmd` was scaffolded for exactly this; uncomment + wire.
+  - **Crops shown by default:** respect the existing `prod_type` admin0 selector already in the Hazard Exposure section. If `prod_type === null` ("All Commodities"), table can grow wide — add horizontal scroll. Consistent with how `stackbars_hazardExposure` already responds to that control.
+  - **Rendering:** first attempt via `dataTable` (Observable `Inputs.table`) with custom `format` callbacks producing `"$1.2M (5.1%)"` cells. If `Inputs.table` can't cleanly handle the dual-format, fall back to a hand-rolled compact HTML `<table>`.
+  - **Download:** `downloadButton(hazardExposure_summaryTable_longform, "hazard-exposure-summary")` for the long-form schema `{iso3, admin1_name, scenario, crop, hazard, value, regional_vop, pct_of_regional_vop}`.
+- **STATUS:** 🔄 **Phase 1 attempted 2026-05-14 and rolled back. BLOCKED on [[CR-068]]** (upstream `hazard_exposure` parquet needs an explicit "no hazard" / unexposed row before the % denominator is self-contained). The Phase 1 attempt computed the % denominator by cross-joining with the `exposure` parquet, which works arithmetically but fails the "audit in one table" property Pete needs: a reader can't see the 100 % reference next to the exposed slice. All Phase 1 code (the data cell, the figure cell, the section markup, the nbText.json keys) was reverted from the working tree the same day. **Scoping decisions above remain valid** — they're the right shape for when CR-049 resumes after [[CR-068]] lands; the only change at resume time is that the denominator query reads `value(hazard='any') + value(hazard='none')` from `hazard_exposure` itself instead of joining to `exposure`.
 
 ### CR-026 — Overview section should link to GCF guidance
 
@@ -1095,6 +1103,33 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   }
   ```
 
+### CR-068 — `hazard_exposure` parquet missing "no hazard" / unexposed row [NEW 2026-05-14]
+
+- **id:** CR-068
+- **title:** Bake an explicit `hazard = "none"` / unexposed row into the `hazard_exposure` parquet per (admin1, scenario, period, crop) so any "share of VoP exposed" denominator is self-contained inside one table
+- **type:** methods / pipeline / data-shape
+- **severity:** med — **blocks [[CR-049]] Phase 1** (Togo-style summary table) and any other downstream consumer that wants to compute "X % of crop production is exposed to hazard Y"
+- **where:** Upstream — `hazards_prototype` (or whichever pipeline produces the `hazard_exposure` parquet at `s3://digital-atlas/.../hazard_exposure/*.parquet`). Notebook downstream surface: `hazardExposure_plotData` SQL (notebook.qmd ~line 1570); affects [[CR-049]] and any other section that wants to compute share-of-production-exposed.
+- **why-this-matters:** The current `hazard_exposure` parquet ships rows for specific hazard combinations (`wet`, `dry`, `heat`, `dry+heat`, `dry+wet`, `heat+wet`, `heat+wet+dry`) plus an `any` row (sum across the specifics). It does NOT ship a row for "production that is not exposed to any hazard." That means the share-of-VoP-exposed denominator can't be computed from `hazard_exposure` alone — it has to come from a different table (`exposure`, joined on `(iso3, admin1, crop)`). The cross-table approach is fragile in three ways:
+  1. The two parquets are produced by different pipeline steps; coverage may diverge (e.g. a crop in `exposure` that isn't in `hazard_exposure`, or vice versa).
+  2. Unit / vintage alignment isn't guaranteed (`exposure` ships nominal-usd-2021 from MapSPAM 2020; `hazard_exposure` ships its own VoP with its own filter chain).
+  3. Auditability: a proposal writer reading "5.1 % exposed" can't see, in the same table, what the 100 % denominator is.
+  
+  Surfaced during the [[CR-049]] Phase 1 build attempt on 2026-05-14 — Pete: *"if 'no hazard' is not present in the table then you are unable to calculate the % exposure."* The Phase 1 code (which used the cross-table approach) was rolled back; CR-049 is now blocked on this fix.
+- **proposed-change:**
+  1. **Upstream pipeline:** for every (`iso3`, `admin1_name`, `scenario`, `timeframe`, `crop`) cell, emit one synthetic `hazard = "none"` (or `"unexposed"`) row whose `value` = total regional VoP for that (admin1, crop) − value of the `any`-hazard row for the same cell. Same units (nominal-usd-2021), same `hazard_vars` partition or a dedicated `hazard_vars = "none"` sentinel.
+  2. **Audit constraint (worth asserting in the pipeline tests):** for every cell, `value(hazard="any") + value(hazard="none") = total_VoP(admin1, crop)`. Pipeline should fail the bake if this identity breaks beyond rounding tolerance.
+  3. **Notebook follow-up ([[CR-049]]):** drop the cross-table denominator entirely. Compute `%` purely from `hazard_exposure` rows:
+     ```
+     pct = value(this_hazard) / (value(hazard='any') + value(hazard='none'))
+         = value(this_hazard) / total_regional_VoP_in_table
+     ```
+     Self-contained; the denominator is visible in the same table as the numerator.
+- **dependencies:** Brayden / `hazards_prototype` maintainer. Bundle with [[CR-059]] (SPEI), [[CR-060]] (AR6 quantiles), [[CR-064]] (FAOSTAT on S3) in a single hazard-parquet re-bake if possible — that's four pipeline tickets that all want a coordinated bake.
+- **discovered:** 2026-05-14 during the [[CR-049]] Phase 1 build attempt. Pete flagged the issue when reviewing the table draft; the Phase 1 code was rolled back the same day.
+- **STATUS:** Open. Pipeline-side. **Blocks [[CR-049]]** Phase 1 and Phase 2.
+- **before-string:** n/a (schema + aggregation change).
+
 ---
 
 **Upstream pipeline work — not notebook.** The tickets below are pipeline-side (typically the `hazards_prototype` repo, or the analogous FAOSTAT pre-fetch pipeline) and require a coordinated re-bake of the parquet data on S3. They are owned by the pipeline maintainer, not by Claude Code's notebook work. Listed here for traceability so they don't fall through the cracks; each one has a notebook-side follow-up that becomes a one-line swap once the parquet lands.
@@ -1191,7 +1226,7 @@ Ordered by Pete's stated priorities. Each PR is independent; do not block any on
 | **B** | `feat/cr-methods-sources-and-attribution` | CR-013, CR-014, CR-015, CR-039, CR-040, CR-041, CR-044, CR-050, CR-051, CR-031, CR-032, **CR-053** | ✓ Done in `0c27624` (CR-040 GCM count and CR-014 description drafts still want Brayden's eyes for correctness). | L |
 | **C** | `feat/cr-global-admin-selector` | CR-034 | ✓ Done in `0c27624` — Pete bypassed the Brayden block; option (a) single global selector applied. Surface to Brayden for review. | M |
 | **D** | `feat/cr-key-facts-downloads` | CR-027, CR-028, CR-029 | ✓ Done in `0c27624`. | S |
-| **E** | `feat/cr-hazard-exposure-summary-table` | CR-049 | Not started. Dominant-hazard rule resolved (Q3). **Pete priority #6.** **Land a working preview before merging** so Pete can compare to Togo Table 5. | L |
+| **E** | `feat/cr-hazard-exposure-summary-table` | CR-049 | 🔄 Phase 1 attempted 2026-05-14, rolled back. **BLOCKED on [[CR-068]]** (upstream `hazard_exposure` needs an explicit "no hazard" row so the % denominator is self-contained). Phase 1 scoping locked in CR-049; resume after CR-068 lands. **Pete priority #6.** | L |
 | **F** | `fix/cr-plot-layout` | CR-035, CR-042, CR-019, CR-045, CR-046 | ✓ Done in `0c27624`. | M |
 | **G** | `feat/cr-loading-feedback` | CR-052 | ✓ Done in `0c27624`. | S |
 | **H** | `fix/cr-typos-captions-scope` | CR-004, CR-005, CR-006, CR-007, CR-010, CR-011, CR-012, CR-018, CR-020, CR-025a, CR-033, CR-026 | ✓ Done in `0c27624`. | S |
@@ -1212,10 +1247,11 @@ These items live in the `hazards_prototype` repo (or the analogous FAOSTAT pre-f
 | **U-1** | [[CR-059]] — SPEI replaces raw-precip z-score for PTOT extreme-event classification | `bars_extremeEvents` reads SPEI for PTOT slice once schema lands | Open. Bundle with U-2 / U-3 in a single re-bake. | M (pipeline) |
 | **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | Open. Notebook ribbon swap is a follow-up once this lands. | M (pipeline) |
 | **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `s3://digital-atlas/.../faostat_production.parquet` | PR-N (CR-063) consumes the S3 path directly. | Open. **Sole unblock for [[CR-063]]** as of 2026-05-14 (the interim [[CR-065]] scaffold was attempted and abandoned). | M (pipeline) |
+| **U-4** | [[CR-068]] — `hazard_exposure` parquet adds `hazard = "none"` / unexposed row per cell | PR-E (CR-049) Phase 1 drops the cross-table join and reads the denominator directly from `hazard_exposure`. | Open. **Sole unblock for [[CR-049]]** Phase 1; Phase 1 attempted 2026-05-14 and rolled back when the cross-table denominator turned out to be unauditable. | M (pipeline) |
 
 Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
 
-**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → E → J → C (when unblocked) → K → N (strictly after [[CR-064]] lands; the CR-065 interim path is dead). O is low-urgency — fold in whenever someone needs `local_path` again. U-1 / U-2 / U-3 are pipeline-side and land out-of-band; notebook-side follow-up swaps are cheap and can ride into the next maintenance PR after each parquet bake.
+**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → J → C (when unblocked) → K → E (strictly after [[CR-068]] lands) → N (strictly after [[CR-064]] lands; the CR-065 interim path is dead). O is low-urgency — fold in whenever someone needs `local_path` again. U-1 / U-2 / U-3 / U-4 are pipeline-side and land out-of-band; notebook-side follow-up swaps are cheap and can ride into the next maintenance PR after each parquet bake. **Suggested upstream-bake bundle:** ask Brayden / `hazards_prototype` maintainer to take U-1 (SPEI), U-2 (AR6 quantiles), U-3 (FAOSTAT-on-S3), and U-4 (no-hazard row) in a single coordinated re-bake — four pipeline tickets, one bake, four downstream PRs unblocked.
 
 ---
 
