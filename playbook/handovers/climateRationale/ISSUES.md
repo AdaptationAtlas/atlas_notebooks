@@ -1156,9 +1156,9 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   2. **Notebook integration:** add a new collapsible `<details>` block in the Methods H1's "Climate data and variables" sub-section (or as a separate H2 sibling). Render as a small table of (model, institution, country, ECS) so a reader can expand-and-skim without leaving the page. Keep it foldable so the methods narrative stays compact by default.
   3. **Caption nudge:** wherever a plot caption says "18 GCMs", add a tooltip-link "(see Methods → ensemble list)" — minimal change to existing captions.
   4. **i18n:** model names are international identifiers (e.g. `ACCESS-CM2`); institution names need FR translation only if there's an official French form (most don't — leave EN). Add the EN copy now, FR stubs roll into PR-J.
-- **dependencies:** Brayden / `hazards_prototype` maintainer to confirm the model list. Notebook-side wiring is straightforward once the list lands.
+- **dependencies:** ~~Brayden / `hazards_prototype` maintainer to confirm the model list~~ — the list is already embedded in the parquet itself via a `models` column (comma-separated string per row). Probed directly 2026-05-15.
 - **discovered:** 2026-05-15, chat-mode review — Pete: "we need to list the GCMs in the ensemble."
-- **STATUS:** Open. Notebook-side once the model list is supplied (or compiled from the pipeline source). No urgency, but blocks any reviewer who wants to audit the ensemble composition.
+- **STATUS:** ✓ FIXED 2026-05-15 — read the 18 GCMs out of the parquet's `models` column and added them as a paragraph in `general.methods.climateData.text` (EN + FR). The list: ACCESS-CM2, ACCESS-ESM1-5, CanESM5, CMCC-ESM2, EC-Earth3, EC-Earth3-Veg-LR, GFDL-ESM4, INM-CM4-8, INM-CM5-0, IPSL-CM6A-LR, KACE-1-0-G, MIROC6, MPI-ESM1-2-HR, MPI-ESM1-2-LR, MRI-ESM2-0, NorESM2-LM, NorESM2-MM, TaiESM1. Methods text also explicitly notes that the `models` column makes the composition auditable from the data itself. **Phase B note (deferred):** the original ticket also proposed a foldable table with institution / country / ECS columns — useful but no urgency, opens later when someone wants the full reviewer-facing detail.
 - **before-string:** *(new content; current placeholder is the "18 CMIP6 GCMs" mention in `data/climateRationale/nbText.json` `general.methods.climateData.text`)*
 
 ---
