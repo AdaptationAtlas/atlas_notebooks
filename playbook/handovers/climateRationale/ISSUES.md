@@ -942,16 +942,62 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 - **severity:** med (perceived-broken; Pete observed the spinner persisting "long after the rest of the notebook has loaded")
 - **where:** `notebooks/climateRationale/notebook.qmd` · the `proj_plotData` and `extremeEvents_plotData` cells; underlying parquet pulls under `s3://digital-atlas/.../` for projections and extremes.
 - **what-users-see:** After the rest of the notebook renders, Future Projections and Extreme Events plots show the spinner for tens of seconds. Eventually they resolve. Confirmed not a bug — the data arrives — but the wait is long enough that users assume the plot has crashed.
-- **why-this-is-slow:** Multiple compounding factors:
-  - Projections / extremes parquets are ~100MB+ each (multi-GCM × scenario × period × admin1 grain).
-  - DuckDB-WASM pulls them over HTTP, parses on the main thread, and runs `parquet_scan` with `hive_partitioning` per query.
-  - Each selector change re-fires the query (no in-memory cache layer for the already-materialised admin0+admin1 subset).
+
+#### Measured data (probed 2026-05-15)
+
+**S3 parquet sizes:**
+
+| Parquet | Size | Notes |
+|---|---|---|
+| `period=1995-2014` | 23.1 MB | Historical — 1 scenario only |
+| `period=2021-2040` | 96.4 MB | 4 SSP scenarios |
+| `period=2041-2060` | 98.8 MB | |
+| `period=2061-2080` | 100.9 MB | |
+| `period=2081-2100` | 102.6 MB | |
+| **Total Future S3 footprint** | **~399 MB** | across 4 parquets |
+
+**Per-query fetch behaviour:** predicate pushdown on `iso3` + `scenario` DOES work — DuckDB-WASM pulls only **5–30 MB** of byte-range slices per single-country query, not the full 100 MB parquet. CloudFront/S3 caches the ranges after first request. The 30-second spinner is the **first-fetch cost**; subsequent selector changes are near-instant within the same browser session.
+
+**Typical SQL result shape** for "Kenya, all admin1, annual season, period 2021–2040, SSP245+SSP585":
+
+| | |
+|---|---|
+| Rows | **17,640** |
+| Distinct admin1 | 48 (Kenya counties) |
+| Distinct hazards | 9 (TAVG / TMAX / PTOT / NTx35 / NTx40 / NDWS / NDWL0 / THI-max / HSH-max) |
+| Distinct years | 20 (2021–2040) |
+| Distinct scenarios | 2 |
+| Columns | 12 (`iso3, admin0_name, admin1_name, season, scenario, year, timeperiod, hazard, mean, mean_anomaly, sd, sd_anomaly`) |
+| Wire payload | ~1.6 MB raw; less after DuckDB-WASM columnar serialisation |
+
+**Worst-case shape:** "all 54 ISO3 × all admin1 × annual × 4 scenarios × 9 hazards" per period ≈ 666 × 4 × 9 × 20 = **480,000 rows**. The admin0 selector cap (`maxSelections: 2`) makes this unreachable in practice but useful for capacity planning.
+
+#### Client-side wastage (8 of 9 hazards dropped after fetch)
+
+Three layers of OJS work happen between SQL and plot — all client-side:
+
+1. **`withAdminName(resp)`** ([helpers/std.ojs](helpers/std.ojs)) — adds an `adminName` column shaped as `"Nairobi (KEN)"` for facet labels.
+2. **`futureProjections_plotData` cell** — filters the 9-hazard result down to **one** hazard via `.filter(d => d.hazard === climateVarSelect.id)`. The server doesn't pre-filter because the SAME dataset is reused downstream by `climateProjectionInsight` (the Quick Insight cell), which needs both TAVG and PTOT for its two-paragraph narrative. So we pull all 9 hazards over the wire to support 2 of them in the insight.
+3. **`timeseries_futureProjections()` figure cell**, on every render:
+   - `filterAdminToggle()` — honours the "Include national" toggle.
+   - Ribbon-bound compute on the fly: `ribbonUpper = mean_anomaly + sd_anomaly`, `ribbonLower = mean_anomaly − sd_anomaly` (no SQL aggregation — two arithmetic ops per row).
+   - Y-extent search via `d3.min` / `d3.max` on the ribbon bounds, extended to include the ±2σ "Extreme" threshold lines.
+   - `adminGridSplit()` — chunks admins into 3-wide rows so the multi-region facet wraps.
+   - Per-point z-score classification: `z = mean_anomaly / baselineStdByAdmin.get(adminName)`, mapped to `Normal` / `Unusual` / `Extreme` and used to size + symbol-code dots when the "Highlight extremes" toggle is on.
+   - Palette interpolation across scenarios from the user's palette choice.
+
+Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade trend slopes per scenario, and string-interpolates the `:::placeholder:::` templates from `nbText`.
+
+**Implication:** a server-side hazard filter could shrink the wire payload by ~7/9 (the 7 hazards never displayed for the user's current variable selection) — IF Quick Insight is restructured to make a separate small fetch for the TAVG + PTOT subset it actually needs. Trade-off: one extra round-trip vs ~80 % smaller plot-data fetch. Worth measuring before acting.
+
 - **proposed-change (options, in order of effort):**
-  1. **Cheap (already partly done by PR-G CR-052):** make sure the spinner stays visible until the data resolves, and add a brief "Future projections data may take 30–60s to load" hint above the section so the wait is expected rather than scary.
-  2. **Medium:** push more of the filter into the SQL (project only the columns the plot uses; pre-filter to the selected `iso3` + `admin1Names` before pulling rows into the client). Verify whether `parquet_scan` with predicate pushdown is already trimming partitions, or whether the partitioning scheme on S3 doesn't include `iso3`.
-  3. **Medium-large:** split the upstream parquet by `iso3` at the pipeline step (`hazards_prototype` repo) so each country pulls a fraction of the rows. This is the highest-leverage fix but requires a coordinated re-bake of the data.
-  4. **Large:** move parquet parsing to a Web Worker so the main thread stays interactive while DuckDB-WASM works.
-- **discovered:** 2026-05-13 during PR-K walkthrough — Pete reported the spinner stuck on Future Projections / Extreme Events sections long after the rest of the notebook had finished loading. Resolved itself; logged for perf follow-up.
+  1. **Cheap (already partly done by PR-G / CR-052) — set expectations.** Ensure the spinner stays visible until the data resolves, and add a "Future projections data may take 30–60s on first visit; subsequent selections are fast (cached)" hint above the section so the wait is expected rather than scary.
+  2. **Medium — server-side hazard filter.** Push the `.filter(d => d.hazard === climateVarSelect.id)` into the SQL `WHERE` clause. Refactor Quick Insight to make a separate small fetch for the TAVG + PTOT subset it actually needs. Estimated reduction: ~7/9 of the wire payload for the plot fetch (from ~1.6 MB → ~180 KB raw for Kenya × 2 scenarios). Notebook-only change; no pipeline work.
+  3. **Medium-large — partition the upstream parquet by `iso3` (HIGHEST LEVERAGE).** At the `hazards_prototype` pipeline step, write one parquet per `iso3` instead of one per period. Each country pulls a fraction of the rows. Estimated reduction: 96 MB period parquet → ~2 MB per-country parquet (96 / 54). First-fetch goes from 5–30 MB of byte ranges to a single ~2 MB whole file. **This is the fix that turns 30-second first loads into 1-second first loads.** Requires a coordinated re-bake.
+  4. **Large — Web Worker for parquet parsing.** Move DuckDB-WASM to a worker so the main thread stays interactive while parsing. Doesn't reduce fetch time; only improves perceived responsiveness during the parse phase.
+  5. **Medium-large — precompute summary statistics in a separate small parquet.** Pipeline-side. For each (`iso3` × `admin1` × `scenario` × `period` × `hazard`) tuple, precompute per-decade trend slope, mean over period, min/max anomaly, count of extreme years. Quick Insight reads from this tiny parquet instead of re-aggregating from the timeseries. Removes one heavy client-side compute loop.
+- **discovered:** 2026-05-13 during PR-K walkthrough — Pete reported the spinner stuck on Future Projections / Extreme Events sections long after the rest of the notebook had finished loading. Resolved itself; logged for perf follow-up. Measured data + client-side-wastage findings added 2026-05-15 from a live SQL probe.
+- **STATUS:** Open. Measured data added 2026-05-15 (Pete probed via Claude Code session). Lowest-effort fix is Option 1 (already partly shipped via CR-052). Highest-leverage fix is Option 3 (per-iso3 parquet partitioning) — sits in the upstream-bake bundle as a candidate addition (U-8 below). Decision pending: does `hazards_prototype` want to take on Option 3 alongside U-1 through U-7, or defer until users actively complain?
 - **before-string:** n/a (data layer, not a single line edit).
 
 ### CR-061 — Mirror ±1σ uncertainty band on Recent Changes plots [NEW 2026-05-14]
@@ -1279,10 +1325,11 @@ These items live in the `hazards_prototype` repo (or the analogous FAOSTAT pre-f
 | **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | Open. Notebook ribbon swap is a follow-up once this lands. | M (pipeline) |
 | **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `s3://digital-atlas/.../adm0_faostat.parquet` | PR-N ([[CR-063]]) consumes the S3 path directly via the `production_timeseries` nbData entry. | ✓ FIXED 2026-05-15 by Brayden — parquet published; PR-N Phase A landed against it the same day. | M (pipeline) |
 | **U-4** | [[CR-068]] — `hazard_exposure` parquet adds `hazard = "none"` / unexposed row per cell | PR-E (CR-049) Phase 1 drops the cross-table join and reads the denominator directly from `hazard_exposure`. | Open. **Sole unblock for [[CR-049]]** Phase 1; Phase 1 attempted 2026-05-14 and rolled back when the cross-table denominator turned out to be unauditable. | M (pipeline) |
+| **U-5 (optional)** | [[CR-058]] Option 3 — partition the projections + extremes parquet by `iso3` instead of (or in addition to) by `period` | First-fetch latency drops from ~30 s to ~1 s on the Future Projections + Extreme Events sections; nbData entries gain per-country `s3_paths`. | Open. **Optional** — Brayden can decline if the pipeline pass is already heavy; defer until users actively complain about latency. Measured 2026-05-15 as the highest-leverage perf fix (96 MB period parquet → ~2 MB per-country, 96 / 54). | M–L (pipeline) |
 
 Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
 
-**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → J → C (when unblocked) → K → E (strictly after [[CR-068]] lands) → **N Phase A landed 2026-05-15** (line / stacked bar / table; awaiting Phase B Quick Insights) → N Phase C (CR-062 observational view, blocked on its own upstream parquet). O is low-urgency — fold in whenever someone needs `local_path` again. U-3 ✓ FIXED 2026-05-15 (FAOSTAT-on-S3 landed); **remaining upstream-bake bundle for Brayden:** U-1 (SPEI / CR-059), U-2 (AR6 quantiles / CR-060), U-4 (no-hazard row / CR-068) — three pipeline tickets that can ride one coordinated re-bake to unblock PR-E and the AR6 caption swap.
+**Suggested landing order:** A (unblocked parts) → H → D → G → F → B → I → M → L → J → C (when unblocked) → K → E (strictly after [[CR-068]] lands) → **N Phase A landed 2026-05-15** (line / stacked bar / table; awaiting Phase B Quick Insights) → N Phase C (CR-062 observational view, blocked on its own upstream parquet). O is low-urgency — fold in whenever someone needs `local_path` again. U-3 ✓ FIXED 2026-05-15 (FAOSTAT-on-S3 landed); **remaining upstream-bake bundle for Brayden:** U-1 (SPEI / CR-059), U-2 (AR6 quantiles / CR-060), U-4 (no-hazard row / CR-068) — three pipeline tickets that can ride one coordinated re-bake to unblock PR-E and the AR6 caption swap. **U-5 is optional** — per-iso3 partitioning of the projections / extremes parquet from [[CR-058]]; highest-leverage latency fix but Brayden can decline if the pipeline pass is already heavy.
 
 ---
 
