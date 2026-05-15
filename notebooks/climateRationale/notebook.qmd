@@ -566,6 +566,13 @@ viewof highlightExtremes = Inputs.toggle({
 });
 ```
 
+```{ojs}
+viewof showRecentAnomaly = Inputs.toggle({
+  label: "Show as anomaly (vs 1995–2014)",
+  value: true,
+});
+```
+
 :::
 
 ```{ojs}
@@ -590,7 +597,7 @@ loaderDiv("plotRecentChanges");
 //| output: false
 {
   // Re-show loader when data-driving selectors change, so users see feedback while the next query runs.
-  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect];
+  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect, showRecentAnomaly, highlightExtremes, paletteRecent, viewRecentChanges];
   const div = document.getElementById("plotRecentChanges");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -706,6 +713,13 @@ viewof showFutureUncertainty = Inputs.toggle({
 });
 ```
 
+```{ojs}
+viewof showFutureAnomaly = Inputs.toggle({
+  label: "Show as anomaly (vs 1995–2014)",
+  value: true,
+});
+```
+
 :::
 
 ```{ojs}
@@ -715,7 +729,7 @@ loaderDiv("plotFutureProjections");
 ```{ojs}
 //| output: false
 {
-  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect, futurePeriodSelect, futureScenarioSelect, showFutureUncertainty, highlightExtremesFuture, paletteFuture, viewFutureChanges];
+  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect, futurePeriodSelect, futureScenarioSelect, showFutureUncertainty, showFutureAnomaly, highlightExtremesFuture, paletteFuture, viewFutureChanges];
   const div = document.getElementById("plotFutureProjections");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -1023,6 +1037,18 @@ gridFxTickFormat = (d) =>
 baselineStdByAdmin = d3.rollup(
   recentChanges_plotData,
   (v) => d3.deviation(v, (d) => d.mean),
+  (d) => d.adminName,
+);
+
+// Per-admin mean of the 1995–2014 baseline. Drawn as a dashed horizontal
+// reference line on the Future Projections plot when the anomaly toggle
+// is OFF (absolute values) — gives the reader a visual anchor for "where
+// the historical 20-year average sat" against the future projections.
+// When the anomaly toggle is ON the baseline is implicitly zero, so no
+// extra line is needed.
+baselineMeanByAdmin = d3.rollup(
+  recentChanges_plotData,
+  (v) => d3.mean(v, (d) => d.mean),
   (d) => d.adminName,
 );
 
@@ -3354,17 +3380,34 @@ barplot_recentChanges = () => {
   const _season = seasonSelect.season_string;
   const _variableName = _lang(climateVarSelect.name);
   const _variableAxis = _lang(climateVarSelect.labelAxis);
-  const _mainTitle = `${_variableName} (${_lang(general_translations.anomaly)}) — Season: ${_season}`;
+  const _showAnomaly = showRecentAnomaly;
+  const _anomalyText = _showAnomaly
+    ? ` (${_lang(general_translations.anomaly)})`
+    : "";
+  const _mainTitle = `${_variableName}${_anomalyText} — Season: ${_season}`;
+  const plotValue = _showAnomaly ? "mean_anomaly" : "mean";
   const _reverse = ["PTOT"].includes(climateVarSelect.id);
 
-  const absDataMax = Math.max(
-    Math.abs(d3.min(_data, (d) => d.mean_anomaly) ?? 0),
-    Math.abs(d3.max(_data, (d) => d.mean_anomaly) ?? 0),
-  );
-  // Expand y domain to fit the ±2σ threshold lines, so "extreme" levels
-  // are always visible even when the data itself doesn't reach them.
-  const maxStd2 = 2 * (d3.max([...baselineStdByAdmin.values()]) ?? 0);
-  const absMax = Math.max(absDataMax, maxStd2) * 1.05;
+  // Y-domain + color domain differ between framings:
+  //   anomaly → symmetric around zero, expanded to fit ±2σ threshold lines
+  //   absolute → actual data range, with a small buffer
+  const dataMin = d3.min(_data, (d) => d[plotValue]) ?? 0;
+  const dataMax = d3.max(_data, (d) => d[plotValue]) ?? 0;
+  let yDomain, colorDomain, colorType;
+  if (_showAnomaly) {
+    const absDataMax = Math.max(Math.abs(dataMin), Math.abs(dataMax));
+    const maxStd2 = 2 * (d3.max([...baselineStdByAdmin.values()]) ?? 0);
+    const absMax = Math.max(absDataMax, maxStd2) * 1.05;
+    yDomain = [-absMax, absMax];
+    colorDomain = [-absMax, absMax];
+    colorType = "diverging";
+  } else {
+    const span = dataMax - dataMin;
+    const buf = span * 0.05;
+    yDomain = [dataMin - buf, dataMax + buf];
+    colorDomain = [dataMin, dataMax];
+    colorType = "linear";
+  }
 
   const { chunks, cols } = adminGridSplit(_data);
 
@@ -3372,14 +3415,23 @@ barplot_recentChanges = () => {
   const renderRow = (rowAdmins, rowIdx, isFirst, isLast) => {
     const padded = padFxDomain(rowAdmins, cols, rowIdx);
     const rowData = _data.filter((d) => rowAdmins.includes(d.adminName));
-    const rowThresholds = buildThresholdRows(rowAdmins, _tails);
-    // Place labels only inside the rightmost admin facet. Both upper and
-    // lower thresholds are labelled for PTOT; only upper for high-only
-    // variables (handled by buildThresholdRows above).
+    // Threshold lines (±σ, ±2σ) are only meaningful in anomaly mode — in
+    // absolute mode the baseline-mean dashed line takes their place.
+    const rowThresholds = _showAnomaly
+      ? buildThresholdRows(rowAdmins, _tails)
+      : [];
     const lastAdmin = rowAdmins[rowAdmins.length - 1];
     const thresholdLabels = rowThresholds.filter(
       (t) => t.adminName === lastAdmin,
     );
+    // In absolute mode, draw a dashed 1995–2014 ensemble-mean per admin
+    // (same baselineMeanByAdmin used by Future Projections). In anomaly
+    // mode the baseline is implicitly the zero line drawn below.
+    const baselineRows = !_showAnomaly
+      ? rowAdmins
+          .map((a) => ({ adminName: a, y: baselineMeanByAdmin.get(a) }))
+          .filter((d) => d.y != null)
+      : [];
     return Plot.plot({
       width,
       height: 380,
@@ -3394,9 +3446,9 @@ barplot_recentChanges = () => {
         ticks: 5,
       },
       y: {
-        domain: [-absMax, absMax],
+        domain: yDomain,
         grid: true,
-        label: _variableAxis,
+        label: `${_variableAxis}${_anomalyText}`,
         tickFormat: yTickWithUnit,
       },
       fx: {
@@ -3407,24 +3459,24 @@ barplot_recentChanges = () => {
       facet: { data: rowData, x: "adminName", label: null },
       color: {
         scheme: paletteRecent,
-        type: "diverging",
+        type: colorType,
         reverse: _reverse,
-        domain: [-absMax, absMax],
+        domain: colorDomain,
         legend: isFirst,
-        label: `${_variableAxis} (${_lang(general_translations.anomaly)})`,
+        label: `${_variableAxis}${_anomalyText}`,
       },
       marks: [
         Plot.barY(rowData, {
           x: "year",
-          y: "mean_anomaly",
-          fill: "mean_anomaly",
+          y: plotValue,
+          fill: plotValue,
           channels: { Admin: "adminName" },
-          ...(highlightExtremes
+          ...(highlightExtremes && _showAnomaly
             ? {
                 stroke: (d) => {
                   const sd = baselineStdByAdmin.get(d.adminName);
                   if (!sd) return "transparent";
-                  const abs = Math.abs(d.mean_anomaly / sd);
+                  const abs = Math.abs(d[plotValue] / sd);
                   if (abs >= 2) return "#c00";
                   if (abs >= 1) return "#444";
                   return "transparent";
@@ -3443,7 +3495,14 @@ barplot_recentChanges = () => {
             },
           },
         }),
-        Plot.ruleY([0], { stroke: "black", strokeWidth: 1.5 }),
+        Plot.ruleY(_showAnomaly ? [0] : [], { stroke: "black", strokeWidth: 1.5 }),
+        Plot.ruleY(baselineRows, {
+          fx: "adminName",
+          y: "y",
+          stroke: "#444",
+          strokeDasharray: [5, 5],
+          strokeWidth: 0.9,
+        }),
         Plot.ruleY(highlightExtremes ? rowThresholds : [], {
           fx: "adminName",
           y: "y",
@@ -3467,14 +3526,25 @@ barplot_recentChanges = () => {
     });
   };
 
-  const caption = multiLineText(
-    [
-      "Historical annual values for 1995–2014 (20 years), by admin1 region. Bars show the anomaly from the 1995–2014 baseline mean.",
-      html`Enable <em>Highlight unusual / extreme</em> to show |z|=1 (grey) and |z|=2 (red) thresholds. See the <a href="#extremeEvents">Extreme Events</a> section for full definitions.`,
-      html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a> historical scenario (ensemble mean across 18 GCMs, r1i1p1f1, 1995–2014); processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
-    ],
-    "atlasFigCaption",
+  const captionLines = [
+    "Historical annual values for 1995–2014 (20 years), by admin1 region.",
+  ];
+  if (_showAnomaly) {
+    captionLines.push(
+      "Bars show the **anomaly** from the 1995–2014 baseline mean (the black zero line). Bars above zero indicate years warmer / wetter than the historical mean; bars below zero indicate the opposite. Toggle off *Show as anomaly* in the controls above to switch to absolute values.",
+    );
+    captionLines.push(
+      html`Enable <em>Highlight unusual / extreme</em> to overlay dashed |z|=1 (grey) and |z|=2 (red) thresholds. See the <a href="#extremeEvents">Extreme Events</a> section for full definitions.`,
+    );
+  } else {
+    captionLines.push(
+      "Bars show **absolute values** for the selected variable. The dashed grey horizontal line marks the **1995–2014 ensemble-mean baseline** for the same admin1, season, and variable — a visual anchor for inter-annual variability around the historical mean. Toggle on *Show as anomaly* in the controls above to re-express every year as a departure from this baseline (and surface the ±σ / ±2σ z-score threshold overlays).",
+    );
+  }
+  captionLines.push(
+    html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a> historical scenario (ensemble mean across 18 GCMs, r1i1p1f1, 1995–2014); processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
   );
+  const caption = multiLineText(captionLines, "atlasFigCaption");
 
   return html`<div>
     ${chunks.map((r, idx) =>
@@ -3493,7 +3563,7 @@ warmingStripes_recentChanges = () => {
   const _season = seasonSelect.season_string;
   const _variableName = _lang(climateVarSelect.name);
   const _variableAxis = _lang(climateVarSelect.labelAxis);
-  const _showAnomaly = true;
+  const _showAnomaly = showRecentAnomaly;
   const _anomalyText = _showAnomaly
     ? ` (${_lang(general_translations.anomaly)})`
     : "";
@@ -3516,6 +3586,10 @@ warmingStripes_recentChanges = () => {
     : yMinData - yBuffer;
   const yDomain = [yMin, yMax];
   const _reverse = ["PTOT"].includes(climateVarSelect.id);
+  // Color scheme matches the framing: diverging-on-zero in anomaly mode,
+  // sequential across the data range in absolute mode (which has no
+  // natural zero anchor for variables like TAVG).
+  const colorType = _showAnomaly ? "diverging" : "linear";
 
   const colorExtent = d3.extent(_data, (d) => d[plotValue]);
 
@@ -3532,6 +3606,14 @@ warmingStripes_recentChanges = () => {
     const thresholdLabels = rowThresholds.filter(
       (t) => t.adminName === lastAdmin,
     );
+    // In absolute mode, draw a dashed 1995–2014 ensemble-mean per admin
+    // (same baselineMeanByAdmin used by Future Projections). In anomaly
+    // mode the baseline is implicitly the zero line drawn below.
+    const baselineRows = !_showAnomaly
+      ? rowAdmins
+          .map((a) => ({ adminName: a, y: baselineMeanByAdmin.get(a) }))
+          .filter((d) => d.y != null)
+      : [];
     return Plot.plot({
       width,
       height: 360,
@@ -3559,8 +3641,9 @@ warmingStripes_recentChanges = () => {
       facet: { data: rowData, x: "adminName", label: null },
       color: {
         scheme: paletteRecent,
+        type: colorType,
         legend: isFirst,
-        label: _variableAxis,
+        label: `${_variableAxis}${_anomalyText}`,
         reverse: _reverse,
         domain: colorExtent,
       },
@@ -3579,6 +3662,13 @@ warmingStripes_recentChanges = () => {
         Plot.ruleY(_showAnomaly ? [0] : [], {
           strokeDasharray: [5],
           stroke: lineColor,
+        }),
+        Plot.ruleY(baselineRows, {
+          fx: "adminName",
+          y: "y",
+          stroke: "#444",
+          strokeDasharray: [5, 5],
+          strokeWidth: 0.9,
         }),
         Plot.ruleY(highlightExtremes ? rowThresholds : [], {
           fx: "adminName",
@@ -3659,14 +3749,25 @@ warmingStripes_recentChanges = () => {
     });
   };
 
-  const caption = multiLineText(
-    [
-      "Historical annual values for 1995–2014 (20 years), by admin1 region. Each stripe = one year; line traces the per-year ensemble mean.",
+  const wsCaptionLines = [
+    "Historical annual values for 1995–2014 (20 years), by admin1 region. Each stripe = one year; the overlaid line + dots trace the per-year ensemble mean.",
+  ];
+  if (_showAnomaly) {
+    wsCaptionLines.push(
+      "Stripes are coloured by **anomaly** relative to the 1995–2014 baseline. The dashed black zero line marks the baseline mean; warmer / wetter years sit above it, cooler / drier years below. Toggle off *Show as anomaly* in the controls above to switch to absolute values.",
+    );
+    wsCaptionLines.push(
       html`Dashed grey lines mark the |z| = 1 threshold (unusual); dashed red lines mark |z| = 2 (extreme). See the <a href="#extremeEvents">Extreme Events</a> section for full definitions.`,
-      html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a> historical scenario (ensemble mean across 18 GCMs, r1i1p1f1, 1995–2014); processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
-    ],
-    "atlasFigCaption",
+    );
+  } else {
+    wsCaptionLines.push(
+      "Stripes are coloured by **absolute value** for the selected variable. The dashed grey horizontal line marks the **1995–2014 ensemble-mean baseline** for the same admin1 region, season, and variable — a visual anchor for inter-annual variability around the historical mean. Toggle on *Show as anomaly* in the controls above to re-express every year as a departure from this baseline.",
+    );
+  }
+  wsCaptionLines.push(
+    html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a> historical scenario (ensemble mean across 18 GCMs, r1i1p1f1, 1995–2014); processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
   );
+  const caption = multiLineText(wsCaptionLines, "atlasFigCaption");
 
   return html`<div>
     ${chunks.map((r, idx) =>
@@ -3687,7 +3788,7 @@ timeseries_futureProjections = () => {
   const _season = seasonSelect.season_string;
   const _variableName = _lang(climateVarSelect.name);
   const _variableAxis = _lang(climateVarSelect.labelAxis);
-  const _showAnomaly = true;
+  const _showAnomaly = showFutureAnomaly;
   const _anomalyText = _showAnomaly
     ? ` (${_lang(general_translations.anomaly)})`
     : "";
@@ -3781,6 +3882,25 @@ timeseries_futureProjections = () => {
       },
       marks: [
         Plot.ruleY(_showAnomaly ? [0] : [], { strokeDasharray: [5] }),
+        // 1995–2014 baseline mean per admin — only when showing absolute
+        // values. Gives the reader a visual anchor for "where the recent
+        // past sat" so the future projections have a comparable reference.
+        // In anomaly mode the baseline is implicitly zero (the dashed zero
+        // line above), so this rule isn't needed.
+        Plot.ruleY(
+          !_showAnomaly
+            ? rowAdmins
+                .map((a) => ({ adminName: a, y: baselineMeanByAdmin.get(a) }))
+                .filter((d) => d.y != null)
+            : [],
+          {
+            fx: "adminName",
+            y: "y",
+            stroke: "#444",
+            strokeDasharray: [5, 5],
+            strokeWidth: 0.9,
+          },
+        ),
         Plot.ruleY(rowThresholds, {
           fx: "adminName",
           y: "y",
@@ -3868,15 +3988,26 @@ timeseries_futureProjections = () => {
     });
   };
 
-  const caption = multiLineText(
-    [
-      "Annual ensemble-mean values for the selected 20-year period (one year per dot), by admin1 region, under each chosen SSP scenario.",
-      "Line = mean across 18 NEX-GDDP-CMIP6 GCMs (r1i1p1f1 realization). Shaded ribbon = ensemble mean ± 1 standard deviation across the 18 models. Assuming an approximately-normal inter-model distribution, this band corresponds to the IPCC AR6 'likely' (17–83%) range. Anomalies are relative to the 1995–2014 baseline.",
+  const captionLines = [
+    "Annual ensemble-mean values for the selected 20-year period (one year per dot), by admin1 region, under each chosen SSP scenario.",
+    "Line = mean across 18 NEX-GDDP-CMIP6 GCMs (r1i1p1f1 realization). Shaded ribbon = ensemble mean ± 1 standard deviation across the 18 models. Assuming an approximately-normal inter-model distribution, this band corresponds to the IPCC AR6 'likely' (17–83%) range.",
+  ];
+  if (_showAnomaly) {
+    captionLines.push(
+      "Currently showing values as **anomalies** relative to the 1995–2014 historical baseline (the dashed zero line). Bars above zero indicate years warmer / wetter / more frequent than the historical mean; bars below zero indicate the opposite. Toggle off *Show as anomaly* in the controls above to switch to absolute values.",
+    );
+    captionLines.push(
       html`Enable <em>Highlight unusual / extreme</em> to overlay dashed |z| = 1 (grey) and |z| = 2 (red) thresholds from the historical baseline. See the <a href="#extremeEvents">Extreme Events</a> section for full definitions.`,
-      html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a>; processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
-    ],
-    "atlasFigCaption",
+    );
+  } else {
+    captionLines.push(
+      "Currently showing **absolute values** for the selected variable. The dashed grey horizontal line marks the **1995–2014 ensemble-mean baseline** for the same admin1 region, season, and variable — a visual anchor for how far each future projection sits from the recent historical average. Toggle on *Show as anomaly* in the controls above to re-express every year as a departure from this baseline (and surface the ±1 σ / ±2 σ z-score threshold overlays).",
+    );
+  }
+  captionLines.push(
+    html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a>; processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
   );
+  const caption = multiLineText(captionLines, "atlasFigCaption");
 
   return html`<div>
     ${chunks.map((r, idx) =>
