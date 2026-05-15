@@ -34,6 +34,132 @@ atlasTOC({
 });
 ```
 
+```{ojs}
+// Hidden state inputs backing the sidebar controls. Declared separately
+// from the visible inputs (which live inside the floating .atlas-toc
+// panel) so they can be referenced from anywhere via OJS reactivity.
+// Controls apply to every plot container in the notebook.
+viewof plotTextSize = Inputs.input(10);
+viewof plotTextBold = Inputs.input(false);
+viewof facetCols = Inputs.input(3);
+viewof includeAdmin0 = Inputs.input(false);
+```
+
+```{ojs}
+//| output: false
+// Inject the plot-text controls into the floating "In this notebook" TOC.
+// atlasTOC re-renders its container on every MutationObserver tick, so
+// we observe for a fresh .atlas-toc node and re-append the controls into
+// it whenever it's recreated. The inputs are bound to viewof
+// plotTextSize / plotTextBold so values flow through OJS reactivity.
+{
+  function injectPlotTextControls() {
+    const toc = document.querySelector(".atlas-toc");
+    if (!toc) return;
+    if (toc.querySelector(".atlas-toc-extras")) return;
+    const slider = Inputs.bind(
+      Inputs.range([8, 20], {
+        step: 1,
+        value: plotTextSize,
+        label: "Plot text size",
+      }),
+      viewof plotTextSize,
+    );
+    const boldToggle = Inputs.bind(
+      Inputs.toggle({
+        label: "Bold plot text",
+        value: plotTextBold,
+      }),
+      viewof plotTextBold,
+    );
+    const facetColsSelect = Inputs.bind(
+      Inputs.select([2, 3, 4], {
+        label: "Facet columns",
+        value: facetCols,
+      }),
+      viewof facetCols,
+    );
+    const includeAdmin0Toggle = Inputs.bind(
+      Inputs.toggle({
+        label: "Include national",
+        value: includeAdmin0,
+      }),
+      viewof includeAdmin0,
+    );
+    // CSS-only instant tooltip: ⓘ icon next to the label with a bubble
+    // that appears on hover via visibility/opacity (no ~1s native
+    // tooltip delay). Bubble opens to the LEFT of the icon because the
+    // sidebar sits at the right edge of the viewport.
+    function attachTooltip(inputEl, tipText) {
+      const lbl = inputEl.querySelector("label");
+      if (!lbl) return;
+      const wrap = html`<span class="cr-tooltip-wrap" style="position: relative; display: inline-block; margin-left: 4px;">
+        <span class="cr-tooltip-icon" aria-label="${tipText}" title="${tipText}" style="cursor: help; color: #2563eb; font-size: 1.05em;">ⓘ</span>
+        <span class="cr-tooltip-bubble" role="tooltip" style="
+          visibility: hidden; opacity: 0;
+          transition: opacity 0.08s ease-out;
+          position: absolute;
+          right: 130%; top: 50%; transform: translateY(-50%);
+          background: #1f2937; color: #fff;
+          padding: 8px 10px; border-radius: 4px;
+          font-size: 12px; line-height: 1.45;
+          width: 240px; max-width: 60vw;
+          z-index: 1050; pointer-events: none;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        ">${tipText}</span>
+      </span>`;
+      lbl.appendChild(wrap);
+    }
+    if (!document.getElementById("cr-tooltip-style")) {
+      const style = document.createElement("style");
+      style.id = "cr-tooltip-style";
+      style.textContent = `
+        .cr-tooltip-wrap:hover .cr-tooltip-bubble,
+        .cr-tooltip-wrap:focus-within .cr-tooltip-bubble {
+          visibility: visible; opacity: 1;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+    attachTooltip(
+      facetColsSelect,
+      "Number of admin1 panels per row in faceted plots. Higher = narrower individual panels; switch to 2 if labels get cramped, 4 if you want a denser grid.",
+    );
+    attachTooltip(
+      includeAdmin0Toggle,
+      "When ON, plots include country-level (admin0) values alongside any selected admin1 regions. When OFF (default), only the selected admin1 regions are shown.",
+    );
+    const wrapper = html`<div class="atlas-toc-extras">
+      <div class="atlas-toc-extras-heading">All plots</div>
+      ${slider}
+      ${boldToggle}
+      ${facetColsSelect}
+      ${includeAdmin0Toggle}
+    </div>`;
+    toc.appendChild(wrapper);
+  }
+  injectPlotTextControls();
+  const observer = new MutationObserver(() => injectPlotTextControls());
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+```
+
+```{ojs}
+//| output: false
+// Apply the slider + toggle values as CSS variables on the document
+// root. Every plot container ([id^="plot"]) inherits font-size and
+// font-weight from these variables via the rule in the global <style>
+// block.
+document.documentElement.style.setProperty(
+  "--plot-text-size",
+  `${plotTextSize}px`,
+);
+document.documentElement.style.setProperty(
+  "--plot-text-weight",
+  plotTextBold ? "700" : "400",
+);
+```
+
 ```{=html}
 <style>
   .atlasFigCaption {
@@ -51,6 +177,83 @@ atlasTOC({
      <br> sometimes inherits from the surrounding markdown body. */
   .atlasFigCaption + br + .atlasFigCaption {
     margin-top: 0;
+  }
+
+  /* Footer row sitting under each plot: optional download button on the
+     left, "About this plot" disclosure immediately to its right. Same
+     pattern across every chart section so the user always knows where
+     to find them. */
+  .plot-footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    margin: 0.25rem 0 0.75rem;
+  }
+  .plot-footer-row > .plot-caption-details {
+    margin: 0;
+    flex: 0 0 auto;
+  }
+  /* Inputs.button renders as a <form> with Observable's default grid
+     layout (label column + value column) plus a min-height. Strip all of
+     that so the bare <button> sits flush against the "About this plot"
+     disclosure on the right. */
+  .plot-footer-row > form {
+    display: block !important;
+    grid-template-columns: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    flex: 0 0 auto;
+    width: auto !important;
+  }
+  .plot-footer-row > form > label {
+    display: none !important;
+  }
+  .plot-footer-row > form > button {
+    margin: 0;
+  }
+
+  /* Plot text-size slider lives at the bottom of the floating
+     "In this notebook" TOC (.atlas-toc). The CSS variable below is read
+     by the SVG text rule and updated reactively by the slider. */
+  .atlas-toc-extras {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    font-size: 11px;
+  }
+  .atlas-toc-extras-heading {
+    font-size: 10px;
+    font-weight: 698;
+    text-transform: uppercase;
+    color: #331;
+    margin-bottom: 6px;
+  }
+  .atlas-toc-extras form {
+    font-size: 11px;
+    min-height: 0;
+  }
+  .atlas-toc-extras input[type="range"] {
+    width: 100%;
+  }
+
+  /* Slider- and toggle-controlled font-size and font-weight for every
+     plot container in the notebook. Targets both:
+       - SVG <text>/<tspan> (axis labels, tick labels, ramp legend text)
+       - HTML legend swatches (Plot's categorical color legend renders
+         labels as inline <span>s inside a [class*="-swatches"] wrapper)
+     Plot's default <text font-size="10"> attribute is overridden because
+     CSS wins over the SVG presentation attribute. */
+  [id^="plot"] text,
+  [id^="plot"] tspan {
+    font-size: var(--plot-text-size, 10px) !important;
+    font-weight: var(--plot-text-weight, 400) !important;
+  }
+  [id^="plot"] [class*="-swatches"],
+  [id^="plot"] [class*="-swatches"] span {
+    font-size: var(--plot-text-size, 10px) !important;
+    font-weight: var(--plot-text-weight, 400) !important;
   }
 
   /* Plot caption furled under a clickable summary. */
@@ -106,6 +309,41 @@ atlasTOC({
   }
   .controls-row .cell-output-display {
     margin: 0;
+  }
+
+  /* Variant: force an exact column count regardless of natural input
+     widths. Use .cols-3 to lay out 9 controls as 3 rows of 3 (Future
+     Projections) or 6 controls as 2 rows of 3 (Recent Changes). Each
+     Quarto cell becomes one grid item; long checkbox rows (e.g. the
+     scenario selector) compress to fit instead of wrapping to a new
+     visual line. */
+  .controls-row.cols-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem 1.5rem;
+    align-items: end;
+    margin: 0.5rem 0 0.75rem;
+  }
+  .controls-row.cols-3 > .cell,
+  .controls-row.cols-3 > .quarto-layout-cell,
+  .controls-row.cols-3 > div.sourceCode {
+    margin: 0;
+    min-width: 0;
+  }
+
+  /* Variant for a single full-width control (e.g. the commodities
+     multi-select checkbox grid). Drops the flex layout so the child form
+     spans the full row width, and lets the checkbox option grid wrap
+     naturally instead of being capped by Inputs.checkbox's default. */
+  .controls-row.full-width {
+    display: block;
+  }
+  .controls-row.full-width form {
+    width: 100%;
+    max-width: 100%;
+  }
+  .controls-row.full-width form > div {
+    max-width: 100%;
   }
 
   .global-admin-selectors {
@@ -175,49 +413,7 @@ atlasTOC({
 ```{ojs}
 globalA0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
 globalA1 = renderA1Multi({ maxSelections: 9 });
-viewof includeAdmin0 = {
-  const toggle = Inputs.toggle({
-    label: "Include national",
-    value: false,
-  });
-  // Native browser `title` tooltips have a ~1 s hover delay — Pete read
-  // that as the tooltip being broken. Replace with a CSS-only instant
-  // tooltip: a visible ⓘ icon with a bubble that pops up on :hover via
-  // visibility/opacity, no JS, no delay. Keep `title` as an a11y fallback
-  // for screen-readers and for users who hover-and-wait.
-  const tip = "When ON, plots include country-level (admin0) values alongside any selected admin1 regions. When OFF (default), only the selected admin1 regions are shown. Toggle ON when you want a national reference line, or when no admin1 regions are selected and you want to see country-level data anyway.";
-  const label = toggle.querySelector("label");
-  if (label) {
-    const wrap = html`<span class="cr-tooltip-wrap" style="position: relative; display: inline-block; margin-left: 4px;">
-      <span class="cr-tooltip-icon" aria-label="${tip}" title="${tip}" style="cursor: help; color: #2563eb; font-size: 1.05em;">ⓘ</span>
-      <span class="cr-tooltip-bubble" role="tooltip" style="
-        visibility: hidden; opacity: 0;
-        transition: opacity 0.08s ease-out;
-        position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%);
-        background: #1f2937; color: #fff;
-        padding: 8px 10px; border-radius: 4px;
-        font-size: 12px; line-height: 1.45;
-        width: 280px; max-width: 80vw;
-        z-index: 1050; pointer-events: none;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-      ">${tip}</span>
-    </span>`;
-    label.appendChild(wrap);
-    if (!document.getElementById("cr-tooltip-style")) {
-      const style = document.createElement("style");
-      style.id = "cr-tooltip-style";
-      style.textContent = `
-        .cr-tooltip-wrap:hover .cr-tooltip-bubble,
-        .cr-tooltip-wrap:focus-within .cr-tooltip-bubble {
-          visibility: visible; opacity: 1;
-        }
-      `;
-      document.head.appendChild(style);
-    }
-  }
-  return toggle;
-}
-inputTemplate()([globalA0, globalA1, viewof includeAdmin0]);
+inputTemplate()([globalA0, globalA1]);
 ```
 
 :::
@@ -278,7 +474,8 @@ captionDetails(
     <strong>Country Land Use by Sector.</strong> Data is based on ${landuse_plotData[0]?.year ?? "?"} values. Source: <a href="https://www.fao.org/faostat/">FAOSTAT</a>.<br>
     Atlas-hosted data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.
   </span>`,
-  "About these plots (poverty, GDP, land use)"
+  "About these plots (poverty, GDP, land use)",
+  downloadButton(keyFacts_combinedData, "keyFacts")
 );
 ```
 
@@ -328,8 +525,6 @@ keyFacts_combinedData = {
   return [...pov, ...gdp, ...lu];
 }
 ```
-
-`{ojs} downloadButton(keyFacts_combinedData, "keyFacts", "Download demographic + economic")`
 
 # `{ojs} heading_production` {#productionTrends}
 
@@ -418,7 +613,7 @@ viewof productionYearEnd = Inputs.range(
 
 :::
 
-::: {.controls-row}
+::: {.controls-row .full-width}
 
 ```{ojs}
 // Manual commodities multi-select. Defaults to the top-N (by current
@@ -451,13 +646,16 @@ loaderDiv("plotProductionTrends");
 //| output: false
 {
   renderToDiv("plotProductionTrends", () => {
-    if (viewProductionTrends === "table") return dataTable(productionTrends_data);
+    if (viewProductionTrends === "table") {
+      return html`<div>
+        ${dataTable(productionTrends_data)}
+        <div class="plot-footer-row">${downloadButton(productionTrends_data, "productionTrends")}</div>
+      </div>`;
+    }
     return chart_productionTrends();
   });
 }
 ```
-
-`{ojs} downloadButton(productionTrends_data, "productionTrends")`
 
 # `{ojs} heading_agProduction` {#agProduction}
 
@@ -521,8 +719,6 @@ html`<div id="insightCommodity"></div>`;
 renderToDiv("insightCommodity", () => createCountryInsights([exposureInsight]));
 ```
 
-`{ojs} downloadButton(exposure_plotData, "agProductionBySector", "Download production value by sector")`
-
 # `{ojs} heading3` {#recentChanges}
 
 <p class="below-h1-methods-link"><a href="#methods-climate-data">→ Methods and data sources for this section</a></p>
@@ -538,11 +734,27 @@ ${_lang(nbText.sections.recentChanges.help.anomaly)}
 </details>`;
 ```
 
+::: {.controls-row .cols-3}
+
 ```{ojs}
-climateForm();
+Inputs.bind(
+  Inputs.select(seasons, {
+    format: (d) => d.season_string,
+    label: _lang(general_translations.season),
+  }),
+  viewof seasonSelect,
+);
 ```
 
-::: {.controls-row}
+```{ojs}
+Inputs.bind(
+  Inputs.select(hazards_obj, {
+    format: (d) => _lang(d.name),
+    label: _lang(general_translations.climateVar),
+  }),
+  viewof climateVarSelect,
+);
+```
 
 ```{ojs}
 viewof viewRecentChanges = Inputs.select(
@@ -560,16 +772,16 @@ viewof paletteRecent = paletteSelector({ value: "BuRd", label: "Palette" });
 ```
 
 ```{ojs}
-viewof highlightExtremes = Inputs.toggle({
-  label: "Highlight unusual / extreme",
-  value: false,
+viewof showRecentAnomaly = Inputs.toggle({
+  label: "Show as anomaly (vs 1995–2014)",
+  value: true,
 });
 ```
 
 ```{ojs}
-viewof showRecentAnomaly = Inputs.toggle({
-  label: "Show as anomaly (vs 1995–2014)",
-  value: true,
+viewof highlightExtremes = Inputs.toggle({
+  label: "Highlight unusual / extreme",
+  value: false,
 });
 ```
 
@@ -614,36 +826,35 @@ loaderDiv("plotRecentChanges");
     if (viewRecentChanges === "warmingStripes") {
       return warmingStripes_recentChanges();
     }
-    return dataTable(recentChanges_plotData, {
-      format: {
-        year: (d) => d,
-      },
-      header: {
-        iso3: "ISO3",
-        admin0_name: "Country",
-        admin1_name: "Admin 1",
-        season: "Season",
-        year: "Year",
-        hazard: "Hazard",
-        mean: "Mean",
-        mean_anomaly: "Mean Anomaly",
-      },
-      columns: [
-        "iso3",
-        "admin0_name",
-        "admin1_name",
-        "season",
-        "year",
-        "hazard",
-        "mean",
-        "mean_anomaly",
-      ],
-    });
+    return html`<div>
+      ${dataTable(recentChanges_plotData, {
+        format: { year: (d) => d },
+        header: {
+          iso3: "ISO3",
+          admin0_name: "Country",
+          admin1_name: "Admin 1",
+          season: "Season",
+          year: "Year",
+          hazard: "Hazard",
+          mean: "Mean",
+          mean_anomaly: "Mean Anomaly",
+        },
+        columns: [
+          "iso3",
+          "admin0_name",
+          "admin1_name",
+          "season",
+          "year",
+          "hazard",
+          "mean",
+          "mean_anomaly",
+        ],
+      })}
+      <div class="plot-footer-row">${downloadButton(recentChanges_plotData, "recentChanges")}</div>
+    </div>`;
   });
 }
 ```
-
-`{ojs} downloadButton(recentChanges_plotData, "recentChanges")`
 
 ### `{ojs} _lang(nbText.general.quickInsight)`
 
@@ -680,12 +891,27 @@ ${_lang(nbText.sections.futureProjections.help.ssp)}
 </details>`;
 ```
 
+::: {.controls-row .cols-3}
+
 ```{ojs}
-climateForm();
-scenarioForm();
+Inputs.bind(
+  Inputs.select(seasons, {
+    format: (d) => d.season_string,
+    label: _lang(general_translations.season),
+  }),
+  viewof seasonSelect,
+);
 ```
 
-::: {.controls-row}
+```{ojs}
+Inputs.bind(
+  Inputs.select(hazards_obj, {
+    format: (d) => _lang(d.name),
+    label: _lang(general_translations.climateVar),
+  }),
+  viewof climateVarSelect,
+);
+```
 
 ```{ojs}
 viewof viewFutureChanges = Inputs.select(["plot", "table"], {
@@ -696,6 +922,24 @@ viewof viewFutureChanges = Inputs.select(["plot", "table"], {
 ```
 
 ```{ojs}
+Inputs.bind(
+  Inputs.select(futurePeriods, {
+    label: _lang(general_translations.timeperiod),
+  }),
+  viewof futurePeriodSelect,
+);
+```
+
+```{ojs}
+Inputs.bind(
+  Inputs.checkbox(scenarioNames, {
+    label: _lang(general_translations.scenario),
+  }),
+  viewof futureScenarioSelect,
+);
+```
+
+```{ojs}
 viewof paletteFuture = categoricalPaletteSelector({
   value: "Tableau10",
   label: "Palette",
@@ -703,23 +947,23 @@ viewof paletteFuture = categoricalPaletteSelector({
 ```
 
 ```{ojs}
-viewof highlightExtremesFuture = Inputs.toggle({
-  label: "Highlight unusual / extreme",
-  value: false,
+viewof showFutureAnomaly = Inputs.toggle({
+  label: "Show as anomaly (vs 1995–2014)",
+  value: true,
 });
 ```
 
 ```{ojs}
 viewof showFutureUncertainty = Inputs.toggle({
-  label: "Show ±1σ ribbon",
+  label: "Show ±1 SD ribbon",
   value: true,
 });
 ```
 
 ```{ojs}
-viewof showFutureAnomaly = Inputs.toggle({
-  label: "Show as anomaly (vs 1995–2014)",
-  value: true,
+viewof highlightExtremesFuture = Inputs.toggle({
+  label: "Highlight unusual / extreme",
+  value: false,
 });
 ```
 
@@ -746,12 +990,13 @@ loaderDiv("plotFutureProjections");
 {
   renderToDiv("plotFutureProjections", () => {
     if (viewFutureChanges === "plot") return timeseries_futureProjections();
-    return dataTable(futureProjections_plotData);
+    return html`<div>
+      ${dataTable(futureProjections_plotData)}
+      <div class="plot-footer-row">${downloadButton(futureProjections_plotData, "futureProjections")}</div>
+    </div>`;
   });
 }
 ```
-
-`{ojs} downloadButton(futureProjections_plotData, "futureProjections")`
 
 ### `{ojs} _lang(nbText.general.quickInsight)`
 
@@ -833,12 +1078,13 @@ loaderDiv("plotExtremeEvents");
 {
   renderToDiv("plotExtremeEvents", () => {
     if (viewExtremeEvents === "plot") return bars_extremeEvents();
-    return dataTable(extremeEvents_plotData);
+    return html`<div>
+      ${dataTable(extremeEvents_plotData)}
+      <div class="plot-footer-row">${downloadButton(extremeEvents_plotData, "extremeEvents")}</div>
+    </div>`;
   });
 }
 ```
-
-`{ojs} downloadButton(extremeEvents_plotData, "extremeEvents")`
 
 ### `{ojs} _lang(nbText.general.quickInsight)`
 
@@ -916,13 +1162,16 @@ loaderDiv("plotHazardExposure");
 //| output: false
 {
   renderToDiv("plotHazardExposure", () => {
-    if (viewHazardExposure === "table") return dataTable(hazardExposure_plotData);
+    if (viewHazardExposure === "table") {
+      return html`<div>
+        ${dataTable(hazardExposure_plotData)}
+        <div class="plot-footer-row">${downloadButton(hazardExposure_plotData, "hazardExposure")}</div>
+      </div>`;
+    }
     return stackbars_hazardExposure();
   });
 }
 ```
-
-`{ojs} downloadButton(hazardExposure_plotData, "hazardExposure")`
 
 # `{ojs} summary` {#summary}
 
@@ -1128,11 +1377,17 @@ noDataPlaceholder = () => html`
 // Wrap a plot caption in a <details> so it stays compact by default and
 // the user can expand it for full source / method text. Used by every
 // admin-faceted plot.
-captionDetails = (caption, summary = "About this plot") => html`
-  <details class="plot-caption-details">
-    <summary>${summary}</summary>
-    <div class="plot-caption-body">${caption}</div>
-  </details>
+// Renders the "About this plot" disclosure with an optional download
+// button on the same row (downloadBtn on the left, summary on the
+// right). See .plot-footer-row CSS for the layout.
+captionDetails = (caption, summary = "About this plot", downloadBtn = null) => html`
+  <div class="plot-footer-row">
+    ${downloadBtn ?? ""}
+    <details class="plot-caption-details">
+      <summary>${summary}</summary>
+      <div class="plot-caption-body">${caption}</div>
+    </details>
+  </div>
 `;
 
 // Map palette name -> d3 sequential interpolator. BuRd is RdBu reversed
@@ -2912,9 +3167,9 @@ exposureBars_keyFacts = function () {
     `;
   }
 
-  // Grid layout: up to 3 admin panels per row, wrap to additional rows.
-  // Each row is its own Plot.plot so heights stay bounded.
-  const cols = Math.min(3, new Set(_data.map((d) => d.adminName)).size);
+  // Grid layout: up to facetCols admin panels per row (sidebar-controlled),
+  // wrap to additional rows. Each row is its own Plot.plot so heights stay bounded.
+  const cols = Math.min(facetCols, new Set(_data.map((d) => d.adminName)).size);
   const allAdmins = [...new Set(_data.map((d) => d.adminName))];
   const rowChunks = [];
   for (let i = 0; i < allAdmins.length; i += cols) {
@@ -2940,10 +3195,14 @@ exposureBars_keyFacts = function () {
     return Plot.plot({
       width,
       height: 300,
-      marginLeft: 70,
+      // Wider left margin so long crop labels (e.g. "Sweet potatoes",
+      // "Sugar beets") fit on a single line without wrapping. Wrapped
+      // labels overlapped vertically when the plot text-size slider was
+      // increased.
+      marginLeft: 130,
       marginRight: 30,
       // Every row needs ~35px of top margin to render its fx facet labels
-      // (admin names, often two lines after wrapTickLabel).
+      // (admin names — kept on a single line via tickFormat below).
       marginTop: isFirst ? 55 : 35,
       marginBottom: isLast ? 40 : 18,
       subtitle: isFirst ? "Agricultural Production" : undefined,
@@ -2958,14 +3217,13 @@ exposureBars_keyFacts = function () {
 
       y: {
         label: null,
-        tickFormat: (d) => wrapTickLabel(_lang(cropTranslations[d])),
+        tickFormat: (d) => _lang(cropTranslations[d]),
       },
 
       fx: {
         domain: padded,
         label: null,
-        tickFormat: (d) =>
-          d.startsWith("__pad_") ? "" : wrapTickLabel(d, 14),
+        tickFormat: (d) => (d.startsWith("__pad_") ? "" : d),
       },
 
       facet: {
@@ -3022,7 +3280,7 @@ exposureBars_keyFacts = function () {
 
   return html`<div>
     ${rowChunks.map((r, idx) => renderRow(r, idx))}
-    ${captionDetails(caption)}
+    ${captionDetails(caption, undefined, downloadButton(exposure_plotData, "agProductionBySector"))}
   </div>`;
 };
 ```
@@ -3373,7 +3631,7 @@ chart_productionTrends = () => {
 
   return html`<div>
     ${plot}
-    ${captionDetails(caption)}
+    ${captionDetails(caption, undefined, downloadButton(productionTrends_data, "productionTrends"))}
   </div>`;
 };
 ```
@@ -3417,7 +3675,15 @@ barplot_recentChanges = () => {
     colorType = "linear";
   }
 
-  const { chunks, cols } = adminGridSplit(_data);
+  const { chunks, cols } = adminGridSplit(_data, facetCols);
+
+  // Explicit year ticks at multiples of 5 (or 10 on narrow 4-col grids)
+  // so band-scale labels don't overlap when the data spans many years.
+  // Plot's `ticks: N` hint is unreliable on band scales — it can fall
+  // back to labelling every band, which creates the smushed-text issue.
+  const _allYears = [...new Set(_data.map((d) => d.year))].sort((a, b) => a - b);
+  const _yearStep = cols >= 4 ? 10 : 5;
+  const _yearTicks = _allYears.filter((y) => y % _yearStep === 0);
 
   const _tails = climateVarSelect.tails ?? "both";
   const renderRow = (rowAdmins, rowIdx, isFirst, isLast) => {
@@ -3451,7 +3717,7 @@ barplot_recentChanges = () => {
       x: {
         label: isLast ? "Year" : null,
         tickFormat: (d) => `${d}`,
-        ticks: 4,
+        ticks: _yearTicks,
       },
       y: {
         domain: yDomain,
@@ -3559,7 +3825,7 @@ barplot_recentChanges = () => {
     ${chunks.map((r, idx) =>
       renderRow(r, idx, idx === 0, idx === chunks.length - 1),
     )}
-    ${captionDetails(caption)}
+    ${captionDetails(caption, undefined, downloadButton(recentChanges_plotData, "recentChanges"))}
   </div>`;
 };
 ```
@@ -3602,7 +3868,15 @@ warmingStripes_recentChanges = () => {
 
   const colorExtent = d3.extent(_data, (d) => d[plotValue]);
 
-  const { chunks, cols } = adminGridSplit(_data);
+  const { chunks, cols } = adminGridSplit(_data, facetCols);
+
+  // Explicit year ticks at multiples of 5 (or 10 on narrow 4-col grids)
+  // so band-scale labels don't overlap when the data spans many years.
+  // Plot's `ticks: N` hint is unreliable on band scales — it can fall
+  // back to labelling every band, which creates the smushed-text issue.
+  const _allYears = [...new Set(_data.map((d) => d.year))].sort((a, b) => a - b);
+  const _yearStep = cols >= 4 ? 10 : 5;
+  const _yearTicks = _allYears.filter((y) => y % _yearStep === 0);
 
   const _tails = climateVarSelect.tails ?? "both";
   const renderRow = (rowAdmins, rowIdx, isFirst, isLast) => {
@@ -3633,8 +3907,8 @@ warmingStripes_recentChanges = () => {
       title: isFirst ? _mainTitle : undefined,
       x: {
         label: isLast ? "Year" : null,
-        tickFormat: (d) => (Number(d) % 5 === 0 ? `${d}` : ""),
-        ticks: 5,
+        tickFormat: (d) => `${d}`,
+        ticks: _yearTicks,
         padding: 0,
       },
       y: {
@@ -3782,7 +4056,7 @@ warmingStripes_recentChanges = () => {
     ${chunks.map((r, idx) =>
       renderRow(r, idx, idx === 0, idx === chunks.length - 1),
     )}
-    ${captionDetails(caption)}
+    ${captionDetails(caption, undefined, downloadButton(recentChanges_plotData, "recentChanges"))}
   </div>`;
 };
 ```
@@ -3825,7 +4099,7 @@ timeseries_futureProjections = () => {
     Math.max(yDataMax, maxStd2 * 1.05),
   ];
 
-  const { chunks, cols } = adminGridSplit(_data);
+  const { chunks, cols } = adminGridSplit(_data, facetCols);
 
   const paletteColors =
     categoricalPaletteMap[paletteFuture] || categoricalPaletteMap.Tableau10;
@@ -4022,7 +4296,7 @@ timeseries_futureProjections = () => {
     ${chunks.map((r, idx) =>
       renderRow(r, idx, idx === 0, idx === chunks.length - 1),
     )}
-    ${captionDetails(caption)}
+    ${captionDetails(caption, undefined, downloadButton(futureProjections_plotData, "futureProjections"))}
   </div>`;
 };
 ```
@@ -4054,7 +4328,7 @@ bars_extremeEvents = () => {
   if (_data.length === 0) return noDataPlaceholder();
 
   const yMax = d3.max(_data, (d) => d.num_events) ?? 1;
-  const { chunks, cols } = adminGridSplit(_data);
+  const { chunks, cols } = adminGridSplit(_data, facetCols);
 
   const scenariosInData = [
     ...new Set(_data.map((d) => d.scenario)),
@@ -4181,7 +4455,7 @@ bars_extremeEvents = () => {
     ${chunks.map((r, idx) =>
       renderRow(r, idx, idx === 0, idx === chunks.length - 1),
     )}
-    ${captionDetails(caption)}
+    ${captionDetails(caption, undefined, downloadButton(extremeEvents_plotData, "extremeEvents"))}
   </div>`;
 };
 
@@ -4291,7 +4565,7 @@ stackbars_hazardExposure = () => {
   ];
   const cropsInData = [...new Set(dataForAggregation.map((d) => d.crop))];
 
-  const { chunks, cols } = adminGridSplit(dataForAggregation);
+  const { chunks, cols } = adminGridSplit(dataForAggregation, facetCols);
 
   const renderRow = (rowAdmins, rowIdx, isFirst, isLast) => {
     const padded = padFxDomain(rowAdmins, cols, rowIdx);
@@ -4301,7 +4575,9 @@ stackbars_hazardExposure = () => {
     return Plot.plot({
       width,
       height: 60 + scenariosInData.length * 150,
-      marginLeft: 80,
+      // Wider left margin so long crop labels fit on a single line
+      // without wrapping (matches the exposure plot above).
+      marginLeft: 140,
       marginRight: 80,
       marginTop: isFirst ? 70 : 35,
       marginBottom: isLast ? 50 : 18,
@@ -4332,7 +4608,7 @@ stackbars_hazardExposure = () => {
 
       y: {
         label: null,
-        tickFormat: (d) => wrapTickLabel(_lang(cropTranslations[d])),
+        tickFormat: (d) => _lang(cropTranslations[d]),
         domain: cropsInData,
       },
 
@@ -4410,7 +4686,7 @@ stackbars_hazardExposure = () => {
     ${chunks.map((r, idx) =>
       renderRow(r, idx, idx === 0, idx === chunks.length - 1),
     )}
-    ${captionDetails(caption)}
+    ${captionDetails(caption, undefined, downloadButton(hazardExposure_plotData, "hazardExposure"))}
   </div>`;
 };
 ```
