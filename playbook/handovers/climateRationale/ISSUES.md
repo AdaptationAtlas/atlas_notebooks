@@ -853,6 +853,7 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
   - **Split into per-section draft PRs** so Pete's review is bounded — suggested split: (i) keyFacts.quickInsight.*, (ii) recentChanges.quickInsight.*, (iii) futureProjections.quickInsight.* + new help.ssp + help.anomaly + help.zscore, (iv) extremeEvents.*, (v) summary + general.direction + general.acknowledgements.
   - **Each PR description:** include a side-by-side EN / proposed-FR diff per key so Pete reviews without context-switching to the JSON file.
   - Mark each PR `draft`. **Only merge after Pete-approval.**
+- **STATUS:** 🔄 **Drafted 2026-05-15** — AI-drafted FR for the 21 remaining gaps (12 methods narratives in `nbText.json`: intro, climateData, extremeEvents, hazardExposure, socioeconomic, production, caveats + their titles; 9 hazard-variable descriptions in `generalTranslations.json`: HSH, NDWL0, NDWS, NTx35, NTx40, PTOT, TAVG, THI-max, TMAX). Both files now show **100 % FR coverage** (`nbText.json` 62/62, `generalTranslations.json` 79/79). **Pete review pending** — drafted under the same style rules as the earlier AI pass: technical terms (TAVG, NDWS, SSP, MapSPAM, FAOSTAT, CHIRPS, etc.) preserved English; markdown links preserved exactly; formal-but-readable French for GCF audiences; "Banque mondiale" for World Bank, "GIEC" for IPCC where natural.
 
 ### CR-023 — Doubled-slash URLs for helpers/components on the live deploy
 
@@ -1261,7 +1262,7 @@ Ordered by Pete's stated priorities. Each PR is independent; do not block any on
 | **G** | `feat/cr-loading-feedback` | CR-052 | ✓ Done in `0c27624`. | S |
 | **H** | `fix/cr-typos-captions-scope` | CR-004, CR-005, CR-006, CR-007, CR-010, CR-011, CR-012, CR-018, CR-020, CR-025a, CR-033, CR-026 | ✓ Done in `0c27624`. | S |
 | **I** | `feat/cr-internal-labels` | CR-017 | ✓ Done in `0c27624` — SSP labels = IPCC canonical (Q6). | M |
-| **J** | `feat/cr-i18n-french` | CR-021 | 🔄 Partial — most existing FR keys filled in; new methods/SPEI/uncertainty keys still EN-only in `0c27624`. Pete review pending. | S × 5 |
+| **J** | `feat/cr-i18n-french` | CR-021 | 🔄 **100 % FR coverage drafted 2026-05-15** — 21-key AI pass closed the remaining gaps (12 methods narratives in `nbText.json` + 9 hazard-variable descriptions in `generalTranslations.json`). nbText.json 62/62, generalTranslations.json 79/79. Pete review pending — drafts ship in a single commit on `dev/climateRationale`; review and either approve or comment inline. | S × 1 |
 | **K** | `chore/cr-url-and-year-cleanup` | CR-023, CR-024 | ✓ Done in `0c27624`. | S |
 | **L** | `feat/cr-recent-changes-uncertainty-band` | CR-061 | Not started. Notebook-only; unblocked. Once [[CR-060]] lands, swap `mean ± sd_anomaly` → `q17 / q83`. | S |
 | **M** | `chore/cr-relocate-handover-and-claude-md` | CR-066 | Not started. Mechanical `git mv` + new `notebooks/climateRationale/CLAUDE.md` + `.DS_Store` `.gitignore`. Unblocked. | S |
