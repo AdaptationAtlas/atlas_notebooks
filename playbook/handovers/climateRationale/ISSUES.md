@@ -1209,6 +1209,36 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+### CR-070 — Focus-view as a third View Type on Future Projections [NEW 2026-05-15, ROLLED BACK]
+
+- **id:** CR-070
+- **title:** Add a "Focus view" option to the Future Projections View Type dropdown so the user can pin one SSP scenario as a thick smoothed line with ±1 SD ribbon, while the other scenarios drop to faint dashed reference lines. Avoids the readability problem on the existing Plot view where multiple overlapping ribbons obscure each other.
+- **type:** feature / visualisation
+- **severity:** med (UX-only — the Plot view still works, just gets visually crowded with all four scenarios + ribbons checked)
+- **where:** `notebooks/climateRationale/notebook.qmd` — `viewof viewFutureChanges` dropdown (currently `["plot", "table"]`); `timeseries_futureProjections()` function (~line 4223); the `renderToDiv("plotFutureProjections", ...)` branch (~line 1182). Strings: a new `sections.futureProjections.focusView` block in `data/climateRationale/nbText.json` with EN+FR for the new view-type label, the focus-scenario selector label, and a 6-paragraph "About this plot" caption.
+- **why-this-matters:** Pete: "the existing Plot view gets cluttered when 3–4 SSPs are checked at once — the ribbons stack and you can't tell which is which. A focus view that pins one scenario and dims the others is much easier to read." Particularly valuable when comparing one focal pathway (e.g. SSP3-7.0 for AGNES use cases) against the rest of the ensemble.
+- **proposed-change (the previous attempt, rolled back):**
+  1. Add `"focus"` to the View Type dropdown alongside `"plot"` and `"table"`. Custom format function — `general_translations.viewTypes` doesn't have a `focus` entry (it lives in `nbText` instead, since the label is notebook-specific).
+  2. Add `viewof focusScenarioFuture = Inputs.input("ssp370")` as a hidden state (default SSP3-7.0). Share one grid slot in the `.controls-row.cols-3` block with the existing `Show ±1 SD ribbon` toggle: a conditional cell renders the focus-scenario `Inputs.select` when `viewFutureChanges === "focus"`, otherwise the ribbon toggle.
+  3. New `focusView_futureProjections()` function: reuses `futureProjections_plotData`, computes an 11-year centred rolling mean per (admin × scenario) of the ensemble-mean column (`mean` or `mean_anomaly` depending on the anomaly toggle) and the SD column. Renders the focus scenario as a thick solid line + ribbon at ±1 SD around the smoothed mean (25 % alpha, focus-scenario colour). Other (checked) scenarios as faint dashed lines, no ribbon. Edge years where the rolling window cannot fully fill are OMITTED (clean visual, but on a 20-year period only 10 years survive — see "blocker B" below).
+  4. Branch the existing "About this plot" caption based on `viewFutureChanges` — new copy lives at `sections.futureProjections.focusView.caption.{intro, focusLine, ribbon, otherLines, reading, caveat}` (EN + AI-drafted FR).
+  5. Reuse the existing in-memory data — **no new DuckDB query**.
+- **what-went-wrong:** Implementation as above hung the plot on every render (Pete: "it is causing the plot to hang"). Root cause not yet diagnosed; the suspects:
+  - Plot.areaY with `y1`/`y2` accessors on a smoothed/filtered dataset may have been generating malformed area paths (some focus-scenario rows could have `null` smoothed values if the underlying `mean`/`sd` columns had nulls — the omit-partial-window filter was on window-length, not on null-presence).
+  - The d3.group two-level loop over a typical SSA admin1 result set (~5 admin1s × 4 scenarios × 20 years = ~400 rows) shouldn't cause an OJS reactive hang, but the grouped iteration may have interacted poorly with the loader/render race protections (CR-049-era loader-dep-array fix).
+  - The conditional grid-slot cell (Focus Scenario `Inputs.select` vs `Show ±1 SD ribbon` `Inputs.toggle`) re-evaluating on every `viewFutureChanges` change may have caused cascading re-renders that the existing reactive graph couldn't settle on.
+  - Rolling back was the right call; the diagnosis can be done leisurely without an unusable preview blocking other work.
+- **blockers / open questions before the next attempt:**
+  - **A. Scenario filter coupling (Pete-flagged):** the existing Scenario checkbox (`viewof futureScenarioSelect`) filters the DuckDB query, so if Pete unchecks SSP3-7.0 but picks it as the focus, the data doesn't include it and the focus line/ribbon silently disappear. Either (a) the focus-scenario dropdown should be dynamically constrained to currently-checked scenarios; (b) we add a warning placeholder when the focus scenario isn't in the data; or (c) we change the data fetch to always include all four scenarios (decouples filter from data; affects the existing Plot view too).
+  - **B. 20-year window vs 11-year smoothing:** the current SQL hard-filters `timeperiod = '${futurePeriodSelect}'`, so the in-memory data is exactly 20 years per period. With an 11-year centred rolling window, only 10 of those 20 years survive the omit-partial rule — the visible line is very short. This is exactly the "path b — investigate performance" item Pete already noted. To get a useful focus-view span (e.g. 2021–2080 = 60 years), the SQL needs to drop the `timeperiod` filter, which means roughly 4× more rows fetched. Performance impact on the existing Plot view (which currently shows one period at a time and benefits from the narrow result set) needs measuring before this lands. A reasonable budget: probe load time and render time for a 4-scenario, 5-admin, 80-year fetch and compare against the current 20-year fetch.
+  - **C. Hang diagnosis:** before re-implementing, isolate which of the three suspect mechanisms (Plot.areaY nulls / d3.group iteration / conditional grid-slot cell) actually caused the hang. The cleanest diagnostic is to add the focus function in a standalone branch with each suspect commented out one at a time.
+- **dependencies:** Blocker B depends on Pete's go-ahead to investigate the multi-period fetch (the "path b" follow-up he flagged on 2026-05-15). Blocker A is purely a UI design call. Blocker C is a code-side investigation.
+- **discovered:** 2026-05-15, chat-mode build attempt — Pete dispatched the feature, build hung the page, agreed to roll back and capture as a ticket pending the blockers above.
+- **STATUS:** ROLLED BACK 2026-05-15. Re-attempt requires (B) decided and (C) diagnosed; (A) can be decided either way at re-attempt time.
+- **before-string:** *(new feature; nothing to revert in the data)*
+
+---
+
 **Upstream pipeline work — not notebook.** The tickets below are pipeline-side (typically the `hazards_prototype` repo, or the analogous FAOSTAT pre-fetch pipeline) and require a coordinated re-bake of the parquet data on S3. They are owned by the pipeline maintainer, not by Claude Code's notebook work. Listed here for traceability so they don't fall through the cracks; each one has a notebook-side follow-up that becomes a one-line swap once the parquet lands.
 
 ---
