@@ -180,14 +180,41 @@ viewof includeAdmin0 = {
     label: "Include national",
     value: false,
   });
-  // Hover tooltip for the label so users discover what the toggle does
-  // without having to chase Methods. Applied to both the wrapping div and
-  // the inner <label> so the tooltip fires regardless of which element the
-  // mouse lands on.
+  // Native browser `title` tooltips have a ~1 s hover delay — Pete read
+  // that as the tooltip being broken. Replace with a CSS-only instant
+  // tooltip: a visible ⓘ icon with a bubble that pops up on :hover via
+  // visibility/opacity, no JS, no delay. Keep `title` as an a11y fallback
+  // for screen-readers and for users who hover-and-wait.
   const tip = "When ON, plots include country-level (admin0) values alongside any selected admin1 regions. When OFF (default), only the selected admin1 regions are shown. Toggle ON when you want a national reference line, or when no admin1 regions are selected and you want to see country-level data anyway.";
-  toggle.title = tip;
   const label = toggle.querySelector("label");
-  if (label) label.title = tip;
+  if (label) {
+    const wrap = html`<span class="cr-tooltip-wrap" style="position: relative; display: inline-block; margin-left: 4px;">
+      <span class="cr-tooltip-icon" aria-label="${tip}" title="${tip}" style="cursor: help; color: #2563eb; font-size: 1.05em;">ⓘ</span>
+      <span class="cr-tooltip-bubble" role="tooltip" style="
+        visibility: hidden; opacity: 0;
+        transition: opacity 0.08s ease-out;
+        position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%);
+        background: #1f2937; color: #fff;
+        padding: 8px 10px; border-radius: 4px;
+        font-size: 12px; line-height: 1.45;
+        width: 280px; max-width: 80vw;
+        z-index: 1050; pointer-events: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      ">${tip}</span>
+    </span>`;
+    label.appendChild(wrap);
+    if (!document.getElementById("cr-tooltip-style")) {
+      const style = document.createElement("style");
+      style.id = "cr-tooltip-style";
+      style.textContent = `
+        .cr-tooltip-wrap:hover .cr-tooltip-bubble,
+        .cr-tooltip-wrap:focus-within .cr-tooltip-bubble {
+          visibility: visible; opacity: 1;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+  }
   return toggle;
 }
 inputTemplate()([globalA0, globalA1, viewof includeAdmin0]);
@@ -812,18 +839,36 @@ renderToDiv("insightExtremeClimate", () => createCountryInsights([extremeEventsI
 
 `{ojs} _lang(nbText.sections.hazardExposure.introText)`
 
+::: {.alert .alert-info role="note" style="font-size: 0.92em;"}
+**Heads up — season selector does not apply here.** Hazard exposure aggregates across **the full calendar year of each year in the selected period** (not the season selected in earlier sections). The hazard occurrence is the NEX-GDDP-CMIP6 ensemble mean over all 12 months × all years in the timeframe (historical: 1995–2014, 20 years; future: each future period spans 20 years). Production values are MapSPAM 2020 (nominal 2021 US$, single snapshot).
+:::
+
 ```{ojs}
 scenarioForm();
+```
 
+::: {.controls-row}
+
+```{ojs}
 Inputs.bind(
   Inputs.select([null, ...Object.keys(exposure_groups)], {
-  format: (d) => d || "All Commodities",
+    format: (d) => d || "All Commodities",
     value: null,
     label: "Production Type",
-  }), 
+  }),
   viewof prod_type
 );
 ```
+
+```{ojs}
+viewof viewHazardExposure = Inputs.select(["plot", "table"], {
+  label: "View Type",
+  value: "plot",
+  format: (d) => _lang(general_translations.viewTypes[d]),
+});
+```
+
+:::
 
 ```{ojs}
 loaderDiv("plotHazardExposure");
@@ -832,7 +877,7 @@ loaderDiv("plotHazardExposure");
 ```{ojs}
 //| output: false
 {
-  [admin0Iso3, admin1Names, futurePeriodSelect, futureScenarioSelect, prod_type];
+  [admin0Iso3, admin1Names, futurePeriodSelect, futureScenarioSelect, prod_type, viewHazardExposure];
   const div = document.getElementById("plotHazardExposure");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -841,9 +886,14 @@ loaderDiv("plotHazardExposure");
 ```{ojs}
 //| output: false
 {
-  renderToDiv("plotHazardExposure", stackbars_hazardExposure);
+  renderToDiv("plotHazardExposure", () => {
+    if (viewHazardExposure === "table") return dataTable(hazardExposure_plotData);
+    return stackbars_hazardExposure();
+  });
 }
 ```
+
+`{ojs} downloadButton(hazardExposure_plotData, "hazardExposure")`
 
 # `{ojs} summary` {#summary}
 
@@ -914,6 +964,15 @@ md`${_lang(nbText.general.methods.caveats.text)}`;
     buildDatasetDescriptor(datasets.data);
 </script>
 ```
+
+<!-- Static refs so Quarto's resource scanner copies the navbar logos into
+     _site/images/ (NavbarAckLogos injects them via JS, which Quarto can't
+     discover at render time). Hidden visually; the real navbar copies are
+     injected by the OJS cell above. -->
+::: {style="display: none;"}
+![CGIAR Climate Action](/images/cgiar-climate-action.png){width=1}
+![Alliance Bioversity & CIAT](/images/alliance-bioversity-ciat.jpeg){width=1}
+:::
 
 ::: {.hidden}
 
@@ -1348,6 +1407,46 @@ function NavbarLangSelector(language_obj, masterLanguage) {
 }
 
 NavbarLangSelector(languages, masterLanguage)
+```
+
+```{ojs}
+// Inject the AoW1 / Alliance Bioversity-CIAT acknowledgement logos into
+// the right-hand side of the navbar so funder credit is visible on every
+// page-load without having to scroll to the Acknowledgements section.
+// Same pattern as NavbarLangSelector above — find the navbar end, insert
+// once, idempotent on re-runs. The two PNGs themselves are referenced via
+// a hidden markdown block further down the page so Quarto's resource
+// scanner copies them into _site/images/ (it can't see JS-injected DOM).
+function NavbarAckLogos() {
+  if (document.getElementById("nav-ack-logos")) return;
+  const navEnd = document.querySelector(".navbar-nav.ms-auto");
+  if (!navEnd) return;
+  const wrap = document.createElement("div");
+  wrap.id = "nav-ack-logos";
+  wrap.style.cssText =
+    "display: flex; gap: 14px; align-items: center; margin: 0 14px;";
+  wrap.innerHTML = `
+    <a href="https://www.cgiar.org/cgiar-research-portfolio-2025-2030/climate-action"
+       target="_blank" rel="noopener" title="CGIAR Climate Action (AoW1)"
+       style="display: inline-flex;">
+      <img src="/images/cgiar-climate-action.png"
+           alt="CGIAR Climate Action"
+           style="height: 44px; width: auto;"
+           onerror="this.style.display='none'">
+    </a>
+    <a href="https://alliancebioversityciat.org"
+       target="_blank" rel="noopener" title="Alliance of Bioversity International &amp; CIAT"
+       style="display: inline-flex;">
+      <img src="/images/alliance-bioversity-ciat.jpeg"
+           alt="Alliance of Bioversity International & CIAT"
+           style="height: 44px; width: auto;"
+           onerror="this.style.display='none'">
+    </a>
+  `;
+  navEnd.parentNode.insertBefore(wrap, navEnd);
+}
+
+NavbarAckLogos()
 ```
 
 
