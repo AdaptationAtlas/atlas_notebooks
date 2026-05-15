@@ -175,10 +175,21 @@ atlasTOC({
 ```{ojs}
 globalA0 = renderA0Multi({ maxSelections: 2, requireAtLeastOne: true });
 globalA1 = renderA1Multi({ maxSelections: 9 });
-viewof includeAdmin0 = Inputs.toggle({
-  label: "Include national",
-  value: false,
-});
+viewof includeAdmin0 = {
+  const toggle = Inputs.toggle({
+    label: "Include national",
+    value: false,
+  });
+  // Hover tooltip for the label so users discover what the toggle does
+  // without having to chase Methods. Applied to both the wrapping div and
+  // the inner <label> so the tooltip fires regardless of which element the
+  // mouse lands on.
+  const tip = "When ON, plots include country-level (admin0) values alongside any selected admin1 regions. When OFF (default), only the selected admin1 regions are shown. Toggle ON when you want a national reference line, or when no admin1 regions are selected and you want to see country-level data anyway.";
+  toggle.title = tip;
+  const label = toggle.querySelector("label");
+  if (label) label.title = tip;
+  return toggle;
+}
 inputTemplate()([globalA0, globalA1, viewof includeAdmin0]);
 ```
 
@@ -193,220 +204,6 @@ md`${_lang(nbText.sections.intro.text)}`; // wrapped in md for lists to work
 ```{ojs}
 md`${_lang(nbText.sections.intro.furtherReading)}`;
 ```
-
-# `{ojs} heading_production` {#productionTrends}
-
-<p class="below-h1-methods-link"><a href="#methods-production">→ Methods and data sources for this section</a></p>
-
-`{ojs} _lang(nbText.sections.productionTrends.introText)`
-
-::: {.alert .alert-info role="note" style="font-size: 0.92em;"}
-**Heads up.** The "Agricultural Production" plot in the Key Facts section below uses a **different** production dataset (MapSPAM 2020, nominal 2021 US$, subnational snapshot). This section uses FAOSTAT — national totals, constant 2014–2016 dollars, deep time-series. The two are **not directly comparable**. See [Methods and data sources](#methods-production) below for the full explanation.
-:::
-
-::: {.controls-row}
-
-```{ojs}
-viewof productionVar = Inputs.select(
-  [
-    { id: "vop_intd15", label: "Value of production (constant 2014–2016 thousand I$)" },
-    { id: "vop_usd15",  label: "Value of production (constant 2014–2016 thousand US$)" },
-    { id: "production", label: "Production (tonnes)" },
-    { id: "yield",      label: "Yield (kg/ha)" }
-  ],
-  {
-    value: { id: "vop_intd15", label: "Value of production (constant 2014–2016 thousand I$)" },
-    format: (d) => d.label,
-    label: "Variable",
-  }
-);
-```
-
-```{ojs}
-viewof viewProductionTrends = Inputs.select(["line", "stackedBar", "table"], {
-  label: "View Type",
-  value: "line",
-  format: (d) =>
-    d === "line" ? "Line plot" : d === "stackedBar" ? "Stacked bar" : "Table",
-});
-```
-
-```{ojs}
-viewof paletteProduction = categoricalPaletteSelector({
-  value: "Tableau10",
-  label: "Palette",
-});
-```
-
-:::
-
-::: {.controls-row}
-
-```{ojs}
-viewof productionTopN = Inputs.range(
-  [1, Math.max(1, productionAvailableCommodities.length)],
-  {
-    step: 1,
-    value: Math.min(5, Math.max(1, productionAvailableCommodities.length)),
-    label: `Top N commodities (of ${productionAvailableCommodities.length} available)`,
-  },
-);
-```
-
-```{ojs}
-// Single-track two-handle year-range slider. Two `<input type="range">`
-// overlaid on a shared visible track (the `.dual-range-track` div before
-// them). Both inputs have transparent backgrounds + transparent runnable
-// tracks (Chrome, Firefox, Safari pseudo-elements all overridden with
-// !important to defeat any theme defaults). pointer-events:none on the
-// input bodies + pointer-events:auto on the thumb pseudo lets both thumbs
-// remain draggable on the same x-axis. The earlier two-stacked-sliders
-// fallback rendered correctly but the user wanted a single track.
-viewof productionYearRange = {
-  const minY = productionYearBounds.min_year;
-  const maxY = productionYearBounds.max_year;
-  const defaultLo = Math.max(minY, 2010);
-  const defaultHi = maxY;
-
-  const loSpan = html`<span style="font-variant-numeric: tabular-nums; font-weight: 600;">${defaultLo}</span>`;
-  const hiSpan = html`<span style="font-variant-numeric: tabular-nums; font-weight: 600;">${defaultHi}</span>`;
-  const loInput = html`<input type="range" min="${minY}" max="${maxY}" value="${defaultLo}" step="1" />`;
-  const hiInput = html`<input type="range" min="${minY}" max="${maxY}" value="${defaultHi}" step="1" />`;
-
-  const container = html`<div class="dual-year-range" style="display: flex; flex-direction: column; gap: 6px; font: 13px sans-serif; min-width: 260px; width: 100%; max-width: 360px;">
-    <label>Year range: ${loSpan} – ${hiSpan}</label>
-    <div class="dual-range-track" style="position: relative; height: 24px;">
-      <div class="dual-range-visible-track"></div>
-      ${loInput}
-      ${hiInput}
-    </div>
-  </div>`;
-
-  const style = document.createElement("style");
-  style.textContent = `
-    .dual-year-range .dual-range-track,
-    .dual-year-range .dual-range-track * {
-      box-sizing: border-box;
-    }
-    .dual-year-range .dual-range-visible-track {
-      position: absolute;
-      left: 0; right: 0; top: 50%;
-      transform: translateY(-50%);
-      height: 4px;
-      background: #d0d4dc;
-      border-radius: 2px;
-      z-index: 0;
-    }
-    .dual-year-range .dual-range-track input[type="range"] {
-      position: absolute !important;
-      left: 0; top: 0;
-      width: 100%;
-      height: 24px;
-      margin: 0;
-      padding: 0;
-      pointer-events: none;
-      background: transparent !important;
-      background-color: transparent !important;
-      -webkit-appearance: none !important;
-      appearance: none !important;
-      z-index: 2;
-    }
-    .dual-year-range .dual-range-track input[type="range"]::-webkit-slider-runnable-track {
-      background: transparent !important;
-      border: none;
-      height: 24px;
-    }
-    .dual-year-range .dual-range-track input[type="range"]::-moz-range-track {
-      background: transparent !important;
-      border: none;
-      height: 24px;
-    }
-    .dual-year-range .dual-range-track input[type="range"]::-moz-range-progress {
-      background: transparent !important;
-    }
-    .dual-year-range .dual-range-track input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none !important;
-      appearance: none !important;
-      pointer-events: auto;
-      width: 16px; height: 16px;
-      border-radius: 50%;
-      background: #2563eb;
-      border: 2px solid #fff;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-      cursor: pointer;
-      margin-top: -6px;
-    }
-    .dual-year-range .dual-range-track input[type="range"]::-moz-range-thumb {
-      pointer-events: auto;
-      width: 16px; height: 16px;
-      border-radius: 50%;
-      background: #2563eb;
-      border: 2px solid #fff;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-      cursor: pointer;
-    }
-  `;
-  container.appendChild(style);
-
-  const update = () => {
-    const lo = Math.min(+loInput.value, +hiInput.value);
-    const hi = Math.max(+loInput.value, +hiInput.value);
-    loSpan.textContent = lo;
-    hiSpan.textContent = hi;
-    container.value = [lo, hi];
-    container.dispatchEvent(new Event("input", { bubbles: true }));
-  };
-
-  loInput.addEventListener("input", update);
-  hiInput.addEventListener("input", update);
-
-  container.value = [defaultLo, defaultHi];
-  return container;
-}
-```
-
-:::
-
-::: {.controls-row}
-
-```{ojs}
-// Manual commodities multi-select. Defaults to the top-N (by current
-// variable + year range). Changing top-N / variable / year / country
-// recomputes the defaults and re-renders this widget — manual overrides
-// are lost on reset, which is the expected reset behaviour.
-viewof commoditiesSelect = Inputs.checkbox(productionAvailableCommodities, {
-  label: "Commodities (override top-N)",
-  value: productionTopCommodities,
-});
-```
-
-:::
-
-```{ojs}
-loaderDiv("plotProductionTrends");
-```
-
-```{ojs}
-//| output: false
-{
-  [admin0Iso3, productionVar, viewProductionTrends, paletteProduction,
-   productionTopN, productionYearRange, commoditiesSelect];
-  const div = document.getElementById("plotProductionTrends");
-  if (div) div.replaceChildren(loaderContent());
-}
-```
-
-```{ojs}
-//| output: false
-{
-  renderToDiv("plotProductionTrends", () => {
-    if (viewProductionTrends === "table") return dataTable(productionTrends_data);
-    return chart_productionTrends();
-  });
-}
-```
-
-`{ojs} downloadButton(productionTrends_data, "productionTrends")`
 
 # `{ojs} heading2` {#keyFacts}
 
@@ -469,14 +266,182 @@ html`<div id="insightKeyFacts"></div>`;
 renderToDiv("insightKeyFacts", () => createCountryInsights([agInsight, povInsight]));
 ```
 
-### `{ojs} agProductionTitle`
+```{ojs}
+keyFacts_combinedData = {
+  const pov = pov_plotData.map((d) => ({
+    iso3: d.iso3,
+    admin1_name: d.admin1_name,
+    metric: "poverty",
+    sub_group: d.group,
+    year: d.value_year,
+    value: d.pov_rate,
+    unit: d.unit,
+    source: "World Bank GSAP (2023 release)",
+  }));
+  const gdp = gdp_plotData.map((d) => ({
+    iso3: d.iso3,
+    admin1_name: null,
+    metric: "gdp",
+    sub_group: d.sector,
+    year: d.year,
+    value: d.gdp_usd2015,
+    unit: d.unit,
+    source: "World Bank WDI",
+  }));
+  const lu = landuse_plotData.map((d) => ({
+    iso3: d.iso3,
+    admin1_name: null,
+    metric: "landuse",
+    sub_group: d.sub_group,
+    year: d.year,
+    value: d.ha,
+    unit: d.unit,
+    source: "FAOSTAT",
+  }));
+  return [...pov, ...gdp, ...lu];
+}
+```
+
+`{ojs} downloadButton(keyFacts_combinedData, "keyFacts", "Download demographic + economic")`
+
+# `{ojs} heading_production` {#productionTrends}
+
+<p class="below-h1-methods-link"><a href="#methods-production">→ Methods and data sources for this section</a></p>
+
+`{ojs} _lang(nbText.sections.productionTrends.introText)`
+
+::: {.alert .alert-info role="note" style="font-size: 0.92em;"}
+**Heads up.** The [Subnational Agricultural Production Statistics](#agProduction) section that follows uses a **different** production dataset (MapSPAM 2020, nominal 2021 US$, subnational snapshot). This section uses FAOSTAT — national totals, constant 2014–2016 dollars, deep time-series. The two are **not directly comparable**. See [Methods and data sources](#methods-production) below for the full explanation.
+:::
+
+::: {.controls-row}
 
 ```{ojs}
-md`${_lang(nbText.sections.keyFacts.agProductionIntro)}`;
+viewof productionVar = Inputs.select(
+  [
+    { id: "vop_intd15", label: "Value of production (constant 2014–2016 thousand I$)" },
+    { id: "vop_usd15",  label: "Value of production (constant 2014–2016 thousand US$)" },
+    { id: "production", label: "Production (tonnes)" },
+    { id: "yield",      label: "Yield (kg/ha)" }
+  ],
+  {
+    value: { id: "vop_intd15", label: "Value of production (constant 2014–2016 thousand I$)" },
+    format: (d) => d.label,
+    label: "Variable",
+  }
+);
+```
+
+```{ojs}
+viewof viewProductionTrends = Inputs.select(["line", "stackedBar", "table"], {
+  label: "View Type",
+  value: "line",
+  format: (d) =>
+    d === "line" ? "Line plot" : d === "stackedBar" ? "Stacked bar" : "Table",
+});
+```
+
+```{ojs}
+viewof paletteProduction = categoricalPaletteSelector({
+  value: "Tableau10",
+  label: "Palette",
+});
+```
+
+:::
+
+::: {.controls-row}
+
+```{ojs}
+viewof productionTopN = Inputs.range(
+  [1, Math.max(1, productionAvailableCommodities.length)],
+  {
+    step: 1,
+    value: Math.min(5, Math.max(1, productionAvailableCommodities.length)),
+    label: `Top N commodities (of ${productionAvailableCommodities.length} available)`,
+  },
+);
+```
+
+```{ojs}
+// Year range — two side-by-side native range inputs. Earlier attempts to
+// overlay both handles on a single track had visual issues across browsers
+// (see Pete's 2026-05-15 feedback). Two separate widgets is the simple
+// reliable fallback.
+viewof productionYearStart = Inputs.range(
+  [productionYearBounds.min_year, productionYearBounds.max_year],
+  {
+    step: 1,
+    value: Math.max(productionYearBounds.min_year, 2010),
+    label: "From year",
+  },
+);
+```
+
+```{ojs}
+viewof productionYearEnd = Inputs.range(
+  [productionYearBounds.min_year, productionYearBounds.max_year],
+  {
+    step: 1,
+    value: productionYearBounds.max_year,
+    label: "To year",
+  },
+);
+```
+
+:::
+
+::: {.controls-row}
+
+```{ojs}
+// Manual commodities multi-select. Defaults to the top-N (by current
+// variable + year range). Changing top-N / variable / year / country
+// recomputes the defaults and re-renders this widget — manual overrides
+// are lost on reset, which is the expected reset behaviour.
+viewof commoditiesSelect = Inputs.checkbox(productionAvailableCommodities, {
+  label: "Commodities (override top-N)",
+  value: productionTopCommodities,
+});
+```
+
+:::
+
+```{ojs}
+loaderDiv("plotProductionTrends");
+```
+
+```{ojs}
+//| output: false
+{
+  [admin0Iso3, productionVar, viewProductionTrends, paletteProduction,
+   productionTopN, productionYearStart, productionYearEnd, commoditiesSelect];
+  const div = document.getElementById("plotProductionTrends");
+  if (div) div.replaceChildren(loaderContent());
+}
+```
+
+```{ojs}
+//| output: false
+{
+  renderToDiv("plotProductionTrends", () => {
+    if (viewProductionTrends === "table") return dataTable(productionTrends_data);
+    return chart_productionTrends();
+  });
+}
+```
+
+`{ojs} downloadButton(productionTrends_data, "productionTrends")`
+
+# `{ojs} heading_agProduction` {#agProduction}
+
+<p class="below-h1-methods-link"><a href="#methods-socioeconomic">→ Methods and data sources for this section</a></p>
+
+```{ojs}
+md`${_lang(nbText.sections.agProduction.introText)}`;
 ```
 
 ::: {.alert .alert-info role="note" style="font-size: 0.92em;"}
-**Heads up.** The plot below uses **MapSPAM 2020 in nominal 2021 US dollars** — a single subnational (admin1) snapshot. For *historical national time-series* of the same commodities, see the [Agricultural Production Trends](#productionTrends) section above; the two datasets are **not directly comparable** (different value bases, different geographic units). See [Methods and data sources](#methods-socioeconomic) for the full explanation.
+**Heads up.** The plot below uses **MapSPAM 2020 in nominal 2021 US dollars** — a single subnational (admin1) snapshot. For *historical national time-series* of the same commodities, see the [National Production Trends](#productionTrends) section above; the two datasets are **not directly comparable** (different value bases, different geographic units). See [Methods and data sources](#methods-socioeconomic) for the full explanation.
 :::
 
 ::: {.controls-row}
@@ -529,53 +494,7 @@ html`<div id="insightCommodity"></div>`;
 renderToDiv("insightCommodity", () => createCountryInsights([exposureInsight]));
 ```
 
-```{ojs}
-keyFacts_combinedData = {
-  const pov = pov_plotData.map((d) => ({
-    iso3: d.iso3,
-    admin1_name: d.admin1_name,
-    metric: "poverty",
-    sub_group: d.group,
-    year: d.value_year,
-    value: d.pov_rate,
-    unit: d.unit,
-    source: "World Bank GSAP (2023 release)",
-  }));
-  const gdp = gdp_plotData.map((d) => ({
-    iso3: d.iso3,
-    admin1_name: null,
-    metric: "gdp",
-    sub_group: d.sector,
-    year: d.year,
-    value: d.gdp_usd2015,
-    unit: d.unit,
-    source: "World Bank WDI",
-  }));
-  const lu = landuse_plotData.map((d) => ({
-    iso3: d.iso3,
-    admin1_name: null,
-    metric: "landuse",
-    sub_group: d.sub_group,
-    year: d.year,
-    value: d.ha,
-    unit: d.unit,
-    source: "FAOSTAT",
-  }));
-  const com = exposure_plotData.map((d) => ({
-    iso3: d.iso3,
-    admin1_name: d.admin1_name,
-    metric: "commodity",
-    sub_group: d.crop,
-    year: d.value_year,
-    value: d.value,
-    unit: d.unit,
-    source: "MapSPAM 2020 (Adaptation Atlas) + GLW 4",
-  }));
-  return [...pov, ...gdp, ...lu, ...com];
-}
-```
-
-`{ojs} downloadButton(keyFacts_combinedData, "keyFacts", "Download Key Facts")`
+`{ojs} downloadButton(exposure_plotData, "agProductionBySector", "Download production value by sector")`
 
 # `{ojs} heading3` {#recentChanges}
 
@@ -1341,8 +1260,8 @@ nbText = await FileAttachment("/data/climateRationale/nbText.json").json();
 
 heading1 = _lang(general_translations.overview);
 heading2 = _lang(nbText.sections.keyFacts.title);
-agProductionTitle = _lang(nbText.sections.keyFacts.agProductionTitle);
 heading_production = _lang(nbText.sections.productionTrends.title);
+heading_agProduction = _lang(nbText.sections.agProduction.title);
 heading3 = _lang(nbText.sections.recentChanges.title);
 heading4 = _lang(nbText.sections.futureProjections.title);
 heading5 = _lang(nbText.sections.extremeEvents.title);
@@ -1651,7 +1570,8 @@ productionAvailableCommodities = {
 // rather than high-value-of-production crops — that's a deliberate trade-off
 // of "respect the variable selector" (per Pete, 2026-05-14).
 productionTopCommodities = {
-  const [yStart, yEnd] = productionYearRange;
+  const yStart = Math.min(productionYearStart, productionYearEnd);
+  const yEnd = Math.max(productionYearStart, productionYearEnd);
   if (!admin0Iso3.length) return [];
   const recent = await db.query(`
     SELECT commodity, AVG(value) AS mean_val
@@ -1674,7 +1594,8 @@ productionTopCommodities = {
 // "1000 ×" prefix. Production (tonnes) and Yield (kg/ha) pass through
 // unchanged.
 productionTrends_data = {
-  const [yStart, yEnd] = productionYearRange;
+  const yStart = Math.min(productionYearStart, productionYearEnd);
+  const yEnd = Math.max(productionYearStart, productionYearEnd);
   if (!admin0Iso3.length || !commoditiesSelect.length) return [];
   const isValue =
     productionVar.id === "vop_intd15" || productionVar.id === "vop_usd15";
@@ -3219,7 +3140,8 @@ chart_productionTrends = () => {
       ? commoditiesInPlot.map((_, i) => paletteColors[i])
       : d3.quantize(d3.piecewise(d3.interpolateRgb.gamma(2.2), paletteColors), N);
 
-  const [yStart, yEnd] = productionYearRange;
+  const yStart = Math.min(productionYearStart, productionYearEnd);
+  const yEnd = Math.max(productionYearStart, productionYearEnd);
 
   const isStacked = viewProductionTrends === "stackedBar";
 
