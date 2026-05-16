@@ -897,16 +897,20 @@ viewof prod_type = Inputs.select(
 ```
 
 ```{ojs}
-viewof viewAgProduction = Inputs.select(["bars", "treemap"], {
+viewof viewAgProduction = Inputs.select(["treemap", "bars"], {
   label: "View Type",
-  value: "bars",
+  value: "treemap",
   format: (d) => (d === "treemap" ? "Tree map" : "Bars"),
 });
 ```
 
 ```{ojs}
-viewof paletteAgProd = sequentialPaletteSelector({
-  value: "YlGn",
+// Shared categorical palette list across both production sections
+// (National Production Trends + Subnational Ag Production) — Pete asked
+// for the same dropdown options in both. Coloring within each plot is
+// now by crop/category (categorical), not by value (sequential).
+viewof paletteAgProd = categoricalPaletteSelector({
+  value: "Tableau10",
   label: "Palette",
 });
 ```
@@ -2247,55 +2251,67 @@ productionYearBounds = {
   return resp[0];
 }
 
-// All commodities present in the parquet for the selected admin0s. Used as
-// the upper bound for the top-N slider.
-productionAvailableCommodities = {
+// Single DuckDB fetch per country selection. Pulls every (commodity ×
+// variable × year) row for the chosen admin0(s); all downstream cells
+// (top-N ranking, year-range filtering, value-vs-yield switch,
+// commodities multi-select, treemap snapshot) operate on this
+// in-memory dataset. Only admin0Iso3 retriggers the query — changing
+// the variable / year / commodities does NOT re-hit DuckDB.
+//
+// FAOSTAT publishes value of production as "thousands of $" (FAOSTAT
+// unit "1000 Int$" / "1000 USD"). We keep raw values here and
+// multiply by 1000 downstream so the axis reads in raw dollars.
+productionTrends_raw = {
   if (!admin0Iso3.length) return [];
   const resp = await db.query(`
-    SELECT DISTINCT commodity
+    SELECT iso3, commodity, variable, year, value
     FROM production_timeseries
     WHERE iso3 IN ${sqlList(admin0Iso3)}
-    ORDER BY commodity
+      AND value IS NOT NULL
+    ORDER BY iso3, commodity, variable, year
   `);
-  return resp.map((r) => r.commodity);
+  return withAdminName(resp);
 }
 
-// Top-N commodities by mean value of the currently-selected variable over
-// the currently-selected year window. Recomputes when any of those change.
-// When yield is the active variable, the ranking surfaces high-yield crops
-// rather than high-value-of-production crops — that's a deliberate trade-off
-// of "respect the variable selector" (per Pete, 2026-05-14).
+// All commodities present in the parquet for the selected admin0s.
+// Derived from the in-memory raw — no DB query.
+productionAvailableCommodities = [
+  ...new Set(productionTrends_raw.map((d) => d.commodity)),
+].sort();
+
+// Top-N commodities by mean value of the currently-selected variable
+// over the currently-selected year window. Computed in JS from the
+// raw — no DB query. When yield is the active variable, the ranking
+// surfaces high-yield crops rather than high-value-of-production
+// crops (per Pete, 2026-05-14).
 productionTopCommodities = {
   const yStart = Math.min(productionYearStart, productionYearEnd);
   const yEnd = Math.max(productionYearStart, productionYearEnd);
-  if (!admin0Iso3.length) return [];
-  const recent = await db.query(`
-    SELECT commodity, AVG(value) AS mean_val
-    FROM production_timeseries
-    WHERE iso3 IN ${sqlList(admin0Iso3)}
-      AND variable = '${productionVar.id}'
-      AND year BETWEEN ${yStart} AND ${yEnd}
-      AND value IS NOT NULL
-    GROUP BY commodity
-    ORDER BY mean_val DESC NULLS LAST
-    LIMIT ${productionTopN}
-  `);
-  return recent.map((r) => r.commodity);
+  if (productionTrends_raw.length === 0) return [];
+  const filtered = productionTrends_raw.filter(
+    (d) =>
+      d.variable === productionVar.id &&
+      d.year >= yStart &&
+      d.year <= yEnd,
+  );
+  const means = d3.rollup(
+    filtered,
+    (v) => d3.mean(v, (r) => r.value),
+    (d) => d.commodity,
+  );
+  return [...means.entries()]
+    .sort((a, b) => (b[1] ?? -Infinity) - (a[1] ?? -Infinity))
+    .slice(0, productionTopN)
+    .map(([commodity]) => commodity);
 }
 
-// FAOSTAT publishes value of production as "thousands of $" (FAOSTAT unit
-// "1000 Int$" / "1000 USD"). The compact axis formatter is much easier to
-// read in raw dollars, so we multiply VoP variables by 1000 in the SQL
-// and re-label the Y-axis as "constant Int$ / constant US$" without the
-// "1000 ×" prefix. Production (tonnes) and Yield (kg/ha) pass through
-// unchanged.
+// Filtered + display-formatted view of the raw. All filters in JS.
 productionTrends_data = {
   const yStart = Math.min(productionYearStart, productionYearEnd);
   const yEnd = Math.max(productionYearStart, productionYearEnd);
-  if (!admin0Iso3.length || !commoditiesSelect.length) return [];
+  if (productionTrends_raw.length === 0 || !commoditiesSelect.length) return [];
   const isValue =
     productionVar.id === "vop_intd15" || productionVar.id === "vop_usd15";
-  const valueExpr = isValue ? "value * 1000" : "value";
   const displayUnit = isValue
     ? productionVar.id === "vop_intd15"
       ? "Int$ (constant 2014–2016)"
@@ -2303,19 +2319,23 @@ productionTrends_data = {
     : productionVar.id === "production"
     ? "tonnes"
     : "kg/ha";
-  const resp = await db.query(`
-    SELECT iso3, commodity, year,
-      ${valueExpr} AS value,
-      '${displayUnit}' AS unit
-    FROM production_timeseries
-    WHERE iso3 IN ${sqlList(admin0Iso3)}
-      AND commodity IN ${sqlList(commoditiesSelect)}
-      AND variable = '${productionVar.id}'
-      AND year BETWEEN ${yStart} AND ${yEnd}
-      AND value IS NOT NULL
-    ORDER BY iso3, commodity, year
-  `);
-  return withAdminName(resp);
+  const commoditiesSet = new Set(commoditiesSelect);
+  return productionTrends_raw
+    .filter(
+      (d) =>
+        d.variable === productionVar.id &&
+        d.year >= yStart &&
+        d.year <= yEnd &&
+        commoditiesSet.has(d.commodity),
+    )
+    .map((d) => ({
+      iso3: d.iso3,
+      commodity: d.commodity,
+      year: d.year,
+      value: isValue ? d.value * 1000 : d.value,
+      unit: displayUnit,
+      adminName: d.adminName,
+    }));
 }
 ```
 
@@ -3484,7 +3504,21 @@ exposureBars_keyFacts = function () {
 
   // Shared scales across all rows so values are comparable.
   const xMax = d3.max(_data, (d) => d.value);
-  const colorDomain = d3.extent(_data, (d) => d.value);
+
+  // Categorical colour by crop (matches the new tree-map encoding and
+  // the National Production Trends line plot's commodity-keyed
+  // palette). paletteAgProd is now a categorical palette name (Pete
+  // asked for shared palette lists across the two prod sections).
+  const cropsForColor = [...visibleCrops];
+  const paletteColorsAgProd =
+    categoricalPaletteMap[paletteAgProd] || categoricalPaletteMap.Tableau10;
+  const colorRangeAgProd =
+    cropsForColor.length <= paletteColorsAgProd.length
+      ? cropsForColor.map((_, i) => paletteColorsAgProd[i])
+      : d3.quantize(
+          d3.piecewise(d3.interpolateRgb.gamma(2.2), paletteColorsAgProd),
+          cropsForColor.length,
+        );
 
   const renderRow = (rowAdmins, rowIdx) => {
     const rowData = _data.filter((d) => rowAdmins.includes(d.adminName));
@@ -3498,9 +3532,16 @@ exposureBars_keyFacts = function () {
     const isFirst = rowIdx === 0;
     const isLast = rowIdx === rowChunks.length - 1;
 
+    // Scale plot height to the number of visible crop rows so labels
+    // don't overlap when "All commodities (ungrouped)" is selected
+    // (30+ rows) — but stay at the original ~300 px when grouped to
+    // categories (4–6 rows). Roughly 20 px per row plus ~100 px chrome.
+    const rowH = 20;
+    const dynHeight = Math.max(300, 100 + visibleCrops.size * rowH);
+
     return Plot.plot({
       width,
-      height: 300,
+      height: dynHeight,
       // Wider left margin so long crop labels (e.g. "Sweet potatoes",
       // "Sugar beets") fit on a single line without wrapping. Wrapped
       // labels overlapped vertically when the plot text-size slider was
@@ -3539,16 +3580,15 @@ exposureBars_keyFacts = function () {
       },
 
       color: {
-        type: "linear",
-        scheme: paletteAgProd.toLowerCase(),
-        domain: colorDomain,
+        domain: cropsForColor,
+        range: colorRangeAgProd,
       },
 
       marks: [
         Plot.barX(rowData, {
           x: "value",
           y: "crop",
-          fill: "value",
+          fill: "crop",
           stroke: "#888",
           strokeWidth: 0.5,
           sort: { y: "x", reverse: true },
@@ -3588,6 +3628,51 @@ exposureBars_keyFacts = function () {
     ${rowChunks.map((r, idx) => renderRow(r, idx))}
     ${captionDetails(caption, undefined, downloadButton(exposure_plotData, "agProductionBySector"))}
   </div>`;
+};
+```
+
+```{ojs}
+// Shared helpers for the tree-map views.
+//   treemapTextColor — picks "#000" or "#fff" based on the cell's
+//     fill colour (WCAG-style relative luminance). White text on dark
+//     cells, black on light cells. OEC-style high-viz.
+//   treemapTextLayout — given a box's pixel size and the label/value
+//     character counts, returns the largest font size that fits the
+//     label horizontally + leaves room for the value below. Returns
+//     showLabel/showValue flags + labelSize/valueSize in px. Caps at
+//     plotTextSize + 4 so the sidebar slider still has some influence.
+treemapTextColor = (bg) => {
+  const rgb = d3.color(bg).rgb();
+  const f = (c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const L = 0.2126 * f(rgb.r) + 0.7152 * f(rgb.g) + 0.0722 * f(rgb.b);
+  return L > 0.55 ? "#000" : "#fff";
+};
+
+treemapTextLayout = (w, h, labelLen, valueLen, maxBase) => {
+  const padX = 12;
+  const padY = 6;
+  const availW = Math.max(0, w - padX);
+  const availH = Math.max(0, h - padY);
+  if (availW < 18 || availH < 12) {
+    return { showLabel: false, showValue: false, labelSize: 0, valueSize: 0 };
+  }
+  const charW = 0.55; // approx em-width of a Latin glyph
+  const fitW = (txtLen) => availW / Math.max(1, txtLen * charW);
+  let labelSize = Math.min(fitW(labelLen), availH * 0.55, maxBase);
+  let valueSize = Math.min(fitW(valueLen), labelSize * 0.85);
+  const MIN = 6.5;
+  const showLabel = labelSize >= MIN;
+  const totalNeeded = labelSize * 1.3 + valueSize * 1.2;
+  const showValue = showLabel && valueSize >= MIN && totalNeeded <= availH;
+  return {
+    showLabel,
+    showValue,
+    labelSize: Math.round(labelSize * 10) / 10,
+    valueSize: Math.round(valueSize * 10) / 10,
+  };
 };
 ```
 
@@ -3641,17 +3726,24 @@ treemap_agProduction = () => {
   const headerH = 22;
   const innerH = cellH - headerH;
 
-  // Same sequential palette family as the bars view.
-  // paletteAgProd is a sequential palette name (set by
-  // sequentialPaletteSelector) — its interpolators live in
-  // sequentialPaletteInterpMap, NOT the diverging paletteInterpMap.
-  const interp =
-    sequentialPaletteInterpMap[paletteAgProd] || d3.interpolateYlGn;
-  const maxVal = d3.max(rows, (d) => d.value) || 1;
-  // Square-root scaling so smaller values aren't washed out — same
-  // trick the bars view uses implicitly via Plot's linear scale on
-  // the extents.
-  const colorOf = (v) => interp(Math.sqrt(v / maxVal));
+  // Categorical colour by crop (matches the new bars-view encoding and
+  // the National Production Trends line plot). paletteAgProd is now a
+  // categorical palette name — shared with paletteProduction so both
+  // production sections offer the same dropdown options.
+  const cropsForColor = [...new Set(rows.map((d) => d.crop))];
+  const paletteColorsAgProd =
+    categoricalPaletteMap[paletteAgProd] || categoricalPaletteMap.Tableau10;
+  const colorRangeAgProd =
+    cropsForColor.length <= paletteColorsAgProd.length
+      ? cropsForColor.map((_, i) => paletteColorsAgProd[i])
+      : d3.quantize(
+          d3.piecewise(d3.interpolateRgb.gamma(2.2), paletteColorsAgProd),
+          cropsForColor.length,
+        );
+  const colorByCrop = new Map(
+    cropsForColor.map((c, i) => [c, colorRangeAgProd[i]]),
+  );
+  const colorOf = (crop) => colorByCrop.get(crop) || "#999";
 
   const fmtUSD = formatUSD();
 
@@ -3673,49 +3765,66 @@ treemap_agProduction = () => {
     const leafEls = root.leaves().map((leaf) => {
       const w = leaf.x1 - leaf.x0;
       const h = leaf.y1 - leaf.y0;
-      const showLabel = w > 56 && h > 22;
-      const showValue = w > 70 && h > 36;
+      const fillColor = colorOf(leaf.data.crop);
       const label =
         _lang(cropTranslations[leaf.data.crop]) || leaf.data.crop;
-      const tipText = `${label}: ${fmtUSD(leaf.data.value)}`;
+      const valueText = fmtUSD(leaf.data.value);
+      // Admin name in the tooltip so the user knows which panel the
+      // hovered cell belongs to (especially useful when boxes are
+      // narrow and labels are clipped).
+      const tipText = `${admin} — ${label}: ${valueText}`;
+      // Auto-contrast text against the cell's fill (white on dark,
+      // black on light). Halo is the inverse for sharpness.
+      const textFill = treemapTextColor(fillColor);
+      const haloFill = textFill === "#fff" ? "#000" : "#fff";
+      // Dynamic font size: fits the label horizontally + leaves room
+      // for the value line. Caps at plotTextSize + 4 so the sidebar
+      // slider still has some effect.
+      const layout = treemapTextLayout(
+        w,
+        h,
+        label.length,
+        valueText.length,
+        plotTextSize + 4,
+      );
       return svg`<g transform="translate(${leaf.x0}, ${leaf.y0})">
         <rect
           class="cr-treemap-cell"
           data-tip="${tipText}"
           width="${w}"
           height="${h}"
-          fill="${colorOf(leaf.data.value)}"
+          fill="${fillColor}"
           stroke="#999"
           stroke-width="0.75"
         ><title>${tipText}</title></rect>
         ${
-          showLabel
+          layout.showLabel
             ? svg`<text
-                class="cr-treemap-label"
                 x="6"
-                y="14"
-                fill="#111"
-                stroke="#fff"
-                stroke-width="1.6"
+                y="${layout.labelSize + 2}"
+                fill="${textFill}"
+                stroke="${haloFill}"
+                stroke-width="${Math.max(0.8, layout.labelSize * 0.12)}"
+                stroke-opacity="0.6"
                 paint-order="stroke"
                 stroke-linejoin="round"
-                style="pointer-events: none;"
+                style="font-size: ${layout.labelSize}px !important; pointer-events: none;"
               >${label}</text>`
             : ""
         }
         ${
-          showValue
+          layout.showValue
             ? svg`<text
-                class="cr-treemap-value"
                 x="6"
-                y="30"
-                fill="#333"
-                stroke="#fff"
-                stroke-width="1.4"
+                y="${layout.labelSize + 2 + layout.valueSize + 3}"
+                fill="${textFill}"
+                stroke="${haloFill}"
+                stroke-width="${Math.max(0.7, layout.valueSize * 0.1)}"
+                stroke-opacity="0.5"
                 paint-order="stroke"
                 stroke-linejoin="round"
-                style="pointer-events: none;"
-              >${fmtUSD(leaf.data.value)}</text>`
+                style="font-size: ${layout.valueSize}px !important; pointer-events: none;"
+              >${valueText}</text>`
             : ""
         }
       </g>`;
@@ -3725,7 +3834,7 @@ treemap_agProduction = () => {
       ${leafEls}
     </svg>`;
 
-    return html`<div style="display: inline-block; vertical-align: top; margin-right: ${gap}px; margin-bottom: ${gap}px;">
+    return html`<div style="display: inline-block; vertical-align: top;">
       <div style="font-size: 11px; color: #444; text-align: center; height: ${headerH}px; line-height: ${headerH}px;">
         ${admin}
       </div>
@@ -3736,7 +3845,7 @@ treemap_agProduction = () => {
   const caption = multiLineText(
     [
       `Data is from ${exposure_plotData[0]?.value_year ?? "?"}, measured in nominal ${exposure_plotData[0]?.unit?.split("-").pop() ?? "?"} US dollars.`,
-      "Box area is proportional to value of production. Boxes are sorted (largest top-left); colour is also scaled to value (square-root) so smaller crops stay distinguishable. Hover for full crop name + value when the label doesn't fit.",
+      "Box area is proportional to value of production. Boxes are sorted (largest top-left); colour is assigned categorically per crop (or per category when grouped) so the same commodity reads the same colour across admin panels. Hover for full crop name + value when the label doesn't fit.",
       html`Source: <a href="https://cgspace.cgiar.org/items/5736e3ff-aadc-4999-8922-8bac50b1c916">MapSPAM 2020 v1r2 SSA</a> (Adaptation Atlas commissioned variant). Atlas-hosted data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
     ],
     "atlasFigCaption",
@@ -3745,7 +3854,7 @@ treemap_agProduction = () => {
   const wrap = html`<div>
     <h2 style="font-size: 1.05rem; font-weight: 600; margin: 0 0 0.4rem;">Agricultural Production</h2>
     <div class="cr-treemap-tip" role="tooltip"></div>
-    <div style="display: flex; flex-wrap: wrap; align-items: flex-start;">
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: ${gap}px;">
       ${admins.map(buildOne)}
     </div>
     ${captionDetails(caption, undefined, downloadButton(exposure_plotData, "agProductionBySector"))}
@@ -4060,14 +4169,19 @@ chart_productionTrends = () => {
           x: "year",
           y: "value",
           stroke: "commodity",
-          strokeWidth: plotLineWidth,
+          // +1 over the global sidebar default so National Production
+          // Trends lines read a little heavier than the other line plots
+          // — the FAOSTAT time-series tends to dominate visually here.
+          strokeWidth: plotLineWidth + 1,
           fy: admins.length > 1 ? "adminName" : undefined,
         }),
         Plot.dot(_data, {
           x: "year",
           y: "value",
           fill: "commodity",
-          r: 1.8 * (plotLineWidth / 1.5),
+          // Bumped from 1.8 → 2.6 base so the dots stay proportionate
+          // to the heavier line (strokeWidth: plotLineWidth + 1).
+          r: 2.6 * (plotLineWidth / 1.5),
           stroke: "white",
           strokeWidth: 0.5,
           fy: admins.length > 1 ? "adminName" : undefined,
@@ -4092,6 +4206,12 @@ chart_productionTrends = () => {
     marginRight: 150,
     marginBottom: 50,
     title: productionVar.label,
+    // Pin the SVG's `currentColor` to a neutral grey so axis chrome
+    // (tick labels, axis lines, title text) doesn't pick up the first
+    // colour from the categorical palette when the user changes
+    // Palette. Marks still get palette-driven fill/stroke via the
+    // color scale below — only the axes are pinned.
+    style: { color: "#333" },
     x: {
       label: "Year",
       tickFormat: "d",
@@ -4209,54 +4329,63 @@ treemap_productionTrends = () => {
     const leafEls = root.leaves().map((leaf) => {
       const w = leaf.x1 - leaf.x0;
       const h = leaf.y1 - leaf.y0;
-      const showLabel = w > 56 && h > 22;
-      const showValue = w > 70 && h > 36;
       const label = leaf.data.commodity;
-      const tipText = `${label} (${leaf.data.year}): ${fmtVal(leaf.data.value)}`;
+      const valueText = fmtVal(leaf.data.value);
+      const fillColor = colorByCommodity.get(label);
+      const tipText = `${admin} — ${label} (${leaf.data.year}): ${valueText}`;
+      const textFill = treemapTextColor(fillColor);
+      const haloFill = textFill === "#fff" ? "#000" : "#fff";
+      const layout = treemapTextLayout(
+        w,
+        h,
+        label.length,
+        valueText.length,
+        plotTextSize + 4,
+      );
       return svg`<g transform="translate(${leaf.x0}, ${leaf.y0})">
         <rect
           class="cr-treemap-cell"
           data-tip="${tipText}"
           width="${w}"
           height="${h}"
-          fill="${colorByCommodity.get(label)}"
+          fill="${fillColor}"
           stroke="#999"
           stroke-width="0.75"
         ><title>${tipText}</title></rect>
         ${
-          showLabel
+          layout.showLabel
             ? svg`<text
-                class="cr-treemap-label"
                 x="6"
-                y="14"
-                fill="#111"
-                stroke="#fff"
-                stroke-width="1.6"
+                y="${layout.labelSize + 2}"
+                fill="${textFill}"
+                stroke="${haloFill}"
+                stroke-width="${Math.max(0.8, layout.labelSize * 0.12)}"
+                stroke-opacity="0.6"
                 paint-order="stroke"
                 stroke-linejoin="round"
-                style="pointer-events: none;"
+                style="font-size: ${layout.labelSize}px !important; pointer-events: none;"
               >${label}</text>`
             : ""
         }
         ${
-          showValue
+          layout.showValue
             ? svg`<text
-                class="cr-treemap-value"
                 x="6"
-                y="30"
-                fill="#333"
-                stroke="#fff"
-                stroke-width="1.4"
+                y="${layout.labelSize + 2 + layout.valueSize + 3}"
+                fill="${textFill}"
+                stroke="${haloFill}"
+                stroke-width="${Math.max(0.7, layout.valueSize * 0.1)}"
+                stroke-opacity="0.5"
                 paint-order="stroke"
                 stroke-linejoin="round"
-                style="pointer-events: none;"
-              >${fmtVal(leaf.data.value)}</text>`
+                style="font-size: ${layout.valueSize}px !important; pointer-events: none;"
+              >${valueText}</text>`
             : ""
         }
       </g>`;
     });
 
-    return html`<div style="display: inline-block; vertical-align: top; margin-right: ${gap}px; margin-bottom: ${gap}px;">
+    return html`<div style="display: inline-block; vertical-align: top;">
       <div style="font-size: 11px; color: #444; text-align: center; height: ${headerH}px; line-height: ${headerH}px;">
         ${admin} — ${yEnd}
       </div>
@@ -4279,7 +4408,7 @@ treemap_productionTrends = () => {
   const wrap = html`<div>
     <h2 style="font-size: 1.05rem; font-weight: 600; margin: 0 0 0.4rem;">${productionVar.label} — ${yEnd}</h2>
     <div class="cr-treemap-tip" role="tooltip"></div>
-    <div style="display: flex; flex-wrap: wrap; align-items: flex-start;">
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: ${gap}px;">
       ${admins.map(buildOne)}
     </div>
     ${captionDetails(caption, undefined, downloadButton(productionTrends_data, "productionTrends"))}
