@@ -410,6 +410,33 @@ document.documentElement.style.setProperty(
     font-weight: var(--plot-text-weight, 400) !important;
   }
 
+  /* Tree map overrides — the global plot-text rule above caps at the
+     sidebar slider value, but treemap labels are denser and benefit
+     from being a touch larger. Rules below the global rule so they
+     win the !important + same-specificity cascade. */
+  [id^="plot"] text.cr-treemap-label {
+    font-size: calc(var(--plot-text-size, 10px) + 2px) !important;
+  }
+  [id^="plot"] text.cr-treemap-value {
+    font-size: calc(var(--plot-text-size, 10px) + 1px) !important;
+  }
+  /* Custom hover tooltip rendered just below the treemap (faster than
+     the default native SVG <title> ~1s delay). The `<title>` element
+     is kept as an accessibility fallback. */
+  .cr-treemap-tip {
+    position: fixed;
+    pointer-events: none;
+    background: rgba(31, 41, 55, 0.92);
+    color: #fff;
+    padding: 5px 9px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 9999;
+    display: none;
+    white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+
   /* Plot caption furled under a clickable summary. */
   .plot-caption-details {
     margin: 0.25rem 0 0.75rem;
@@ -463,6 +490,15 @@ document.documentElement.style.setProperty(
   }
   .controls-row .cell-output-display {
     margin: 0;
+  }
+
+  /* Hide the ±1 SD ribbon toggle when Future Projections is in
+     "Summary" View Type — the whisker IS the uncertainty band in that
+     view, so the ribbon toggle is meaningless. The class is added by
+     a side-effect OJS cell that watches viewFutureChanges. Toggle's
+     value persists, so switching back to Plot view restores its state. */
+  body.future-view-summary .fp-uncertainty-toggle {
+    display: none;
   }
 
   /* Variant: force an exact column count regardless of natural input
@@ -686,9 +722,14 @@ keyFacts_combinedData = {
 
 `{ojs} _lang(nbText.sections.productionTrends.introText)`
 
-::: {.alert .alert-info role="note" style="font-size: 0.92em;"}
-**Heads up.** The [Subnational Agricultural Production Statistics](#agProduction) section that follows uses a **different** production dataset (MapSPAM 2020, nominal 2021 US$, subnational snapshot). This section uses FAOSTAT — national totals, constant 2014–2016 dollars, deep time-series. The two are **not directly comparable**. See [Methods and data sources](#methods-production) below for the full explanation.
-:::
+```{ojs}
+md`<details class="alert alert-info help-callout" role="note">
+<summary>Heads up — not directly comparable to the MapSPAM section below.</summary>
+
+The [Subnational Agricultural Production Statistics](#agProduction) section that follows uses a **different** production dataset (MapSPAM 2020, nominal 2021 US$, subnational snapshot). This section uses FAOSTAT — national totals, constant 2014–2016 dollars, deep time-series. The two are **not directly comparable** (different value bases, different geographic units, different time coverage). See [Methods and data sources](#methods-production) below for the full explanation.
+
+</details>`;
+```
 
 ::: {.controls-row}
 
@@ -709,12 +750,21 @@ viewof productionVar = Inputs.select(
 ```
 
 ```{ojs}
-viewof viewProductionTrends = Inputs.select(["line", "stackedBar", "table"], {
-  label: "View Type",
-  value: "line",
-  format: (d) =>
-    d === "line" ? "Line plot" : d === "stackedBar" ? "Stacked bar" : "Table",
-});
+viewof viewProductionTrends = Inputs.select(
+  ["line", "stackedBar", "treemap", "table"],
+  {
+    label: "View Type",
+    value: "line",
+    format: (d) =>
+      d === "line"
+        ? "Line plot"
+        : d === "stackedBar"
+          ? "Stacked bar"
+          : d === "treemap"
+            ? "Tree map"
+            : "Table",
+  },
+);
 ```
 
 ```{ojs}
@@ -806,6 +856,7 @@ loaderDiv("plotProductionTrends");
         <div class="plot-footer-row">${downloadButton(productionTrends_data, "productionTrends")}</div>
       </div>`;
     }
+    if (viewProductionTrends === "treemap") return treemap_productionTrends();
     return chart_productionTrends();
   });
 }
@@ -819,17 +870,37 @@ loaderDiv("plotProductionTrends");
 md`${_lang(nbText.sections.agProduction.introText)}`;
 ```
 
-::: {.alert .alert-info role="note" style="font-size: 0.92em;"}
-**Heads up.** The plot below uses **MapSPAM 2020 in nominal 2021 US dollars** — a single subnational (admin1) snapshot. For *historical national time-series* of the same commodities, see the [National Production Trends](#productionTrends) section above; the two datasets are **not directly comparable** (different value bases, different geographic units). See [Methods and data sources](#methods-socioeconomic) for the full explanation.
-:::
+```{ojs}
+md`<details class="alert alert-info help-callout" role="note">
+<summary>Heads up — not directly comparable to the FAOSTAT section above.</summary>
+
+The plot below uses **MapSPAM 2020 in nominal 2021 US dollars** — a single subnational (admin1) snapshot. For *historical national time-series* of the same commodities, see the [National Production Trends](#productionTrends) section above; the two datasets are **not directly comparable** (different value bases, different geographic units, different time coverage). See [Methods and data sources](#methods-socioeconomic) for the full explanation.
+
+</details>`;
+```
 
 ::: {.controls-row}
 
 ```{ojs}
-viewof prod_type = Inputs.select([null, ...Object.keys(exposure_groups)], {
-  format: (d) => _lang(cropTranslations[d]) || "All Commodities",
-  value: null,
-  label: "Production Type",
+viewof prod_type = Inputs.select(
+  [null, "all_ungrouped", ...Object.keys(exposure_groups)],
+  {
+    format: (d) => {
+      if (d === null) return "All commodities (grouped)";
+      if (d === "all_ungrouped") return "All commodities (ungrouped)";
+      return _lang(cropTranslations[d]);
+    },
+    value: null,
+    label: "Production Type",
+  },
+);
+```
+
+```{ojs}
+viewof viewAgProduction = Inputs.select(["bars", "treemap"], {
+  label: "View Type",
+  value: "bars",
+  format: (d) => (d === "treemap" ? "Tree map" : "Bars"),
 });
 ```
 
@@ -849,6 +920,8 @@ loaderDiv("plotExposure");
 ```{ojs}
 //| output: false
 {
+  // Only data-changing inputs in the loader-dep array (view type is
+  // presentation-only and re-renders synchronously from existing data).
   [admin0Iso3, admin1Names, prod_type];
   const div = document.getElementById("plotExposure");
   if (div) div.replaceChildren(loaderContent());
@@ -858,7 +931,10 @@ loaderDiv("plotExposure");
 ```{ojs}
 //| output: false
 {
-  renderToDiv("plotExposure", exposureBars_keyFacts);
+  renderToDiv("plotExposure", () => {
+    if (viewAgProduction === "treemap") return treemap_agProduction();
+    return exposureBars_keyFacts();
+  });
 }
 ```
 
@@ -1068,10 +1144,21 @@ Inputs.bind(
 ```
 
 ```{ojs}
-viewof viewFutureChanges = Inputs.select(["plot", "table"], {
+viewof viewFutureChanges = Inputs.select(["plot", "summary", "table"], {
   label: "View Type",
   value: "plot",
-  format: (d) => _lang(general_translations.viewTypes[d]),
+  // Notebook-specific renames live in nbText (don't touch the shared
+  // general_translations.viewTypes since the "plot" label there is used
+  // by sibling notebooks). For Future Projections only:
+  //   "plot"    → "Ribbon"
+  //   "summary" → "Dot plot"
+  // "table" still uses the shared translation.
+  format: (d) =>
+    d === "summary"
+      ? _lang(nbText.sections.futureProjections.summaryView.viewTypeLabel)
+      : d === "plot"
+        ? _lang(nbText.sections.futureProjections.plotView.viewTypeLabel)
+        : _lang(general_translations.viewTypes[d]),
 });
 ```
 
@@ -1108,10 +1195,31 @@ viewof showFutureAnomaly = Inputs.toggle({
 ```
 
 ```{ojs}
-viewof showFutureUncertainty = Inputs.toggle({
-  label: "Show ±1 SD ribbon",
-  value: true,
-});
+// The toggle keeps the same viewof name and structure (no conditional
+// swap pattern that caused the CR-070 hang). When View Type = "summary",
+// a CSS rule hides the wrapping element via the body.future-view-summary
+// class set by the side-effect cell further down. The toggle's *value*
+// stays meaningful so switching back to Plot view restores the user's
+// last choice. Adds a .fp-uncertainty-toggle class to the form so the
+// CSS rule can target only this control, not other toggles in the row.
+viewof showFutureUncertainty = (() => {
+  const el = Inputs.toggle({ label: "Show ±1 SD ribbon", value: true });
+  el.classList.add("fp-uncertainty-toggle");
+  return el;
+})();
+```
+
+```{ojs}
+//| output: false
+// Tag the body with the current View Type so CSS rules can hide
+// view-incompatible controls (currently: the ±1 SD ribbon toggle when
+// Summary view is active). Side-effect only — does not feed the plot.
+{
+  document.body.classList.toggle(
+    "future-view-summary",
+    viewFutureChanges === "summary",
+  );
+}
 ```
 
 ```{ojs}
@@ -1144,6 +1252,7 @@ loaderDiv("plotFutureProjections");
 {
   renderToDiv("plotFutureProjections", () => {
     if (viewFutureChanges === "plot") return timeseries_futureProjections();
+    if (viewFutureChanges === "summary") return summary_futureProjections();
     return html`<div>
       ${dataTable(futureProjections_plotData)}
       <div class="plot-footer-row">${downloadButton(futureProjections_plotData, "futureProjections")}</div>
@@ -1179,11 +1288,59 @@ renderToDiv("insightFutureClimate", () => createCountryInsights([climateProjecti
 `{ojs} _lang(nbText.sections.extremeEvents.introText)`
 
 ```{ojs}
-climateForm();
-scenarioForm();
+md`<details class="alert alert-info help-callout" role="note">
+<summary>${_lang(nbText.sections.extremeEvents.help.zscoreTitle)}</summary>
+
+${_lang(nbText.sections.extremeEvents.help.zscore)}
+
+${
+  (climateVarSelect.tails ?? "both") === "high-only"
+    ? _lang(nbText.sections.extremeEvents.help.tailNote.highOnly)
+    : _lang(nbText.sections.extremeEvents.help.tailNote.both)
+}
+
+</details>`;
 ```
 
-::: {.controls-row}
+::: {.controls-row .cols-3}
+
+```{ojs}
+Inputs.bind(
+  Inputs.select(seasons, {
+    format: (d) => d.season_string,
+    label: _lang(general_translations.season),
+  }),
+  viewof seasonSelect,
+);
+```
+
+```{ojs}
+Inputs.bind(
+  Inputs.select(hazards_obj, {
+    format: (d) => _lang(d.name),
+    label: _lang(general_translations.climateVar),
+  }),
+  viewof climateVarSelect,
+);
+```
+
+```{ojs}
+Inputs.bind(
+  Inputs.select(futurePeriods, {
+    label: _lang(general_translations.timeperiod),
+  }),
+  viewof futurePeriodSelect,
+);
+```
+
+```{ojs}
+Inputs.bind(
+  Inputs.checkbox(scenarioNames, {
+    label: _lang(general_translations.scenario),
+  }),
+  viewof futureScenarioSelect,
+);
+```
 
 ```{ojs}
 viewof viewExtremeEvents = Inputs.select(["plot", "table"], {
@@ -1198,21 +1355,6 @@ viewof paletteExtreme = paletteSelector({ value: "BuRd", label: "Palette" });
 ```
 
 :::
-
-```{ojs}
-md`<details class="alert alert-info help-callout" role="note">
-<summary>${_lang(nbText.sections.extremeEvents.help.zscoreTitle)}</summary>
-
-${_lang(nbText.sections.extremeEvents.help.zscore)}
-
-${
-  (climateVarSelect.tails ?? "both") === "high-only"
-    ? _lang(nbText.sections.extremeEvents.help.tailNote.highOnly)
-    : _lang(nbText.sections.extremeEvents.help.tailNote.both)
-}
-
-</details>`;
-```
 
 ```{ojs}
 loaderDiv("plotExtremeEvents");
@@ -1266,9 +1408,14 @@ renderToDiv("insightExtremeClimate", () => createCountryInsights([extremeEventsI
 
 `{ojs} _lang(nbText.sections.hazardExposure.introText)`
 
-::: {.alert .alert-info role="note" style="font-size: 0.92em;"}
-**Heads up — season selector does not apply here.** Hazard exposure aggregates across **the full calendar year of each year in the selected period** (not the season selected in earlier sections). The hazard occurrence is the NEX-GDDP-CMIP6 ensemble mean over all 12 months × all years in the timeframe (historical: 1995–2014, 20 years; future: each future period spans 20 years). Production values are MapSPAM 2020 (nominal 2021 US$, single snapshot).
-:::
+```{ojs}
+md`<details class="alert alert-info help-callout" role="note">
+<summary>Heads up — season selector does not apply here.</summary>
+
+Hazard exposure aggregates across **the full calendar year of each year in the selected period** (not the season selected in earlier sections). The hazard occurrence is the NEX-GDDP-CMIP6 ensemble mean over all 12 months × all years in the timeframe (historical: 1995–2014, 20 years; future: each future period spans 20 years). Production values are MapSPAM 2020 (nominal 2021 US$, single snapshot).
+
+</details>`;
+```
 
 ```{ojs}
 scenarioForm();
@@ -3266,7 +3413,8 @@ exposureBars_keyFacts = function () {
   const dataCategories = filterAdminToggle(exposure_plotData);
 
   let _data;
-  if (!prod_type) {
+  if (prod_type === null) {
+    // "All commodities (grouped)" — roll up to category level.
     _data = Array.from(
       d3.rollup(
         dataCategories,
@@ -3287,6 +3435,10 @@ exposureBars_keyFacts = function () {
           admin1_name: obj.admin1_name,
         })),
     ).flat();
+  } else if (prod_type === "all_ungrouped") {
+    // "All commodities (ungrouped)" — show every individual crop, no
+    // category rollup. Same shape the per-category branch produces.
+    _data = dataCategories;
   } else {
     _data = dataCategories.filter((d) => d.category === prod_type);
   }
@@ -3436,6 +3588,189 @@ exposureBars_keyFacts = function () {
     ${rowChunks.map((r, idx) => renderRow(r, idx))}
     ${captionDetails(caption, undefined, downloadButton(exposure_plotData, "agProductionBySector"))}
   </div>`;
+};
+```
+
+```{ojs}
+// Tree-map alternative view for the Subnational Ag Production section.
+// Reuses exposure_plotData — same aggregation logic as
+// exposureBars_keyFacts (when prod_type is null, sums to category
+// level; otherwise filters to that category and shows individual
+// crops). Layout: one tree map per selected admin, arranged in a
+// facet-cols grid, sized by value, coloured by value (same sequential
+// palette as the bars view). No new DuckDB query.
+treemap_agProduction = () => {
+  const dataCategories = filterAdminToggle(exposure_plotData);
+
+  let rows;
+  if (prod_type === null) {
+    rows = Array.from(
+      d3.rollup(
+        dataCategories,
+        (v) => ({
+          value: d3.sum(v, (d) => d.value),
+          iso3: v[0].iso3,
+          admin1_name: v[0].admin1_name,
+        }),
+        (d) => d.adminName,
+        (d) => d.category,
+      ),
+      ([adminName, catMap]) =>
+        Array.from(catMap, ([category, obj]) => ({
+          adminName,
+          crop: category,
+          value: obj.value,
+          iso3: obj.iso3,
+          admin1_name: obj.admin1_name,
+        })),
+    ).flat();
+  } else if (prod_type === "all_ungrouped") {
+    rows = dataCategories;
+  } else {
+    rows = dataCategories.filter((d) => d.category === prod_type);
+  }
+
+  rows = rows.filter((d) => Number(d.value) > 0);
+  if (rows.length === 0) return noDataPlaceholder();
+
+  const admins = [...new Set(rows.map((d) => d.adminName))];
+  const cols = Math.min(facetCols, admins.length);
+  const gap = 12;
+  const cellW = Math.floor((width - gap * (cols - 1)) / cols);
+  const cellH = 280;
+  const headerH = 22;
+  const innerH = cellH - headerH;
+
+  // Same sequential palette family as the bars view.
+  // paletteAgProd is a sequential palette name (set by
+  // sequentialPaletteSelector) — its interpolators live in
+  // sequentialPaletteInterpMap, NOT the diverging paletteInterpMap.
+  const interp =
+    sequentialPaletteInterpMap[paletteAgProd] || d3.interpolateYlGn;
+  const maxVal = d3.max(rows, (d) => d.value) || 1;
+  // Square-root scaling so smaller values aren't washed out — same
+  // trick the bars view uses implicitly via Plot's linear scale on
+  // the extents.
+  const colorOf = (v) => interp(Math.sqrt(v / maxVal));
+
+  const fmtUSD = formatUSD();
+
+  const buildOne = (admin) => {
+    const adminRows = rows.filter((d) => d.adminName === admin);
+    const root = d3
+      .hierarchy({ children: adminRows })
+      .sum((d) => d.value)
+      .sort((a, b) => b.value - a.value);
+    d3
+      .treemap()
+      .size([cellW, innerH])
+      .paddingInner(2)(root);
+
+    // Build SVG content via the `svg` template tag so children of
+    // <svg> are created in the SVG namespace (htl's `html` tag would
+    // create HTML <g>/<rect>/<text> nodes that browsers refuse to
+    // render inside an SVG — the "tree map produces nothing" symptom).
+    const leafEls = root.leaves().map((leaf) => {
+      const w = leaf.x1 - leaf.x0;
+      const h = leaf.y1 - leaf.y0;
+      const showLabel = w > 56 && h > 22;
+      const showValue = w > 70 && h > 36;
+      const label =
+        _lang(cropTranslations[leaf.data.crop]) || leaf.data.crop;
+      const tipText = `${label}: ${fmtUSD(leaf.data.value)}`;
+      return svg`<g transform="translate(${leaf.x0}, ${leaf.y0})">
+        <rect
+          class="cr-treemap-cell"
+          data-tip="${tipText}"
+          width="${w}"
+          height="${h}"
+          fill="${colorOf(leaf.data.value)}"
+          stroke="#999"
+          stroke-width="0.75"
+        ><title>${tipText}</title></rect>
+        ${
+          showLabel
+            ? svg`<text
+                class="cr-treemap-label"
+                x="6"
+                y="14"
+                fill="#111"
+                stroke="#fff"
+                stroke-width="1.6"
+                paint-order="stroke"
+                stroke-linejoin="round"
+                style="pointer-events: none;"
+              >${label}</text>`
+            : ""
+        }
+        ${
+          showValue
+            ? svg`<text
+                class="cr-treemap-value"
+                x="6"
+                y="30"
+                fill="#333"
+                stroke="#fff"
+                stroke-width="1.4"
+                paint-order="stroke"
+                stroke-linejoin="round"
+                style="pointer-events: none;"
+              >${fmtUSD(leaf.data.value)}</text>`
+            : ""
+        }
+      </g>`;
+    });
+
+    const svgEl = svg`<svg width="${cellW}" height="${innerH}" style="display: block; background: #fafafa;">
+      ${leafEls}
+    </svg>`;
+
+    return html`<div style="display: inline-block; vertical-align: top; margin-right: ${gap}px; margin-bottom: ${gap}px;">
+      <div style="font-size: 11px; color: #444; text-align: center; height: ${headerH}px; line-height: ${headerH}px;">
+        ${admin}
+      </div>
+      ${svgEl}
+    </div>`;
+  };
+
+  const caption = multiLineText(
+    [
+      `Data is from ${exposure_plotData[0]?.value_year ?? "?"}, measured in nominal ${exposure_plotData[0]?.unit?.split("-").pop() ?? "?"} US dollars.`,
+      "Box area is proportional to value of production. Boxes are sorted (largest top-left); colour is also scaled to value (square-root) so smaller crops stay distinguishable. Hover for full crop name + value when the label doesn't fit.",
+      html`Source: <a href="https://cgspace.cgiar.org/items/5736e3ff-aadc-4999-8922-8bac50b1c916">MapSPAM 2020 v1r2 SSA</a> (Adaptation Atlas commissioned variant). Atlas-hosted data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
+    ],
+    "atlasFigCaption",
+  );
+
+  const wrap = html`<div>
+    <h2 style="font-size: 1.05rem; font-weight: 600; margin: 0 0 0.4rem;">Agricultural Production</h2>
+    <div class="cr-treemap-tip" role="tooltip"></div>
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-start;">
+      ${admins.map(buildOne)}
+    </div>
+    ${captionDetails(caption, undefined, downloadButton(exposure_plotData, "agProductionBySector"))}
+  </div>`;
+
+  // Custom hover tooltip — faster than the browser's native <title>
+  // delay. The <title> element stays on each <rect> as an a11y/SR
+  // fallback. One shared tooltip div, repositioned on mousemove.
+  const tipEl = wrap.querySelector(".cr-treemap-tip");
+  wrap.querySelectorAll(".cr-treemap-cell").forEach((r) => {
+    const tipText = r.getAttribute("data-tip");
+    r.addEventListener("mouseenter", () => {
+      tipEl.textContent = tipText;
+      tipEl.style.display = "block";
+    });
+    r.addEventListener("mousemove", (e) => {
+      tipEl.style.left = `${e.clientX + 14}px`;
+      tipEl.style.top = `${e.clientY + 14}px`;
+    });
+    r.addEventListener("mouseleave", () => {
+      tipEl.style.display = "none";
+    });
+  });
+
+  return wrap;
 };
 ```
 
@@ -3779,6 +4114,7 @@ chart_productionTrends = () => {
       html`<strong>Variables and units.</strong> <em>Production</em> — annual production, tonnes. <em>Yield</em> — production per hectare harvested, kg/ha. <em>Value of production (US$)</em> — gross value of production deflated to 2014–2016 US dollars using FAO's commodity-specific price series. <em>Value of production (Int$)</em> — same deflation, converted to international dollars via Geary-Khamis purchasing-power-parity. <strong>Use I$ for cross-country comparison</strong> (it normalises for price-level differences); use US$ for absolute dollar amounts. Both VoP variables are stored upstream as "thousands of $" and re-scaled to dollars on display in this plot.`,
       "Commodities filtered to those representing ≥ 0.25 % of national vop_intd15 averaged over the last 5 years; FAO aggregate rollups and residual “n.e.c.” categories excluded; spice items combined into a single “Spices” entry.",
       `Top-${productionTopN} commodities ranked by the displayed variable (${productionVar.label}) over the selected year window (${yStart}–${yEnd}); manual overrides via the Commodities checkbox replace the top-N defaults. Ranking re-computes when the variable or year range changes.`,
+      `For a single end-year snapshot ranked by box area, switch View Type to **Tree map** — useful for seeing which commodities dominate ${productionVar.label} in ${yEnd} without the visual noise of the time series.`,
     ],
     "atlasFigCaption",
   );
@@ -3787,6 +4123,186 @@ chart_productionTrends = () => {
     ${plot}
     ${captionDetails(caption, undefined, downloadButton(productionTrends_data, "productionTrends"))}
   </div>`;
+};
+```
+
+```{ojs}
+// Tree-map view for National Production Trends. Shows the END YEAR of
+// the selected year range only (single snapshot of the top-N
+// commodities by value). Reuses productionTrends_data — no new query.
+// Categorical colour by commodity (same palette as the line view) so a
+// reader can mentally link the boxes to the line plot's colour legend.
+treemap_productionTrends = () => {
+  const _data = productionTrends_data;
+  if (_data.length === 0) return noDataPlaceholder();
+
+  const yStart = Math.min(productionYearStart, productionYearEnd);
+  const yEnd = Math.max(productionYearStart, productionYearEnd);
+
+  // Filter to the "to year" only — the dispatch asked for a single
+  // snapshot rather than a span average. Some FAOSTAT rows may not
+  // have data for that exact year (sparse coverage); fall back to the
+  // most recent available year ≤ yEnd per (admin × commodity).
+  const yearsByAdminCommodity = d3.rollup(
+    _data,
+    (v) => v,
+    (d) => d.adminName,
+    (d) => d.commodity,
+  );
+  const snapshot = [];
+  for (const [adminName, byCommodity] of yearsByAdminCommodity) {
+    for (const [commodity, rows] of byCommodity) {
+      const valid = rows
+        .filter((r) => r.year <= yEnd && r.value != null && r.value > 0)
+        .sort((a, b) => b.year - a.year);
+      if (valid.length === 0) continue;
+      snapshot.push(valid[0]); // most recent year ≤ yEnd
+    }
+  }
+  if (snapshot.length === 0) return noDataPlaceholder();
+
+  // Unit label for tooltips and the on-box value text.
+  const yUnit =
+    productionVar.id === "yield"
+      ? "kg / ha"
+      : productionVar.id === "production"
+        ? "tonnes"
+        : productionVar.id === "vop_intd15"
+          ? "Int$"
+          : "US$";
+
+  const admins = [...new Set(snapshot.map((d) => d.adminName))];
+  const commoditiesInPlot = [...new Set(snapshot.map((d) => d.commodity))];
+  const paletteColors =
+    categoricalPaletteMap[paletteProduction] ||
+    categoricalPaletteMap.Tableau10;
+  const N = commoditiesInPlot.length;
+  const colorRange =
+    N <= paletteColors.length
+      ? commoditiesInPlot.map((_, i) => paletteColors[i])
+      : d3.quantize(
+          d3.piecewise(d3.interpolateRgb.gamma(2.2), paletteColors),
+          N,
+        );
+  const colorByCommodity = new Map(
+    commoditiesInPlot.map((c, i) => [c, colorRange[i]]),
+  );
+
+  const cols = Math.min(facetCols, admins.length);
+  const gap = 12;
+  const cellW = Math.floor((width - gap * (cols - 1)) / cols);
+  const cellH = 280;
+  const headerH = 22;
+  const innerH = cellH - headerH;
+
+  const fmtVal = (v) =>
+    `${formatNumCompactShort()(v)} ${yUnit}`;
+
+  const buildOne = (admin) => {
+    const adminRows = snapshot.filter((d) => d.adminName === admin);
+    const root = d3
+      .hierarchy({ children: adminRows })
+      .sum((d) => d.value)
+      .sort((a, b) => b.value - a.value);
+    d3.treemap().size([cellW, innerH]).paddingInner(2)(root);
+
+    const leafEls = root.leaves().map((leaf) => {
+      const w = leaf.x1 - leaf.x0;
+      const h = leaf.y1 - leaf.y0;
+      const showLabel = w > 56 && h > 22;
+      const showValue = w > 70 && h > 36;
+      const label = leaf.data.commodity;
+      const tipText = `${label} (${leaf.data.year}): ${fmtVal(leaf.data.value)}`;
+      return svg`<g transform="translate(${leaf.x0}, ${leaf.y0})">
+        <rect
+          class="cr-treemap-cell"
+          data-tip="${tipText}"
+          width="${w}"
+          height="${h}"
+          fill="${colorByCommodity.get(label)}"
+          stroke="#999"
+          stroke-width="0.75"
+        ><title>${tipText}</title></rect>
+        ${
+          showLabel
+            ? svg`<text
+                class="cr-treemap-label"
+                x="6"
+                y="14"
+                fill="#111"
+                stroke="#fff"
+                stroke-width="1.6"
+                paint-order="stroke"
+                stroke-linejoin="round"
+                style="pointer-events: none;"
+              >${label}</text>`
+            : ""
+        }
+        ${
+          showValue
+            ? svg`<text
+                class="cr-treemap-value"
+                x="6"
+                y="30"
+                fill="#333"
+                stroke="#fff"
+                stroke-width="1.4"
+                paint-order="stroke"
+                stroke-linejoin="round"
+                style="pointer-events: none;"
+              >${fmtVal(leaf.data.value)}</text>`
+            : ""
+        }
+      </g>`;
+    });
+
+    return html`<div style="display: inline-block; vertical-align: top; margin-right: ${gap}px; margin-bottom: ${gap}px;">
+      <div style="font-size: 11px; color: #444; text-align: center; height: ${headerH}px; line-height: ${headerH}px;">
+        ${admin} — ${yEnd}
+      </div>
+      ${svg`<svg width="${cellW}" height="${innerH}" style="display: block; background: #fafafa;">
+        ${leafEls}
+      </svg>`}
+    </div>`;
+  };
+
+  const caption = multiLineText(
+    [
+      `Snapshot of the **end year** (${yEnd}) of the selected year range — box area is proportional to ${productionVar.label}. For years where the end year has no FAOSTAT record for a commodity, the most recent year ≤ ${yEnd} is shown instead. Switch View Type to **Line plot** for the full time-series.`,
+      html`<strong>Source.</strong> <a href="https://www.fao.org/faostat/en/#data/QV">FAOSTAT QV</a> + <a href="https://www.fao.org/faostat/en/#data/QCL">FAOSTAT QCL</a>. Built by <a href="https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/0.4.5_create_faostat_long.R">AdaptationAtlas/hazards_prototype</a>.`,
+      "Commodities filtered to those representing ≥ 0.25 % of national vop_intd15 averaged over the last 5 years; FAO aggregate rollups and residual “n.e.c.” categories excluded; spice items combined into a single “Spices” entry.",
+      `Top-${productionTopN} commodities ranked by ${productionVar.label} over the selected year window (${yStart}–${yEnd}); the tree map then plots the end-year value of each. Manual overrides via the Commodities checkbox replace the top-N defaults.`,
+    ],
+    "atlasFigCaption",
+  );
+
+  const wrap = html`<div>
+    <h2 style="font-size: 1.05rem; font-weight: 600; margin: 0 0 0.4rem;">${productionVar.label} — ${yEnd}</h2>
+    <div class="cr-treemap-tip" role="tooltip"></div>
+    <div style="display: flex; flex-wrap: wrap; align-items: flex-start;">
+      ${admins.map(buildOne)}
+    </div>
+    ${captionDetails(caption, undefined, downloadButton(productionTrends_data, "productionTrends"))}
+  </div>`;
+
+  // Custom hover tooltip — same pattern as treemap_agProduction.
+  const tipEl = wrap.querySelector(".cr-treemap-tip");
+  wrap.querySelectorAll(".cr-treemap-cell").forEach((r) => {
+    const tipText = r.getAttribute("data-tip");
+    r.addEventListener("mouseenter", () => {
+      tipEl.textContent = tipText;
+      tipEl.style.display = "block";
+    });
+    r.addEventListener("mousemove", (e) => {
+      tipEl.style.left = `${e.clientX + 14}px`;
+      tipEl.style.top = `${e.clientY + 14}px`;
+    });
+    r.addEventListener("mouseleave", () => {
+      tipEl.style.display = "none";
+    });
+  });
+
+  return wrap;
 };
 ```
 
@@ -4459,6 +4975,232 @@ timeseries_futureProjections = () => {
 };
 ```
 
+```{ojs}
+// Summary view: horizontal dot-and-whisker per scenario, one panel per
+// selected admin. The dot is the period-mean ensemble value; the
+// whisker is ±1 SD across the 18 GCMs (averaged across years in the
+// selected timeperiod). Reuses futureProjections_plotData — no new
+// DuckDB query. Hides scenarios that aren't in the current scenario
+// filter (option 6a from the CR-074 dispatch); the caveat copy guides
+// the user to pick a later Timeframe if SSPs overlap too much.
+summary_futureProjections = () => {
+  const _data = filterAdminToggle(futureProjections_plotData);
+  if (_data.length === 0) return noDataPlaceholder();
+
+  const _season = seasonSelect.season_string;
+  const _variableName = _lang(climateVarSelect.name);
+  const _variableAxis = _lang(climateVarSelect.labelAxis);
+  const _showAnomaly = showFutureAnomaly;
+  const _anomalyText = _showAnomaly
+    ? ` (${_lang(general_translations.anomaly)})`
+    : "";
+  const _mainTitle = `${_variableName}${_anomalyText} — Season: ${_season} — ${futurePeriodSelect}`;
+  const plotValue_mean = _showAnomaly ? "mean_anomaly" : "mean";
+  const plotValue_sd = _showAnomaly ? "sd_anomaly" : "sd";
+
+  // Canonical SSP ordering for the y-axis (top-to-bottom).
+  const canonicalOrder = ["ssp126", "ssp245", "ssp370", "ssp585"];
+  const scenariosInData = [
+    ...new Set(_data.map((d) => d.scenario.toLowerCase())),
+  ];
+
+  // Colour map matches the existing Plot view's palette assignment so
+  // the SSP-X colour stays the same across view switches.
+  const paletteColors =
+    categoricalPaletteMap[paletteFuture] || categoricalPaletteMap.Tableau10;
+  const colorByScenario = new Map(
+    scenariosInData.map((s, i) => [s, paletteColors[i % paletteColors.length]]),
+  );
+
+  // Aggregate per (admin × scenario): mean of annual `mean` and mean of
+  // annual `sd`. Plot.js doesn't need a separate groupBy mark — we
+  // pre-aggregate into one row per (admin, scenario).
+  const groups = d3.group(
+    _data,
+    (d) => d.adminName,
+    (d) => d.scenario.toLowerCase(),
+  );
+  const summary = [];
+  for (const [adminName, byScen] of groups) {
+    for (const [scen, scenRows] of byScen) {
+      const meanVals = scenRows
+        .map((r) => r[plotValue_mean])
+        .filter((v) => v != null);
+      const sdVals = scenRows
+        .map((r) => r[plotValue_sd])
+        .filter((v) => v != null);
+      if (meanVals.length === 0) continue;
+      summary.push({
+        adminName,
+        scenario: scen,
+        scenarioUpper: scen.toUpperCase(),
+        mean: d3.mean(meanVals),
+        sd: sdVals.length > 0 ? d3.mean(sdVals) : 0,
+      });
+    }
+  }
+  if (summary.length === 0) return noDataPlaceholder();
+
+  // Y-axis: canonical order, filtered to scenarios actually in the data
+  // (CR-074 option 6a).
+  const yDomain = canonicalOrder
+    .filter((s) => scenariosInData.includes(s))
+    .map((s) => s.toUpperCase());
+
+  // Shared x-axis across panels so visual comparison works.
+  const xMin = d3.min(summary, (d) => d.mean - d.sd);
+  const xMax = d3.max(summary, (d) => d.mean + d.sd);
+  const xPad = (xMax - xMin) * 0.1 || Math.abs(xMax) * 0.1 || 1;
+  const xExtent = _showAnomaly
+    ? [Math.min(xMin - xPad, 0), Math.max(xMax + xPad, 0)]
+    : [xMin - xPad, xMax + xPad];
+
+  const { chunks, cols } = adminGridSplit(_data, facetCols);
+  const _unit = _lang(climateVarSelect.unit) || "";
+  const fmtSigned = d3.format("+,.1f");
+  const fmtAbs = d3.format(",.1f");
+  const labelFor = (d) =>
+    `${fmtSigned(d.mean)} ± ${fmtAbs(d.sd)}${_unit ? ` ${_unit}` : ""}`;
+
+  const renderRow = (rowAdmins, rowIdx, isFirst, isLast) => {
+    const padded = padFxDomain(rowAdmins, cols, rowIdx);
+    const rowData = summary.filter((d) => rowAdmins.includes(d.adminName));
+    return Plot.plot({
+      width,
+      // Generous per-row height so y-tick labels (SSP126 / SSP245 / …)
+      // never collide and the right-edge "+X ± Y unit" annotation has
+      // room to breathe. 70 px per scenario + ~120 px chrome (title,
+      // x-axis label, facet header) gives comfortable spacing even at
+      // facetCols = 4.
+      height: 120 + yDomain.length * 70,
+      marginLeft: 80,
+      marginRight: 160,
+      marginTop: isFirst ? 90 : 48,
+      marginBottom: isLast ? 60 : 32,
+      title: isFirst ? _mainTitle : undefined,
+      x: {
+        domain: xExtent,
+        label: `${_variableAxis}${_anomalyText}`,
+        grid: true,
+        tickFormat: yTickWithUnit,
+      },
+      y: {
+        domain: yDomain,
+        label: null,
+      },
+      fx: {
+        domain: padded,
+        label: null,
+        tickFormat: gridFxTickFormat,
+      },
+      facet: {
+        data: rowData,
+        x: "adminName",
+        label: null,
+      },
+      color: {
+        domain: scenariosInData.map((s) => s.toUpperCase()),
+        range: scenariosInData.map((s) => colorByScenario.get(s)),
+        legend: false,
+      },
+      marks: [
+        // Anomaly mode: vertical zero baseline.
+        // Absolute mode: vertical dashed line at the per-admin
+        // 1995–2014 ensemble-mean baseline so each panel shows where
+        // "recent past" sat relative to the projected SSPs.
+        Plot.ruleX(_showAnomaly ? [0] : [], {
+          stroke: "#666",
+          strokeDasharray: [4, 4],
+        }),
+        Plot.ruleX(
+          !_showAnomaly
+            ? rowAdmins
+                .map((a) => ({ adminName: a, x: baselineMeanByAdmin.get(a) }))
+                .filter((d) => d.x != null)
+            : [],
+          {
+            fx: "adminName",
+            x: "x",
+            stroke: "#444",
+            strokeDasharray: [5, 5],
+            strokeWidth: 0.9,
+          },
+        ),
+        // Whisker body — horizontal rule from mean-sd to mean+sd.
+        Plot.ruleY(rowData, {
+          x1: (d) => d.mean - d.sd,
+          x2: (d) => d.mean + d.sd,
+          y: "scenarioUpper",
+          stroke: "scenarioUpper",
+          strokeWidth: plotLineWidth + 1,
+        }),
+        // End caps. Plot.tickX defaults to spanning the full y-band
+        // height — Pete read that as "wide ends". Small symmetric
+        // insetTop/insetBottom shorten the cap so it reads as a brief
+        // serif rather than a full bar, while staying clearly visible.
+        Plot.tickX(rowData, {
+          x: (d) => d.mean - d.sd,
+          y: "scenarioUpper",
+          stroke: "scenarioUpper",
+          strokeWidth: plotLineWidth + 1,
+          insetTop: 10,
+          insetBottom: 10,
+        }),
+        Plot.tickX(rowData, {
+          x: (d) => d.mean + d.sd,
+          y: "scenarioUpper",
+          stroke: "scenarioUpper",
+          strokeWidth: plotLineWidth + 1,
+          insetTop: 10,
+          insetBottom: 10,
+        }),
+        // Centre dot — full saturation so the mean reads clearly
+        // against the lighter whisker.
+        Plot.dot(rowData, {
+          x: "mean",
+          y: "scenarioUpper",
+          fill: "scenarioUpper",
+          r: 4 * (plotLineWidth / 1.5),
+          stroke: "white",
+          strokeWidth: 1.2,
+        }),
+        // Right-edge numeric label (placed at the right end of the
+        // whisker's data position, anchored to start so it spills into
+        // the right margin).
+        Plot.text(rowData, {
+          x: (d) => d.mean + d.sd,
+          y: "scenarioUpper",
+          text: labelFor,
+          textAnchor: "start",
+          dx: 6,
+          fontSize: 10,
+          fill: "#333",
+        }),
+      ],
+    });
+  };
+
+  const captionLines = [
+    _lang(nbText.sections.futureProjections.summaryView.caption.intro),
+    _lang(nbText.sections.futureProjections.summaryView.caption.reading),
+    _lang(nbText.sections.futureProjections.summaryView.caption.separation),
+    _lang(nbText.sections.futureProjections.summaryView.caption.caveat),
+  ];
+  const caption = multiLineText(captionLines, "atlasFigCaption");
+
+  return html`<div>
+    ${chunks.map((r, idx) =>
+      renderRow(r, idx, idx === 0, idx === chunks.length - 1),
+    )}
+    ${captionDetails(
+      caption,
+      undefined,
+      downloadButton(futureProjections_plotData, "futureProjections"),
+    )}
+  </div>`;
+};
+```
+
 ### extremeEvents
 
 ```{ojs}
@@ -4485,6 +5227,10 @@ bars_extremeEvents = () => {
   );
   if (_data.length === 0) return noDataPlaceholder();
 
+  // Y-axis is free / auto-scales to the observed data. The period
+  // length (20 years per scenario) is communicated as plain text below
+  // the chart title rather than as a fixed y-domain anchor.
+  const YEARS_PER_PERIOD = 20;
   const yMax = d3.max(_data, (d) => d.num_events) ?? 1;
   const { chunks, cols } = adminGridSplit(_data, facetCols);
 
@@ -4533,10 +5279,13 @@ bars_extremeEvents = () => {
       marginRight: 30,
       marginTop: isFirst ? 80 : 40,
       marginBottom: isLast ? 60 : 22,
+      // Title inside Plot.plot for consistency with the other plot
+      // functions (timeseries_futureProjections, barplot_recentChanges,
+      // etc.). The period-length note that briefly lived here as a
+      // styled-subtitle now lives in the "About this plot" caption.
       title: isFirst
         ? `Extreme events: ${_lang(climateVarSelect.name)}`
         : undefined,
-
       facet: { data: rowData, x: "adminName", label: null },
 
       fx: {
@@ -4602,6 +5351,7 @@ bars_extremeEvents = () => {
 
   const caption = multiLineText(
     [
+      `Counted over ${YEARS_PER_PERIOD} years per scenario (1995–2014 historic, 20-year future slices).`,
       "Count of years classified as 'extreme' (|z| ≥ 2) or 'unusual' (1 ≤ |z| < 2). Z-scores are computed per admin1 × season × hazard against the 1995–2014 baseline mean and standard deviation. The same baseline is applied to both historic and future windows so the cutoffs are directly comparable across scenarios.",
       "Counts are point estimates based on the ensemble mean per year — they carry no inter-model uncertainty. A proper uncertainty treatment requires per-GCM classification followed by ensemble aggregation, which has to happen in the upstream analytical pipeline.",
       html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a> ensemble (18 GCMs, r1i1p1f1) — historical (1995–2014) and future scenarios; processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
