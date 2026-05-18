@@ -59,11 +59,11 @@ Keep each commit small and reviewable. If commit 2 needs adjustments after smoke
 Two bulk downloads to add (matches the convention used for the existing four):
 
 ```
-https://fenixservices.fao.org/faostat/static/bulkdownloads/Trade_Crops_Livestock_E_Africa.zip
-  -> Trade_Crops_Livestock_E_Africa_NOFLAG.csv          (Africa-only, smaller, used by the build)
+https://fenixservices.fao.org/faostat/static/bulkdownloads/Trade_CropsLivestock_E_Africa.zip
+  -> Trade_CropsLivestock_E_Africa_NOFLAG.csv          (Africa-only, smaller, used by the build)
 
-https://fenixservices.fao.org/faostat/static/bulkdownloads/Trade_Crops_Livestock_E_All_Area_Groups.zip
-  -> Trade_Crops_Livestock_E_All_Area_Groups.csv        (global, for reference; downloaded but not used in the parquet)
+https://fenixservices.fao.org/faostat/static/bulkdownloads/Trade_CropsLivestock_E_All_Area_Groups.zip
+  -> Trade_CropsLivestock_E_All_Area_Groups.csv        (global, for reference; downloaded but not used in the parquet)
 ```
 
 Download pattern is identical to `R/0_server_setup.R` lines ~547–565 (the Production block) — `download.file(url, zip)`, `unzip(zip, exdir = fao_dir)`, `unlink(zip)`. Idempotent (skip if target CSV exists unless `update = TRUE`).
@@ -90,24 +90,25 @@ sources <- list(
     file    = file.path(fao_dir, "Value_of_Production_E_Africa.csv"),
     element = "Gross Production Value (constant 2014-2016 thousand I$)"
   ),
-  # NEW — Trade domain
+  # NEW — Trade domain. Element strings are FAOSTAT-canonical lowercase.
   export_quantity = list(
-    file    = file.path(fao_dir, "Trade_Crops_Livestock_E_Africa_NOFLAG.csv"),
-    element = "Export Quantity"
+    file    = file.path(fao_dir, "Trade_CropsLivestock_E_Africa_NOFLAG.csv"),
+    element = "Export quantity"
   ),
   export_value = list(
-    file    = file.path(fao_dir, "Trade_Crops_Livestock_E_Africa_NOFLAG.csv"),
-    element = "Export Value"
+    file    = file.path(fao_dir, "Trade_CropsLivestock_E_Africa_NOFLAG.csv"),
+    element = "Export value"
   )
 )
 ```
 
-**Important — verify the element strings before committing.** FAOSTAT element-string naming has shifted over years. Open `Trade_Crops_Livestock_E_Africa_NOFLAG.csv` and `unique(dt$Element)` to confirm the exact strings. Likely candidates:
-- `Export Quantity` (tonnes) — element code 5910
-- `Export Value` (1000 USD) — element code 5922
-- (Imports exist too but explicitly out of scope for this dispatch.)
+**Element strings verified against the FAOSTAT bulk (2026-05-18):**
+- `"Export quantity"` (lowercase q) — covers element codes 5907 / 5908 / 5909 / 5910 split by unit (head counts and tonnes). Tonnes is the dominant slice; the others are livestock head counts that come along for the ride.
+- `"Export value"` (lowercase v) — element code 5922 only; unit is `1000 USD`.
 
-If the strings don't match exactly, use what the CSV actually contains. Trust the data over the dispatch.
+The multi-element-code-per-string pattern matches the existing Production filter (`"Production"` covers codes 5510 `t` + 5513 `1000 No`), so the `unit` column downstream preserves the distinction.
+
+**Note on FAOSTAT filename quirks:** The bulk zip uses `Trade_CropsLivestock` (no underscore between Crops and Livestock), unlike `Production_Crops_Livestock` (underscore). FAOSTAT is inconsistent across domains — match the upstream spelling for each.
 
 **`commodity_clean_map` may need extending** if Trade introduces commodities not present in Production (rare for the FAOSTAT crop list, but check). After adding the Trade rows, run `setdiff(unique(fao_long$commodity), names(commodity_clean_map))` and inspect — anything new gets either a clean-map entry or an exclude-pattern entry.
 
