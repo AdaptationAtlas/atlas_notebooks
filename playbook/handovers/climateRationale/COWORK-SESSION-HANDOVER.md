@@ -3,7 +3,7 @@
 **Audience:** a fresh chat-mode Claude session (Cowork or web/desktop chat)
 picking up the Climate Rationale notebook work. Read this first.
 
-**Last updated:** 2026-05-15 by Pete + previous chat-mode session.
+**Last updated:** 2026-05-18 (session 7) by Pete + Claude Code.
 
 ---
 
@@ -134,61 +134,84 @@ changes in VS Code's Source Control panel.
 
 ---
 
-## Current state (2026-05-15, end of session 2)
+## Current state (2026-05-18, end of session 7)
 
 ### Where the branch is
 
-- `dev/climateRationale`, 9 commits ahead of `notebooks/climateRationale`,
-  local matches origin.
-- Open PR #29 (draft), targets `notebooks/climateRationale`. Brayden is
-  the assigned reviewer.
-- Working tree clean apart from `.DS_Store` noise.
+- `dev/climateRationale` — local is one commit ahead of `origin/dev/climateRationale`
+  (`c599c33` dispatch corrections + a pending docs commit for this session 7
+  wrap-up). PR #29 still open, targets `notebooks/climateRationale`.
+- `hazards_prototype/develop` — three new commits pushed this session
+  (`df3ce97`, `595eb6d`, `1be265d`). Origin in sync.
+- Working tree noise: `.DS_Store` files (untouched).
 
-### What's landed (the big stuff)
+### What's landed (the big stuff, latest first)
 
-- **CR-063 Phase A** — Agricultural Production Trends section + restructured
-  page order: Overview → Key Demographic and Economic Facts → National
-  Production Trends (FAOSTAT) → Subnational Agricultural Production
-  Statistics (MapSPAM) → Recent Changes → Future Projections → Extreme
-  Events → Crop & Livestock Exposure → Summary → Acknowledgements →
-  Methods → Data Sources.
-- **CR-064** ✓ done — Brayden published FAOSTAT parquet at
-  `s3://digital-atlas/.../adm0_faostat.parquet`.
-- **CR-021** 🔄 AI-drafted FR for all remaining gaps (100% coverage in
-  both nbText.json and generalTranslations.json). Pete-review pending.
-- **8 PR groups partially or fully done** — see ISSUES.md STATUS lines.
-- **CR-058 measured** — load-latency probe done; ticket needs expansion
-  (dispatch queued, see below).
+- **2026-05-18, session 7 — observational publish layer + FAOSTAT exports.**
+  - New `hazards_prototype/R/observational/6_publish_obs_to_s3.R`: wraps
+    `AtlasDataManageR::S3DirUploader` with `--dry-run` / `--smoke` / `--full`
+    + `--tier {1|2|all}` flags. Tier 1 = admin parquets + base raster;
+    Tier 2 = climatology COGs; Tier 3 (per-pixel COGs) explicitly out of
+    scope. Climatology `name_fn` re-labels the on-disk 4-token names
+    (`1995-2014` / `1991-2020` / `full`) to descriptive S3 partition
+    values (`atlas_1995-2014` / `wmo_1991-2020` / `full_record`).
+  - FAOSTAT parquet republished with two new `variable` levels:
+    `export_quantity` + `export_value`. Schema unchanged at 7 columns;
+    enum now 6 levels. 308 k rows on S3 at the canonical
+    `s3://digital-atlas/.../adm0_faostat.parquet`. See [[CR-064]] STATUS.
+  - Notebook follow-up: CR-063 Phase B / C can now pick up the trade
+    variables; CR-062 still waits on script-4/5/6 verification on CGlabs.
+- **2026-05-18, session 6 — CR-009 reactive filter fix + CR-068
+  categorisation-bug dispatch sent to `hazards_prototype/develop`.**
+- **2026-05-15 → 2026-05-18, sessions 2–5 — major iteration.**
+  Tree-map views in both production sections, foldable heads-ups,
+  collapsible TOC, Hawkins warming-stripes hero, AGNES Methods justification,
+  Future Projections Summary view, Extreme Events polish.
+- **CR-063 Phase A** — National Production Trends section landed 2026-05-15
+  against the freshly-baked FAOSTAT parquet ([[CR-064]]). Page order:
+  Overview → Key Demographic and Economic Facts → National Production
+  Trends (FAOSTAT) → Subnational Agricultural Production Statistics
+  (MapSPAM) → Recent Changes → Future Projections → Extreme Events →
+  Crop & Livestock Exposure → Summary → Acknowledgements → Methods →
+  Data Sources.
+- **CR-021** 🔄 100 % FR coverage drafted, Pete-review pending.
 
-### Still BLOCKED on Brayden
+### Still BLOCKED on Brayden / pipeline
 
 - CR-001 Part 1 (HSH-max → TAVG)
-- CR-009 (hazard_exposure parquet completeness)
 - CR-040 (GCM count + list)
 - CR-054 (Future Projections insight variable-selector responsiveness)
 - CR-055 (PTOT seasonal-window unit ambiguity)
-- CR-057 (historical data source confirmation — captions shipped on best
-  available evidence)
+- CR-057 (historical data source confirmation)
+- CR-068 (hazard_exposure categorisation: historic vs future mismatch +
+  SSP370 zero-row periods) — dispatch sent from session 6, awaiting
+  Stage 1 root-cause report.
 
-### Queued dispatches (not yet run as of end of session 2)
+### Open items needing CGlabs / server-side runs (Pete)
 
-Three things in the chat history that haven't been pasted into Claude
-Code yet:
+1. **Observational pipeline scripts 4 + 5 + 6 verification.** Script 3
+   was still running adm1 at session close. Once that finishes, run
+   `4_aggregate_obs_admin_periods.R --smoke && --full`, then
+   `5_make_obs_map_climatologies.R --smoke && --full`, then
+   `6_publish_obs_to_s3.R --dry-run` followed by `--smoke` (one-file
+   upload + 4 inline checks). **STOP after `--smoke`** before running
+   `--full`. Surfaces the climatology COGs + admin parquets at the
+   public S3 paths documented in `hazards_prototype/R/observational/README.md`.
+2. **FAOSTAT smoke / verification.** Already done — Pete re-sourced
+   `0_server_setup.R` to pull the Trade CSV, rebuilt `0.4.5_*` to produce
+   the 6-variable parquet, and ran the S3 upload. Verified live at
+   the canonical CR-064 path with 308 k rows / 6 levels.
 
-1. **CR-070 + CR-071 + CR-062 update** — add the methodology audit ticket
-   (CR-070), the observational spatial-maps ticket (CR-071), and tighten
-   CR-062's scope to timeseries-only. Full dispatch text in the previous
-   chat session.
+### Queued dispatches / next dispatchable items
 
-2. **CR-058 expansion** — replace the speculative "~100MB+" parquet
-   estimate with measured probe data; add the "8/9 hazards filtered
-   client-side" finding; refine fix options including option 3 (per-iso3
-   parquet partitioning) as the highest-leverage fix. Full dispatch text
-   in the previous chat session.
-
-3. **Slack handover to Brayden** — has been drafted but not sent. PR #29
-   description has been updated; needs the explicit "here are the
-   upstream-bake bundle items" framing.
+- **CR-063 Phase B (production-trend Quick Insights, now with trade
+  variables available).** Notebook-only; the FAOSTAT parquet already
+  carries `export_quantity` + `export_value`. See Q-N in ISSUES.md and
+  session 7 notes in DECISIONS.md.
+- **CR-058 Option 6 (apply CR-073 *_raw pattern to FP + EE).** Notebook-only.
+  Documented in `3cc607c`; not yet dispatched.
+- **CR-062 / CR-070 #2 / CR-071 follow-up.** Becomes one-`nbData.json`-entry
+  on the notebook side as soon as script 6 `--full` lands the S3 paths.
 
 If Pete wants any of these landed, he'll dispatch them via Claude Code.
 Don't redo them from scratch unless Pete asks.
@@ -201,16 +224,18 @@ Don't redo them from scratch unless Pete asks.
 |---|---|---|---|
 | U-1 | CR-059 | SPEI as a hazard variable | SPEI display in Extreme Events |
 | U-2 | CR-060 | Inter-model quantiles (q5/q17/q50/q83/q95) | Exact AR6 ribbon |
-| U-3 | CR-064 | FAOSTAT on S3 | ✓ DONE |
-| U-4 | CR-068 | `hazard_exposure` no-hazard row | Togo summary table (CR-049) |
+| U-3 | CR-064 | FAOSTAT on S3 | ✓ DONE (2026-05-15); **extended 2026-05-18 with `export_quantity` + `export_value` — same path, 6-level enum** |
+| U-4 | CR-068 | `hazard_exposure` no-hazard row + historic/future categorisation parity + SSP370 coverage | Togo summary table (CR-049), Crop & Livestock Exposure panels (CR-009 second-order fix) |
 | U-5 | CR-070 #3 | Per-GCM extreme-event classification | Uncertainty bands on counts |
 | U-6 | CR-070 #1 | 1991–2020 baseline statistics in parquet | Baseline upgrade |
-| U-7 | CR-070 #2 + CR-062 + CR-071 | CHIRPS / CHIRTS at admin1 | Observational baseline, timeseries view, three map views |
+| U-7 | CR-070 #2 + CR-062 + CR-071 | CHIRPS / CHIRTS at admin1 + observational climatology COGs | Observational baseline, timeseries view, three map views. **2026-05-18:** publish layer drafted (`R/observational/6_publish_obs_to_s3.R` on `hazards_prototype/develop`); pending end-to-end `--smoke` + `--full` runs on CGlabs |
 | U-8 | CR-058 Option 3 | Per-iso3 parquet partitioning | First-load latency fix |
 
 **Seven asks remaining (U-1, U-2, U-4 through U-8); landing them together
 unblocks six downstream notebook PRs.** Frame any Slack to Brayden around
-this consolidation.
+this consolidation. U-7 is partly self-served (Pete + Claude Code in
+`hazards_prototype` rather than Brayden); U-3 has been extended without
+needing Brayden's queue.
 
 ---
 

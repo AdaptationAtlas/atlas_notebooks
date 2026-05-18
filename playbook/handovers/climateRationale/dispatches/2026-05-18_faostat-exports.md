@@ -1,5 +1,21 @@
 # Dispatch — FAOSTAT: add Trade domain (exports) to long-format parquet
 
+**Status: ✓ COMPLETED 2026-05-18.** Landed on `hazards_prototype/develop` (pushed to origin) as two commits:
+
+- `595eb6d` — `feat(faostat): add Trade (Crops & Livestock) bulk download to 0_server_setup.R §3.5.5`
+- `1be265d` — `feat(faostat): add export_quantity + export_value to long-format parquet`
+
+The S3 republish at the canonical CR-064 path (`s3://digital-atlas/domain=socioeconomic/type=production/source=faostat/region=ssa/variable=adm0_faostat.parquet`) was run by Pete the same day; the published parquet now has **308 k rows, 6 `variable` levels** (`production`, `yield`, `vop_usd15`, `vop_intd15`, `export_quantity`, `export_value`), 23,897 export_quantity rows + 23,139 export_value rows, 54 countries × 88 commodities × 1961–2024. Sample sanity (CIV cocoa 2024: 1.06 Mt at $3.99 B; ETH coffee 2024: 264 kt at $1.26 B) matches public FAO figures. Build timestamp in parquet metadata: 2026-05-18T19:33:34Z.
+
+**Two corrections to the original dispatch text** (verified against the FAOSTAT bulk during implementation; these have been folded into the body of this dispatch in commit `c599c33` on `dev/climateRationale`):
+
+1. The FAOSTAT bulk uses `Trade_CropsLivestock_E_*.zip` (Crops + Livestock fused), **not** `Trade_Crops_Livestock_E_*.zip` (the dispatch had an extra underscore). Production keeps the underscore; Trade doesn't.
+2. The element strings are lowercase: `"Export quantity"` / `"Export value"`, **not** title case.
+
+**Notebook follow-up (out of scope for this dispatch):** [[CR-063]] Phase B / C and the National Production Trends section need to know that `variable` now includes `export_quantity` and `export_value`. That's a separate notebook-side dispatch in `atlas_notebooks`.
+
+---
+
 **Target repo:** `AdaptationAtlas/hazards_prototype`
 **Source repo:** `AdaptationAtlas/atlas_notebooks` (this dispatch is the planning artefact)
 **Drafted:** 2026-05-18

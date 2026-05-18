@@ -268,3 +268,49 @@ Nothing — all CR-009 work is committed and pushed. Dispatches folder + ISSUES/
 ### Suggested next step
 
 Wait on the dispatch's Stage 1 report. While waiting, CR-058 Option 6 is the next dispatchable notebook-only item.
+
+## Session state — 2026-05-18, session 7 (observational publish layer + FAOSTAT exports)
+
+### Done
+
+Two parallel work streams against `hazards_prototype/develop`. Both landed and pushed.
+
+**A. Observational pipeline — publish layer.** New `R/observational/6_publish_obs_to_s3.R` plus README updates. Wraps `AtlasDataManageR::S3DirUploader` for the canonical Hive-partitioned path scheme. Three run modes (`--dry-run`, `--smoke`, `--full`) and a `--tier {1|2|all}` filter. **Tier 1** = admin parquets (monthly + periods adm0/1) + base raster (5 files). **Tier 2** = climatology COGs (~1,404 files: 9 variables × 13 periods × 3 climatology windows × 4 stats). **Tier 3** (per-pixel monthly + SPEI COGs) explicitly out of scope; stays on Afrilabs/CGlabs only. The Tier-2 `name_fn` translates the on-disk 4-token climatology label (bare year-range — script 5 emits `1995-2014` / `1991-2020` / `full`) into the descriptive S3 partition value (`atlas_1995-2014` / `wmo_1991-2020` / `full_record`) so no retro-rename of 1,404 COGs is needed. Commit: `df3ce97`.
+
+Status of the observational chain end-to-end: scripts 1–3 have run on CGlabs successfully; scripts 4–5 smoke + full still pending; script 6 needs `--dry-run` + `--smoke` on CGlabs before `--full` runs. Once that lands, [[CR-070]] #2 + [[CR-062]] + [[CR-071]] (U-7 in the upstream bundle) become consumable by the notebook side.
+
+**B. FAOSTAT pipeline — Trade domain.** Three commits (one in `hazards_prototype`, one corrects the dispatch in `atlas_notebooks`):
+
+- `595eb6d` (`hazards_prototype/develop`): `feat(faostat): add Trade (Crops & Livestock) bulk download to 0_server_setup.R §3.5.5`. Two new bulk downloads (`Trade_CropsLivestock_E_Africa.zip` + `_All_Area_Groups.zip`) matching the existing idempotent skip-if-present pattern.
+- `1be265d` (`hazards_prototype/develop`): `feat(faostat): add export_quantity + export_value to long-format parquet`. Adds two entries to the `sources` list in `R/0.4.5_create_faostat_long.R`. Schema unchanged at 7 columns; `variable` enum grows 4 → 6.
+- `c599c33` (`atlas_notebooks/dev/climateRationale`): `docs(climateRationale): correct FAOSTAT dispatch URLs + element strings`. Two corrections discovered during implementation, folded back into the dispatch (see below).
+
+S3 republish to the canonical CR-064 path was run by Pete the same day; verified live at `s3://digital-atlas/.../adm0_faostat.parquet`. Now **308 k rows, 6 variables** (added `export_quantity` + `export_value`), 54 countries × 88 commodities × 1961–2024. Sample sanity passed (CIV cocoa 2024 = 1.06 Mt @ $3.99 B; ETH coffee 2024 = 264 kt @ $1.26 B). [[CR-064]] STATUS line updated with the extension. Dispatch [[dispatches/2026-05-18_faostat-exports.md]] now carries a "✓ COMPLETED 2026-05-18" stamp at the top.
+
+### Pattern decisions captured this run
+
+- **No new git branches without explicit ask, even when a dispatch instructs it.** The FAOSTAT dispatch's original sister (also drafted 2026-05-18) instructed `feat/observational-publish-to-s3`; the agent acted on that instruction and Pete reverted hard. The dispatch is not authority over branching workflow — this repo lands commits directly on the working branch (`develop` for `hazards_prototype`, `dev/climateRationale` for `atlas_notebooks`). Both subsequent dispatches in this session were amended in place to say "work directly on develop" before any code touched. **Saved as durable agent feedback** in the agent's memory store; the dispatch text itself was also amended to be explicit.
+- **Descope before implementing when downstream dependencies are unknown.** The FAOSTAT dispatch originally proposed a full restructure into `R/faostat/` mirroring the `R/observational/` pattern. Pete descoped it to two in-place edits because of unmapped downstream callers of `R/0.4.5_create_faostat_long.R`'s current path. Pattern: when a dispatch couples a refactor with a feature, the feature lands first; the refactor waits until callers are mapped.
+- **Trust the data over the dispatch.** The dispatch guessed `Trade_Crops_Livestock` and `"Export Quantity"`/`"Export Value"` based on the existing Production-domain naming. The actual FAOSTAT bulk uses `Trade_CropsLivestock` (no underscore) and lowercase `"Export quantity"`/`"Export value"`. The dispatch explicitly invited this kind of correction; the corrections were folded back into the dispatch text the same day. FAOSTAT is internally inconsistent across domains (Production keeps the underscore; Trade doesn't); always probe the actual CSV before locking element strings into code.
+- **Multi-element-code-per-element-string is the FAOSTAT norm.** A single FAOSTAT `Element` string covers multiple element codes split by unit (e.g. `"Production"` covers codes 5510 `t` + 5513 `1000 No`; `"Export quantity"` covers 5907/5908/5909/5910). The existing `read_fao_long()` filter handles this naturally by keeping the `unit` column. New variables fit the same pattern without special handling.
+
+### In flight / uncommitted
+
+- `atlas_notebooks/dev/climateRationale` is one commit ahead of `origin/dev/climateRationale` (`c599c33` dispatch corrections — not pushed yet pending Pete's go-ahead).
+- This DECISIONS / ISSUES / COWORK update will be committed in a single `docs(climateRationale): session 7 wrap-up` commit after Pete reviews.
+- The observational pipeline scripts 4 + 5 + 6 still need their smoke + full runs on CGlabs. Script 3 was still running adm1 at the time of session close; once it finishes, the rest of the chain becomes runnable.
+
+### Open questions for next session
+
+- **CR-063 Phase B (Quick Insights for production trends).** Trade variables now available. Worth scoping a dispatch that lets the user toggle between production / yield / vop / exports in the Quick Insight template. Watch for: countries that produce a commodity but don't export it (will have production rows with no matching export rows in the same year — by design, the production-anchored filter preserves the row count behaviour).
+- **CR-062 Phase C (observational view).** Awaiting end-to-end script 1 → 6 verification on CGlabs. Once the admin parquets and climatology COGs are live on S3, this is a one-`nbData.json`-entry swap on the notebook side. The S3 path scheme is documented in `R/observational/README.md` (in `hazards_prototype/develop`).
+- **CR-068 (Crop & Livestock Exposure hazard categorisation bug).** Dispatch from session 6 is open against `hazards_prototype/develop` and still awaiting a Stage 1 root-cause report; the notebook still shows the "Under construction" callout. No change this session.
+- **Push timing.** Pete's standing preference is to push manually after review. `hazards_prototype/develop` was pushed mid-session (3 commits: `df3ce97` + `595eb6d` + `1be265d`) because Pete confirmed the push explicitly. `atlas_notebooks/dev/climateRationale` is unpushed.
+
+### Suggested next step
+
+Land the session-7 wrap-up commit on `dev/climateRationale` (this file + ISSUES.md + COWORK-SESSION-HANDOVER.md + the dispatch stamp) and ask Pete whether to push. After that, the next dispatchable items in priority order:
+
+1. CR-068 stage-1 follow-up (waiting on Brayden / hazards_prototype side).
+2. Script 4 + 5 + 6 verification on CGlabs (Pete on the server).
+3. CR-063 Phase B dispatch — production trends Quick Insight including the new trade variables.
