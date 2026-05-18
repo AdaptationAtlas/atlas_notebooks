@@ -1187,7 +1187,21 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
      Self-contained; the denominator is visible in the same table as the numerator.
 - **dependencies:** Brayden / `hazards_prototype` maintainer. Bundle with [[CR-059]] (SPEI), [[CR-060]] (AR6 quantiles), [[CR-064]] (FAOSTAT on S3) in a single hazard-parquet re-bake if possible — that's four pipeline tickets that all want a coordinated bake.
 - **discovered:** 2026-05-14 during the [[CR-049]] Phase 1 build attempt. Pete flagged the issue when reviewing the table draft; the Phase 1 code was rolled back the same day.
-- **STATUS:** Open. Pipeline-side. **Blocks [[CR-049]]** Phase 1 and Phase 2.
+- **additional-finding 2026-05-18 — different hazard categorisation between historic and future periods (CR-009 dispatch, Stage 2 probe):** A separate probe of the same parquet surfaced a second data-shape oddity likely tied to the same upstream pipeline step. For AGO (likely SSA-wide), the historic 1995–2014 partition reports **zero exposure** for `heat`, `heat+wet`, and `wet` — that mass appears bundled into the `dry+*` combinations. Every future scenario × period redistributes hazard occurrences across all 7 combinations. Evidence (AGO, all crops, summing rows where `hazard != 'any'`, USD nominal 2021):
+
+  | hazard | hist 1995-2014 | ssp245 2021-2040 | ssp585 2021-2040 |
+  |---|---|---|---|
+  | dry | 10.74 B | 4.19 B | 3.92 B |
+  | dry+wet | 2.55 B | 0.008 B | 0.005 B |
+  | dry+heat | 1.34 B | 1.02 B | 0.99 B |
+  | dry+heat+wet | 0.19 B | 0.003 B | 0.001 B |
+  | heat | **0** | 0.57 B | 0.57 B |
+  | heat+wet | **0** | 0.24 B | 0.29 B |
+  | wet | **0** | 2.70 B | 3.03 B |
+
+  Totals (AGO, all crops, all specific hazards): historic 1995-2014 = 14.81 B vs ssp245 2021-2040 = 8.74 B — historic is ≈ 1.7× higher even before the per-category split. Hypotheses (not disambiguated by this probe): (a) severity threshold for `dry` / `wet` / `heat` is calibrated on different reference windows for historic vs future, so single-hazard combos never trigger for one of them; (b) the historic baseline pipeline step emits fewer hazard categories and bundles the rest into `dry+*`; (c) `hazard_vars` partition mapping differs between the two pipeline steps. Worth investigating in the same bake that adds the `hazard = "none"` row, since both touch the same parquet schema. Notebook downstream impact: the Crop & Livestock Exposure plot's per-color stack composition is not directly comparable historic vs future; interim notebook mitigation (heads-up callout near the plot) was committed 2026-05-18 alongside the CR-009 reactive-filter fix. Side finding from the same probe: **SSP370 only has data for timeframe 2021-2040** — all other future periods (2041-2060, 2061-2080, 2081-2100) are zero rows under SSP370. Likely a parallel pipeline omission to triage alongside the categorisation fix.
+- **notebook-side latent fix shipped 2026-05-18:** The notebook's `_hazards` color domain at [notebook.qmd:5672-5680] previously listed the triple-hazard category as `"heat+wet+dry"`, but the parquet uses `"dry+heat+wet"`. Renamed in the same commit as CR-009 so triple-hazard rows now get a color slot and stable stack order. Cosmetic (tiny magnitudes) but worth noting alongside the larger categorisation finding above.
+- **STATUS:** Open. Pipeline-side. **Blocks [[CR-049]]** Phase 1 and Phase 2. Two distinct findings now bundled here: (a) missing `hazard='none'` row (original 2026-05-14); (b) different hazard categorisation between historic and future periods (added 2026-05-18) plus SSP370 missing periods. Notebook surfaces (b) via an interim heads-up callout; per-color comparison remains misleading until the pipeline fix lands.
 - **before-string:** n/a (schema + aggregation change).
 
 ### CR-069 — Methods section should enumerate the GCMs in the NEX-GDDP-CMIP6 ensemble [NEW 2026-05-15]
