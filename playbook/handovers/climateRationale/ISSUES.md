@@ -1234,8 +1234,91 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
   - **C. Hang diagnosis:** before re-implementing, isolate which of the three suspect mechanisms (Plot.areaY nulls / d3.group iteration / conditional grid-slot cell) actually caused the hang. The cleanest diagnostic is to add the focus function in a standalone branch with each suspect commented out one at a time.
 - **dependencies:** Blocker B depends on Pete's go-ahead to investigate the multi-period fetch (the "path b" follow-up he flagged on 2026-05-15). Blocker A is purely a UI design call. Blocker C is a code-side investigation.
 - **discovered:** 2026-05-15, chat-mode build attempt — Pete dispatched the feature, build hung the page, agreed to roll back and capture as a ticket pending the blockers above.
-- **STATUS:** ROLLED BACK 2026-05-15. Re-attempt requires (B) decided and (C) diagnosed; (A) can be decided either way at re-attempt time.
-- **before-string:** *(new feature; nothing to revert in the data)*
+- **STATUS:** ROLLED BACK 2026-05-15. Re-attempt requires (B) decided and (C) diagnosed; (A) can be decided either way at re-attempt time. **NOTE 2026-05-18:** a less-ambitious alternative shipped as CR-071 (the "Dot plot" summary view) — same readability problem, different solution (collapse the time dimension to a single per-period dot+whisker instead of smoothing a time series). The focus-view ask remains valid as a separate visualisation if/when the three blockers are addressed.
+
+---
+
+### CR-071 — Future Projections "Dot plot" (Summary) view [NEW 2026-05-16]
+
+- **id:** CR-071
+- **title:** Add a "Dot plot" View Type to Future Projections that collapses the time dimension — one horizontal dot-and-whisker per scenario per admin (dot = period-mean ensemble value; whisker = ±1 SD across the 18 GCMs averaged over the timeframe). Sidesteps the "overlapping ribbons obscure each other" readability problem that motivated CR-070 without needing the multi-period fetch and edge-tapering smoothing that blocked CR-070.
+- **type:** feature / visualisation
+- **severity:** UX — shipped because the existing Ribbon (formerly "Plot") view gets visually crowded with 3–4 scenarios + ribbons checked.
+- **where:** `notebooks/climateRationale/notebook.qmd` — `viewof viewFutureChanges` dropdown; new `summary_futureProjections()` function; `sections.futureProjections.{plotView.viewTypeLabel, summaryView.{viewTypeLabel, caption.{intro,reading,separation,caveat}}}` in `data/climateRationale/nbText.json`.
+- **what-shipped:**
+  - View Type dropdown gains `"summary"`; the `"plot"` option is relabelled "Ribbon" and `"summary"` displays as "Dot plot" via a custom `format()` callback (notebook-scoped labels in nbText, shared `general_translations.viewTypes` untouched).
+  - One panel per selected admin, horizontal dot-and-whisker per scenario in canonical SSP order (SSP1-2.6 → SSP5-8.5). Shared x-axis across panels.
+  - Whisker end-caps shortened via `insetTop`/`insetBottom` so they read as serifs rather than full-band bars (Pete: "the ends of the error bar are wide").
+  - Per-admin baseline reference (dashed vertical) in absolute mode; dashed zero line in anomaly mode.
+  - Right-edge `"+X ± Y unit"` annotation per row.
+  - Only scenarios checked in the Scenario filter render (option (a) from CR-070's blocker A).
+  - `Show ±1 SD ribbon` toggle is hidden via `body.future-view-summary` + a CSS rule on `.fp-uncertainty-toggle` — **no conditional cell-swap**, so the CR-070 hang risk doesn't recur.
+- **discovered:** 2026-05-16 dispatch (`feat/climateRationale-projections-summary-view`).
+- **STATUS:** ✓ FIXED 2026-05-16, commit `ace42db`. FR copy AI-drafted, needs native review.
+
+---
+
+### CR-072 — Tree-map views on both production sections [NEW 2026-05-17]
+
+- **id:** CR-072
+- **title:** Add a "Tree map" View Type to Subnational Agricultural Production and to National Production Trends. Both reuse the section's in-memory data — no new DuckDB query, no new download trigger.
+- **type:** feature / visualisation
+- **severity:** UX — the horizontal bars view of Subnational Production is hard to scan at a glance when many crops are visible (and dominated by the largest crop on the shared x-axis); a tree map shows the value distribution proportionally.
+- **where:** `notebooks/climateRationale/notebook.qmd` — `viewof viewAgProduction`, `viewof viewProductionTrends` extended; new `treemap_agProduction()` and `treemap_productionTrends()` functions; shared `treemapTextColor()` (luminance-based contrast) and `treemapTextLayout()` (per-cell dynamic font sizing) helpers; `.cr-treemap-*` CSS classes for cell outlines, halo text, custom hover tooltip.
+- **what-shipped:**
+  - **Subnational:** tree map is the **default view** (Pete: reads more naturally as a "where is value concentrated" snapshot than the bars at first glance). Bars still one click away.
+  - **National Production Trends:** tree map shows the **end-year snapshot** of the selected year range, with most-recent-year fallback for commodities sparse at `yEnd`.
+  - **Shared palette list:** `paletteAgProd` switched from `sequentialPaletteSelector` to `categoricalPaletteSelector` so both production sections offer the same dropdown options. Subnational coloring switched from by-value (sequential gradient) to by-crop (categorical) — same commodity reads the same colour across admin panels and across both production sections.
+  - **Auto-contrast text:** WCAG-style relative-luminance helper picks white text on dark cells, black on light cells; halo is the inverse at reduced opacity.
+  - **Dynamic font sizing:** each cell's label scales to fit the box (horizontal char-width × vertical room); small boxes get small text instead of no text. Caps at `plotTextSize + 4` so the sidebar slider still has some effect.
+  - **Custom JS hover tooltip:** faster than the native SVG `<title>` ~1 s delay; `<title>` stays as the a11y/SR fallback. Tooltip includes the admin name.
+  - **`svg\`\`` namespace** used for SVG content (htl's `html` tag would have produced HTML `<g>`/`<rect>` nodes that browsers refuse to render inside an SVG — the "tree map produces nothing" symptom).
+  - **Ghost-facet layout fix:** parent flex container uses CSS `gap` instead of `margin-right` on each cell, which was pushing total row width past `body-width` and wrapping the 3rd panel to a second row.
+- **also-in-this-batch:**
+  - Bars-view height scales with `visibleCrops.size` so "All commodities (ungrouped)" doesn't squish labels.
+  - New `"All commodities (ungrouped)"` option on the Production Type selector (alongside the existing grouped/per-category options).
+  - National Production Trends line plot: default `strokeWidth: plotLineWidth + 1` and dot base `1.8 → 2.6` so the line reads more confidently against the FAOSTAT time series.
+  - `style: { color: "#333" }` pinned on the chart_productionTrends Plot.plot so axis chrome doesn't pick up the first palette colour when the palette is changed.
+- **discovered:** 2026-05-17 chat-mode iteration.
+- **STATUS:** ✓ FIXED 2026-05-17 / 2026-05-18, commits `ace42db` + `ae14fde`.
+
+---
+
+### CR-073 — Production Trends: only `admin0Iso3` should trigger DuckDB query [NEW 2026-05-18]
+
+- **id:** CR-073
+- **title:** Restructure the National Production Trends data flow so changing the Variable / Year range / Top-N / Commodities checkbox / View Type / Palette does NOT re-hit DuckDB. Only switching country (`admin0Iso3`) should re-fetch. Pete: "the only thing that should retrigger data download is change the admin0 country selector."
+- **type:** perf / data-flow
+- **severity:** med — without the fix, every variable/year/topN/commodities change re-issued a parquet read (~seconds each), making the section feel laggy.
+- **where:** `notebooks/climateRationale/notebook.qmd` — `productionAvailableCommodities`, `productionTopCommodities`, `productionTrends_data` cells.
+- **what-shipped:**
+  - New `productionTrends_raw` cell — one DuckDB fetch per country, all `(commodity × variable × year)` rows.
+  - `productionAvailableCommodities` now derived in JS from raw (no DB query).
+  - `productionTopCommodities` now computed in JS — filter raw by variable + year range, `d3.rollup` + `d3.mean` per commodity, take top N.
+  - `productionTrends_data` filters raw in JS and applies the FAOSTAT `× 1000` VoP unit transformation in JS.
+- **discovered:** 2026-05-18, Pete noticed the loader spinner firing on non-country control changes.
+- **STATUS:** ✓ FIXED 2026-05-18, commit `ae14fde`.
+
+---
+
+### CR-074 — Collapsible floating TOC for narrow viewports / browser zoom [NEW 2026-05-18]
+
+- **id:** CR-074
+- **title:** The floating "In this notebook" TOC (`.atlas-toc`) is `position: fixed` and overlaps the content column when the viewport narrows (browser zoom, side-by-side windows, smaller screens). Add a toggle to show/hide the TOC; default-collapse below the body-width + TOC-width threshold.
+- **type:** UX / responsive
+- **severity:** med — visible overlap on zoom is unprofessional; before this ticket the user had no way to dismiss the TOC.
+- **where:** `notebooks/climateRationale/notebook.qmd` — inline `<style>` block (`.atlas-toc-toggle` + `body.atlas-toc-collapsed` rules) + a small side-effect OJS cell that injects the toggle button and wires the click handler. **Does not touch `helpers/toc.ojs`** (shared with other notebooks).
+- **what-shipped:**
+  - New `.atlas-toc-toggle` button at top-left of the viewport (same side as the TOC — Pete's correction during iteration).
+  - Initial state is collapsed below 1480 px viewport width (body-width 1180 + TOC 218 + padding) so the overlap doesn't happen on first paint.
+  - Once the user clicks the button, their preference sticks for the session (no resize re-trigger fighting them). Tracked via `body.dataset.atlasTocUserChose`.
+  - CSS-only fade + slide-left transition (0.15 s) on `.atlas-toc`. The button is `z-index: 12`, the TOC is `z-index: 10`, so the button sits over the panel as a close affordance when open.
+- **followups:**
+  - When the TOC closes, the toggle stays in place (top-left of viewport) — visible enough to be discoverable. If user-testing flags discoverability as an issue, consider an inline "Open TOC" link in the notebook header area instead.
+  - The default-collapse threshold (1480 px) is approximate. Pete may want to tune for his typical zoom levels.
+  - Pattern is notebook-scoped; if other Atlas notebooks want the same behaviour, lift the CSS + inject cell into a shared helper (or into `helpers/toc.ojs` proper).
+- **discovered:** 2026-05-18, Pete zoomed in and saw the TOC overlap the content; "is this behaviour standard? is there a better way of handling this?"
+- **STATUS:** ✓ FIXED 2026-05-18, commit `a46f699`.
 
 ---
 

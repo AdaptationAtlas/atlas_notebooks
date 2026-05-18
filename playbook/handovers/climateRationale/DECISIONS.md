@@ -185,3 +185,49 @@ Nothing in flight before this commit lands. Once `docs(climateRationale): mark F
 ### Suggested next step
 
 Open a PR from `dev/climateRationale` → `notebooks/climateRationale` and bring Brayden in for the review pass on the Brayden-blocked items listed above before merging upstream. Once those are settled, CR-049 (PR-E, Togo summary table) is the natural next unblocked piece of work to pick up.
+
+---
+
+## Session state — 2026-05-15 → 2026-05-18, sessions 2–5
+
+### Done
+
+All commits on `dev/climateRationale`. Most recent commits last:
+
+- **`955fd11`** chore: add Nigeria warming-stripes hero PNG
+- **`c293d48`** feat: warming-stripes hero + de-boxed title (replaces atlasHero white-box title with a full-bleed PNG hero, EN+FR strings, Hawkins CC-BY 4.0 attribution)
+- **`1ac1b37`** feat: sidebar polish + line/point-size slider (hide TOC scrollbar chrome, hide Inputs.range number readout, new `viewof plotLineWidth` slider wired into 3 line plots)
+- **`a9a12d9`** docs: justify NEX-GDDP-CMIP6 in methods (AGNES ask) — new "Why NEX-GDDP-CMIP6?" lead paragraph + agnes-africa.org link, EN + FR draft
+- **`308fa77`** docs: CR-070 focus-view (rolled back) + 3 blockers — captured the focus-view feature request with its three blockers (scenario filter coupling, 20y vs 11y smoothing, hang diagnosis) after the build hung the page
+- **`ace42db`** feat: Future Projections Summary view, Extreme Events polish, tree-map views for Subnational Ag + National Production Trends, foldable heads-ups (the big iteration)
+- **`ae14fde`** feat: production-section polish (tree map default, shared palette list, in-memory filter, line bump)
+- **`a46f699`** feat: collapsible floating TOC with viewport-aware default
+
+Tickets shipped this run (FIXED): CR-058 (partial — in-memory filter for production trends; the FP/EE parquet-load latency is unchanged), CR-070 (rolled back, captured), CR-071 (Summary "Dot plot" view as alternative), CR-072 (tree maps × 2 sections), CR-073 (in-memory filter), CR-074 (collapsible TOC). Hero replacement + AGNES justification did not get their own CR tickets — they were direct dispatches.
+
+Pattern decisions captured this run:
+
+- **Tree map default for Subnational Production.** Bars remains one click away. Tree map reads more naturally for "where is value concentrated".
+- **Shared categorical palette list across both production sections.** Subnational coloring switched from by-value (sequential gradient) to by-crop (categorical) so the same commodity reads the same colour across admin panels and across both sections.
+- **Tree-map tooltip pattern.** Custom JS hover tooltip (`.cr-treemap-tip`) attached after render — faster than the native SVG `<title>` ~1 s delay. `<title>` stays as the a11y/SR fallback.
+- **Tree-map text auto-contrast.** `treemapTextColor(bg)` helper picks white/black based on WCAG-style relative luminance.
+- **Tree-map dynamic font sizing.** `treemapTextLayout(w, h, labelLen, valueLen, maxBase)` helper sizes labels to fit the cell instead of binary show/hide thresholds; caps at `plotTextSize + 4`.
+- **Foldable heads-up callouts.** Converted from `:::{.alert .alert-info}` (always-visible) to `<details>` (foldable). Default closed; the short summary stays visible.
+- **Hide non-essential controls via body class + CSS** rather than conditional grid-slot cell swaps (which caused the CR-070 hang). Pattern: `body.future-view-summary .fp-uncertainty-toggle { display: none }`.
+- **Plot.plot `style: { color }` override** to stop the active palette's first colour from leaking into axis chrome (tick labels, axis line, title text).
+
+### In flight / uncommitted
+
+Nothing — all work is committed on `dev/climateRationale`. Not pushed.
+
+### Open questions for next session
+
+- **CR-070 focus-view re-attempt.** Three blockers remain (scenario filter coupling, 20y vs 11y smoothing → needs multi-period fetch, hang diagnosis). Lower-priority now that CR-071 ships a Summary view that addresses the same readability concern.
+- **CR-058 parquet-load latency.** Production Trends data flow is now in-memory after the first fetch (CR-073); Future Projections / Extreme Events still hit DuckDB on most control changes. Worth applying the same `*_raw` + JS-filter pattern to those sections.
+- **Tree-map UX follow-ups.** Default-collapse TOC threshold (1480 px) is approximate; may want tuning. Pete also flagged the bars-view colour as less informative now that it's categorical-by-crop instead of sequential-by-value — re-evaluate if user feedback objects.
+- **French translations** for the newly-added `summaryView.*`, `plotView.*`, `hero.*`, `methods.climateData.text` (AGNES paragraph) are AI-drafted. Pete's review pass is pending.
+- **Hero PNG.** Currently Nigeria 1886–2025; chip says "Africa-wide / 1886–2025". The image is illustrative; if it should match the notebook's continent-wide scope, source an all-Africa stripes asset.
+
+### Suggested next step
+
+Push `dev/climateRationale` and open a PR to `notebooks/climateRationale` (or to whatever the canonical merge target is now). Bring Brayden in on the Brayden-blocked items from session 1's list (CR-001 Part 1, CR-009, CR-014, CR-040, CR-054, CR-057) before merging upstream — same advice as session 1's note, still applies.
