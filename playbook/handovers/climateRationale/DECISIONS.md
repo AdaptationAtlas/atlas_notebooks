@@ -231,3 +231,40 @@ Nothing — all work is committed on `dev/climateRationale`. Not pushed.
 ### Suggested next step
 
 Push `dev/climateRationale` and open a PR to `notebooks/climateRationale` (or to whatever the canonical merge target is now). Bring Brayden in on the Brayden-blocked items from session 1's list (CR-001 Part 1, CR-009, CR-014, CR-040, CR-054, CR-057) before merging upstream — same advice as session 1's note, still applies.
+
+## Session state — 2026-05-18, session 6 (CR-009 fix + categorisation dispatch)
+
+### Done
+
+All commits on `dev/climateRationale` and pushed to `origin/dev/climateRationale`. Most recent commits last:
+
+- **`3cc607c`** docs: CR-058 Option 6 — apply CR-073 *_raw pattern to FP+EE (perf-debt option documented for a future notebook-only dispatch).
+- **`f216a74`** fix: wire reactive filters + flag historic/future hazard categorisation mismatch on Crop & Livestock Exposure (CR-009). Replaced the hardcoded `["1995-2014","2021-2040"].includes(d.timeframe) && ["historic","ssp245","ssp585"].includes(d.scenario)` filter at notebook.qmd:5636 with the reactive selector form. Also renamed `"heat+wet+dry"` → `"dry+heat+wet"` (notebook.qmd:5679 + generalTranslations.json:53) to match the parquet's actual hazard string.
+- **`d6ae15c`** docs: reframe Exposure historic/future callout as "Under construction" (after Pete's correction that the panels are meant to be comparable; the divergence is a bug, not a thing to interpret around).
+
+Tickets shipped: **CR-009 FIXED** (visually verified 4 Timeframe × Scenario combos including 2041-2060 and SSP370). **CR-068 updated** with two new findings: (b) historic-vs-future hazard categorisation divergence; (c) SSP370 zero-row periods.
+
+Notebook surfaces (b) as an "Under construction" `<details>` callout above the Crop & Livestock Exposure plot, until the pipeline-side fix lands.
+
+Dispatch sent: [`dispatches/2026-05-18_hazards-prototype-categorisation-bug.md`](dispatches/2026-05-18_hazards-prototype-categorisation-bug.md) — 3-stage debug brief for `hazards_prototype/develop`. Top-pick hypothesis is that the historic NDWS classified raster is saturated. Mirrored to OneDrive `Climate_data_hub/Claude/`.
+
+### Pattern decisions captured this run
+
+- **In-memory filter must align with the SQL filter.** When a `*_plotData` SQL filter references a reactive selector, every downstream in-memory `.filter()` on the same column must reference the same selector — otherwise the SQL fetch reacts but the plot still slices a hardcoded subset. CR-009's symptom (panels stuck on `2021-2040 × {ssp245,ssp585}` even as the user changed dropdowns) was this exact failure.
+- **"Under construction" framing for known pipeline bugs.** When a consumer notebook surfaces a data-shape bug the upstream hasn't fixed yet, the callout should say "data bug, fix in progress" — NOT offer interpretation workarounds. Workarounds normalise the bug and let it linger.
+- **DuckDB CLI against the public S3 parquet** is the fastest diagnostic when the notebook itself is the suspect. `INSTALL httpfs; LOAD httpfs; SELECT ... FROM read_parquet('${URL}')` lets a session iterate hypotheses in seconds without re-rendering the notebook.
+- **`_site/data/shared/` staleness in Quarto preview.** Edits to `data/shared/*.json` don't propagate to the preview until a re-render — the preview server returns the build artifact in `_site/`, not the source. The CR-009 callout's `undefined` legend label was this. Captured here for future-Pete; consider as a doc note under CR-067 (`local_path` loader / preview static-file server).
+
+### In flight / uncommitted
+
+Nothing — all CR-009 work is committed and pushed. Dispatches folder + ISSUES/DECISIONS updates committed in this session-state pass.
+
+### Open questions for next session
+
+- **CR-068 fix landing.** Dispatch is sent; the engineer/Claude in `hazards_prototype/develop` returns a Stage 1 report. Once root cause is confirmed and the parquet re-bakes, remove the "Under construction" callout (notebook.qmd:1508-1514) and tick (b)+(c) off CR-068.
+- **CR-058 follow-through.** Option 6 (apply CR-073 pattern to FP+EE) is documented but not dispatched. Can be picked up notebook-side without waiting on the pipeline.
+- **Pushing behavior.** Something auto-pushed all three commits to `origin/dev/climateRationale` during this session despite the standing "don't push" rule. Worth checking the IDE / workspace settings for an auto-push hook.
+
+### Suggested next step
+
+Wait on the dispatch's Stage 1 report. While waiting, CR-058 Option 6 is the next dispatchable notebook-only item.
