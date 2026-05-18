@@ -820,10 +820,12 @@ The [Subnational Agricultural Production Statistics](#agProduction) section that
 ```{ojs}
 viewof productionVar = Inputs.select(
   [
-    { id: "vop_intd15", label: "Value of production (constant 2014–2016 thousand I$)" },
-    { id: "vop_usd15",  label: "Value of production (constant 2014–2016 thousand US$)" },
-    { id: "production", label: "Production (tonnes)" },
-    { id: "yield",      label: "Yield (kg/ha)" }
+    { id: "vop_intd15",      label: "Value of production (constant 2014–2016 thousand I$)" },
+    { id: "vop_usd15",       label: "Value of production (constant 2014–2016 thousand US$)" },
+    { id: "production",      label: "Production (tonnes)" },
+    { id: "yield",           label: "Yield (kg/ha)" },
+    { id: "export_quantity", label: "Export quantity (tonnes)" },
+    { id: "export_value",    label: "Export value (current US$)" }
   ],
   {
     value: { id: "vop_intd15", label: "Value of production (constant 2014–2016 thousand I$)" },
@@ -2404,14 +2406,21 @@ productionTrends_data = {
   const yEnd = Math.max(productionYearStart, productionYearEnd);
   if (productionTrends_raw.length === 0 || !commoditiesSelect.length) return [];
   const isValue =
-    productionVar.id === "vop_intd15" || productionVar.id === "vop_usd15";
-  const displayUnit = isValue
-    ? productionVar.id === "vop_intd15"
+    productionVar.id === "vop_intd15" ||
+    productionVar.id === "vop_usd15" ||
+    productionVar.id === "export_value";
+  const displayUnit =
+    productionVar.id === "vop_intd15"
       ? "Int$ (constant 2014–2016)"
-      : "US$ (constant 2014–2016)"
-    : productionVar.id === "production"
-    ? "tonnes"
-    : "kg/ha";
+      : productionVar.id === "vop_usd15"
+      ? "US$ (constant 2014–2016)"
+      : productionVar.id === "export_value"
+      ? "US$ (current)"
+      : productionVar.id === "production"
+      ? "tonnes"
+      : productionVar.id === "export_quantity"
+      ? "tonnes"
+      : "kg/ha";
   const commoditiesSet = new Set(commoditiesSelect);
   return productionTrends_raw
     .filter(
@@ -4202,15 +4211,21 @@ chart_productionTrends = () => {
   const _data = productionTrends_data;
   if (_data.length === 0) return noDataPlaceholder();
 
-  // Simplified unit labels — VoP variables are pre-multiplied by 1000 in the
-  // SQL, so the axis reads dollars directly (no "1000 ×" prefix).
+  // Simplified unit labels — VoP variables and export_value are pre-multiplied
+  // by 1000 in the data cell, so the axis reads dollars directly (no "1000 ×"
+  // prefix). Export value is in CURRENT (nominal) US$, distinct from vop_usd15
+  // which is constant 2014–2016 US$.
   const yUnit =
     productionVar.id === "yield"
       ? "kg / ha"
       : productionVar.id === "production"
       ? "tonnes"
+      : productionVar.id === "export_quantity"
+      ? "tonnes"
       : productionVar.id === "vop_intd15"
       ? "Int$ (constant 2014–2016)"
+      : productionVar.id === "export_value"
+      ? "US$ (current)"
       : "US$ (constant 2014–2016)";
 
   const admins = [...new Set(_data.map((d) => d.adminName))];
@@ -4323,8 +4338,8 @@ chart_productionTrends = () => {
 
   const caption = multiLineText(
     [
-      html`<strong>Source.</strong> <a href="https://www.fao.org/faostat/en/#data/QV">FAOSTAT QV</a> (Gross Production Value, constant 2014–2016) + <a href="https://www.fao.org/faostat/en/#data/QCL">FAOSTAT QCL</a> (Production, Yield). Coverage: 1961–2024, ~44 SSA countries. Built by <a href="https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/0.4.5_create_faostat_long.R">AdaptationAtlas/hazards_prototype/R/0.4.5_create_faostat_long.R</a>.`,
-      html`<strong>Variables and units.</strong> <em>Production</em> — annual production, tonnes. <em>Yield</em> — production per hectare harvested, kg/ha. <em>Value of production (US$)</em> — gross value of production deflated to 2014–2016 US dollars using FAO's commodity-specific price series. <em>Value of production (Int$)</em> — same deflation, converted to international dollars via Geary-Khamis purchasing-power-parity. <strong>Use I$ for cross-country comparison</strong> (it normalises for price-level differences); use US$ for absolute dollar amounts. Both VoP variables are stored upstream as "thousands of $" and re-scaled to dollars on display in this plot.`,
+      html`<strong>Source.</strong> <a href="https://www.fao.org/faostat/en/#data/QV">FAOSTAT QV</a> (Gross Production Value, constant 2014–2016) + <a href="https://www.fao.org/faostat/en/#data/QCL">FAOSTAT QCL</a> (Production, Yield) + <a href="https://www.fao.org/faostat/en/#data/TM">FAOSTAT TM</a> (Trade: Export quantity, Export value). Coverage: 1961–2024, ~44 SSA countries. Built by <a href="https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/0.4.5_create_faostat_long.R">AdaptationAtlas/hazards_prototype/R/0.4.5_create_faostat_long.R</a>.`,
+      html`<strong>Variables and units.</strong> <em>Production</em> — annual production, tonnes. <em>Yield</em> — production per hectare harvested, kg/ha. <em>Value of production (US$)</em> — gross value of production deflated to 2014–2016 US dollars using FAO's commodity-specific price series. <em>Value of production (Int$)</em> — same deflation, converted to international dollars via Geary-Khamis purchasing-power-parity. <strong>Use I$ for cross-country comparison</strong> (it normalises for price-level differences); use US$ for absolute dollar amounts. <em>Export quantity</em> — annual exports of the commodity, tonnes. <em>Export value</em> — annual export value in <strong>current</strong> (nominal) US dollars — i.e. each year's value is in then-year prices, not deflated like the Value-of-Production variables above. Long time-series of nominal values include inflation; for cross-year comparison favour Export quantity or treat with care. Value-shaped variables (vop_*, export_value) are stored upstream as "thousands of $" and re-scaled to dollars on display in this plot.`,
       "Commodities filtered to those representing ≥ 0.25 % of national vop_intd15 averaged over the last 5 years; FAO aggregate rollups and residual “n.e.c.” categories excluded; spice items combined into a single “Spices” entry.",
       `Top-${productionTopN} commodities ranked by the displayed variable (${productionVar.label}) over the selected year window (${yStart}–${yEnd}); manual overrides via the Commodities checkbox replace the top-N defaults. Ranking re-computes when the variable or year range changes.`,
       `For a single end-year snapshot ranked by box area, switch View Type to **Tree map** — useful for seeing which commodities dominate ${productionVar.label} in ${yEnd} without the visual noise of the time series.`,
@@ -4380,9 +4395,11 @@ treemap_productionTrends = () => {
       ? "kg / ha"
       : productionVar.id === "production"
         ? "tonnes"
-        : productionVar.id === "vop_intd15"
-          ? "Int$"
-          : "US$";
+        : productionVar.id === "export_quantity"
+          ? "tonnes"
+          : productionVar.id === "vop_intd15"
+            ? "Int$"
+            : "US$";
 
   const admins = [...new Set(snapshot.map((d) => d.adminName))];
   const commoditiesInPlot = [...new Set(snapshot.map((d) => d.commodity))];
@@ -4491,7 +4508,7 @@ treemap_productionTrends = () => {
   const caption = multiLineText(
     [
       `Snapshot of the **end year** (${yEnd}) of the selected year range — box area is proportional to ${productionVar.label}. For years where the end year has no FAOSTAT record for a commodity, the most recent year ≤ ${yEnd} is shown instead. Switch View Type to **Line plot** for the full time-series.`,
-      html`<strong>Source.</strong> <a href="https://www.fao.org/faostat/en/#data/QV">FAOSTAT QV</a> + <a href="https://www.fao.org/faostat/en/#data/QCL">FAOSTAT QCL</a>. Built by <a href="https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/0.4.5_create_faostat_long.R">AdaptationAtlas/hazards_prototype</a>.`,
+      html`<strong>Source.</strong> <a href="https://www.fao.org/faostat/en/#data/QV">FAOSTAT QV</a> + <a href="https://www.fao.org/faostat/en/#data/QCL">FAOSTAT QCL</a> + <a href="https://www.fao.org/faostat/en/#data/TM">FAOSTAT TM</a> (Trade — Export quantity / value; nominal current US$ for value). Built by <a href="https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/0.4.5_create_faostat_long.R">AdaptationAtlas/hazards_prototype</a>.`,
       "Commodities filtered to those representing ≥ 0.25 % of national vop_intd15 averaged over the last 5 years; FAO aggregate rollups and residual “n.e.c.” categories excluded; spice items combined into a single “Spices” entry.",
       `Top-${productionTopN} commodities ranked by ${productionVar.label} over the selected year window (${yStart}–${yEnd}); the tree map then plots the end-year value of each. Manual overrides via the Commodities checkbox replace the top-N defaults.`,
     ],
