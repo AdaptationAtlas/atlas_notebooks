@@ -356,6 +356,447 @@ GDAL writes -9999 when the bake step skips full statistics computation. Min/max 
 
 Both pipeline bugs filed as **CR-076** — bundle into the next hazards_prototype dispatch alongside CR-068 / CR-064 / CR-075.
 
+## Section E — Recent Changes (observational replacement, drop-in candidate)
+
+Prototype drop-in replacement for the existing `barplot_recentChanges` / `warmingStripes_recentChanges` plots in the main `climateRationale` notebook. Driven by observational CHIRPS v3 + CHIRTS-ERA5 monthly admin1 parquet (not the NEX-GDDP-CMIP6 hindcast).
+
+**Design rules** (per the 2026-05-20 dispatch):
+- Baseline window: **1991-2020 exclusively** (matches WMO normals + SPEI standardisation).
+- **No per-year ±SD ribbon** — observational data is a single realisation, not an ensemble. Uncertainty is rendered as horizontal reference bands centred on the 1991-2020 mean.
+- **Temperature (TMAX/TMIN/TAVG) and PTOT**: ±1σ band ≈ normal year-to-year variability; ±2σ envelope ≈ unusual/extreme threshold. Bands are subordinate to the observed line (15-25% alpha, no border).
+- **SPEI-3 / SPEI-12**: already standardised by the pipeline (log-logistic, ub-pwm). No σ bands. Reference lines at ±1, ±1.5, ±2 mark WMO drought/wet thresholds. Anomaly toggle hidden (SPEI is anomaly by construction).
+- **SPEI season mapping**: for season MAM the value is the SPEI-3 at month = 5 (i.e. the 3-month accumulation ending in May represents Mar+Apr+May). Annual → SPEI-12 at month = 12. Independent of which SPEI scale is selected the system picks the month index from the season's last month.
+- **Extreme highlighting**: `|z| > 2` or `|SPEI| > 1.5` flagged extreme; `|z| > 1` or `|SPEI| > 1` flagged unusual. Same colour palette as the existing `bars_extremeEvents` so the visual carries over.
+
+### Controls
+
+```{ojs}
+viewof admin1_name = {
+  const iso3 = country.iso3;
+  const gaul = mainGaul.get(iso3);
+  if (gaul == null) return Inputs.select(["(country)"], { label: "Region (admin1)" });
+  const resp = await db.query(`
+    SELECT DISTINCT admin1_name FROM read_parquet('${monthlyAdm0URL.replace("adm0_obs","adm1_obs")}')
+    WHERE iso3 = '${iso3}' AND gaul0_code = ${gaul}
+    ORDER BY admin1_name
+  `);
+  const options = ["(country)", ...Array.from(resp).map((d) => d.admin1_name)];
+  return Inputs.select(options, { label: "Region (admin1)", value: "(country)" });
+}
+
+viewof variable_E = Inputs.select(
+  ["TAVG", "TMAX", "TMIN", "PTOT", "SPEI-3", "SPEI-12"],
+  { label: "Variable", value: "TAVG" }
+);
+
+viewof season_E = Inputs.select(
+  ["annual","JFM","FMA","MAM","AMJ","MJJ","JJA","JAS","ASO","SON","OND","NDJ","DJF"],
+  { label: "Season", value: "annual" }
+);
+
+viewof viewType_E = Inputs.select(
+  ["periods", "monthly"],
+  { label: "View Type", value: "periods", format: (d) => d === "periods" ? "Annual / season" : "Monthly" }
+);
+
+// Hidden when SPEI selected
+viewof anomaly_E = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: false });
+```
+
+```{ojs}
+//| output: false
+isSPEI_E = variable_E.startsWith("SPEI");
+// Use anomaly framing only for non-SPEI; SPEI is anomaly-by-construction
+useAnomaly_E = anomaly_E && !isSPEI_E;
+
+// Season → final-month-of-season mapping (for SPEI handling)
+seasonLastMonth = ({
+  annual: 12, JFM: 3, FMA: 4, MAM: 5, AMJ: 6, MJJ: 7, JJA: 8, JAS: 9,
+  ASO: 10, SON: 11, OND: 12, NDJ: 1, DJF: 2,
+});
+```
+
+### Timeseries
+
+```{ojs}
+//| output: false
+// Pull whichever parquet the active variable × view-type combo needs.
+// For SPEI: ALWAYS monthly parquet, filtered to the season's last month.
+// For TEMP/PTOT periods: admin-periods parquet, filtered to the season.
+// For TEMP/PTOT monthly: admin-monthly parquet (12 months × years).
+observed_E_raw = {
+  const iso3 = country.iso3;
+  const gaul = mainGaul.get(iso3);
+  if (gaul == null) return [];
+
+  // Choose adm0 vs adm1 parquet based on selector
+  const isAdmin1 = admin1_name !== "(country)";
+  const baseURL = isAdmin1
+    ? monthlyAdm0URL.replace("adm0_obs", "adm1_obs")
+    : monthlyAdm0URL;
+  const periodsURL = baseURL.replace("admin-monthly", "admin-periods");
+
+  let q;
+  if (isSPEI_E) {
+    // Always monthly parquet for SPEI; filter to the season's last month
+    const mo = seasonLastMonth[season_E];
+    q = `
+      SELECT year, month, value_mean
+      FROM read_parquet('${baseURL}')
+      WHERE iso3 = '${iso3}'
+        AND gaul0_code = ${gaul}
+        ${isAdmin1 ? `AND admin1_name = '${admin1_name.replace(/'/g, "''")}'` : ""}
+        AND variable = '${variable_E}'
+        AND month = ${mo}
+        AND value_mean IS NOT NULL AND isfinite(value_mean)
+      ORDER BY year
+    `;
+  } else if (viewType_E === "monthly") {
+    q = `
+      SELECT year, month, value_mean
+      FROM read_parquet('${baseURL}')
+      WHERE iso3 = '${iso3}'
+        AND gaul0_code = ${gaul}
+        ${isAdmin1 ? `AND admin1_name = '${admin1_name.replace(/'/g, "''")}'` : ""}
+        AND variable = '${variable_E}'
+        AND value_mean IS NOT NULL AND isfinite(value_mean)
+      ORDER BY year, month
+    `;
+  } else {
+    // periods (annual / seasons)
+    q = `
+      SELECT year, value_mean
+      FROM read_parquet('${periodsURL}')
+      WHERE iso3 = '${iso3}'
+        AND gaul0_code = ${gaul}
+        ${isAdmin1 ? `AND admin1_name = '${admin1_name.replace(/'/g, "''")}'` : ""}
+        AND variable = '${variable_E}'
+        AND period = '${season_E}'
+        AND value_mean IS NOT NULL AND isfinite(value_mean)
+      ORDER BY year
+    `;
+  }
+  const resp = await db.query(q);
+  return Array.from(resp);
+}
+
+// Baseline statistics (1991-2020) over the same series.
+baseline_E = {
+  const baseline = observed_E_raw.filter((d) => d.year >= 1991 && d.year <= 2020);
+  if (baseline.length === 0) return { mean: 0, sd: 0, n: 0 };
+  const vals = baseline.map((d) => d.value_mean);
+  const mean = d3.mean(vals);
+  const sd = d3.deviation(vals) ?? 0;
+  return { mean, sd, n: vals.length };
+}
+
+// Transform: apply anomaly framing (subtract baseline mean) when active.
+observed_E = observed_E_raw.map((d) => {
+  const v = useAnomaly_E ? d.value_mean - baseline_E.mean : d.value_mean;
+  const z = baseline_E.sd > 0 ? (d.value_mean - baseline_E.mean) / baseline_E.sd : 0;
+  // Extreme classification
+  let cls = "normal";
+  if (isSPEI_E) {
+    const av = Math.abs(d.value_mean);
+    if (av >= 1.5) cls = "extreme";
+    else if (av >= 1) cls = "unusual";
+  } else {
+    const az = Math.abs(z);
+    if (az >= 2) cls = "extreme";
+    else if (az >= 1) cls = "unusual";
+  }
+  // For monthly view, add a year_frac for continuous x-axis
+  const year_frac = d.month != null
+    ? d.year + (d.month - 1) / 12
+    : d.year;
+  return { ...d, value_plot: v, z, cls, year_frac };
+});
+
+extremeColour_E = { normal: "#bbbbbb", unusual: "#f4a261", extreme: "#e15759" };
+```
+
+```{ojs}
+recentChanges_E = {
+  if (observed_E.length === 0) return html`<div style="padding: 1em; color: #999;">No data for this selection.</div>`;
+
+  // y-axis label
+  const unit = isSPEI_E ? "(z-score)"
+    : variable_E === "PTOT" ? (viewType_E === "monthly" ? "(mm / month)" : "(mm / period)")
+    : "(°C)";
+  const yLabel = useAnomaly_E ? `${variable_E} anomaly ${unit}` : `${variable_E} ${unit}`;
+
+  // Bands (only for non-SPEI)
+  const meanForBands = useAnomaly_E ? 0 : baseline_E.mean;
+  const bands = (!isSPEI_E && baseline_E.sd > 0) ? [
+    { y1: meanForBands - 2 * baseline_E.sd, y2: meanForBands + 2 * baseline_E.sd, fill: "rgba(70,130,180,0.10)", label: "±2σ (unusual/extreme threshold)" },
+    { y1: meanForBands - baseline_E.sd,     y2: meanForBands + baseline_E.sd,     fill: "rgba(70,130,180,0.18)", label: "±1σ (normal year-to-year variability)" },
+  ] : [];
+
+  // SPEI reference lines
+  const speiLines = isSPEI_E ? [
+    { y: -2,   stroke: "#e15759", strokeDasharray: "2,3", label: "−2 (extreme dry)" },
+    { y: -1.5, stroke: "#e15759", strokeDasharray: "2,3", label: "−1.5 (severe dry)" },
+    { y: -1,   stroke: "#f4a261", strokeDasharray: "2,3", label: "−1 (moderate dry)" },
+    { y:  0,   stroke: "#999",    strokeDasharray: "1,2", label: "0 (baseline)" },
+    { y:  1,   stroke: "#76b7b2", strokeDasharray: "2,3", label: "1 (moderate wet)" },
+    { y:  1.5, stroke: "#76b7b2", strokeDasharray: "2,3", label: "1.5 (severe wet)" },
+    { y:  2,   stroke: "#76b7b2", strokeDasharray: "2,3", label: "2 (extreme wet)" },
+  ] : [];
+
+  const xField = viewType_E === "monthly" || isSPEI_E && viewType_E === "monthly" ? "year_frac" : "year";
+
+  return Plot.plot({
+    width: 1200,
+    height: 380,
+    marginLeft: 70,
+    marginBottom: 50,
+    marginTop: 30,
+    style: { color: "#333" },
+    x: {
+      label: "Year",
+      tickFormat: (d) => `${Math.floor(d)}`,
+    },
+    y: {
+      label: yLabel,
+      grid: true,
+      nice: true,
+    },
+    marks: [
+      // baseline bands (rectangle spanning full x extent)
+      ...bands.map((b) =>
+        Plot.rect([b], { x1: d3.min(observed_E, (d) => d[xField]), x2: d3.max(observed_E, (d) => d[xField]), y1: "y1", y2: "y2", fill: "fill" })
+      ),
+      // baseline mean line
+      ...(!isSPEI_E ? [Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" })] : []),
+      // SPEI reference lines
+      ...speiLines.map((l) =>
+        Plot.ruleY([l.y], { stroke: l.stroke, strokeDasharray: l.strokeDasharray })
+      ),
+      // observed values — bars for SPEI, line + dot for others
+      ...(isSPEI_E
+        ? [
+            Plot.barY(observed_E, {
+              x: xField,
+              y: "value_plot",
+              fill: (d) => extremeColour_E[d.cls],
+              stroke: (d) => extremeColour_E[d.cls],
+              channels: { year: "year", value: "value_mean", classification: "cls" },
+              tip: true,
+            }),
+          ]
+        : [
+            Plot.line(observed_E, {
+              x: xField,
+              y: "value_plot",
+              stroke: "#333",
+              strokeWidth: 1,
+            }),
+            Plot.dot(observed_E, {
+              x: xField,
+              y: "value_plot",
+              r: 2.5,
+              fill: (d) => extremeColour_E[d.cls],
+              stroke: (d) => extremeColour_E[d.cls],
+              channels: { year: "year", value: "value_mean", anomaly: "value_plot", z: "z", classification: "cls" },
+              tip: true,
+            }),
+          ]),
+    ],
+  });
+}
+
+// Caption summary
+recentChanges_caption_E = {
+  const speiMonth = isSPEI_E ? seasonLastMonth[season_E] : null;
+  const region = admin1_name === "(country)" ? `${country.name} (national)` : `${admin1_name}, ${country.name}`;
+  const baselineCopy = baseline_E.n > 0
+    ? `Baseline (1991-2020): μ = ${baseline_E.mean.toFixed(2)}, σ = ${baseline_E.sd.toFixed(2)}, n = ${baseline_E.n} years.`
+    : `Baseline (1991-2020): insufficient data.`;
+  const speiCopy = isSPEI_E
+    ? `SPEI is the ${variable_E.replace("SPEI-","")}-month accumulation ending in month ${speiMonth}. Reference lines: ±1 moderate, ±1.5 severe, ±2 extreme (WMO).`
+    : "";
+  return md`
+*Region: **${region}** · Variable: **${variable_E}** · Season: **${season_E}** · View: **${viewType_E}**${useAnomaly_E ? " · **anomaly mode**" : ""}*
+
+${baselineCopy} ${speiCopy}
+  `;
+}
+```
+
+::: {#recent-changes-plot-E}
+:::
+
+```{ojs}
+//| output: false
+{
+  const div = document.getElementById("recent-changes-plot-E");
+  if (div) div.replaceChildren(recentChanges_E);
+}
+```
+
+```{ojs}
+recentChanges_caption_E
+```
+
+### Map (interactive — Leaflet + georaster)
+
+Renders the COG for the current (variable × season × clim=wmo_1991-2020 × stat=mean) as a raster overlay on a basemap. Admin0 polygon used as a pixel mask (transparent outside the country); a faint bbox rectangle marks the country envelope for context. **Admin1 selection does NOT filter the map** (we render the whole country and let the user see the spatial pattern); the admin1 dropdown only affects the timeseries above.
+
+```{ojs}
+//| output: false
+// Leaflet via CDN (ES modules)
+L_E = (await import("https://cdn.jsdelivr.net/npm/leaflet@1.9.4/+esm")).default;
+
+// CSS injection — Leaflet needs its CSS loaded
+{
+  if (!document.getElementById("leaflet-css-sandbox")) {
+    const link = document.createElement("link");
+    link.id = "leaflet-css-sandbox";
+    link.rel = "stylesheet";
+    link.href = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(link);
+  }
+}
+
+parseGeoraster_E = (await import("https://cdn.jsdelivr.net/npm/georaster@1.6.0/+esm")).default;
+GeoRasterLayer_E = (await import("https://cdn.jsdelivr.net/npm/georaster-layer-for-leaflet@3.10.0/+esm")).default;
+topojsonClient_E = await import("https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm");
+```
+
+```{ojs}
+//| output: false
+// Admin0 boundaries (topojson → geojson FeatureCollection)
+admin0_geo_E = {
+  const tj = await FileAttachment("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").json();
+  const objectName = Object.keys(tj.objects)[0];
+  return topojsonClient_E.feature(tj, tj.objects[objectName]);
+}
+
+// Country feature for the selected iso3
+admin0_feature_E = {
+  const iso3 = country.iso3;
+  const f = admin0_geo_E.features.find((f) => f.properties && (f.properties.iso3 === iso3 || f.properties.ISO3 === iso3 || f.properties.iso_3 === iso3));
+  return f ?? null;
+}
+
+// Variable → COG filename mapping (palette ramp picked per family)
+cogURL_for_E = ({ variable, season, clim = "1995-2014", stat = "mean" }) => {
+  // CR-076 — all COGs are physically in this one directory
+  const dir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=climatology/variable=PTOT/period=AMJ/clim=wmo_1991-2020/stat=max";
+  // The notebook eventually wants `1991-2020` to match the timeseries baseline. The
+  // climatology bake currently emits 1995-2014 and 1991-2020 and full; use 1991-2020.
+  return `${dir}/${variable}_${season}_1991-2020_${stat}.tif`;
+}
+
+variableRamp_E = ({
+  TAVG:    [ [0,'#440154'], [15,'#3b528b'], [22,'#21918c'], [30,'#5ec962'], [40,'#fde725'] ],
+  TMAX:    [ [0,'#440154'], [15,'#3b528b'], [25,'#21918c'], [35,'#5ec962'], [45,'#fde725'] ],
+  TMIN:    [ [-5,'#440154'], [5,'#3b528b'], [15,'#21918c'], [25,'#5ec962'], [35,'#fde725'] ],
+  PTOT:    [ [0,'#f7fbff'], [50,'#9ecae1'], [150,'#3182bd'], [300,'#08519c'], [500,'#08306b'] ],
+  "SPEI-3":  [ [-2.5,'#67001f'], [-1,'#d6604d'], [-0.3,'#f7f7f7'], [0.3,'#f7f7f7'], [1,'#4393c3'], [2.5,'#053061'] ],
+  "SPEI-12": [ [-2.5,'#67001f'], [-1,'#d6604d'], [-0.3,'#f7f7f7'], [0.3,'#f7f7f7'], [1,'#4393c3'], [2.5,'#053061'] ],
+});
+
+rgbInterp_E = (stops) => {
+  const xs = stops.map((s) => s[0]);
+  const cs = stops.map((s) => s[1]);
+  const scale = d3.scaleLinear().domain(xs).range(cs).interpolate(d3.interpolateRgb).clamp(true);
+  return (v) => {
+    if (v == null || !isFinite(v)) return null;
+    const rgb = d3.color(scale(v));
+    if (!rgb) return null;
+    return [rgb.r, rgb.g, rgb.b];
+  };
+}
+```
+
+```{ojs}
+recentChangesMap_E = {
+  const iso3 = country.iso3;
+  const f = admin0_feature_E;
+
+  const container = html`<div id="recent-changes-map-E" style="width: 100%; height: 460px; border: 1px solid #ddd; background: #f5f5f5;"></div>`;
+
+  // Defer map setup until after the container is in the DOM
+  const setup = async () => {
+    while (!document.getElementById("recent-changes-map-E")) {
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    const div = document.getElementById("recent-changes-map-E");
+    div.innerHTML = "";
+
+    const map = L_E.map(div, { zoomControl: true, attributionControl: true });
+    L_E.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+      attribution: "© OpenStreetMap, © CARTO",
+      subdomains: "abcd",
+      maxZoom: 19,
+    }).addTo(map);
+
+    // Country polygon outline
+    if (f) {
+      const layer = L_E.geoJSON(f, {
+        style: { color: "#222", weight: 1.5, fill: false, dashArray: "4,3" },
+      }).addTo(map);
+      // Fit to country bounds (with padding)
+      map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+      // Bbox rectangle (slightly larger than polygon)
+      const b = layer.getBounds();
+      L_E.rectangle(b, { color: "#888", weight: 1, fill: false, dashArray: "1,4" }).addTo(map);
+    } else {
+      map.setView([0, 20], 3);
+    }
+
+    // Load + render COG
+    try {
+      const cogUrl = cogURL_for_E({ variable: variable_E, season: season_E });
+      const resp = await fetch(cogUrl);
+      if (!resp.ok) {
+        L_E.popup().setLatLng(map.getCenter()).setContent(
+          `<b>COG not found</b><br>${cogUrl.split("/").pop()}<br>(HTTP ${resp.status})`
+        ).openOn(map);
+        return;
+      }
+      const ab = await resp.arrayBuffer();
+      const georaster = await parseGeoraster_E(ab);
+      const colourFn = rgbInterp_E(variableRamp_E[variable_E] ?? variableRamp_E.TAVG);
+      const layer = new GeoRasterLayer_E({
+        georaster,
+        opacity: 0.78,
+        resolution: 96,
+        pixelValuesToColorFn: ([v]) => {
+          const rgb = colourFn(v);
+          return rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : null;
+        },
+      });
+      layer.addTo(map);
+    } catch (e) {
+      L_E.popup().setLatLng(map.getCenter()).setContent(`<b>Error loading COG</b><br>${String(e)}`).openOn(map);
+    }
+  };
+  setup();
+  return container;
+}
+```
+
+::: {#recent-changes-map-wrap-E}
+:::
+
+```{ojs}
+//| output: false
+{
+  const div = document.getElementById("recent-changes-map-wrap-E");
+  if (div) div.replaceChildren(recentChangesMap_E);
+}
+```
+
+::: {.callout-note}
+**Map caveats** (sandbox scope):
+
+- Pixel-mask via polygon clip is approximated by relying on the COG's NoData (ocean / outside-Africa pixels are already nan). True polygon-cut masking — using the admin0 boundary as a clip mask — would need either server-side `gdalwarp --cutline` (re-bake per country) or client-side canvas masking via the rendered tile + admin0 geometry. Deferred until the production view.
+- COG URL is hard-coded to the CR-076 single-physical-directory layout. Once CR-076 lands the path template needs updating.
+- Re-rendering on selector change is *full re-init* of the Leaflet map (cheap enough for sandbox; production view should swap the COG layer in place).
+:::
+
 ## Quick row-count sanity check
 
 ```{ojs}
