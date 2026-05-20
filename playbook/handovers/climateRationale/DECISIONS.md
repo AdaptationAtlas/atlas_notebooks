@@ -314,3 +314,61 @@ Land the session-7 wrap-up commit on `dev/climateRationale` (this file + ISSUES.
 1. CR-068 stage-1 follow-up (waiting on Brayden / hazards_prototype side).
 2. Script 4 + 5 + 6 verification on CGlabs (Pete on the server).
 3. CR-063 Phase B dispatch — production trends Quick Insight including the new trade variables.
+
+## Session state — 2026-05-19 → 2026-05-20, session 8 (FAOSTAT v4 + v5 + observational verification)
+
+### Done
+
+Major FAOSTAT pipeline iteration across two days. All commits on `hazards_prototype/develop` and pushed to `origin/develop`. Most recent commits last:
+
+- **`bb04869`** chore(faostat): mapping CSV switches to Item-Code keys + include flag (v5 dispatch piece 1+7+8)
+- **`5df75bf`** docs(faostat): v4 schema metadata + fix stale `window` reference
+- **`6b6a647`** chore(faostat): yield sanity check + cross-domain integrity check
+- **`be1d044`** feat(faostat): add `export_value_usd15` + `import_value_usd15` via Deflators
+- **`231a675`** feat(faostat): aggregate dropped commodities into Other rows per type
+- **`a200b8b`** feat(faostat): add `commodity_class` column to long-format parquet
+- **`ba82c9e`** feat(faostat): add `type` + `parent_raw` columns to long-format parquet
+- **`878c1df`** feat(faostat): parent-mapping gate for processed export rows
+- **`33de8ae`** feat(faostat): union-of-three relative filter (production OR exports OR imports)
+- **`6ee8daf`** chore(faostat): generate `metadata/faostat_processed_to_raw.csv` from FAO bulks (v4)
+- **`c3ede18`** feat(observational): per-worker progress logging + chunked zonal + run wrapper
+
+**Tickets touched:** [[CR-064]] STATUS extended with v4 fields-and-filter + v5 mapping-cleanup notes. [[CR-068]] dispatch still in flight (from session 6).
+
+**FAOSTAT v4 dispatch fully landed** ([[dispatches/2026-05-19_faostat-filter-and-schema-rework.md]]). Local rebuild produced 845,609 rows × 10 variables × 206 commodities × 55 countries; SAMPLE checks (CIV cocoa, ETH coffee, AGO banana, EGY wheat imports) all pass. S3 republish is STILL PENDING — gating on v5 follow-up landing before Pete flips `upload_to_s3` and runs.
+
+**FAOSTAT v5 dispatch partially landed** ([[dispatches/2026-05-20_faostat-v5-mapping-cleanup.md]]). Generator + Item-Code-keyed mapping CSV landed in `bb04869`. The 0.4.5 build-script refactor (item_code lookups, item_code parquet column, rollup excludes, reason column, production/yield invariant, schema v5 bump, S3 mapping upload) is deferred to a fresh session because of context length.
+
+**Observational pipeline verification on CGlabs:**
+- Script 3 (admin extract): adm0 rebuild on 2026-05-19 finished after deletion of the smoke-shape contamination. The chunked-zonal + worker telemetry from `c3ede18` worked — but furrr's default `stdout = TRUE` captured worker output in memory until `future_map()` returned, so progress wasn't visible in the live log. Workers still produced the chunk-level lines, just batched at completion.
+- Script 4 (period aggregation): smoke + full both passed. The `obs_periods_adm{0,1}.parquet` files landed.
+- Script 5 (climatology COGs): full run completed on 2026-05-19 → 2026-05-20. Same furrr `stdout = TRUE` silence pattern. **1,404 COGs expected** (9 vars × 13 periods × 3 climatologies × 4 stats) — Pete to confirm count.
+- Script 6 (S3 publish): not yet run.
+
+### Pattern decisions captured this run
+
+- **Item Codes are the stable join key, not Item strings.** v4 surfaced the issue (16 livestock species defaulted to `commodity_class = "crop"` because `commodity_clean_map` renamed the string between CSV-write and CSV-lookup); v5 fixes it by carrying the FAO Item Code through `read_fao_long()`. The mapping CSV is now keyed on `item_code`; the `commodity` string column is human reference only.
+- **`include = FALSE` rows stay in the mapping CSV.** Silent deletion of unresolvable items hides the design choice. Reviewers can `grep ",FALSE$"` for the audit trail; the build script filters on `include == TRUE` before the rows enter the parquet.
+- **Build-time invariants over downstream conventions.** The v5 dispatch adds two: (I-1) `value` aggregates across (raw, processed) only for value-type variables; (I-2) `production` / `yield` rows must have `type == "raw"`. Both documented in the parquet's JSON sidecar; (I-2) enforced by a build-time `stop()`.
+- **Non-indigenous meat is not production, period.** v4 cattle-meat fix: trade keeps non-indigenous (it IS the physical meat flow), production drops non-indigenous (mixes imported-live-and-slaughtered animals into a "national production" number). The integrity check now labels these as `reason = "meat-by-design"` rather than dropping them, so the audit trail is visible.
+- **Furrr captures worker stdout by default.** `furrr_options(stdout = TRUE)` (the default) holds child output in memory until `future_map()` returns. For long-running pipelines where live progress matters, set `stdout = FALSE` so worker `cat()` lines stream through to the parent's stdout (and thus to the `nohup` log). Tracked as a follow-up for scripts 3 + 5.
+
+### In flight / uncommitted
+
+- `dev/climateRationale` has this session-8 wrap-up about to land (this file + ISSUES.md + the new v5 dispatch file).
+- v5 0.4.5 refactor pending in fresh session.
+
+### Open questions for next session
+
+- **v5 0.4.5 refactor — pick up where `bb04869` left off.** See [[dispatches/2026-05-20_faostat-v5-mapping-cleanup.md]] for the full picking-up prompt. Suggested commit sequence is 7-8 commits; rebuild + 7 verification blocks + STOP before S3.
+- **Observational pipeline polish (non-blocking):**
+  - `_helpers.R` `system_resources()`: when cgroup v1's `memory.limit_in_bytes` returns the unset sentinel (~8 EB), `free_ram_gb` shows ~8.5 billion GB. Sanity-clamp against host total. ~5-line fix.
+  - Scripts 3 + 5: switch `furrr_options(stdout = TRUE)` → `stdout = FALSE` so worker progress streams live.
+  - Script 5: `flush.console()` after the final "Full build complete" log line so the wrap-up summary lands in the log file even if the R session exits.
+- **Mapping CSV `include = FALSE` curation pass.** 66 items currently flagged as processed-but-no-resolvable-parent. Pete to eyeball after v5 refactor lands; some may need hand-supplied parent codes.
+- **CR-068 stage-1.** Dispatch open from session 6; awaiting Brayden / `hazards_prototype` Stage 1 root-cause report.
+- **CR-063 Phase B/C.** Trade variables + `type` / `commodity_class` / `item_code` columns are all set up; phase B can dispatch as soon as v5 lands on S3.
+
+### Suggested next step
+
+Pick up the v5 0.4.5 refactor in a fresh session using the picking-up prompt in [[dispatches/2026-05-20_faostat-v5-mapping-cleanup.md]]. After that lands + Pete approves, FAOSTAT republish + script-6 observational publish can both proceed.

@@ -3,7 +3,7 @@
 **Audience:** a fresh chat-mode Claude session (Cowork or web/desktop chat)
 picking up the Climate Rationale notebook work. Read this first.
 
-**Last updated:** 2026-05-18 (session 7) by Pete + Claude Code.
+**Last updated:** 2026-05-20 (session 8) by Pete + Claude Code.
 
 ---
 
@@ -134,7 +134,28 @@ changes in VS Code's Source Control panel.
 
 ---
 
-## Current state (2026-05-18, end of session 7)
+## Current state (2026-05-20, mid-session 8)
+
+### Where the branch is
+
+- `dev/climateRationale` — local matches `origin/dev/climateRationale`. This session's docs (DECISIONS / ISSUES / new v5 dispatch file) are about to land in one wrap-up commit.
+- `hazards_prototype/develop` — pushed up to `bb04869` (v5 mapping CSV + generator). 9 FAOSTAT v4 commits + 1 v5 commit on `origin`. The v5 0.4.5 refactor is deferred to a fresh session.
+
+### What's landed this session
+
+- **FAOSTAT v4 dispatch complete** ([[dispatches/2026-05-19_faostat-filter-and-schema-rework.md]]): union-of-3 filter, parent-mapping gate, type / parent_raw / commodity_class columns, Other aggregation, deflation, sanity + integrity checks. 845 k rows × 10 variables × 206 commodities. **Not yet republished to S3** — gating on v5 refactor.
+- **FAOSTAT v5 dispatch partial** ([[dispatches/2026-05-20_faostat-v5-mapping-cleanup.md]]): generator + Item-Code-keyed mapping CSV in `bb04869`. **Build script 0.4.5 still references OLD schema — don't run it.**
+- **Observational pipeline** scripts 3, 4, 5 verified on CGlabs through script 5's `--full` run. Script 6 not yet run.
+
+### Deferred to next session
+
+- v5 0.4.5 refactor (item_code lookups + rollup excludes + reason column + production/yield invariant + schema v5 + S3 mapping upload). Picking-up prompt in [[dispatches/2026-05-20_faostat-v5-mapping-cleanup.md]] under "Implementation status".
+- Three small observational-pipeline polish items (cgroup-sentinel fix in `_helpers.R`; `furrr_options(stdout = FALSE)` in scripts 3 + 5; `flush.console()` after script 5's final log line). Non-blocking.
+- Script 6 (S3 publish) once Pete confirms the 1,404 COG count from script 5.
+
+### What landed before this session (retained for orientation)
+
+## Old current state (2026-05-18, end of session 7)
 
 ### Where the branch is
 
