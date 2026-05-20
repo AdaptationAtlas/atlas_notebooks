@@ -273,6 +273,66 @@ periods_plot = Plot.plot({
 
 Each row of facets = one season (`annual` + 12 rolling 3-month); each column = one variable. Dashed grey line = 1995–2014 mean for that cell. Hover-over not yet wired (sandbox).
 
+## Section D — Climatology COG spot checks
+
+The climatology side of the publish — `processing=climatology/{variable}/{period}/{clim}/{stat}/*.tif` — has its own QAQC story. 1,404 COGs total (9 variables × 13 periods × 3 climatologies × 4 stats). All sit on S3 alongside the parquets.
+
+### Raster contents are sound
+
+Spot-checked three COGs (`annual_1995-2014_mean.tif` for PTOT, TAVG, SPEI-12) with `gdalinfo`:
+
+| variable | min | max | range plausible? |
+|---|---|---|---|
+| PTOT annual mean | 0.045 mm/yr | 5,195 mm/yr | ✓ Sahara → equatorial rainforest |
+| TAVG annual mean | 5.57 °C | 36.84 °C | ✓ Atlas / Ethiopian highlands → Sahara |
+| SPEI-12 annual mean | −0.50 | +0.49 | ✓ z-score, ≈0 over reference period |
+
+All COGs: 1500×1600 px, 0.05° resolution, WGS84, Africa bounding box (20°W → 55°E, 40°S → 40°N), Float32, 512×512 tiled blocks, NoData = `nan`. Standard COG layout.
+
+Grayscale thumbnails (`gdal_translate -of PNG -ot Byte -scale ... -outsize 600 0`):
+
+::: {layout-ncol=3}
+![PTOT annual mean (0–5,200 mm/yr → 0–255)](img/PTOT_annual_1995-2014_mean.png){width=100%}
+
+![TAVG annual mean (0–40 °C → 0–255)](img/TAVG_annual_1995-2014_mean.png){width=100%}
+
+![SPEI-12 annual mean (−2 to +2 → 0–255)](img/SPEI-12_annual_1995-2014_mean.png){width=100%}
+:::
+
+Visual sanity: TAVG shows the expected continental temperature gradient (dark = cooler Atlas + Ethiopian highlands, lighter = Sahara). PTOT shows the expected wet/dry pattern (Sahara dark, Gulf of Guinea / Congo basin bright). SPEI-12 is uniformly near zero (expected: z-score over its own reference period).
+
+### Pipeline bug 1 — Hive partition tokens collapsed (CR-076)
+
+**All ~1,404 COGs land in a single physical S3 directory**:
+
+```
+processing=climatology/variable=PTOT/period=AMJ/clim=wmo_1991-2020/stat=max/
+  └─ PTOT_AMJ_1991-2020_mean.tif
+  └─ PTOT_AMJ_1995-2014_max.tif
+  └─ TAVG_annual_full_sd.tif
+  └─ SPEI-12_DJF_1995-2014_min.tif
+  └─ ... (all 1,404 files here)
+```
+
+Filenames carry the metadata correctly (`{var}_{period}_{clim}_{stat}.tif`) but the Hive partition tokens in the path are stuck on the first-iteration value: `variable=PTOT`, `period=AMJ`, `clim=wmo_1991-2020`, `stat=max`. Consumers using path-based partition pruning (e.g. terra::rast, DuckDB's globbed `read_parquet`, MapLibre tile-source path lookups) won't find files at the "right" partition paths. Workaround: glob the single directory and parse the filename.
+
+Probable cause: the publish step's `name_fn` (per the hazards_prototype observational README, "translates the on-disk 4-token climatology label into the descriptive S3 partition value") sets the partition tokens once at startup based on the first file, then reuses those values for every subsequent upload instead of recomputing per-file.
+
+### Pipeline bug 2 — Stats metadata are sentinel `-9999` (CR-076)
+
+Every COG ships with bogus mean/stddev in the embedded stats:
+
+```
+STATISTICS_MAXIMUM = <real value>     ✓
+STATISTICS_MINIMUM = <real value>     ✓
+STATISTICS_MEAN    = -9999            ✗  (sentinel; never computed)
+STATISTICS_STDDEV  = -9999            ✗  (sentinel; never computed)
+```
+
+GDAL writes -9999 when the bake step skips full statistics computation. Min/max were computed but mean/stddev were not. Downstream consumers that read embedded stats to set colour-scale defaults will pick up the bogus -9999 and break.
+
+Both pipeline bugs filed as **CR-076** — bundle into the next hazards_prototype dispatch alongside CR-068 / CR-064 / CR-075.
+
 ## Quick row-count sanity check
 
 ```{ojs}

@@ -1470,6 +1470,57 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **before-string:** n/a (pipeline schema / aggregation change).
 
+### CR-076 — Observational climatology COGs: Hive partition tokens collapsed + bogus stats metadata [NEW 2026-05-20]
+
+- **id:** CR-076
+- **title:** Two upstream-side defects in the observational climatology COG publish: (1) all 1,404 COGs land in a single physical S3 directory with Hive partition tokens stuck at the first-file value, (2) every COG ships with `STATISTICS_MEAN = STATISTICS_STDDEV = -9999` sentinel values instead of computed stats
+- **type:** pipeline / publish
+- **severity:** med-high (breaks Hive partition pruning for any downstream that uses path-based lookup; breaks colour-scale defaults for any consumer that reads embedded stats; raster contents themselves are sound)
+- **where:** Upstream — `hazards_prototype/R/observational/6_publish_obs_to_s3.R` (Tier-2 climatology COG publish step) + the climatology bake in `hazards_prototype/R/observational/5_make_obs_map_climatologies.R` (or wherever GDAL writes the stats metadata). Downstream surface: the eventual [[CR-062]] observational map view; any future Atlas map view that consumes the climatology COGs.
+
+- **why-this-matters:** Discovered 2026-05-20 during Stage 1 QAQC of the freshly-published observational data. The raster contents themselves are correct (Africa-wide WGS84 GeoTIFFs at 0.05° resolution, plausible value ranges per variable, NoData = nan), but two defects in the publish process break downstream consumers:
+
+  **(1) Hive partition tokens collapsed.** All COGs land in one physical S3 directory:
+
+  ```
+  domain=climate/type=observational/source=chirps-chirts-era5/region=africa/
+    processing=climatology/variable=PTOT/period=AMJ/clim=wmo_1991-2020/stat=max/
+      ├── PTOT_AMJ_1991-2020_mean.tif
+      ├── PTOT_AMJ_1995-2014_max.tif
+      ├── TAVG_annual_full_sd.tif
+      ├── SPEI-12_DJF_1995-2014_min.tif
+      └── … all 1,404 files
+  ```
+
+  Filenames carry the metadata correctly (`{var}_{period}_{clim}_{stat}.tif`), but the Hive partition tokens in the path are stuck on the first-iteration value: `variable=PTOT`, `period=AMJ`, `clim=wmo_1991-2020`, `stat=max`. Probable cause: the `name_fn` per the README ("translates the on-disk 4-token climatology label into the descriptive S3 partition value") sets the partition tokens once at startup based on the first file, then reuses those values for every subsequent upload instead of recomputing per-file. Confirmed by paginating the S3 listing — `variable=TAVG/`, `variable=TMIN/`, `variable=SPEI-12/` etc. all return zero keys; everything is under the one directory.
+
+  Consumer-side impact: any downstream that uses path-based partition pruning (e.g. `terra::rast()` with a glob, DuckDB / `read_parquet` with partition predicates, tile-server path lookups, STAC asset hrefs) will fail to locate files at the "expected" path. The Atlas pattern of selecting a (variable × period × clim × stat) COG via path tokens is fully broken; the consumer has to glob the single physical directory and parse the filename instead.
+
+  **(2) Stats metadata are sentinel `-9999`.** Every COG ships with:
+
+  ```
+  STATISTICS_MAXIMUM = <real value>     ✓
+  STATISTICS_MINIMUM = <real value>     ✓
+  STATISTICS_MEAN    = -9999            ✗  (sentinel; never computed)
+  STATISTICS_STDDEV  = -9999            ✗  (sentinel; never computed)
+  ```
+
+  GDAL writes -9999 when the bake skips full statistics computation. Min/max were computed but mean/stddev were not. Spot-checked across PTOT / TAVG / SPEI-12 `annual_1995-2014_mean.tif` — same `-9999` placeholder on all three. Consumers that read embedded stats to set colour-scale defaults (typical for any auto-styled map) will pick up the -9999 and either crash or render unusable colour ramps.
+
+- **proposed-change:**
+  1. **(1) Hive partition fix in `6_publish_obs_to_s3.R`:** the `name_fn` (or equivalent — the S3DirUploader caller) needs to recompute `variable / period / clim / stat` partition tokens **per file** rather than once at startup. The simplest fix: derive the four tokens from each file's basename inside the upload loop, not from a captured-once template.
+  2. **(2) Stats fix in `5_make_obs_map_climatologies.R`:** invoke `gdaladdo`-equivalent stats computation (or `terra::setMinMax` + full statistics) so the COG header carries real `STATISTICS_MEAN` and `STATISTICS_STDDEV` rather than the -9999 placeholder. If `terra::writeRaster` already supports a `stats=TRUE` option (or similar), turn it on. Alternatively, post-process with `gdal_translate -stats` or `gdalinfo -stats` to force computation before the upload step.
+  3. **Re-bake** the climatology COGs into the corrected layout. ~1,404 files; estimated bake time per the README is ~10 GB / parallel-per-variable, so likely an overnight run.
+  4. **Sanity check** post-fix by re-running the Section D spot checks in the sandbox notebook (`notebooks/sandbox/obs_qaqc.qmd`) — listing should now show ~117 distinct partition paths (9 variables × 13 periods); stats metadata should show non-`-9999` mean/stddev.
+
+- **dependencies:** Brayden / `hazards_prototype` maintainer. Bundle into the same hazards_prototype follow-up dispatch as [[CR-075]] (disputed-territory polygons), [[CR-068]] (categorisation), [[CR-064]] (cattle-meat + filter eligibility) — all touch the publish or bake steps for the same observational pipeline and would amortise the re-bake overnight.
+
+- **discovered:** 2026-05-20 during Stage 1 QAQC probes of the freshly-published observational data + Pete's "what about the maps?" follow-up. Documented in the sandbox notebook Section D (`notebooks/sandbox/obs_qaqc.qmd`) with three grayscale PNG thumbnails (PTOT / TAVG / SPEI-12 annual_1995-2014_mean) confirming the raster contents are sound — the bugs are in the publish layer, not the bake of the underlying values.
+
+- **STATUS:** Open. Pipeline-side. Notebook-side workaround for the eventual [[CR-062]] view: glob the single physical S3 directory and parse the filename to locate the right COG. Stats metadata: ignore the embedded mean/stddev for now and compute colour-scale defaults from a value-range table (could be a small lookup baked into the notebook).
+
+- **before-string:** n/a (publish / metadata fix).
+
 ---
 
 ## Proposed PR groupings
