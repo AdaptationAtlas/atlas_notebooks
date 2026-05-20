@@ -335,33 +335,15 @@ Reads the COG directly from S3 via geotiff.js (HTTP Range requests under the hoo
 
 ```{ojs}
 //| output: false
-// Minimal UMD loader — only geotiff.js + topojson-client. No Leaflet,
-// no georaster wrapper stack (the wrappers' transitive deps hit the
-// quick-scale@0.2.0 named-export dead-end on every ESM CDN tried).
-loadScript_E = (src) => new Promise((resolve, reject) => {
-  for (const s of document.scripts) {
-    if (s.src === src) {
-      if (s.dataset.loaded === "1") return resolve();
-      s.addEventListener("load", () => resolve());
-      return;
-    }
-  }
-  const s = document.createElement("script");
-  s.src = src;
-  s.async = false;
-  s.onload = () => { s.dataset.loaded = "1"; resolve(); };
-  s.onerror = (e) => reject(new Error(`failed to load ${src}: ${e}`));
-  document.head.appendChild(s);
-});
-
-geoTiffReady_E = {
-  await loadScript_E("https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js");
-  await loadScript_E("https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js");
-  return true;
-}
-
-GeoTIFF_E       = geoTiffReady_E && window.GeoTIFF;
-topojsonClient_E = geoTiffReady_E && window.topojson;
+// Both libraries via ESM through esm.sh. OJS handles dynamic imports
+// natively and resolves each cell to the module namespace, which
+// downstream cells reference via dataflow. No UMD-global-attach
+// contract to violate, no script-tag-dedup race, no global probe.
+// esm.sh passthrough verified for both packages on 2026-05-20
+// (no `x-esm-build` header on either response → no CJS rewriter
+// involved; both packages ship native ESM in dist-module/).
+GeoTIFF_E        = await import("https://esm.sh/geotiff@2.1.3");
+topojsonClient_E = await import("https://esm.sh/topojson-client@3.1.0");
 ```
 
 ```{ojs}
@@ -385,6 +367,15 @@ cogURL_for_E = ({ variable, season, clim = "1991-2020", stat = "mean" }) => {
   const dir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=climatology/variable=PTOT/period=AMJ/clim=wmo_1991-2020/stat=max";
   return `${dir}/${variable}_${season}_${clim}_${stat}.tif`;
 }
+```
+
+```{ojs}
+//| output: false
+// Standalone cell so any preprocessor weirdness here can't take down the
+// upstream loader cells (see commit history around extremeColour_E).
+// SPEI 1991-2020 *mean* is ~0 by construction (standardisation window),
+// so switch SPEI to stat=sd to show real spatial variability.
+mapStat_E = variable_E.startsWith("SPEI") ? "sd" : "mean";
 ```
 
 ```{ojs}
@@ -438,33 +429,39 @@ ramps_E = ({
     { at:  25, rgb: [253, 231,  37] },
     { at:  35, rgb: [253, 100,  20] },
   ],
-  // Sequential white→deep-blue for precipitation
+  // Sequential white→deep-blue for precipitation (annual totals in tropical
+  // Africa commonly reach 1500-2500 mm — earlier 800 mm ceiling clamped
+  // most of the country to deep blue and lost all spatial signal).
   PTOT: [
-    { at:   0, rgb: [247, 251, 255] },
-    { at:  50, rgb: [222, 235, 247] },
-    { at: 150, rgb: [158, 202, 225] },
-    { at: 300, rgb: [ 49, 130, 189] },
-    { at: 500, rgb: [  8,  81, 156] },
-    { at: 800, rgb: [  8,  48, 107] },
+    { at:    0, rgb: [247, 251, 255] },
+    { at:  100, rgb: [222, 235, 247] },
+    { at:  300, rgb: [198, 219, 239] },
+    { at:  600, rgb: [158, 202, 225] },
+    { at: 1000, rgb: [107, 174, 214] },
+    { at: 1500, rgb: [ 49, 130, 189] },
+    { at: 2000, rgb: [  8,  81, 156] },
+    { at: 2500, rgb: [  8,  48, 107] },
   ],
-  // Diverging RdBu for SPEI (dry→wet, white at 0)
+  // SPEI map uses stat=sd (not mean), so the ramp is a sequential green→
+  // brown going from low variability (stable hydroclimate) to high
+  // variability (drought-prone).
   "SPEI-03": [
-    { at: -2.0, rgb: [165,   0,  38] },
-    { at: -1.5, rgb: [215,  48,  39] },
-    { at: -1.0, rgb: [244, 109,  67] },
-    { at:  0.0, rgb: [255, 255, 255] },
-    { at:  1.0, rgb: [116, 173, 209] },
-    { at:  1.5, rgb: [ 69, 117, 180] },
-    { at:  2.0, rgb: [ 49,  54, 149] },
+    { at: 0.5, rgb: [247, 252, 245] },
+    { at: 0.7, rgb: [199, 233, 192] },
+    { at: 0.9, rgb: [161, 217, 155] },
+    { at: 1.0, rgb: [254, 224, 144] },
+    { at: 1.1, rgb: [253, 174,  97] },
+    { at: 1.3, rgb: [244, 109,  67] },
+    { at: 1.5, rgb: [165,   0,  38] },
   ],
   "SPEI-12": [
-    { at: -2.0, rgb: [165,   0,  38] },
-    { at: -1.5, rgb: [215,  48,  39] },
-    { at: -1.0, rgb: [244, 109,  67] },
-    { at:  0.0, rgb: [255, 255, 255] },
-    { at:  1.0, rgb: [116, 173, 209] },
-    { at:  1.5, rgb: [ 69, 117, 180] },
-    { at:  2.0, rgb: [ 49,  54, 149] },
+    { at: 0.5, rgb: [247, 252, 245] },
+    { at: 0.7, rgb: [199, 233, 192] },
+    { at: 0.9, rgb: [161, 217, 155] },
+    { at: 1.0, rgb: [254, 224, 144] },
+    { at: 1.1, rgb: [253, 174,  97] },
+    { at: 1.3, rgb: [244, 109,  67] },
+    { at: 1.5, rgb: [165,   0,  38] },
   ],
 })
 ```
@@ -509,39 +506,84 @@ recentChangesMap_E = {
   // Render once into the wrap, async.
   const run = async () => {
     try {
-      const cogUrl = cogURL_for_E({ variable: variable_E, season: season_E });
+      const cogUrl = cogURL_for_E({ variable: variable_E, season: season_E, stat: mapStat_E });
       setStatus(`Reading COG header (${cogUrl.split("/").pop()})…`);
       const t0 = performance.now();
 
       // 1. Open the COG via geotiff.js. Internally this uses HTTP Range
-      // requests to fetch ONLY the bytes needed for our bbox. The full
-      // ~3.5 MB Africa-wide file is never downloaded.
+      // requests to fetch ONLY the bytes needed for our pixel window.
       const tiff = await GeoTIFF_E.fromUrl(cogUrl);
       const image = await tiff.getImage();
 
-      setStatus(`Fetching pixels for bbox [${bbox.xmin.toFixed(2)},${bbox.ymin.toFixed(2)},${bbox.xmax.toFixed(2)},${bbox.ymax.toFixed(2)}]…`);
+      // 2. Compute the COG's georeferencing manually rather than relying
+      // on readRasters({bbox}) — that parameter silently returns the
+      // ENTIRE raster for some COG flavours in this collection (TAVG +
+      // SPEI), apparently due to projection-tag differences. Building
+      // an explicit pixel `window` from the image's bounding box +
+      // resolution forces the right crop for every variable.
+      const imgBbox = image.getBoundingBox();                    // [xmin, ymin, xmax, ymax] in COG CRS
+      const imgW = image.getWidth();
+      const imgH = image.getHeight();
+      const xRes = (imgBbox[2] - imgBbox[0]) / imgW;
+      const yRes = (imgBbox[3] - imgBbox[1]) / imgH;
 
-      // 2. Read raster pixels for the country bbox at NATIVE resolution.
-      // geotiff.js handles the geo-bbox → pixel-window conversion using
-      // the COG's georeferencing tags.
-      const rasters = await image.readRasters({ bbox: [bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax] });
-      const data = rasters[0];                                  // Float32Array
-      const w = rasters.width, h = rasters.height;              // source resolution at our bbox
-      const fetchMs = performance.now() - t0;
+      let wx1 = Math.max(0,    Math.floor((bbox.xmin   - imgBbox[0]) / xRes));
+      let wy1 = Math.max(0,    Math.floor((imgBbox[3]  - bbox.ymax)  / yRes));   // y-flip: raster row 0 is at ymax
+      let wx2 = Math.min(imgW, Math.ceil ((bbox.xmax   - imgBbox[0]) / xRes));
+      let wy2 = Math.min(imgH, Math.ceil ((imgBbox[3]  - bbox.ymin)  / yRes));
+      if (wx2 <= wx1 || wy2 <= wy1) {
+        setStatus(`Country bbox does not overlap COG extent (image: ${imgBbox.map(v => v.toFixed(1)).join(", ")} vs country: ${bbox.xmin.toFixed(1)},${bbox.ymin.toFixed(1)},${bbox.xmax.toFixed(1)},${bbox.ymax.toFixed(1)}).`);
+        return;
+      }
+
+      setStatus(`Fetching pixels for ${country.name} (window ${wx2 - wx1}×${wy2 - wy1} of source ${imgW}×${imgH})…`);
+
+      // 3. Read raster pixels for our pixel window. window is [x1, y1, x2, y2]
+      // in source pixel coordinates with y growing downward.
+      const rasters = await image.readRasters({ window: [wx1, wy1, wx2, wy2] });
+      const data = rasters[0];                                  // typed array (Float32Array for these COGs)
+      const w = rasters.width, h = rasters.height;
+
+      // The actual geographic extent of the pixel window (may be
+      // slightly larger than our padded country bbox because of integer
+      // pixel snapping). Use THIS for the SVG overlay projection so
+      // the outline aligns to the canvas perfectly.
+      const actualBbox = {
+        xmin: imgBbox[0] + wx1 * xRes,
+        ymax: imgBbox[3] - wy1 * yRes,
+        xmax: imgBbox[0] + wx2 * xRes,
+        ymin: imgBbox[3] - wy2 * yRes,
+      };
+
+      // Detect common NoData sentinels (CR-076 noted STATISTICS_MEAN=-9999;
+      // production COGs likely use either NaN or -9999 / -3.4e38). Treat
+      // both as transparent in the colour ramp.
+      const noData = typeof image.getGDALNoData === "function" ? image.getGDALNoData() : null;
+      const isNoData = (v) => {
+        if (!isFinite(v)) return true;
+        if (noData != null && v === noData) return true;
+        if (v <= -9999) return true;
+        return false;
+      };
 
       setStatus(`Rendering ${w}×${h} pixels → ${W} px canvas (smooth resample)…`);
 
-      // 3. Build offscreen canvas at SOURCE resolution and paint each
-      // pixel via the colour ramp. NaN / non-finite values stay
-      // transparent (we never write to those alpha bytes).
+      // 4. Build offscreen canvas at SOURCE resolution and paint each
+      // pixel via the colour ramp. NoData stays transparent.
       const offscreen = document.createElement("canvas");
       offscreen.width = w;
       offscreen.height = h;
       const offCtx = offscreen.getContext("2d");
       const img = offCtx.createImageData(w, h);
       const stops = ramps_E[variable_E] ?? ramps_E.TAVG;
+      let nValid = 0, vMin = Infinity, vMax = -Infinity;
       for (let i = 0; i < w * h; i++) {
-        const c = colorRamp_E(data[i], stops);
+        const v = data[i];
+        if (isNoData(v)) continue;
+        nValid++;
+        if (v < vMin) vMin = v;
+        if (v > vMax) vMax = v;
+        const c = colorRamp_E(v, stops);
         if (c) {
           img.data[i * 4]     = c[0];
           img.data[i * 4 + 1] = c[1];
@@ -551,14 +593,12 @@ recentChangesMap_E = {
       }
       offCtx.putImageData(img, 0, 0);
 
-      // 4. Visible display canvas, scaled up from source.
-      // Browser bilinear resampling via imageSmoothing — this matters!
-      // Skipping the smoothing reproduces exactly the block-artefact
-      // pattern of nearest-neighbour gdal_translate pre-renders. Do
-      // NOT "simplify" this by drawing the source canvas at 1:1 then
-      // CSS-scaling the element — CSS upscaling is nearest-neighbour
-      // by default in most browsers. drawImage with smoothing is the
-      // right place.
+      // 5. Visible display canvas, scaled up from source. Browser bilinear
+      // resampling via imageSmoothing — this matters! Skipping it
+      // reproduces exactly the block-artefact pattern of nearest-
+      // neighbour gdal_translate pre-renders. Do NOT "simplify" this
+      // by drawing the source canvas at 1:1 then CSS-scaling — CSS
+      // upscaling is nearest-neighbour by default in most browsers.
       const H = Math.round(W * h / w);
       const display = document.createElement("canvas");
       display.width  = W;
@@ -571,21 +611,15 @@ recentChangesMap_E = {
       dctx.imageSmoothingQuality = "high";
       dctx.drawImage(offscreen, 0, 0, W, H);
 
-      // 5. Admin0 outline SVG overlay. Same projection as the canvas:
-      //   px_x = (lon - bbox.xmin) / (bbox.xmax - bbox.xmin) * W
-      //   px_y = (bbox.ymax - lat) / (bbox.ymax - bbox.ymin) * H
-      // y-flip is critical — canvas y grows DOWNWARD but lat grows UP.
-      const tx = (lon) => (lon - bbox.xmin) / (bbox.xmax - bbox.xmin) * W;
-      const ty = (lat) => (bbox.ymax - lat) / (bbox.ymax - bbox.ymin) * H;
+      // 6. Admin0 outline SVG overlay. Uses the ACTUAL pixel-window
+      // geo-extent (not the padded country bbox) for perfect alignment.
+      const tx = (lon) => (lon - actualBbox.xmin) / (actualBbox.xmax - actualBbox.xmin) * W;
+      const ty = (lat) => (actualBbox.ymax - lat) / (actualBbox.ymax - actualBbox.ymin) * H;
       const ringToPath = (ring) => "M" + ring.map(([lo, la]) => `${tx(lo).toFixed(1)},${ty(la).toFixed(1)}`).join("L") + "Z";
       const featureToPath = (feat) => {
         const g = feat.geometry;
-        if (g.type === "Polygon") {
-          return g.coordinates.map(ringToPath).join(" ");
-        }
-        if (g.type === "MultiPolygon") {
-          return g.coordinates.flatMap((poly) => poly.map(ringToPath)).join(" ");
-        }
+        if (g.type === "Polygon") return g.coordinates.map(ringToPath).join(" ");
+        if (g.type === "MultiPolygon") return g.coordinates.flatMap((poly) => poly.map(ringToPath)).join(" ");
         return "";
       };
       const pathD = featureToPath(f);
@@ -593,19 +627,84 @@ recentChangesMap_E = {
         <path d="${pathD}" stroke="#222" stroke-width="1.2" fill="none" />
       </svg>`;
 
-      // Mount into wrap
+      // 7. Legend — horizontal colour bar with tick labels at each stop.
+      const legend = buildLegend_E(stops, variable_E, mapStat_E);
+
+      // Mount
       wrap.innerHTML = "";
-      wrap.appendChild(display);
-      wrap.appendChild(svgOverlay);
+      const mapStack = html`<div style="position: relative; width: ${W}px;"></div>`;
+      mapStack.appendChild(display);
+      mapStack.appendChild(svgOverlay);
+      wrap.appendChild(mapStack);
+      wrap.appendChild(legend);
 
       const totalMs = performance.now() - t0;
-      setStatus(`Loaded ${variable_E} ${season_E} (1991-2020 mean) for ${country.name} — fetched + parsed + rendered in ${(totalMs/1000).toFixed(1)}s · source ${w}×${h} px upsampled to ${W}×${H}`);
+      const statLabel = mapStat_E === "mean" ? "1991-2020 mean" : `1991-2020 ${mapStat_E}`;
+      const rangeStr = nValid > 0 ? ` · data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "";
+      setStatus(`Loaded ${variable_E} ${season_E} (${statLabel}) for ${country.name} — fetched + parsed + rendered in ${(totalMs/1000).toFixed(1)}s · source ${w}×${h} upsampled to ${W}×${H}${rangeStr}`);
     } catch (e) {
       console.error("recentChangesMap_E", e);
       setStatus(`Error: ${String(e)}`);
     }
   };
   run();
+  return container;
+}
+```
+
+```{ojs}
+//| output: false
+// Legend renderer — horizontal colour bar with tick marks at every stop.
+// The gradient mirrors colorRamp_E (linear RGB interp between stops),
+// rendered via SVG <linearGradient>.
+buildLegend_E = (stops, variable, stat) => {
+  const W = 600;
+  const barH = 14;
+  const padTop = 6, padBottom = 22, padX = 8;
+  const totalH = padTop + barH + padBottom;
+
+  const v0 = stops[0].at;
+  const v1 = stops[stops.length - 1].at;
+  const range = v1 - v0;
+  const xForVal = (v) => padX + (v - v0) / range * (W - 2 * padX);
+
+  const gradientId = "legend-grad-" + variable.split("-").join("_") + "-" + stat;
+  const gradientStops = stops.map((s) => {
+    const pct = ((s.at - v0) / range * 100).toFixed(2);
+    return `<stop offset="${pct}%" stop-color="rgb(${s.rgb.join(",")})" />`;
+  }).join("");
+
+  const ticks = stops.map((s) => {
+    const x = xForVal(s.at);
+    const label = Math.abs(s.at) >= 100 ? Math.round(s.at) : (Math.abs(s.at) >= 10 ? s.at.toFixed(0) : s.at.toFixed(1));
+    return `
+      <line x1="${x}" x2="${x}" y1="${padTop}" y2="${padTop + barH + 3}" stroke="#333" stroke-width="0.8"/>
+      <text x="${x}" y="${padTop + barH + 16}" font-size="10" fill="#333" text-anchor="middle" font-family="system-ui, sans-serif">${label}</text>
+    `;
+  }).join("");
+
+  const unit = variable === "PTOT" ? "mm" : variable.startsWith("SPEI") ? (stat === "sd" ? "σ (z)" : "z") : "°C";
+  const titleText = `${variable} (${stat}) — ${unit}`;
+
+  const svgMarkup = `
+    <svg width="${W}" height="${totalH}" style="display:block; margin-top: 6px;" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="${gradientId}" x1="0" x2="1" y1="0" y2="0">
+          ${gradientStops}
+        </linearGradient>
+      </defs>
+      <rect x="${padX}" y="${padTop}" width="${W - 2 * padX}" height="${barH}" fill="url(#${gradientId})" stroke="#333" stroke-width="0.6"/>
+      ${ticks}
+    </svg>
+  `;
+  const container = html`<div style="font-size: 11px; color: #333; margin-top: 4px;">
+    <div style="font-weight: 500; margin-bottom: 2px;">${titleText}</div>
+  </div>`;
+  // Build SVG DOM from markup string
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgMarkup, "image/svg+xml");
+  const svgEl = document.importNode(doc.documentElement, true);
+  container.appendChild(svgEl);
   return container;
 }
 ```
