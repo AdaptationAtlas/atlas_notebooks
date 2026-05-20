@@ -335,25 +335,56 @@ Renders the COG for the current (variable × season × clim=wmo_1991-2020 × sta
 
 ```{ojs}
 //| output: false
-L_E = (await import("https://esm.sh/leaflet@1.9.4")).default;
-
-// Leaflet CSS injection
-{
-  if (!document.getElementById("leaflet-css-sandbox")) {
-    const link = document.createElement("link");
-    link.id = "leaflet-css-sandbox";
-    link.rel = "stylesheet";
-    link.href = "https://esm.sh/leaflet@1.9.4/dist/leaflet.css";
-    document.head.appendChild(link);
+// Load Leaflet + georaster ecosystem via UMD <script> tags rather than
+// ESM imports. ESM via esm.sh / jsdelivr hits a dead-end transitive
+// dep: pixel-utils@0.9.0 imports {createScaleFunction} from quick-scale,
+// but quick-scale@0.2.0 (the latest published version) only exports it
+// on its default export, not as a named export. The CDN-side
+// CommonJS→ESM transform can't bridge that gap. UMD bundles sidestep
+// the issue — they're self-contained and expose globals via window.
+loadScript_E = (src) => new Promise((resolve, reject) => {
+  // Avoid double-loading
+  for (const s of document.scripts) {
+    if (s.src === src) {
+      // wait until it's fully loaded if it's already in the DOM
+      if (s.dataset.loaded === "1") return resolve();
+      s.addEventListener("load", () => resolve());
+      return;
+    }
   }
+  const s = document.createElement("script");
+  s.src = src;
+  s.async = false;
+  s.onload = () => { s.dataset.loaded = "1"; resolve(); };
+  s.onerror = (e) => reject(new Error(`failed to load ${src}: ${e}`));
+  document.head.appendChild(s);
+});
+
+loadCSS_E = (id, href) => {
+  if (document.getElementById(id)) return;
+  const link = document.createElement("link");
+  link.id = id;
+  link.rel = "stylesheet";
+  link.href = href;
+  document.head.appendChild(link);
+};
+
+leafletReady_E = {
+  loadCSS_E("leaflet-css-sandbox", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
+  // Order matters: leaflet must be on window.L before georaster-layer loads.
+  await loadScript_E("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js");
+  await loadScript_E("https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js");
+  await loadScript_E("https://unpkg.com/georaster-layer-for-leaflet@4.1.2/dist/georaster-layer-for-leaflet.min.js");
+  await loadScript_E("https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js");
+  return true;
 }
 
-parseGeoraster_E = (await import("https://esm.sh/georaster@1.6.0")).default;
-// 3.x pulled quick-scale@0.1.0 (no createScaleFunction) → broken. 4.1.2
-// dropped quick-scale entirely and uses geowarp instead. Same API surface
-// for our use (default export + pixelValuesToColorFn option).
-GeoRasterLayer_E = (await import("https://esm.sh/georaster-layer-for-leaflet@4.1.2")).default;
-topojsonClient_E = await import("https://esm.sh/topojson-client@3.1.0");
+// Aliases to the UMD-exposed globals. The leafletReady_E gate ensures
+// each global is on window before these cells fire.
+L_E = leafletReady_E && window.L;
+parseGeoraster_E = leafletReady_E && window.parseGeoraster;
+GeoRasterLayer_E = leafletReady_E && window.GeoRasterLayer;
+topojsonClient_E = leafletReady_E && window.topojson;
 ```
 
 ```{ojs}
