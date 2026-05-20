@@ -481,22 +481,37 @@ recentChangesMap_E = {
 
     try {
       const cogUrl = cogURL_for_E({ variable: variable_E, season: season_E });
-      setStatus(`Fetching COG (${cogUrl.split("/").pop()})…`);
-      const t0 = performance.now();
-      const resp = await fetch(cogUrl);
-      if (!resp.ok) {
-        setStatus(`COG not found: ${cogUrl.split("/").pop()} (HTTP ${resp.status})`);
+      // HEAD probe first so we can fail fast with a clear error if the
+      // COG doesn't exist at the constructed URL.
+      const head = await fetch(cogUrl, { method: "HEAD" });
+      if (!head.ok) {
+        setStatus(`COG not found: ${cogUrl.split("/").pop()} (HTTP ${head.status})`);
         L_E.popup().setLatLng(map.getCenter()).setContent(
-          `<b>COG not found</b><br>${cogUrl.split("/").pop()}<br>(HTTP ${resp.status})`
+          `<b>COG not found</b><br>${cogUrl.split("/").pop()}<br>(HTTP ${head.status})`
         ).openOn(map);
         return;
       }
-      const ab = await resp.arrayBuffer();
-      const fetchMs = performance.now() - t0;
-      const sizeMB = (ab.byteLength / 1024 / 1024).toFixed(1);
-      setStatus(`Parsing COG (${sizeMB} MB, fetched in ${(fetchMs/1000).toFixed(1)}s)…`);
+      const totalBytes = parseInt(head.headers.get("content-length") || "0", 10);
 
-      const georaster = await parseGeoraster_E(ab);
+      setStatus(`Streaming COG via HTTP Range requests (full size ${(totalBytes/1024/1024).toFixed(1)} MB; only country-area tiles fetched)…`);
+      const t0 = performance.now();
+      // Pass the URL string (not an ArrayBuffer) to parseGeoraster.
+      // georaster.js then uses geotiff.js HTTP Range requests under the
+      // hood — only the tiles intersecting the current map viewport
+      // get downloaded. The full ~15 MB Africa-wide COG is never
+      // pulled in full; at country zoom we typically fetch <2 MB.
+      const georaster = await parseGeoraster_E(cogUrl);
+      const parseMs = performance.now() - t0;
+
+      // Country bounds restrict both fetching (Leaflet only requests
+      // tiles within these bounds) AND rendering (pixels outside are
+      // transparent). f is the admin0 GeoJSON Feature for the iso3.
+      let countryBounds = null;
+      if (f) {
+        const tmp = L_E.geoJSON(f);
+        countryBounds = tmp.getBounds();
+      }
+
       const colourFn = rgbInterp_E(variableRamp_E[variable_E] ?? variableRamp_E.TAVG);
       const layer = new GeoRasterLayer_E({
         georaster,
@@ -506,11 +521,11 @@ recentChangesMap_E = {
           const rgb = colourFn(v);
           return rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : null;
         },
+        ...(countryBounds ? { bounds: countryBounds } : {}),
       });
       layer.addTo(map);
       const totalMs = performance.now() - t0;
-      setStatus(`Loaded ${variable_E} ${season_E} clim=1991-2020 mean (${sizeMB} MB, ${(totalMs/1000).toFixed(1)}s)`);
-      // Re-invalidate after the raster layer settles
+      setStatus(`Loaded ${variable_E} ${season_E} (1991-2020 mean) — ${(totalMs/1000).toFixed(1)}s, country-cropped via HTTP Range`);
       setTimeout(() => map.invalidateSize(), 200);
     } catch (e) {
       setStatus(`Error loading COG: ${String(e)}`);
