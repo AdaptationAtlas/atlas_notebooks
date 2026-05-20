@@ -329,24 +329,18 @@ ${baselineCopy} ${speiCopy}
 recentChanges_caption_E
 ```
 
-## Map (interactive — Leaflet + georaster)
+## Map (interactive — geotiff.js + canvas)
 
-Renders the COG for the current (variable × season × clim=wmo_1991-2020 × stat=mean) as a raster overlay on a basemap. Admin0 polygon shown as a dashed outline + bbox rectangle for context. **Admin1 selection does NOT filter the map** (the whole country renders so the spatial pattern stays visible); the admin1 dropdown only affects the timeseries.
+Reads the COG directly from S3 via geotiff.js (HTTP Range requests under the hood — only the bytes for the country bbox get fetched, not the full Africa-wide raster). Pixels render into an offscreen canvas at the COG's native resolution, then up-sampled onto the visible canvas with the browser's built-in bilinear smoothing. Admin0 outline is overlaid as an SVG path using the same `(lon, lat) → (px_x, px_y)` projection. **Admin1 selection does NOT filter the map** — the whole country renders so the spatial pattern stays visible; the admin1 dropdown only affects the timeseries.
 
 ```{ojs}
 //| output: false
-// Load Leaflet + georaster ecosystem via UMD <script> tags rather than
-// ESM imports. ESM via esm.sh / jsdelivr hits a dead-end transitive
-// dep: pixel-utils@0.9.0 imports {createScaleFunction} from quick-scale,
-// but quick-scale@0.2.0 (the latest published version) only exports it
-// on its default export, not as a named export. The CDN-side
-// CommonJS→ESM transform can't bridge that gap. UMD bundles sidestep
-// the issue — they're self-contained and expose globals via window.
+// Minimal UMD loader — only geotiff.js + topojson-client. No Leaflet,
+// no georaster wrapper stack (the wrappers' transitive deps hit the
+// quick-scale@0.2.0 named-export dead-end on every ESM CDN tried).
 loadScript_E = (src) => new Promise((resolve, reject) => {
-  // Avoid double-loading
   for (const s of document.scripts) {
     if (s.src === src) {
-      // wait until it's fully loaded if it's already in the DOM
       if (s.dataset.loaded === "1") return resolve();
       s.addEventListener("load", () => resolve());
       return;
@@ -360,31 +354,14 @@ loadScript_E = (src) => new Promise((resolve, reject) => {
   document.head.appendChild(s);
 });
 
-loadCSS_E = (id, href) => {
-  if (document.getElementById(id)) return;
-  const link = document.createElement("link");
-  link.id = id;
-  link.rel = "stylesheet";
-  link.href = href;
-  document.head.appendChild(link);
-};
-
-leafletReady_E = {
-  loadCSS_E("leaflet-css-sandbox", "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css");
-  // Order matters: leaflet must be on window.L before georaster-layer loads.
-  await loadScript_E("https://unpkg.com/leaflet@1.9.4/dist/leaflet.js");
-  await loadScript_E("https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js");
-  await loadScript_E("https://unpkg.com/georaster-layer-for-leaflet@4.1.2/dist/georaster-layer-for-leaflet.min.js");
+geoTiffReady_E = {
+  await loadScript_E("https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js");
   await loadScript_E("https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js");
   return true;
 }
 
-// Aliases to the UMD-exposed globals. The leafletReady_E gate ensures
-// each global is on window before these cells fire.
-L_E = leafletReady_E && window.L;
-parseGeoraster_E = leafletReady_E && window.parseGeoraster;
-GeoRasterLayer_E = leafletReady_E && window.GeoRasterLayer;
-topojsonClient_E = leafletReady_E && window.topojson;
+GeoTIFF_E       = geoTiffReady_E && window.GeoTIFF;
+topojsonClient_E = geoTiffReady_E && window.topojson;
 ```
 
 ```{ojs}
@@ -408,131 +385,227 @@ cogURL_for_E = ({ variable, season, clim = "1991-2020", stat = "mean" }) => {
   const dir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=climatology/variable=PTOT/period=AMJ/clim=wmo_1991-2020/stat=max";
   return `${dir}/${variable}_${season}_${clim}_${stat}.tif`;
 }
+```
 
-variableRamp_E = ({
-  TAVG:    [ [0,'#440154'], [15,'#3b528b'], [22,'#21918c'], [30,'#5ec962'], [40,'#fde725'] ],
-  TMAX:    [ [0,'#440154'], [15,'#3b528b'], [25,'#21918c'], [35,'#5ec962'], [45,'#fde725'] ],
-  TMIN:    [ [-5,'#440154'], [5,'#3b528b'], [15,'#21918c'], [25,'#5ec962'], [35,'#fde725'] ],
-  PTOT:    [ [0,'#f7fbff'], [50,'#9ecae1'], [150,'#3182bd'], [300,'#08519c'], [500,'#08306b'] ],
-  "SPEI-03": [ [-2.5,'#67001f'], [-1,'#d6604d'], [-0.3,'#f7f7f7'], [0.3,'#f7f7f7'], [1,'#4393c3'], [2.5,'#053061'] ],
-  "SPEI-12": [ [-2.5,'#67001f'], [-1,'#d6604d'], [-0.3,'#f7f7f7'], [0.3,'#f7f7f7'], [1,'#4393c3'], [2.5,'#053061'] ],
-});
-
-rgbInterp_E = (stops) => {
-  const xs = stops.map((s) => s[0]);
-  const cs = stops.map((s) => s[1]);
-  const scale = d3.scaleLinear().domain(xs).range(cs).interpolate(d3.interpolateRgb).clamp(true);
-  return (v) => {
-    if (v == null || !isFinite(v)) return null;
-    const rgb = d3.color(scale(v));
-    if (!rgb) return null;
-    return [rgb.r, rgb.g, rgb.b];
-  };
+```{ojs}
+//| output: false
+// Reusable colour-ramp helper. stops sorted by `at`; linear RGB
+// interpolation between adjacent stops; clamps at endpoints; returns
+// null (transparent) for NaN / non-finite values.
+colorRamp_E = (value, stops) => {
+  if (value == null || !isFinite(value)) return null;
+  if (value <= stops[0].at) return [...stops[0].rgb, 255];
+  const last = stops[stops.length - 1];
+  if (value >= last.at) return [...last.rgb, 255];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i + 1];
+    if (value >= a.at && value <= b.at) {
+      const t = (value - a.at) / (b.at - a.at);
+      return [
+        Math.round(a.rgb[0] + t * (b.rgb[0] - a.rgb[0])),
+        Math.round(a.rgb[1] + t * (b.rgb[1] - a.rgb[1])),
+        Math.round(a.rgb[2] + t * (b.rgb[2] - a.rgb[2])),
+        255,
+      ];
+    }
+  }
+  return null;
 }
+
+ramps_E = ({
+  // Sequential viridis-like for absolute temperature
+  TAVG: [
+    { at:  0, rgb: [ 68,   1,  84] },
+    { at: 10, rgb: [ 59,  82, 139] },
+    { at: 20, rgb: [ 32, 144, 140] },
+    { at: 25, rgb: [ 94, 201,  98] },
+    { at: 30, rgb: [253, 231,  37] },
+    { at: 40, rgb: [253, 100,  20] },
+  ],
+  TMAX: [
+    { at:  5, rgb: [ 68,   1,  84] },
+    { at: 15, rgb: [ 59,  82, 139] },
+    { at: 25, rgb: [ 32, 144, 140] },
+    { at: 35, rgb: [ 94, 201,  98] },
+    { at: 40, rgb: [253, 231,  37] },
+    { at: 45, rgb: [253, 100,  20] },
+  ],
+  TMIN: [
+    { at: -10, rgb: [ 68,   1,  84] },
+    { at:   0, rgb: [ 59,  82, 139] },
+    { at:  10, rgb: [ 32, 144, 140] },
+    { at:  20, rgb: [ 94, 201,  98] },
+    { at:  25, rgb: [253, 231,  37] },
+    { at:  35, rgb: [253, 100,  20] },
+  ],
+  // Sequential white→deep-blue for precipitation
+  PTOT: [
+    { at:   0, rgb: [247, 251, 255] },
+    { at:  50, rgb: [222, 235, 247] },
+    { at: 150, rgb: [158, 202, 225] },
+    { at: 300, rgb: [ 49, 130, 189] },
+    { at: 500, rgb: [  8,  81, 156] },
+    { at: 800, rgb: [  8,  48, 107] },
+  ],
+  // Diverging RdBu for SPEI (dry→wet, white at 0)
+  "SPEI-03": [
+    { at: -2.0, rgb: [165,   0,  38] },
+    { at: -1.5, rgb: [215,  48,  39] },
+    { at: -1.0, rgb: [244, 109,  67] },
+    { at:  0.0, rgb: [255, 255, 255] },
+    { at:  1.0, rgb: [116, 173, 209] },
+    { at:  1.5, rgb: [ 69, 117, 180] },
+    { at:  2.0, rgb: [ 49,  54, 149] },
+  ],
+  "SPEI-12": [
+    { at: -2.0, rgb: [165,   0,  38] },
+    { at: -1.5, rgb: [215,  48,  39] },
+    { at: -1.0, rgb: [244, 109,  67] },
+    { at:  0.0, rgb: [255, 255, 255] },
+    { at:  1.0, rgb: [116, 173, 209] },
+    { at:  1.5, rgb: [ 69, 117, 180] },
+    { at:  2.0, rgb: [ 49,  54, 149] },
+  ],
+})
 ```
 
 ```{ojs}
 recentChangesMap_E = {
   const iso3 = country.iso3;
   const f = admin0_feature_E;
+  if (!f) return html`<div style="padding: 1em; color: #999;">No admin0 polygon for ${iso3}.</div>`;
 
-  const container = html`<div style="width: 100%;">
-    <div id="recent-changes-map-status-E" style="font-size: 0.85em; color: #666; margin-bottom: 4px; min-height: 1.2em;">Initialising map…</div>
-    <div id="recent-changes-map-E" style="width: 100%; height: 460px; border: 1px solid #ddd; background: #f5f5f5;"></div>
-  </div>`;
+  // Status indicator + display canvas wrapper. Dynamic `<img>`-style
+  // we own — no Leaflet container sizing race.
+  const W = 600;
+  const status = html`<div style="font-size: 0.85em; color: #666; margin-bottom: 4px; min-height: 1.2em;">Reading COG…</div>`;
+  const wrap = html`<div style="position: relative; width: ${W}px; max-width: 100%;"></div>`;
+  const container = html`<div>${status}${wrap}</div>`;
 
-  const setStatus = (msg) => {
-    const el = document.getElementById("recent-changes-map-status-E");
-    if (el) el.textContent = msg;
+  const setStatus = (msg) => { status.textContent = msg; };
+
+  // Compute country bbox in EPSG:4326 from the GeoJSON feature.
+  const computeBbox = (feature) => {
+    let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+    const visit = (coords) => {
+      if (typeof coords[0] === "number") {
+        if (coords[0] < xmin) xmin = coords[0];
+        if (coords[0] > xmax) xmax = coords[0];
+        if (coords[1] < ymin) ymin = coords[1];
+        if (coords[1] > ymax) ymax = coords[1];
+      } else {
+        for (const c of coords) visit(c);
+      }
+    };
+    visit(feature.geometry.coordinates);
+    // Small 2% pad so the country isn't flush against the canvas edge
+    const px = (xmax - xmin) * 0.02;
+    const py = (ymax - ymin) * 0.02;
+    return { xmin: xmin - px, ymin: ymin - py, xmax: xmax + px, ymax: ymax + py };
   };
 
-  const setup = async () => {
-    // Wait for the container to be attached AND have real dimensions
-    while (true) {
-      const el = document.getElementById("recent-changes-map-E");
-      if (el && el.getBoundingClientRect().width > 0) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    const div = document.getElementById("recent-changes-map-E");
-    div.innerHTML = "";
+  const bbox = computeBbox(f);
 
-    setStatus("Setting up Leaflet…");
-    const map = L_E.map(div, { zoomControl: true, attributionControl: true });
-    L_E.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-      attribution: "© OpenStreetMap, © CARTO",
-      subdomains: "abcd",
-      maxZoom: 19,
-    }).addTo(map);
-
-    if (f) {
-      const layer = L_E.geoJSON(f, {
-        style: { color: "#222", weight: 1.5, fill: false, dashArray: "4,3" },
-      }).addTo(map);
-      map.fitBounds(layer.getBounds(), { padding: [20, 20] });
-      const b = layer.getBounds();
-      L_E.rectangle(b, { color: "#888", weight: 1, fill: false, dashArray: "1,4" }).addTo(map);
-    } else {
-      map.setView([0, 20], 3);
-    }
-
-    // Force Leaflet to re-measure the container after initial layout —
-    // fixes the "grey box" issue when the div was sized late.
-    setTimeout(() => map.invalidateSize(), 100);
-
+  // Render once into the wrap, async.
+  const run = async () => {
     try {
       const cogUrl = cogURL_for_E({ variable: variable_E, season: season_E });
-      // HEAD probe first so we can fail fast with a clear error if the
-      // COG doesn't exist at the constructed URL.
-      const head = await fetch(cogUrl, { method: "HEAD" });
-      if (!head.ok) {
-        setStatus(`COG not found: ${cogUrl.split("/").pop()} (HTTP ${head.status})`);
-        L_E.popup().setLatLng(map.getCenter()).setContent(
-          `<b>COG not found</b><br>${cogUrl.split("/").pop()}<br>(HTTP ${head.status})`
-        ).openOn(map);
-        return;
-      }
-      const totalBytes = parseInt(head.headers.get("content-length") || "0", 10);
-
-      setStatus(`Streaming COG via HTTP Range requests (full size ${(totalBytes/1024/1024).toFixed(1)} MB; only country-area tiles fetched)…`);
+      setStatus(`Reading COG header (${cogUrl.split("/").pop()})…`);
       const t0 = performance.now();
-      // Pass the URL string (not an ArrayBuffer) to parseGeoraster.
-      // georaster.js then uses geotiff.js HTTP Range requests under the
-      // hood — only the tiles intersecting the current map viewport
-      // get downloaded. The full ~15 MB Africa-wide COG is never
-      // pulled in full; at country zoom we typically fetch <2 MB.
-      const georaster = await parseGeoraster_E(cogUrl);
-      const parseMs = performance.now() - t0;
 
-      // Country bounds restrict both fetching (Leaflet only requests
-      // tiles within these bounds) AND rendering (pixels outside are
-      // transparent). f is the admin0 GeoJSON Feature for the iso3.
-      let countryBounds = null;
-      if (f) {
-        const tmp = L_E.geoJSON(f);
-        countryBounds = tmp.getBounds();
+      // 1. Open the COG via geotiff.js. Internally this uses HTTP Range
+      // requests to fetch ONLY the bytes needed for our bbox. The full
+      // ~3.5 MB Africa-wide file is never downloaded.
+      const tiff = await GeoTIFF_E.fromUrl(cogUrl);
+      const image = await tiff.getImage();
+
+      setStatus(`Fetching pixels for bbox [${bbox.xmin.toFixed(2)},${bbox.ymin.toFixed(2)},${bbox.xmax.toFixed(2)},${bbox.ymax.toFixed(2)}]…`);
+
+      // 2. Read raster pixels for the country bbox at NATIVE resolution.
+      // geotiff.js handles the geo-bbox → pixel-window conversion using
+      // the COG's georeferencing tags.
+      const rasters = await image.readRasters({ bbox: [bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax] });
+      const data = rasters[0];                                  // Float32Array
+      const w = rasters.width, h = rasters.height;              // source resolution at our bbox
+      const fetchMs = performance.now() - t0;
+
+      setStatus(`Rendering ${w}×${h} pixels → ${W} px canvas (smooth resample)…`);
+
+      // 3. Build offscreen canvas at SOURCE resolution and paint each
+      // pixel via the colour ramp. NaN / non-finite values stay
+      // transparent (we never write to those alpha bytes).
+      const offscreen = document.createElement("canvas");
+      offscreen.width = w;
+      offscreen.height = h;
+      const offCtx = offscreen.getContext("2d");
+      const img = offCtx.createImageData(w, h);
+      const stops = ramps_E[variable_E] ?? ramps_E.TAVG;
+      for (let i = 0; i < w * h; i++) {
+        const c = colorRamp_E(data[i], stops);
+        if (c) {
+          img.data[i * 4]     = c[0];
+          img.data[i * 4 + 1] = c[1];
+          img.data[i * 4 + 2] = c[2];
+          img.data[i * 4 + 3] = c[3];
+        }
       }
+      offCtx.putImageData(img, 0, 0);
 
-      const colourFn = rgbInterp_E(variableRamp_E[variable_E] ?? variableRamp_E.TAVG);
-      const layer = new GeoRasterLayer_E({
-        georaster,
-        opacity: 0.78,
-        resolution: 96,
-        pixelValuesToColorFn: ([v]) => {
-          const rgb = colourFn(v);
-          return rgb ? `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` : null;
-        },
-        ...(countryBounds ? { bounds: countryBounds } : {}),
-      });
-      layer.addTo(map);
+      // 4. Visible display canvas, scaled up from source.
+      // Browser bilinear resampling via imageSmoothing — this matters!
+      // Skipping the smoothing reproduces exactly the block-artefact
+      // pattern of nearest-neighbour gdal_translate pre-renders. Do
+      // NOT "simplify" this by drawing the source canvas at 1:1 then
+      // CSS-scaling the element — CSS upscaling is nearest-neighbour
+      // by default in most browsers. drawImage with smoothing is the
+      // right place.
+      const H = Math.round(W * h / w);
+      const display = document.createElement("canvas");
+      display.width  = W;
+      display.height = H;
+      display.style.display = "block";
+      display.style.border = "1px solid #ddd";
+      display.style.background = "#fafafa";
+      const dctx = display.getContext("2d");
+      dctx.imageSmoothingEnabled = true;
+      dctx.imageSmoothingQuality = "high";
+      dctx.drawImage(offscreen, 0, 0, W, H);
+
+      // 5. Admin0 outline SVG overlay. Same projection as the canvas:
+      //   px_x = (lon - bbox.xmin) / (bbox.xmax - bbox.xmin) * W
+      //   px_y = (bbox.ymax - lat) / (bbox.ymax - bbox.ymin) * H
+      // y-flip is critical — canvas y grows DOWNWARD but lat grows UP.
+      const tx = (lon) => (lon - bbox.xmin) / (bbox.xmax - bbox.xmin) * W;
+      const ty = (lat) => (bbox.ymax - lat) / (bbox.ymax - bbox.ymin) * H;
+      const ringToPath = (ring) => "M" + ring.map(([lo, la]) => `${tx(lo).toFixed(1)},${ty(la).toFixed(1)}`).join("L") + "Z";
+      const featureToPath = (feat) => {
+        const g = feat.geometry;
+        if (g.type === "Polygon") {
+          return g.coordinates.map(ringToPath).join(" ");
+        }
+        if (g.type === "MultiPolygon") {
+          return g.coordinates.flatMap((poly) => poly.map(ringToPath)).join(" ");
+        }
+        return "";
+      };
+      const pathD = featureToPath(f);
+      const svgOverlay = html`<svg width="${W}" height="${H}" style="position: absolute; top: 0; left: 0; pointer-events: none;">
+        <path d="${pathD}" stroke="#222" stroke-width="1.2" fill="none" />
+      </svg>`;
+
+      // Mount into wrap
+      wrap.innerHTML = "";
+      wrap.appendChild(display);
+      wrap.appendChild(svgOverlay);
+
       const totalMs = performance.now() - t0;
-      setStatus(`Loaded ${variable_E} ${season_E} (1991-2020 mean) — ${(totalMs/1000).toFixed(1)}s, country-cropped via HTTP Range`);
-      setTimeout(() => map.invalidateSize(), 200);
+      setStatus(`Loaded ${variable_E} ${season_E} (1991-2020 mean) for ${country.name} — fetched + parsed + rendered in ${(totalMs/1000).toFixed(1)}s · source ${w}×${h} px upsampled to ${W}×${H}`);
     } catch (e) {
-      setStatus(`Error loading COG: ${String(e)}`);
-      L_E.popup().setLatLng(map.getCenter()).setContent(`<b>Error loading COG</b><br>${String(e)}`).openOn(map);
+      console.error("recentChangesMap_E", e);
+      setStatus(`Error: ${String(e)}`);
     }
   };
-  setup();
+  run();
   return container;
 }
 ```
@@ -549,10 +622,11 @@ recentChangesMap_E = {
 ```
 
 ::: {.callout-note}
-**Sandbox caveats**
+**Sandbox notes**
 
-- **Polygon mask is approximated** — the COG's existing NaN/NoData masks ocean/non-Africa pixels, but admin0 polygon-cut clipping is deferred to the production view (would need `gdalwarp --cutline` server-side per country, or client-side canvas masking).
-- **COG URL is hard-coded** to the CR-076 single-physical-directory layout. Once CR-076 lands the proper Hive partition fix, the path template in `cogURL_for_E` needs updating.
-- **Map re-inits on every selector change** instead of swapping the COG layer in place. Production view should optimise.
-- **CR-075 short-term filter applied** — disputed-territory polygons for EGY/KEN/SDN are dropped via the `mainGaul` selector. Pipeline-side fix tracked in CR-075.
+- **No-overviews caveat (CR-076 follow-up).** The COGs were baked with `OVERVIEWS=NONE` (per `R/observational/5_make_obs_map_climatologies.R` `cog_gdal_opts`). Without overviews, geotiff.js has to read full-resolution data even for low-zoom views — fine at country scale where the country bbox already gives a modest source size, but it's worth rebaking with proper overviews if this layer is ever deployed at continental zoom.
+- **Polygon pixel-mask not applied** — the COG's existing NaN/NoData masks ocean/non-Africa pixels, but admin0 polygon-cut clipping is deferred to the production view (would need `gdalwarp --cutline` server-side per country, or client-side canvas-clip masking via the SVG path).
+- **COG URL is hard-coded** to the CR-076 single-physical-directory layout. Once CR-076 lands, the path template in `cogURL_for_E` needs updating.
+- **CR-075 short-term filter** applied — disputed-territory polygons for EGY/KEN/SDN are dropped via the `mainGaul` selector (timeseries side; the map side renders only the main admin0 feature).
+- **Forward-compat note**: if we later want pan / zoom / drag, OpenLayers `WebGLTileLayer` is a drop-in upgrade that uses the same geotiff.js underneath — so this COG-read + bbox-extraction logic carries forward unchanged.
 :::
