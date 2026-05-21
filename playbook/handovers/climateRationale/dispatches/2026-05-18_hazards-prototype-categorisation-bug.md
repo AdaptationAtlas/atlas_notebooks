@@ -465,3 +465,104 @@ QUICK REFERENCE — FILE / LINE LANDMARKS
 | `R/3_freq_x_exposure.R` | Frequency × exposure intersection (consumer of step 5.2 output) |
 | `R/haz_functions.R:1750-1812` | Hazard-name parsing into parquet columns (`hazard`, `hazard_vars`, etc.) |
 | `R/push_to_s3.R` | S3 upload script — coordinate before invoking |
+
+═══════════════════════════════════════════════════════════════════
+STATUS UPDATE — 2026-05-21 — bug localized, fix bookmarked
+═══════════════════════════════════════════════════════════════════
+
+Three probe stages run on CGlabs (commits `bc0ec99`, `b2a9bfc`,
+`ee6031b`, `429092e`, `182fbfc` on `hazards_prototype/develop`; logs
+under `logs/cr068_stage*_*.log`). Findings:
+
+### Stage 1 — class-layer mean by (scenario, timeframe, hazard) — AGO, 16 workers, 112,056 files, ~27 min
+
+- Candidate 1 confirmed at the class-layer for NDWS.
+- `historic 1995-2014 NDWS-mean-G15`: mean = **1.000** (every pixel-month flagged dry).
+- `historic 1995-2014 NDWS-mean-G20`: mean = **1.000** (same — even at the stricter threshold).
+- `ssp126 2021-2040 NDWS-mean-G15`: mean = 0.876 (saturated but not full).
+- Pattern: historic > all future scenarios at the same threshold, for two threshold tiers — physically anomalous (futures should be drier, not less dry).
+- 60 NaN rasters out of 112,056 (< 0.1 %) — negligible; all-NA AGO intersections.
+
+### Stage 2 v3 — source TIF inspection — AGO
+
+- `historical_ACCESS-CM2_1995-2014_NDWS-mean_mean.tif`: per-pixel
+  values **collapsed to 28.36–30.38 days/month** across all of AGO.
+  Every pixel sits in a 2-day band at the top of the [0, 31] range.
+- `ssp245_ACCESS-CM2_2021-2040_NDWS-mean_mean.tif`: per-pixel values
+  span 15.85–30.25 days/month with proper wet/dry-season spatial
+  variation visible.
+- So the bug exists in the source (period-mean) NDWS raster, not just
+  in the classifier output. Classifier is doing the right thing
+  with corrupted input.
+- Section C confirmed no same-directory file-name collisions; the L654
+  rename concern is benign (Stage 1's "collisions" were cross-subdir
+  basename matches).
+
+### Stage 3 — raw input comparison — AGO
+
+| Variable | spread historic | spread ssp245 | ratio | verdict |
+|---|---|---|---|---|
+| PTOT | 1517 mm/yr | 1493 mm/yr | **1.02** | identical, fine |
+| TAVG | 10.10 °C | 9.11 °C | **1.11** | identical, fine |
+| NDWS | 2.00 days | 14.40 days | **0.14** | **collapsed** |
+
+Raw NEX-GDDP-CMIP6 historical PTOT + TAVG ingest fine. The
+ingestion in `R/1_make_timeseries.R` of the underlying NEX-GDDP TIFs
+is NOT the bug — only the derived NDWS variable shows the collapse.
+
+### Conclusion
+
+The CR-068 historic-vs-future hazard-category asymmetry is caused by
+**a bug in the NDWS derivation step**, which lives in a **separate
+pipeline** (not in `hazards_prototype/R/1_make_timeseries.R` directly —
+the NDWS rasters arrive in `hazard_timeseries_mean/` already
+computed). The historic NDWS values are degenerate (uniform 28-30
+days/month at every pixel), while ssp245 NDWS values are physically
+spread (16-30 days/month with seasonal variation). Same PTOT + TAVG
+inputs flow into both, so there's a scenario-conditional path in
+the NDWS computation that's wrong for historic.
+
+### Bookmarked actions for the NDWS-pipeline owner
+
+1. Identify where NDWS is computed (which repo / pipeline). Likely
+   somewhere it consumes daily PR + Tmax + Tmin + (potentially radiation)
+   and applies a soil-moisture water-balance model to count days
+   below a threshold.
+2. Inspect the historic-scenario branch of that computation — likely
+   either (a) a fixed climatological reference (and historic IS the
+   reference, producing self-referential output), or (b) a different
+   product path / source data for historical.
+3. Re-derive historic NDWS rasters and overwrite the broken files at
+   `hazard_timeseries_mean/<period>/historical_*_NDWS-mean_mean.tif`.
+4. Re-run `R/2_calculate_haz_freq.R` Step 1 + Step 5.2 to regenerate
+   the classified + interaction rasters. Re-run `R/3_freq_x_exposure.R`
+   for the parquet. Re-publish to S3.
+
+### Probes available for re-validation
+
+After the NDWS fix, the existing probes can be replayed to confirm:
+
+```bash
+# Stage 1 — should show NDWS-mean-G15 historic < 1.000 and the
+# saturated-rows table should no longer include historic NDWS
+Rscript R/checks/68_categorisation_stage1.R --countries AGO --workers 16
+
+# Stage 2 — historic NDWS source spread should match ssp245
+Rscript R/checks/68_categorisation_stage2.R --countries AGO
+
+# Stage 3 — spread_historic / spread_ssp245 ratio for NDWS should
+# climb from 0.14 to roughly 1.0
+Rscript R/checks/68_categorisation_stage3.R --countries AGO
+```
+
+The mass-conservation (issue #9) validation in
+`R/checks/9_mass_conservation_validate.R` is independent and can run
+in parallel with the categorisation rebake.
+
+### Why this is bookmarked, not blocking
+
+CR-068 affects the climateRationale notebook's hazard-category split
+panel (historic shows zero pure-heat / pure-wet / heat+wet exposure
+for AGO). The notebook already surfaces this with a user-visible
+"Under construction" warning, so no end-user impact while the
+NDWS-pipeline owner schedules the fix.
