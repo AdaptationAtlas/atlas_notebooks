@@ -127,13 +127,52 @@ viewof season_E = Inputs.select(
   { label: "Season", value: "annual" }
 );
 
-viewof viewType_E = Inputs.select(
-  ["periods", "monthly"],
-  { label: "View Type", value: "periods", format: (d) => d === "periods" ? "Annual / season" : "Monthly" }
-);
+// View type is meaningful only for non-SPEI variables. SPEI queries
+// always pin to a single month per year (the season's last month;
+// see seasonLastMonth) so "monthly" vs "periods" doesn't change the
+// returned rows. Greying out the selector under SPEI makes that
+// constraint visible to the user.
+viewof viewType_E = {
+  const isSPEI = variable_E.startsWith("SPEI");
+  return Inputs.select(
+    ["periods", "monthly"],
+    {
+      label: isSPEI ? "View type (N/A — SPEI is annual-per-season)" : "View type",
+      value: "periods",
+      format: (d) => d === "periods" ? "Annual / season" : "Monthly",
+      disabled: isSPEI,
+    }
+  );
+}
 
 viewof anomaly_E = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: false });
+```
 
+```{ojs}
+// Plot-type selector. Available options depend on the chosen variable:
+//   - SPEI:        bars only (a line is meaningless for a discrete index)
+//   - PTOT:        line / bars / wet-dry stripes / line+stripes
+//   - Temperature: line / bars / warming stripes / line+stripes
+// When the variable changes the dropdown rebuilds; if the previous
+// type isn't in the new option set, the selector resets to default.
+viewof plotType_E = {
+  const isSPEI = variable_E.startsWith("SPEI");
+  const options = isSPEI ? ["bars"] : ["line", "bars", "stripes", "line+stripes"];
+  const labels = {
+    "line":         "Line + bands",
+    "bars":         "Bars",
+    "stripes":      variable_E === "PTOT" ? "Wet-dry stripes" : "Warming stripes",
+    "line+stripes": variable_E === "PTOT" ? "Line + wet-dry stripes" : "Line + warming stripes",
+  };
+  return Inputs.select(options, {
+    label: "Plot type",
+    value: isSPEI ? "bars" : "line",
+    format: (k) => labels[k],
+  });
+}
+```
+
+```{ojs}
 // Map-only toggle: dynamic ramp rescales each render to the visible
 // data range (max contrast within a view); fixed ramp keeps the
 // 0–40°C / 0–2500 mm / SPEI-sd absolute limits (cross-region
@@ -262,6 +301,32 @@ recentChanges_E = {
     ? variable_E
     : (useAnomaly_E ? `${variable_E} anomaly ${unit}` : `${variable_E} ${unit}`);
 
+  const xField = viewType_E === "monthly" || (isSPEI_E && viewType_E === "monthly") ? "year_frac" : "year";
+  const stripeWidth = viewType_E === "monthly" ? 1/12 : 1;
+
+  // Diverging colour for stripes — anomaly mapped to ±2σ of baseline.
+  // RdBu (reversed) for temperature, BrBG for precipitation. Values
+  // come from d3-scale-chromatic (bundled with d3 in OJS).
+  const stripeColour = (d) => {
+    const anom = d.value_mean - baseline_E.mean;
+    const scale = baseline_E.sd > 0 ? baseline_E.sd * 2 : 1;
+    const t = Math.max(-1, Math.min(1, anom / scale));
+    if (variable_E === "PTOT") {
+      // BrBG: brown (dry, low) → white (baseline) → green (wet, high)
+      return d3.interpolateBrBG(0.5 + t * 0.5);
+    }
+    // RdBu reversed: blue (cool, low) → white → red (warm, high)
+    return d3.interpolateRdBu(0.5 - t * 0.5);
+  };
+
+  // For bars on temperature in ABSOLUTE mode, anchor bars at the
+  // baseline mean (delta-style) so 1-2°C variation isn't crushed
+  // against a 0 baseline. PTOT bars start from 0 (precip totals
+  // are naturally cumulative). Anomaly mode → all bars from 0.
+  const barBaseline = useAnomaly_E ? 0
+    : variable_E === "PTOT" ? 0
+    : baseline_E.mean;
+
   const meanForBands = useAnomaly_E ? 0 : baseline_E.mean;
   const bands = (!isSPEI_E && baseline_E.sd > 0) ? [
     { y1: meanForBands - 2 * baseline_E.sd, y2: meanForBands + 2 * baseline_E.sd, fill: "rgba(70,130,180,0.10)" },
@@ -278,7 +343,84 @@ recentChanges_E = {
     { y:  2,   stroke: "#76b7b2" },
   ] : [];
 
-  const xField = viewType_E === "monthly" || (isSPEI_E && viewType_E === "monthly") ? "year_frac" : "year";
+  // Build mark stack based on plot type. SPEI is fixed to bars; all
+  // other variables route through plotType_E. Stripes are full-chart-
+  // height background rects; line layer (when combined) sits on top.
+  const stripesMark = (yMin, yMax) => Plot.rect(observed_E, {
+    x1: (d) => d[xField] - stripeWidth/2,
+    x2: (d) => d[xField] + stripeWidth/2,
+    y1: yMin, y2: yMax,
+    fill: stripeColour,
+    stroke: null,
+    channels: { year: "year", value: "value_mean" },
+    tip: true,
+  });
+  const barMark = Plot.rect(observed_E, {
+    x1: (d) => d[xField] - stripeWidth * 0.4,
+    x2: (d) => d[xField] + stripeWidth * 0.4,
+    y1: barBaseline,
+    y2: "value_plot",
+    fill: (d) => extremeColour_E[d.cls],
+    stroke: (d) => extremeColour_E[d.cls],
+    channels: { year: "year", value: "value_mean", anomaly: "value_plot", classification: "cls" },
+    tip: true,
+  });
+  const lineMarks = [
+    Plot.line(observed_E, { x: xField, y: "value_plot", stroke: "#333", strokeWidth: 1 }),
+    Plot.dot(observed_E, {
+      x: xField, y: "value_plot", r: 2.5,
+      fill: (d) => extremeColour_E[d.cls],
+      stroke: (d) => extremeColour_E[d.cls],
+      channels: { year: "year", value: "value_mean", anomaly: "value_plot", z: "z", classification: "cls" },
+      tip: true,
+    }),
+  ];
+
+  let marks = [];
+  if (isSPEI_E) {
+    marks = [
+      ...speiLines.map((l) => Plot.ruleY([l.y], { stroke: l.stroke, strokeDasharray: "2,3" })),
+      Plot.barY(observed_E, {
+        x: xField, y: "value_plot",
+        fill: (d) => extremeColour_E[d.cls],
+        stroke: (d) => extremeColour_E[d.cls],
+        channels: { year: "year", value: "value_mean", classification: "cls" },
+        tip: true,
+      }),
+    ];
+  } else if (plotType_E === "bars") {
+    marks = [
+      Plot.ruleY([barBaseline], { stroke: "#4682b4", strokeDasharray: "3,2" }),
+      barMark,
+    ];
+  } else if (plotType_E === "stripes") {
+    // Pure stripes — keep °C axis (per dispatch), full-height
+    // coloured rects span the data's y-range.
+    const yMin = d3.min(observed_E, (d) => d.value_plot);
+    const yMax = d3.max(observed_E, (d) => d.value_plot);
+    marks = [stripesMark(yMin, yMax)];
+  } else if (plotType_E === "line+stripes") {
+    const yMin = d3.min(observed_E, (d) => d.value_plot);
+    const yMax = d3.max(observed_E, (d) => d.value_plot);
+    marks = [
+      stripesMark(yMin, yMax),
+      Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" }),
+      ...lineMarks,
+    ];
+  } else {
+    // Default "line" — bands behind, baseline reference line, line + dots.
+    marks = [
+      ...bands.map((b) =>
+        Plot.rect([b], {
+          x1: d3.min(observed_E, (d) => d[xField]),
+          x2: d3.max(observed_E, (d) => d[xField]),
+          y1: "y1", y2: "y2", fill: "fill",
+        })
+      ),
+      Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" }),
+      ...lineMarks,
+    ];
+  }
 
   const chart = Plot.plot({
     width: 1200,
@@ -289,42 +431,7 @@ recentChanges_E = {
     style: { color: "#333", background: "#fff" },
     x: { label: "Year", tickFormat: (d) => `${Math.floor(d)}` },
     y: { label: yLabel, grid: true, nice: true },
-    marks: [
-      ...bands.map((b) =>
-        Plot.rect([b], {
-          x1: d3.min(observed_E, (d) => d[xField]),
-          x2: d3.max(observed_E, (d) => d[xField]),
-          y1: "y1", y2: "y2", fill: "fill",
-        })
-      ),
-      ...(!isSPEI_E ? [Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" })] : []),
-      ...speiLines.map((l) =>
-        Plot.ruleY([l.y], { stroke: l.stroke, strokeDasharray: "2,3" })
-      ),
-      ...(isSPEI_E
-        ? [
-            Plot.barY(observed_E, {
-              x: xField,
-              y: "value_plot",
-              fill: (d) => extremeColour_E[d.cls],
-              stroke: (d) => extremeColour_E[d.cls],
-              channels: { year: "year", value: "value_mean", classification: "cls" },
-              tip: true,
-            }),
-          ]
-        : [
-            Plot.line(observed_E, { x: xField, y: "value_plot", stroke: "#333", strokeWidth: 1 }),
-            Plot.dot(observed_E, {
-              x: xField,
-              y: "value_plot",
-              r: 2.5,
-              fill: (d) => extremeColour_E[d.cls],
-              stroke: (d) => extremeColour_E[d.cls],
-              channels: { year: "year", value: "value_mean", anomaly: "value_plot", z: "z", classification: "cls" },
-              tip: true,
-            }),
-          ]),
-    ],
+    marks,
   });
 
   // Hand off to the shared chartDownloadMenu helper — split-button
@@ -358,7 +465,7 @@ recentChanges_caption_E = {
     ? `SPEI is the ${variable_E.replace("SPEI-","").replace(/^0+/, "")}-month accumulation ending in month ${speiMonth}. Reference lines: ±1 moderate, ±1.5 severe, ±2 extreme (WMO).`
     : "";
   return md`
-*Region: **${region}** · Variable: **${variable_E}** · Season: **${season_E}** · View: **${viewType_E}**${useAnomaly_E ? " · **anomaly mode**" : ""}*
+*Region: **${region}** · Variable: **${variable_E}** · Season: **${season_E}** · View: **${viewType_E}** · Plot: **${plotType_E}**${useAnomaly_E ? " · **anomaly mode**" : ""}*
 
 ${baselineCopy} ${speiCopy}
   `;
