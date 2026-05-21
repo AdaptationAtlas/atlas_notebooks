@@ -2097,14 +2097,24 @@ recentChanges_obs = {
       im.src = url;
     });
 
-    // Layer 1 — chart SVG. Plot.plot returns a self-contained SVG;
-    // serialize it standalone and rasterise via Image.
-    const chartSvgString = new XMLSerializer().serializeToString(chart);
-    const chartBlob = new Blob([chartSvgString], { type: "image/svg+xml;charset=utf-8" });
-    const chartUrl = URL.createObjectURL(chartBlob);
+    // Layer 1 — chart SVG. Plot.plot returns an SVG, but without
+    // xmlns / xmlns:xlink / explicit width / height attributes the
+    // Image rasteriser can't decode the serialised string. Mirror the
+    // chartDownloadMenu helper's _serializeSvg pattern (clone +
+    // backfill those attributes on the clone) so the rasteriser
+    // succeeds. The earlier omission silently failed every PNG export
+    // and made Pete's button look broken on 2026-05-22.
     const chartRect = chart.getBoundingClientRect();
     const chartW = Math.max(1, Math.ceil(chartRect.width));
     const chartH = Math.max(1, Math.ceil(chartRect.height));
+    const chartClone = chart.cloneNode(true);
+    if (!chartClone.getAttribute("xmlns"))       chartClone.setAttribute("xmlns",       "http://www.w3.org/2000/svg");
+    if (!chartClone.getAttribute("xmlns:xlink")) chartClone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+    if (!chartClone.getAttribute("width"))       chartClone.setAttribute("width",  chartW);
+    if (!chartClone.getAttribute("height"))      chartClone.setAttribute("height", chartH);
+    const chartSvgString = new XMLSerializer().serializeToString(chartClone);
+    const chartBlob = new Blob([chartSvgString], { type: "image/svg+xml;charset=utf-8" });
+    const chartUrl = URL.createObjectURL(chartBlob);
 
     // Layer 2 — legend HTML (skip when no legend items rendered).
     // Wrap in foreignObject envelope so Image can rasterise the live
