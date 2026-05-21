@@ -10,9 +10,9 @@
 
 ## How to use this dispatch
 
-Open Claude Code in VS Code with the `hazards_prototype` repo as the workspace. Paste the **entire "Dispatch" section below** (everything between the two `---` rules) into the Claude Code prompt. Claude Code will read the existing pipeline scripts, then build out the new download script on a feature branch.
+Open Claude Code in VS Code with the `hazards_prototype` repo as the workspace. Paste the **entire "Dispatch" section below** (everything between the two `---` rules) into the Claude Code prompt. Claude Code will read the existing pipeline scripts, then build out the new download script directly on `develop`.
 
-After the smoke test passes locally, push the branch; pull on the Afrilabs server; run the full bake there. (Local laptops will not have the disk or compute to do the full bake comfortably.)
+After the smoke test passes locally, push to `origin/develop`; pull on the Afrilabs server; run the full bake there. (Local laptops will not have the disk or compute to do the full bake comfortably.)
 
 ---
 
@@ -28,16 +28,12 @@ This is the foundation for the observational climate track in the Climate Ration
 
 ### Branch + file conventions
 
-- Create a new feature branch off `develop`:
-  ```bash
-  git checkout develop && git pull
-  git checkout -b feat/chirps-chirts-monthly-download
-  ```
+- **Work directly on `develop`.** This repo's convention is direct commits on `develop`; no feature branches, no PRs. Sync before starting: `git checkout develop && git pull origin develop`.
 - New script at `R/0.6_download_chirps_chirts.R`. This slot is free — `0.4.5_create_faostat_long.R` is the previous numbered script in `R/`; `R/misc/0.7_create_aez_temp_zones.R` already exists in `misc/` so don't collide.
 - Helpers may go in `R/haz_functions.R` if they're worth reusing in later dispatches; otherwise keep them local to the script.
-- Respect `.lintr` (line_length 120, `object_name_linter` and `commented_code_linter` disabled). Do NOT delete commented blocks — flag them in the PR description instead.
-- Conventional Commit: `feat(observational): add CHIRPS v3 + CHIRTS-ERA5 monthly download and COG bake`. Open the PR against `develop`, mark it **draft** until Pete reviews the smoke output.
-- After implementation, run the existing auto-format pass (`styler` / `lintr`) before opening the PR — recent commits like `Auto-format 3_freq_x_exposure.R and fix lints` show this is the house pattern.
+- Respect `.lintr` (line_length 120, `object_name_linter` and `commented_code_linter` disabled). Do NOT delete commented blocks — mention them in the final message to Pete instead.
+- Conventional Commit: `feat(observational): add CHIRPS v3 + CHIRTS-ERA5 monthly download and COG bake`. Push commits as they land — Pete reviews via the GitHub UI / git log, not via a PR.
+- After implementation, run the existing auto-format pass (`styler` / `lintr`) on changed files before pushing — recent commits like `Auto-format 3_freq_x_exposure.R and fix lints` show this is the house pattern.
 
 ### Context — read these files before writing code
 
@@ -237,23 +233,19 @@ This rule is from the Climate Rationale workflow playbook (`atlas_notebooks/play
 ### Style / repo-convention reminders
 
 - **Match `.lintr` config** — line length 120; `commented_code_linter` is off, so commented blocks are tolerated; `trailing_whitespace_linter` is on so don't leave trailing whitespace.
-- **Do not delete code or files without explicit permission.** Flag dead / commented blocks in the PR description.
+- **Do not delete code or files without explicit permission.** Mention dead / commented blocks in the final message to Pete instead.
 - **Match the existing script style** — `pacman::p_load(char = packages)` for package loading; `data.table` for tabular ops; `terra` for rasters; `progressr` for progress; `furrr` / `future.apply` for parallelism.
 - **Use `glue` for URL building.** Existing pipeline pattern.
 - **Header comment** — every script in `R/` starts with a banner that explains purpose, inputs, outputs, and dependencies. Match that structure. See `R/0_server_setup.R` lines 1–9 and `R/1_make_timeseries.R` lines 1–35 for examples.
 
 ### When you're done
 
-- Commit + push the feature branch.
-- Open the draft PR against `develop` with description:
+- Commit + push to `origin/develop` (commits land as they're made, per the repo convention).
+- In the final message back to Pete, paste:
+  - a `git log --oneline -10` snapshot showing the new commits,
   - one-paragraph summary,
-  - smoke-test output paste (the 12 COG paths, the validation checks pass/fail summary),
-  - any URL-pattern surprises or CHC-server quirks Pete should know about (these inform the next dispatch — admin1 aggregation),
-  - the commit hash of the branch tip.
-- In your final chat message to Pete, paste:
-  - the PR URL,
-  - the commit hash,
-  - the smoke-output one-line summary.
+  - smoke-test output (the 12 COG paths, the validation checks pass/fail summary),
+  - any URL-pattern surprises or CHC-server quirks Pete should know about (these inform the next dispatch — admin1 aggregation).
 
 ---
 

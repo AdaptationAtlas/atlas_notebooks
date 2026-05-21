@@ -372,3 +372,57 @@ Major FAOSTAT pipeline iteration across two days. All commits on `hazards_protot
 ### Suggested next step
 
 Pick up the v5 0.4.5 refactor in a fresh session using the picking-up prompt in [[dispatches/2026-05-20_faostat-v5-mapping-cleanup.md]]. After that lands + Pete approves, FAOSTAT republish + script-6 observational publish can both proceed.
+
+---
+
+## Session state — 2026-05-20 → 2026-05-21, session 9 (observational sandbox build-out — map, downloads, plot types, trend overlay)
+
+Two-day session focused on the sandbox observational view (`notebooks/sandbox/obs_qaqc.qmd`). Builds the prototype that will eventually become the production drop-in for `barplot_recentChanges` / `warmingStripes_recentChanges` in the Recent Changes section of the Climate Rationale notebook. Four commits landed; two new helpers shipped.
+
+### What landed
+
+**Commit `c91ddc7` — ESM loader switch.** Sandbox COG renderer for the map switched from the UMD-via-dynamic-`<script>`-injection pattern (intrinsically flaky in OJS; `window.GeoTIFF` / `window.topojson` periodically came back `undefined` mid-session) to `await import("https://esm.sh/<pkg>")` for both `geotiff.js@2.1.3` and `topojson-client@3.1.0`. Both packages ship native ESM in `dist-module/`, so esm.sh serves passthrough — no CJS-rewriter risk. Dispatch [`dispatches/2026-05-20_observational-cog-loader-strategy.md`](dispatches/2026-05-20_observational-cog-loader-strategy.md). Production view will eventually self-host the bundles under `helpers/vendor/` per Option C in that dispatch — gated on Pete's sign-off after sandbox stabilises.
+
+**Commit `cd8cd76` — sandbox feature bundle.** Map cell rewritten around `geotiff.js` + canvas (no Leaflet, no georaster wrapper stack). Highlights:
+- `countryRaster_E` (cached fetch) + `recentChangesMap_E` (cached re-crop) — admin1 selection re-slices the in-memory typed array; no second HTTP fetch when switching admin1s inside the same country.
+- Multi-select admin1 (`Inputs.select multiple`). 0 selected = country view, masked to admin0 union; 1+ selected = zoom + mask to union of selected admin1s. Timeseries falls back to country aggregate when 2+ admin1s selected (no implicit averaging, which would mislead for PTOT totals across different-sized regions).
+- Canvas `clip()` with `Path2D` (evenodd) masks pixels outside the AoI — only the AoI's data is painted.
+- Dynamic colour ramp by default (linear remap of the global ramp stops to the visible data range, max contrast within each view); "Lock map ramp to global limits" toggle to swap to the fixed cross-region scale.
+- Boundary layer rework: drop the admin0 outline (was misaligned by 1–3 px vs admin1 because the two topojsons are simplified independently); draw all of the country's admin1 boundaries as thin gray for context; accent selected admin1s with white-haloed red (`#d62728`). Mask source switched to the admin1 union too, so mask edge and boundary line trace the same simplification.
+- Lat/lon ticks + admin1 name labels (two new toggles). Labels via `d3.geoCentroid` (bbox-center fallback). Both layers part of the SVG overlay → captured by the PNG download.
+- SPEI map uses `stat=sd` by default (the 1991-2020 *mean* SPEI is ~0 by construction — a baseline-mean view of a standardised index is uninformative).
+- SPEI y-axis label simplified from `"(z-score)"` (implies a transform we don't perform) to just `SPEI-03` / `SPEI-12`.
+
+**Commit `4d1d8c8` — `helpers/chartDownloadMenu.ojs` + sandbox retrofit.** New helper exporting `chartDownloadMenu(chart, {filename, data, csvColumns?})` that wraps a chart with a split-button: primary click = PNG (2× DPR), caret dropdown = SVG + CSV. Implements the 2026-05-21 dispatch. Helper sits **below** the chart per Pete's call (dispatch said top-right). Sandbox timeseries chart now uses it; map keeps its inline composite-PNG button (SVG-source-only helper doesn't cover canvas + SVG compositing). 17 production call sites pending migration → [[CR-078]].
+
+**Commit `9dbef92` — `helpers/trend.ojs` + sandbox trend overlay.** New helper: `mannKendall(values, opts)` + `trendOverlayMarks(data, opts)`. Theil-Sen median pairwise slope; Hollander-Wolfe 95% CI; MK S-statistic with tie correction and normal-approximation p-value; Yue et al. (2002) trend-free pre-whitening when `|lag-1 AC of detrended residuals| > 0.1`. **TFPW algorithm corrected pre-commit** per Pete's Python validation reference in [`context/05_trend-validation-reference.py`](context/05_trend-validation-reference.py) — earlier draft whitened the OBSERVED series + added `slope·Δx` per step (the buggy formulation flagged in the reference); correct Yue whitens the *detrended residuals* then re-adds the deterministic Theil-Sen line. Sandbox additions: trend toggle (default ON); trend badge above chart (or "no significant change" + "internal variability dominates" caveat); IPCC AR6 calibrated-language qualifier below (*high confidence* / *insufficient evidence*); section-head methods callout; hazard-gradient background bands (inside ±1σ unshaded, 1σ–2σ amber matching "unusual" dot/bar colour, >2σ red matching "extreme" — now visible on Bars view too per Pete's ask); adaptive chart legend below the chart (circle swatches for dot-based plots, square for bar-based, only surfaces elements actually visible in the current view); classification labels unified to σ-vocabulary for non-SPEI (matches the band shading, one vocabulary). Methods memo at [`context/04_observed-trend-best-practice.md`](context/04_observed-trend-best-practice.md). Production migration → [[CR-079]].
+
+Other sandbox additions across the session (folded into the bundle commits above): plot-type selector gated by variable (TAVG/TMAX/TMIN/PTOT: Line+bands / Bars / Warming(or Wet-dry) stripes / Line+stripes; SPEI: Bars only); the view-type selector now greys out under SPEI ("View type N/A — SPEI is annual-per-season") because SPEI queries always pin to the period's last month.
+
+### Pattern decisions captured this session
+
+- **Sandbox-first sequencing.** Every helper this session (`chartDownloadMenu`, `trend`) landed in the sandbox first, retrofitted in the same commit, with the production migration explicitly deferred. Lets Pete eyeball layout / wording / behaviour before they multiply across N production cells. Sequence: build helper → wire sandbox → Pete tests → commit → later production sweep.
+- **Helpers/ ownership.** Brayden owns existing `helpers/*.ojs` files. New helper files are OK to add (chartDownloadMenu + trend both new); modifying existing files (uiComponents.ojs, etc.) needs explicit override or a dispatch to Brayden.
+- **ESM > UMD for OJS deps.** UMD-via-dynamic-`<script>` injection inside OJS reactive cells is fundamentally fragile — the global-attach contract isn't honoured reliably across cell re-evaluations. ESM via esm.sh (passthrough — no `x-esm-build` header) is the right default for any OJS-side npm dep that ships ESM. Self-hosted vendoring under `helpers/vendor/` is the right answer for production-shipped notebooks (Option C in the COG loader strategy dispatch).
+- **OJS module export convention** — `.ojs` files use plain top-level `function name(…) {}` declarations (no `export` keyword — OJS auto-exports). Adding `export` causes import to silently miss the symbol; learnt the hard way mid-session on trend.ojs.
+- **OJS preprocessor sensitivities** — regex literals + trailing object literal in the same cell, optional-chaining function calls (`?.()`), nested `html\`<svg-child>\`` templates (create HTMLUnknownElements invisible inside SVG): all three trip the preprocessor in different ways. Workarounds in the sandbox: `.split().join()` instead of `.replace(/.../g, "…")`, `typeof fn === "function"` instead of `?.()`, `DOMParser.parseFromString(svgMarkup, "image/svg+xml")` for any non-trivial SVG with conditional children.
+- **Map mask aligns with boundary layer**, not admin0. Using admin0 for the mask and admin1 for the boundary lines produced a 1–3 px gap because the two topojsons are simplified independently. Switched mask source to the admin1 union (selected admin1s if any, else all of the country's admin1s) — mask edge + drawn boundary trace the same geometry.
+- **TFPW whitens the detrended residuals**, not the observed series — caught by Pete's validation reference before commit. The "obvious" implementation (whiten y, add slope·Δx) is wrong as autocorrelation grows. Worth re-checking against Python whenever any statistical algorithm lands in OJS.
+- **Number formatting in CSV exports** deliberately punted to a per-call-site decision via a future `csvFormat` option → [[CR-077]]. Defaults to raw JS `Number.toString()` for now (full IEEE-754 precision; honest but ugly for °C / mm columns).
+
+### In flight / uncommitted
+
+- `dev/climateRationale` has commits A → D landed locally; A, B, C pushed earlier in the session; D (trend overlay + helper) is local-only.
+- This session-9 wrap-up about to land (DECISIONS.md + ISSUES.md additions for CR-078..CR-081 + a couple of leftover prior-session items — see commit message).
+- One new dispatch dropped late in the session and **not yet read or planned**: [`dispatches/2026-05-21_observational-uncertainty-band.md`](dispatches/2026-05-21_observational-uncertainty-band.md). Next session.
+
+### Open questions for next session
+
+- **Read the observational-uncertainty-band dispatch + draft a plan.** Title suggests it's about uncertainty quantification on the observational timeseries beyond what TFPW already captures — could be about ensemble spread, CHIRPS v3 vs v2 differences, or the post-2020 lag in CHIRTS. Read first; the plan-for-approval pattern from earlier in the session applies.
+- **Production migrations** ([[CR-078]] + [[CR-079]]) — bundle into a single sweep when ready. Sequence Recent Changes section first (validates both helpers in the same cells), then the rest of the notebook for chartDownloadMenu.
+- **CR-080 + CR-081 (Phase 2 features)** — lower priority than production migration.
+- **`helpers/vendor/` decision** (production COG renderer hardening) — still gated on the sandbox-→-production swap. Worth pulling forward once the sandbox stabilises further so production isn't dependent on esm.sh availability at runtime.
+
+### Suggested next step
+
+Read the new observational-uncertainty-band dispatch in [`dispatches/2026-05-21_observational-uncertainty-band.md`](dispatches/2026-05-21_observational-uncertainty-band.md), summarise + draft a plan-for-approval matching the pattern established in commits B / C / D. Don't open the production migration until the sandbox feature set stabilises (next dispatch may add more sandbox surface area).

@@ -1558,6 +1558,101 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+### CR-078 — Production migration: `chartDownloadMenu` across 17 figure cells [NEW 2026-05-21]
+
+- **id:** CR-078
+- **title:** Migrate the 17 existing `downloadButton(data, name)` call sites in `notebooks/climateRationale/notebook.qmd` to the new `chartDownloadMenu` helper (PNG + SVG + CSV split-button).
+- **type:** notebook
+- **severity:** low — current CSV-only downloads still work; this is a UX upgrade, not a bug fix.
+- **where:** [notebooks/climateRationale/notebook.qmd](notebooks/climateRationale/notebook.qmd). 17 cells located 2026-05-21; see `grep -n downloadButton` output for the list. Helper landed in `4d1d8c8` (commit B); sandbox retrofit in same commit.
+
+- **why-this-matters:** The new helper delivers what the audience asked for (PNG for slides, SVG for publication co-authors, CSV for downstream re-users) in a single split-button. Existing call sites are CSV-only; readers wanting PNG screenshot the figure manually and lose label crispness. Migration is mechanical but touches every figure section.
+
+- **proposed-change:** For each call site, swap `downloadButton(data, name)` (in the `captionDetails(...)` row) for `chartDownloadMenu(chart, {filename, data})` wrapping the chart return. Filename token convention per the dispatch (`AGO_TAVG_annual_periods` etc.). Verify on Recent Changes + Future Projections + Crop & Livestock Exposure first per the dispatch's validation matrix, then walk the remaining 14.
+
+- **dependencies:** None (helper landed). Bundle with [[CR-077]] (decimal precision option) — every call site needs to decide its precision regardless, may as well land both together.
+
+- **discovered:** 2026-05-21. Dispatch [`dispatches/2026-05-21_chart-download-menu.md`](dispatches/2026-05-21_chart-download-menu.md). Sandbox-first sequence locked in this session; production migration was the explicit "SEPARATE LATER" item.
+
+- **STATUS:** Open. Phase-1 (3 validation cells) can ship as a small first commit, then a sweep for the remaining 14.
+
+- **before-string:** `${captionDetails(caption, undefined, downloadButton(productionTrends_data, "productionTrends"))}` — see all 17 sites.
+
+---
+
+### CR-079 — Production migration: Mann-Kendall trend overlay across Recent Changes cells [NEW 2026-05-21]
+
+- **id:** CR-079
+- **title:** Apply the `trend.ojs` helper (MK + Theil-Sen + Yue TFPW + 95% CI + IPCC qualifier + trend badge + methods callout) to the production Recent Changes timeseries cells.
+- **type:** notebook
+- **severity:** med — the trend layer is the headline value-add for the section; readers currently get year-by-year values but no quantitative statement of how fast the variable is changing or with what confidence.
+- **where:** [notebooks/climateRationale/notebook.qmd](notebooks/climateRationale/notebook.qmd) Recent Changes section. Specifically `barplot_recentChanges`, `warmingStripes_recentChanges`, `timeseries_recentChanges` (and any others — locate via the dispatch's pointer "Recent Changes timeseries cells"). Helper + sandbox prototype landed in `9dbef92` (commit D).
+
+- **why-this-matters:** Sandbox prototype validated on AGO TAVG (sig +0.19 °C/decade, p < 0.001) and the IPCC qualifier + hazard-gradient bands + adaptive legend pattern all reads correctly. Production cells currently lack the trend layer entirely — readers must eyeball.
+
+- **proposed-change:** For each Recent Changes timeseries cell: import `mannKendall` + `trendOverlayMarks` from `/helpers/trend.ojs`; wire badge + IPCC qualifier + hazard-gradient bands per the sandbox pattern; add the section-head "How to read this" callout once at the top of Recent Changes. Match SPEI's "suppress slope-per-decade + Phase-2 deferral note" treatment. Validation matrix per the dispatch.
+
+- **dependencies:** None (helper landed). Worth pairing with [[CR-078]] in a single production-migration sweep so the touched cells get both upgrades at once.
+
+- **discovered:** 2026-05-21. Dispatch [`dispatches/2026-05-21_recent-changes-trend-overlay.md`](dispatches/2026-05-21_recent-changes-trend-overlay.md). Methods backing in [`context/04_observed-trend-best-practice.md`](context/04_observed-trend-best-practice.md). Sandbox-first sequence locked in this session.
+
+- **STATUS:** Open. Sequence with CR-078.
+
+- **before-string:** n/a (additive change per cell).
+
+---
+
+### CR-080 — Phase 2: per-admin trend overlay when 2+ admin1s selected [NEW 2026-05-21]
+
+- **id:** CR-080
+- **title:** Replace the country-aggregate fallback (current Phase-1 behaviour) with per-admin trend lines + per-admin badges when the user has 2+ admin1s selected.
+- **type:** notebook / data shape
+- **severity:** low — Phase-1 fallback ("country aggregate when 2+ admin1s, with caption note") is honest and unambiguous; per-admin is a richness upgrade, not a correctness fix.
+- **where:** sandbox `notebooks/sandbox/obs_qaqc.qmd` for prototyping; eventually the production cells covered by [[CR-079]].
+
+- **why-this-matters:** When a user selects 2+ admin1s on the map, they often want to compare trends across regions. Current behaviour silently aggregates to country (with a caption note). Per-admin trend lines (one per region, colour-matched to the map highlight palette) would surface the cross-region comparison directly in the chart.
+
+- **proposed-change:**
+  1. Reshape `observed_E_raw` to optionally GROUP BY `admin1_name` when `admin1_names.length > 1`. Return rows tagged with `admin1` per group.
+  2. `trendOverlayMarks` already supports `groupField` — pass `"admin1"` to get one trend line + CI band per admin. Colour the trend lines to match each admin's map-accent.
+  3. Stack badges (one per admin) above the chart. Keep them compact — likely a small table rather than full-prose IPCC qualifiers.
+  4. Single-admin1 path stays unchanged.
+
+- **dependencies:** None.
+
+- **discovered:** 2026-05-21. Pete flagged in trend-overlay plan-for-approval: "we do need an end point where we can look at trends in admin1 areas." Phase-1 satisfies this via single-admin selection; Phase-2 satisfies it for multi-admin too.
+
+- **STATUS:** Open. Lower priority than CR-078 + CR-079 production migrations.
+
+- **before-string:** sandbox `observed_E_raw = { … isAdmin1 = admin1_names.length === 1 … }` — needs `else if (admin1_names.length > 1) GROUP BY admin1_name` branch.
+
+---
+
+### CR-081 — Phase 2: SPEI dry-month-frequency view (reframe SPEI trend) [NEW 2026-05-21]
+
+- **id:** CR-081
+- **title:** Replace the suppressed slope-per-decade badge for SPEI with a dry-month-frequency reframe per the methods memo §10 item 5 (fraction of months with SPEI < -1 in rolling decadal windows, or stacked decadal counts of dry / neutral / wet months).
+- **type:** notebook
+- **severity:** low — current SPEI treatment ("MK p only + deferred note") is honest; the reframe is the meaningful trend communication.
+- **where:** sandbox `recentChanges_E` + eventually the production Recent Changes SPEI cells. Helper additions may live in `helpers/trend.ojs` (a `speiCategoryFrequency(data, opts)` function returning decadal counts of dry/neutral/wet).
+
+- **why-this-matters:** SPEI is a z-score-distributed index — a "slope of SPEI per decade" has no physical meaning and is hard to interpret. The standard impacts-literature communication is the frequency of months falling into dry vs neutral vs wet categories over rolling decadal windows. Per the memo §10 item 5.
+
+- **proposed-change:**
+  1. New helper function: `speiCategoryFrequency(data, opts)` returning `{decade, dry_count, neutral_count, wet_count, total}` rows grouped by `floor(year/10)*10`.
+  2. New plot type "dry-month frequency" for SPEI: stacked-area or stacked-bar of (dry / neutral / wet) counts per decade.
+  3. Badge reports the change in dry-month fraction between the first decade and the most recent.
+
+- **dependencies:** None.
+
+- **discovered:** 2026-05-21. Dispatch [`dispatches/2026-05-21_recent-changes-trend-overlay.md`](dispatches/2026-05-21_recent-changes-trend-overlay.md) §2.3 explicitly defers this; methods memo [`context/04_observed-trend-best-practice.md`](context/04_observed-trend-best-practice.md) §10 item 5 describes the reframe.
+
+- **STATUS:** Open. Phase 2.
+
+- **before-string:** n/a (new helper function + new sandbox plot type).
+
+---
+
 ## Proposed PR groupings
 
 Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.
