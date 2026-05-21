@@ -142,6 +142,80 @@ function _chartDownloadMenu_svgToPng(svg, scale) {
 
 
 /**
+ * Rasterise an arbitrary DOM element (HTML or SVG) to a PNG Blob via
+ * an `<svg><foreignObject>` envelope. Useful for compositing a chart
+ * with its custom HTML legend into a single PNG — the foreignObject
+ * trick lets Image rasterise an inlined fragment of the live DOM.
+ *
+ * Caveats:
+ *  - Only inline styles are picked up (external CSS won't load inside
+ *    the foreignObject — clone the element with its computed styles
+ *    inlined if you need that).
+ *  - Web fonts may fall back to system fonts in the rasterised output.
+ *  - Live <canvas> contents inside the wrapper won't render through
+ *    foreignObject — extract the canvas's pixel data via drawImage
+ *    instead, then composite.
+ *
+ * @param {HTMLElement} el      - the element to rasterise
+ * @param {number}      [scale=2] - device-pixel-ratio multiplier
+ * @returns {Promise<Blob>}
+ */
+function elementToPngBlob(el, scale) {
+  const dpr = scale || 2;
+  const rect = el.getBoundingClientRect();
+  const W = Math.max(1, Math.ceil(rect.width));
+  const H = Math.max(1, Math.ceil(rect.height));
+
+  // Wrap a deep clone of the element in an SVG foreignObject envelope.
+  // Cloning prevents foreignObject ↔ live-DOM ownership tangles when
+  // the Image rasteriser parses the SVG string back into a doc.
+  const clone = el.cloneNode(true);
+  const xhtmlWrap = document.createElement("div");
+  xhtmlWrap.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  xhtmlWrap.style.background = "#ffffff";
+  xhtmlWrap.style.display = "inline-block";
+  xhtmlWrap.appendChild(clone);
+
+  const fo = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+  fo.setAttribute("x", "0");
+  fo.setAttribute("y", "0");
+  fo.setAttribute("width",  String(W));
+  fo.setAttribute("height", String(H));
+  fo.appendChild(xhtmlWrap);
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  svg.setAttribute("width",  String(W));
+  svg.setAttribute("height", String(H));
+  svg.appendChild(fo);
+
+  const xml = new XMLSerializer().serializeToString(svg);
+  const blob = new Blob([xml], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width  = W * dpr;
+      canvas.height = H * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((b) => {
+        URL.revokeObjectURL(url);
+        if (b) resolve(b);
+        else   reject(new Error("canvas.toBlob returned null"));
+      }, "image/png");
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+
+/**
  * Inject the helper's CSS once per page (idempotent — the style
  * element is identified by id and skipped on subsequent calls).
  */
@@ -155,15 +229,20 @@ function _chartDownloadMenu_ensureStyle() {
     ".cdm-primary, .cdm-caret {",
     "  font: inherit;",
     "  font-size: 0.85em;",
-    "  padding: 4px 10px;",
-    "  background: #fff;",
-    "  border: 1px solid #ccc;",
+    "  font-weight: 500;",
+    "  padding: 5px 12px;",
+    // Darker default so the button reads against the chart background
+    // (was a near-invisible white-on-white outline — Pete flagged it
+    // as too faint on 2026-05-21).
+    "  background: #e8e8e8;",
+    "  color: #222;",
+    "  border: 1px solid #888;",
     "  cursor: pointer;",
     "  line-height: 1.2;",
     "}",
     ".cdm-primary { border-radius: 3px 0 0 3px; border-right: none; }",
-    ".cdm-caret   { border-radius: 0 3px 3px 0; padding: 4px 8px; }",
-    ".cdm-primary:hover, .cdm-caret:hover { background: #f4f4f4; }",
+    ".cdm-caret   { border-radius: 0 3px 3px 0; padding: 5px 10px; }",
+    ".cdm-primary:hover, .cdm-caret:hover { background: #d4d4d4; }",
     ".cdm-primary:focus, .cdm-caret:focus { outline: 2px solid #4a90e2; outline-offset: -2px; }",
     ".cdm-menu {",
     "  position: absolute;",

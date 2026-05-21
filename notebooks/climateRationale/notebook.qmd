@@ -24,7 +24,7 @@ import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
 
 import { atlasTOC } from "/helpers/toc.ojs";
 
-import { chartDownloadMenu }                                          from "/helpers/chartDownloadMenu.ojs";
+import { chartDownloadMenu, elementToPngBlob }                        from "/helpers/chartDownloadMenu.ojs";
 import { mannKendall, trendOverlayMarks }                             from "/helpers/trend.ojs";
 import { observationalUncertaintyBand, observationalUncertaintyMarks } from "/helpers/observationalUncertainty.ojs";
 
@@ -1243,10 +1243,22 @@ viewof showObsUncertainty_obs = Inputs.toggle({ label: "Show observational uncer
     ? _lang(climateVarSelect.description)
     : "";
   if (!descText) return html`<span></span>`;
+  // Cross-references (issue #12 Pete 2026-05-21): link the variable
+  // description to (a) the underlying product methods, (b) the trend
+  // statistics methods, (c) the observational uncertainty methods, and
+  // (d) the data-sources entry for the source product.
   return html`<p class="climate-var-description">
     <strong>${_lang(climateVarSelect.name)}.</strong>
     ${descText}
-    <a href="#methods-climate-data">More in Methods →</a>
+    <span class="cv-desc-links">
+      <a href="#methods-climate-data">Methods → data</a>
+      &nbsp;·&nbsp;
+      <a href="#methods-trend-estimation">trend</a>
+      &nbsp;·&nbsp;
+      <a href="#methods-observational-uncertainty">uncertainty</a>
+      &nbsp;·&nbsp;
+      <a href="#data-sources">data sources</a>
+    </span>
   </p>`;
 }
 ```
@@ -1301,60 +1313,75 @@ observed_obs_raw = {
   const gaul = mainGaul.get(obsAdmin0Iso3);
   if (gaul == null) return [];
   const useAdm1 = admin1Names.length > 0;
-  const baseURL    = useAdm1 ? monthlyAdm1URL : monthlyAdm0URL;
-  const periodsURL = useAdm1 ? periodsAdm1URL : periodsAdm0URL;
   const variable = climateVarSelect.id;
   const season = seasonSelect.season;
+  const safeName = obsAdmin0Name.replace(/'/g, "''");
 
-  // Build SELECT'd adminName: literal national label when no admin1,
-  // else admin1_name column. SQL-quote admin1 names defensively.
-  const adminSelect = useAdm1
-    ? "admin1_name AS adminName"
-    : `'${obsAdmin0Name.replace(/'/g, "''")}' AS adminName`;
-  const admin1Filter = useAdm1
-    ? `AND admin1_name IN (${admin1Names.map((n) => `'${n.replace(/'/g, "''")}'`).join(", ")})`
-    : "";
+  // SQL builders. fetchOne issues a single query against either the
+  // adm0 or adm1 parquet and returns rows with a literal adminName
+  // column already filled in.
+  const buildQuery = (level) => {
+    const baseURL    = level === "adm1" ? monthlyAdm1URL : monthlyAdm0URL;
+    const periodsURL = level === "adm1" ? periodsAdm1URL : periodsAdm0URL;
+    const adminSelect = level === "adm1"
+      ? "admin1_name AS adminName"
+      : `'${safeName}' AS adminName`;
+    const admin1Filter = level === "adm1"
+      ? `AND admin1_name IN (${admin1Names.map((n) => `'${n.replace(/'/g, "''")}'`).join(", ")})`
+      : "";
+    if (isSPEI_obs) {
+      const mo = seasonLastMonth[season];
+      return `
+        SELECT ${adminSelect}, year, month, value_mean
+        FROM read_parquet('${baseURL}')
+        WHERE iso3 = '${obsAdmin0Iso3}'
+          AND gaul0_code = ${gaul}
+          ${admin1Filter}
+          AND variable = '${variable}'
+          AND month = ${mo}
+          AND value_mean IS NOT NULL AND isfinite(value_mean)
+        ORDER BY adminName, year
+      `;
+    } else if (viewType_obs === "monthly") {
+      return `
+        SELECT ${adminSelect}, year, month, value_mean
+        FROM read_parquet('${baseURL}')
+        WHERE iso3 = '${obsAdmin0Iso3}'
+          AND gaul0_code = ${gaul}
+          ${admin1Filter}
+          AND variable = '${variable}'
+          AND value_mean IS NOT NULL AND isfinite(value_mean)
+        ORDER BY adminName, year, month
+      `;
+    } else {
+      return `
+        SELECT ${adminSelect}, year, value_mean
+        FROM read_parquet('${periodsURL}')
+        WHERE iso3 = '${obsAdmin0Iso3}'
+          AND gaul0_code = ${gaul}
+          ${admin1Filter}
+          AND variable = '${variable}'
+          AND period = '${season}'
+          AND value_mean IS NOT NULL AND isfinite(value_mean)
+        ORDER BY adminName, year
+      `;
+    }
+  };
 
-  let q;
-  if (isSPEI_obs) {
-    const mo = seasonLastMonth[season];
-    q = `
-      SELECT ${adminSelect}, year, month, value_mean
-      FROM read_parquet('${baseURL}')
-      WHERE iso3 = '${obsAdmin0Iso3}'
-        AND gaul0_code = ${gaul}
-        ${admin1Filter}
-        AND variable = '${variable}'
-        AND month = ${mo}
-        AND value_mean IS NOT NULL AND isfinite(value_mean)
-      ORDER BY adminName, year
-    `;
-  } else if (viewType_obs === "monthly") {
-    q = `
-      SELECT ${adminSelect}, year, month, value_mean
-      FROM read_parquet('${baseURL}')
-      WHERE iso3 = '${obsAdmin0Iso3}'
-        AND gaul0_code = ${gaul}
-        ${admin1Filter}
-        AND variable = '${variable}'
-        AND value_mean IS NOT NULL AND isfinite(value_mean)
-      ORDER BY adminName, year, month
-    `;
-  } else {
-    q = `
-      SELECT ${adminSelect}, year, value_mean
-      FROM read_parquet('${periodsURL}')
-      WHERE iso3 = '${obsAdmin0Iso3}'
-        AND gaul0_code = ${gaul}
-        ${admin1Filter}
-        AND variable = '${variable}'
-        AND period = '${season}'
-        AND value_mean IS NOT NULL AND isfinite(value_mean)
-      ORDER BY adminName, year
-    `;
+  // Primary query — adm1 when 1+ admin1s selected, else national.
+  const rows = Array.from(await db.query(buildQuery(useAdm1 ? "adm1" : "adm0")));
+
+  // National-overlay query (issue #1 Pete's 2026-05-21 review). When
+  // the sidebar "Include National" toggle is on AND at least one
+  // admin1 is selected, ALSO fetch the country-level series and
+  // append it as one extra facet labelled with the country name.
+  // (When admin1Names is empty, the primary query is already national.)
+  if (useAdm1 && includeAdmin0) {
+    const nationalRows = Array.from(await db.query(buildQuery("adm0")));
+    rows.push(...nationalRows);
   }
-  const resp = await db.query(q);
-  return Array.from(resp);
+
+  return rows;
 }
 
 // Per-admin baseline {mean, sd, n} keyed by adminName. The 1991-2020
@@ -1378,9 +1405,14 @@ baselines_obs = {
 
 // Distinct admin names in the fetched data, preserving the order in
 // which admin1Names was selected. Drives faceting + per-admin trend.
+// When `includeAdmin0` is on and 1+ admin1s selected, the national
+// facet appears LAST in the grid (admin1s remain the primary view;
+// national is supplementary context).
 adminNames_obs = {
   if (admin1Names.length === 0) return [obsAdmin0Name];
-  return [...new Set(observed_obs_raw.map((d) => d.adminName))];
+  const names = [...admin1Names];
+  if (includeAdmin0) names.push(obsAdmin0Name);
+  return names;
 }
 
 observed_obs = observed_obs_raw.map((d) => {
@@ -1597,6 +1629,17 @@ recentChanges_obs = {
     yRangesByAdmin.set(name, { yMin: d3.min(vals), yMax: d3.max(vals) });
   }
 
+  // Tooltip config — hide the mark-internal channels (x, y, fill,
+  // stroke, x1/x2/y1/y2, fx/fy) by setting their format to null;
+  // only the user-meaningful `channels: { … }` declared per mark
+  // surface in the tip. Issue #7 (Pete's 2026-05-21 review).
+  const tipOpts = { format: {
+    x: null, y: null,
+    x1: null, x2: null, y1: null, y2: null,
+    fill: null, stroke: null,
+    fx: null, fy: null,
+  }};
+
   // Mark builders. All marks consume observed_obs_aug (carries _fx/_fy)
   // so the facet system routes them into the right grid cell.
   const stripesMark = Plot.rect(observed_obs_aug, {
@@ -1609,7 +1652,7 @@ recentChanges_obs = {
     fx: isFaceted ? "_fx" : undefined,
     fy: isFaceted ? "_fy" : undefined,
     channels: { admin: "adminName", year: "year", value: "value_mean" },
-    tip: true,
+    tip: tipOpts,
   });
   const barMark = Plot.rect(observed_obs_aug, {
     x1: (d) => d[xField] - stripeWidth * 0.4,
@@ -1621,7 +1664,7 @@ recentChanges_obs = {
     fx: isFaceted ? "_fx" : undefined,
     fy: isFaceted ? "_fy" : undefined,
     channels: { admin: "adminName", year: "year", value: "value_mean", anomaly: "value_plot", classification: "cls" },
-    tip: true,
+    tip: tipOpts,
   });
   const lineMarks = [
     Plot.line(observed_obs_aug, {
@@ -1638,7 +1681,7 @@ recentChanges_obs = {
       fx: isFaceted ? "_fx" : undefined,
       fy: isFaceted ? "_fy" : undefined,
       channels: { admin: "adminName", year: "year", value: "value_mean", anomaly: "value_plot", z: "z", classification: "cls" },
-      tip: true,
+      tip: tipOpts,
     }),
   ];
 
@@ -1695,7 +1738,7 @@ recentChanges_obs = {
         fx: isFaceted ? "_fx" : undefined,
         fy: isFaceted ? "_fy" : undefined,
         channels: { admin: "adminName", year: "year", value: "value_mean", classification: "cls" },
-        tip: true,
+        tip: tipOpts,
       }),
     ];
   } else if (plotType_obs === "bars") {
@@ -1755,6 +1798,11 @@ recentChanges_obs = {
     ? observationalUncertaintyMarks(observed_obs_aug, {
         xField: "year",
         yField: "value_plot",
+        // valueField: drive band WIDTH from the raw rainfall / temperature
+        // value (value_mean) so anomaly mode renders constant ±10% / ±0.5°C
+        // bands instead of the tilted ones from sizing off the anomaly.
+        // Issue #6 (Pete's 2026-05-21 review).
+        valueField: "value_mean",
         groupField: isFaceted ? "adminName" : null,
         preserveFields: isFaceted ? ["_fx", "_fy"] : [],
         fx: isFaceted ? "_fx" : null,
@@ -1909,7 +1957,10 @@ recentChanges_obs = {
     }
   }
 
-  // chartDownloadMenu handles PNG / SVG / CSV exports.
+  // chartDownloadMenu handles PNG / SVG / CSV exports. Wrap chart +
+  // legend together (issue #5: download button sits below legend) and
+  // pass a pngOverride that rasterises the wrapper via foreignObject
+  // so the exported PNG includes the legend alongside the chart.
   const regionToken = admin1Names.length === 1
     ? admin1Names[0]
     : admin1Names.length > 1
@@ -1917,10 +1968,15 @@ recentChanges_obs = {
       : obsAdmin0Iso3;
   const filename = `obs_chart_${obsAdmin0Iso3}_${regionToken}_${variable}_${season}_${viewType_obs}`
     .split(" ").join("_");
-  const chartWithDownload = chartDownloadMenu(chart, {
+  const chartAndLegend = html`<div style="background:#fff; display:block;"></div>`;
+  chartAndLegend.appendChild(chart);
+  chartAndLegend.appendChild(legend);
+  const chartAndLegendWithDownload = chartDownloadMenu(chartAndLegend, {
     filename,
     data: observed_obs,
     csvColumns: ["adminName", "year", "month", "value_mean", "value_plot", "z", "cls"],
+    // Composite PNG = chart SVG + legend HTML via foreignObject.
+    pngOverride: () => elementToPngBlob(chartAndLegend, 2),
   });
 
   // Adaptive legend.
@@ -2016,7 +2072,12 @@ recentChanges_obs = {
     </span>`)}
   </div>`;
 
-  return html`<div>${trendBadge}${chartWithDownload}${legend}${ipccQualifier}</div>`;
+  // Layout (issues #2, #3, #5): chart + legend wrapped together (download
+  // button sits below the wrapper, i.e. below the legend); per-admin
+  // trend badges + IPCC qualifier render UNDERNEATH the chart. The
+  // per-admin baseline numbers live in the recentChanges_obs_caption
+  // cell that renders directly below this output.
+  return html`<div>${chartAndLegendWithDownload}${trendBadge}${ipccQualifier}</div>`;
 }
 
 recentChanges_obs_caption = {
@@ -2052,14 +2113,14 @@ recentChanges_obs_caption = {
   const speiCopy = isSPEI_obs
     ? `SPEI is the ${variable.replace("SPEI-","").replace(/^0+/, "")}-month accumulation ending in month ${speiMonth}. Reference lines: ±1 moderate, ±1.5 severe, ±2 extreme (WMO).`
     : "";
+  // Issue #4 (Pete's 2026-05-21 review): dropped the meta-info line
+  // ("Region: X · Variable: Y · Season: Z · View: W · Plot: V · …").
+  // The controls + selector labels already make every one of those
+  // settings visible on screen; the repeat just clutters the caption.
   const multiCountryNote = admin0Iso3.length > 1
     ? ` *Note: ${admin0Iso3.length} countries selected; the observational view shows only the first (${obsAdmin0Name}).*`
     : "";
-  return md`
-*Region: **${region}** · Variable: **${variable}** · Season: **${season}** · View: **${viewType_obs}** · Plot: **${plotType_obs}**${useAnomaly_obs ? " · **anomaly mode**" : ""}${showTrend_obs ? " · **trend layer on**" : ""}${showObsUncertainty_obs && !isSPEI_obs ? " · **obs uncertainty band on**" : ""}*
-
-${baselineCopy} ${speiCopy}${multiCountryNote}
-  `;
+  return md`${baselineCopy} ${speiCopy}${multiCountryNote}`;
 }
 ```
 
@@ -2074,7 +2135,7 @@ ${baselineCopy} ${speiCopy}${multiCountryNote}
   // from already-fetched data — they must NOT trip the loader, or
   // they race with the render cell and the spinner clobbers the
   // rendered viz (see feedback_loader-render-race memory).
-  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect, monthly_obs, plotType_obs, anomaly_obs];
+  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect, monthly_obs, plotType_obs, anomaly_obs, includeAdmin0];
   const div = document.getElementById("recent-changes-plot");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -2092,11 +2153,19 @@ ${baselineCopy} ${speiCopy}${multiCountryNote}
 recentChanges_obs_caption
 ```
 
-### Map — observational climatology (1991–2020 mean)
+### Map — average conditions over the country (1991–2020)
 
-Reads the COG directly from S3 via geotiff.js (HTTP Range requests under the hood — only the bytes for the country bbox get fetched, not the full Africa-wide raster). Pixels render into an offscreen canvas at the COG's native resolution, then up-sampled onto the visible canvas with the browser's built-in bilinear smoothing. Admin0 + admin1 outlines are overlaid as SVG paths using the same `(lon, lat) → (px_x, px_y)` projection.
+The map shows the **average value over 1991–2020** of the selected variable, season by season — for example, "mean annual rainfall" or "mean January–March maximum temperature" — across the country. Where you've selected one or more admin1 regions in the sidebar, those regions are outlined; the rest of the country still renders for context.
 
-Map controls (affect this map only — ramp scaling + decoration overlays):
+The colour ramp adapts to the values actually present in the visible area, so the contrast is maximised for the region you're looking at. Flip the **"Lock map ramp to global limits"** toggle if you want a fixed scale that lets you compare across countries or seasons. The **"Map palette"** dropdown lets you swap colour schemes.
+
+::: {.callout-note collapse="true"}
+## Methods notes (click to expand)
+
+Source data: **CHIRPS v3** for precipitation and **CHIRTS-ERA5** for temperature, downsampled to a Cloud-Optimized GeoTIFF (COG) of the 1991–2020 mean per (variable × season). For SPEI the map shows the *standard deviation* over 1991–2020 (the SPEI mean is ~0 by construction, since SPEI is standardised against its own reference window). Boundary polygons are GAUL 2024 admin1 simplified to a vector tile-friendly resolution. See **[Methods → Climate data sources](#methods-climate-data)** and **[Methods → Observational uncertainty](#methods-observational-uncertainty)** for product details and known caveats.
+:::
+
+Map controls (affect this map only):
 
 ::: {.controls-row .cols-3}
 
@@ -2678,7 +2747,7 @@ recentChangesMap_obs = {
       <path d="${allAdmin1Paths}" stroke="#222" stroke-width="${adminLineW}" fill="none" opacity="0.95"/>
       ${selectedAdmin1Paths ? `
         <path d="${selectedAdmin1Paths}" stroke="#ffffff" stroke-width="${selectedHaloW}" fill="none" stroke-linejoin="round"/>
-        <path d="${selectedAdmin1Paths}" stroke="#d62728" stroke-width="${selectedLineW}" fill="none" stroke-linejoin="round"/>
+        <path d="${selectedAdmin1Paths}" stroke="#000000" stroke-width="${selectedLineW}" fill="none" stroke-linejoin="round"/>
       ` : ""}
       ${graticuleMarkup}
       ${labelsMarkup}

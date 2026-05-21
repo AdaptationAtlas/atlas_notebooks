@@ -117,7 +117,17 @@ function observationalUncertaintyBand(value, variable, opts) {
  * @param {Array<object>} data
  * @param {object} [opts]
  * @param {string} [opts.xField="year"]
- * @param {string} [opts.yField="value"]
+ * @param {string} [opts.yField="value"] - field used for both the
+ *   band's plotted position AND its width, unless valueField is
+ *   provided (see below).
+ * @param {string} [opts.valueField] - optional field giving the
+ *   UNDERLYING value for band-WIDTH computation, separate from yField
+ *   which positions the band on the chart. Set this when the chart is
+ *   plotting an anomaly: yField = anomaly (positions band relative to
+ *   zero baseline) but valueField = raw value (drives the ±10% PTOT
+ *   width). Without it, anomaly-mode PTOT bands collapse near zero
+ *   and balloon at extreme years — the tilted look Pete flagged
+ *   2026-05-21. Defaults to yField.
  * @param {string} [opts.variable] - one of PTOT / TMAX / TMIN / TAVG.
  *   Required (the band rule is variable-specific).
  * @param {string|null} [opts.groupField=null]
@@ -131,6 +141,7 @@ function observationalUncertaintyMarks(data, opts) {
   const o = opts || {};
   const xField = o.xField || "year";
   const yField = o.yField || "value";
+  const valueField = o.valueField || yField;
   const variable = o.variable;
   const groupField = o.groupField || null;
   const fill = o.fill || "#777";
@@ -146,17 +157,22 @@ function observationalUncertaintyMarks(data, opts) {
   if (!data || data.length === 0) return [];
   if (_ouVariableKey(variable) == null) return [];
 
-  // Build (lower, upper) per row.
+  // Build (lower, upper) per row. width is computed from the RAW
+  // valueField (e.g. value_mean), then the band is positioned around
+  // the PLOTTED yField (e.g. value_plot, which equals the anomaly in
+  // anomaly mode).
   const rows = [];
   for (const d of data) {
-    const v = Number(d[yField]);
-    if (!isFinite(v)) continue;
-    const band = observationalUncertaintyBand(v, variable, { heuristic });
-    if (!band) continue;
+    const yPos = Number(d[yField]);
+    const vRaw = Number(d[valueField]);
+    if (!isFinite(yPos) || !isFinite(vRaw)) continue;
+    const widthBand = observationalUncertaintyBand(vRaw, variable, { heuristic });
+    if (!widthBand) continue;
+    const halfWidth = (widthBand.upper - widthBand.lower) / 2;
     const row = {
       [xField]: d[xField],
-      _ou_lower: band.lower,
-      _ou_upper: band.upper,
+      _ou_lower: yPos - halfWidth,
+      _ou_upper: yPos + halfWidth,
     };
     if (groupField) row[groupField] = d[groupField];
     for (const f of preserveFields) row[f] = d[f];
