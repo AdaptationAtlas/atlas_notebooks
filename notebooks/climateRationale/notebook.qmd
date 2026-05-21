@@ -1307,11 +1307,17 @@ obsAdmin0Name = (admin0Select[0] && admin0Select[0].translation)
 //                old production behaviour and is now restored.
 // Every returned row carries `adminName` so downstream cells can group
 // without re-deriving it.
+// Returns { rows, fetchMs, nQueries, source } so downstream cells can
+// surface fetch timing in the chart status line (matches the map's
+// "country fetch X.Xs" header pattern Pete asked to preserve
+// 2026-05-22). `rows` is the concatenated query result; everything
+// else is metadata.
 observed_obs_raw = {
-  if (obsAdmin0Iso3 == null) return [];
-  if (!obsVarCodes.includes(climateVarSelect.id)) return [];  // heat-index placeholder branch
+  const empty = { rows: [], fetchMs: 0, nQueries: 0, source: "none" };
+  if (obsAdmin0Iso3 == null) return empty;
+  if (!obsVarCodes.includes(climateVarSelect.id)) return empty;  // heat-index placeholder branch
   const gaul = mainGaul.get(obsAdmin0Iso3);
-  if (gaul == null) return [];
+  if (gaul == null) return empty;
   const useAdm1 = admin1Names.length > 0;
   const variable = climateVarSelect.id;
   const season = seasonSelect.season;
@@ -1369,7 +1375,9 @@ observed_obs_raw = {
   };
 
   // Primary query — adm1 when 1+ admin1s selected, else national.
+  const t0 = performance.now();
   const rows = Array.from(await db.query(buildQuery(useAdm1 ? "adm1" : "adm0")));
+  let nQueries = 1;
 
   // National-overlay query (issue #1 Pete's 2026-05-21 review). When
   // the sidebar "Include National" toggle is on AND at least one
@@ -1379,9 +1387,16 @@ observed_obs_raw = {
   if (useAdm1 && includeAdmin0) {
     const nationalRows = Array.from(await db.query(buildQuery("adm0")));
     rows.push(...nationalRows);
+    nQueries++;
   }
+  const fetchMs = performance.now() - t0;
 
-  return rows;
+  return {
+    rows,
+    fetchMs,
+    nQueries,
+    source: useAdm1 ? (includeAdmin0 ? "adm1 + national overlay" : "adm1") : "national",
+  };
 }
 
 // Per-admin baseline {mean, sd, n} keyed by adminName. The 1991-2020
@@ -1389,7 +1404,7 @@ observed_obs_raw = {
 // hazard bands + z-scores reference the right baseline.
 baselines_obs = {
   const byAdmin = new Map();
-  for (const row of observed_obs_raw) {
+  for (const row of observed_obs_raw.rows) {
     if (row.year < 1991 || row.year > 2020) continue;
     if (!byAdmin.has(row.adminName)) byAdmin.set(row.adminName, []);
     byAdmin.get(row.adminName).push(row.value_mean);
@@ -1415,7 +1430,7 @@ adminNames_obs = {
   return names;
 }
 
-observed_obs = observed_obs_raw.map((d) => {
+observed_obs = observed_obs_raw.rows.map((d) => {
   const base = baselines_obs.get(d.adminName) ?? { mean: 0, sd: 0, n: 0 };
   const v = useAnomaly_obs ? d.value_mean - base.mean : d.value_mean;
   const z = base.sd > 0 ? (d.value_mean - base.mean) / base.sd : 0;
@@ -2078,12 +2093,20 @@ recentChanges_obs = {
     pngOverride: () => elementToPngBlob(chartAndLegend, 2),
   });
 
+  // Fetch-time status header, mirroring the map's. Pete confirmed
+  // 2026-05-22 this readout is useful for spotting slow queries.
+  const fetchSec = (observed_obs_raw.fetchMs / 1000).toFixed(2);
+  const nRows = observed_obs.length;
+  const status = html`<div style="font-size: 0.82em; color: #666; margin-bottom: 4px;">
+    data fetch ${fetchSec}s · ${nRows} rows · ${observed_obs_raw.nQueries} ${observed_obs_raw.nQueries === 1 ? "query" : "queries"} · source: ${observed_obs_raw.source}
+  </div>`;
+
   // Layout (issues #2, #3, #5): chart + legend wrapped together (download
   // button sits below the wrapper, i.e. below the legend); per-admin
   // trend badges + IPCC qualifier render UNDERNEATH the chart. The
   // per-admin baseline numbers live in the recentChanges_obs_caption
   // cell that renders directly below this output.
-  return html`<div>${chartAndLegendWithDownload}${trendBadge}${ipccQualifier}</div>`;
+  return html`<div>${status}${chartAndLegendWithDownload}${trendBadge}${ipccQualifier}</div>`;
 }
 
 recentChanges_obs_caption = {
