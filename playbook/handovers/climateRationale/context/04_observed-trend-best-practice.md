@@ -152,25 +152,29 @@ The Mann-Kendall + Theil-Sen + 95 % CI machinery in §5–§6 produces a *statis
 
 ### 12.1 What the underlying products do and do not provide
 
-**CHIRPS v3** does not ship formal uncertainty layers, confidence intervals, or ensemble members. Error varies by region (gauge density, terrain), by season (convective regimes are worse), by rainfall magnitude (extremes are worse), and by aggregation period. There is no single "official" error value that can be attached to a CHIRPS PTOT estimate. Validation papers report monthly RMSE on the order of 10–30 % of the local monthly total in moderately gauged African regions, larger over mountains, semi-arid convective zones, and sparse-station areas.
+**CHIRPS v3** ships no formal uncertainty layers, confidence intervals, or ensemble members. It is a deterministic satellite–gauge blended product. The Climate Hazards Center's own guidance is explicit: *"All satellite-based precipitation estimates are uncertain… Accuracy varies across locations and seasons, depending on the precipitation mechanisms"* ([Climate Data Guide entry for CHIRPS v3](https://climatedataguide.ucar.edu/climate-data/chirps-climate-hazards-infrared-precipitation-station-data-version-3)). What the literature does provide is per-region validation against rain gauges. The most-cited reference is **Dinku et al. (2018)** ([*Quart. J. Royal Met. Soc.* 144, 292–312](https://rmets.onlinelibrary.wiley.com/doi/10.1002/qj.3244)), validating CHIRPS over ~1,200 gauges in eastern Africa: low bias and high skill at monthly / dekadal scales, slightly outperforming TAMSAT and substantially outperforming ARC2. Country-scale validation studies report monthly RMSE that is large *in absolute terms* (≈ 40–47 mm/month for Ethiopia and South Africa, on means of 50–80 mm/month) but small *as a bias* on annual aggregates (PBIAS ≈ 1 % for Ethiopia; up to 9 % over equatorial East Africa across products — Cattani et al. (2022), [*J. Hydromet.*](https://journals.ametsoc.org/view/journals/hydr/23/2/JHM-D-21-0145.1.xml)). The pattern is consistent: **CHIRPS has high relative noise at the monthly individual-value scale but small systematic bias at the annual aggregate scale.** CHIRPS v3 is wetter than v2 by construction because gauge-undercatch correction is now applied — this is a *bias correction*, not a reduction in noise.
 
-**CHIRTS-ERA5** has somewhat better characterised error structure because it blends station + satellite + ERA5 reanalysis, but it is still deterministic — no formal CI ships with it. Typical RMSE for monthly TMAX/TMIN against station data is ~0.5–1.5 °C; monthly TAVG is generally tighter (~0.3–0.7 °C in well-gauged areas).
+**CHIRTS-ERA5** has somewhat better-characterised error structure because the underlying CHIRTS climatology (1983–2016) was built on satellite + ~15,000 Berkeley Earth monthly stations specifically to correct ERA5's documented cool bias over Africa ([Verdin et al. 2020, *Sci. Data* 7:303](https://www.nature.com/articles/s41597-020-00643-7); [CHIRTS-ERA5 product page](https://www.chc.ucsb.edu/data/chirts-era5)). It is still deterministic — no formal CI ships with it. The most comprehensive station-by-station validation over Africa is **Sheridan et al. (2022)** ([*Climate* 10(7):98](https://www.mdpi.com/2225-1154/10/7/98)), comparing CHIRTS, ERA5, and ERA5-Land against 8 long-record African stations. Headline numbers from that paper for daily values:
+
+- **TMAX bias: between −0.5 °C and +0.5 °C** at 7 of 8 stations (Kisumu being the outlier); ERA5 and ERA5-Land underestimate TMAX by 1 to 4.4 °C at all stations. CHIRTS-ERA5 inherits this correction.
+- **TMIN bias: typically +0.6 to +2.3 °C; +2.9 to +6.4 °C** at Kisumu / Mpika / Livingstone — CHIRTS overestimates minimum temperatures across all African sites tested. The bias appears to be systematic (low standard deviation of the daily error), inherited from the diurnal-temperature-range step in the algorithm.
+- **Verdin et al. (2020)** reports mean correlation with African station data of **0.81 (TMAX)** and **0.67 (TMIN)** for the hottest three-month period.
+- Complex-terrain edge case (**Reda et al., Upper Tekeze Basin Ethiopia**): daily RMSE 3.7 °C TMAX, 4.0 °C TMIN — meaningfully larger than the typical case.
 
 **SPEI** is derived from PTOT and TAVG (Hargreaves PET) and inherits the uncertainty of both, nonlinearly. The z-score framing makes propagated uncertainty hard to express in the same units as the index itself. Treat SPEI uncertainty qualitatively, not quantitatively.
 
 ### 12.2 Three options for representing it visually
 
-1. **Heuristic relative bands** — quick, illustrative, scientifically modest. Reasonable starting values:
-   - Moderate-gauge monthly rainfall: **± 10–15 %** of value
-   - Sparse-gauge / convective regions: **± 20–30 %** of value
-   - Extremes: larger
-2. **Multi-product spread (preferred)** — compute the spread across independent products (CHIRPS, TAMSAT, IMERG, ERA5, MSWEP for precipitation; ERA5, MERRA-2, CHIRTS-ERA5 for temperature) and visualise the inter-product range as the uncertainty ribbon. This is the most scientifically defensible option because it reflects actual disagreement between observational systems rather than a heuristic. The cost is pipeline-side: we need the other products downloaded, regridded to the Atlas grid, and aggregated to the same admin polygons.
-3. **Simple absolute bands** — useful where the per-value-relative heuristic feels off. Indicative for monthly precipitation:
-   - < 50 mm/month → ± 10 mm
-   - 50–150 mm/month → ± 20 mm
-   - > 150 mm/month → ± 40 mm
+1. **Heuristic bands** — quick, illustrative, scientifically modest. Defensible Phase 1 defaults, anchored to the literature in §12.1:
+   - **PTOT (CHIRPS v3)** — annual or seasonal: **± 10 %** of value. Defensible because country-scale annual PBIAS in published validations is consistently below 10 % over African regions with moderate gauge density (Dinku et al. 2018; Cattani et al. 2022; various national studies). Larger band in sparse-gauge or convective regions noted as a caveat rather than tightening per-pixel.
+   - **TMAX (CHIRTS-ERA5)** — monthly / seasonal / annual mean: **± 0.5 °C**. Matches the Sheridan et al. (2022) daily-bias range at 7 of 8 African stations and is consistent with Verdin et al.'s validation correlations. Note: the systematic nature of the bias means it does *not* average down with aggregation.
+   - **TAVG (CHIRTS-ERA5)** — monthly / seasonal / annual mean: **± 0.5 °C**. If TAVG is computed as (TMAX + TMIN)/2, partial cancellation can occur, but the TMIN positive bias dominates the average in low-altitude African sites. The same ± 0.5 °C is defensible as a Phase 1 default with a caveat.
+   - **TMIN (CHIRTS-ERA5)** — monthly / seasonal / annual mean: **± 1.0 °C**. Strictly conservative relative to Sheridan et al. (2022) at well-gauged sites (typical bias 0.6–2.3 °C) but consistent with the "moderate-gauge" expectation. Add an explicit caveat: *"At some African sites (notably near large water bodies or in lowland tropical zones), CHIRTS-ERA5 has shown systematic warm biases of 3 °C or more in TMIN; the band shown is a continental moderate-gauge default."*
+   - **SPEI-3 / SPEI-12** — band **suppressed**; show disclaimer text only. Z-score propagated uncertainty has no defensible single-number representation.
+2. **Multi-product spread (preferred upgrade path)** — compute the spread across independent products and visualise the inter-product range as the uncertainty ribbon. For precipitation: CHIRPS v3, TAMSAT v3, IMERG-Final, ERA5, MSWEP v2.8. For temperature: CHIRTS-ERA5, ERA5, ERA5-Land, MERRA-2 (with the explicit caveat that the ERA5 cool bias is correlated across the family). This is more scientifically defensible than the heuristic because it reflects actual disagreement between observational systems rather than a textbook value. The cost is pipeline-side: other products need to be downloaded, regridded to the Atlas grid, and aggregated to the same admin polygons.
+3. **Simple absolute bands** — useful where the per-value-relative heuristic feels off. Indicative ranges for monthly precipitation values are < 50 mm → ± 10 mm; 50–150 mm → ± 20 mm; > 150 mm → ± 40 mm.
 
-For aggregation to seasonal / annual, errors are not fully independent across months (regional / seasonal biases persist), so the naive √n scaling under-states real uncertainty. A defensible Phase 1 default: hold the relative heuristic constant across aggregation periods (i.e. ± 10 % whether monthly, seasonal, or annual) rather than scaling it down — over-conservative, but truthful given the limited evidence.
+**On aggregation**: errors are not fully independent across months (regional / seasonal biases persist), so naive √n scaling under-states real uncertainty. For temperature in particular, the Sheridan et al. (2022) result shows the bias is *systematic* (low standard deviation across days at a given site), meaning it persists more or less unchanged into seasonal and annual means. Therefore: **hold the heuristic band constant across aggregation periods** (i.e. ± 10 % whether monthly, seasonal, or annual for PTOT; ± 0.5 °C for TMAX/TAVG across all periods; ± 1.0 °C for TMIN across all periods) — over-conservative for the noise component, honest for the systematic component.
 
 ### 12.3 What to avoid
 
@@ -184,7 +188,7 @@ For aggregation to seasonal / annual, errors are not fully independent across mo
 
 For the methods callout under the Recent Changes section:
 
-> Rainfall estimates are derived from satellite–gauge blended products (CHIRPS v3) and contain observational uncertainty, particularly in regions with sparse station coverage or during extreme events. Temperature estimates (CHIRTS-ERA5) have better-characterised error but are also deterministic; no formal uncertainty layer ships with either product. The indicative band shown around each year's value is a heuristic, not a statistical confidence interval. The statistical CI on the trend slope represents sampling uncertainty in the slope **given the observed values** — it does not include the underlying observational uncertainty in those values.
+> Rainfall estimates (CHIRPS v3) and temperature estimates (CHIRTS-ERA5) are deterministic satellite–gauge blended products; no formal uncertainty layer ships with either. The indicative bands shown around each year's value are heuristics anchored to published African validation studies — **PTOT ± 10 %** (Dinku et al. 2018; Cattani et al. 2022, country-scale annual PBIAS typically < 10 %), **TMAX / TAVG ± 0.5 °C** and **TMIN ± 1.0 °C** (Sheridan et al. 2022; daily-bias range across 8 diverse African stations). These are *not* statistical confidence intervals, and observational error in these products varies by region, season, and gauge density. CHIRTS-ERA5 has shown larger systematic warm biases in TMIN (up to several °C) at some lowland and lakeside African sites; the heuristic shown is a moderate-gauge continental default. The statistical CI on the trend slope reflects sampling uncertainty given the observed values; it does not include this observational uncertainty.
 
 ### 12.5 Implications for the trend layer
 
@@ -206,6 +210,18 @@ When multi-product spread is later available (§12.2 option 2), the right move i
 - Yue & Wang (2004) MK modified by effective sample size — *Water Resources Management*
 - Hawkins warming stripes — https://en.wikipedia.org/wiki/Warming_stripes  /  https://climatelabbook.substack.com/p/warming-stripes
 - GISS LOWESS smoothing convention — https://data.giss.nasa.gov/gistemp/graphs_v4/
+
+### CHIRPS / CHIRTS validation literature (anchors for the §12 heuristic bands)
+
+- **CHIRPS v3 product page** (Climate Hazards Center, UCSB) — https://www.chc.ucsb.edu/data/chirps3
+- **CHIRPS v3 expert guide** (UCAR Climate Data Guide) — https://climatedataguide.ucar.edu/climate-data/chirps-climate-hazards-infrared-precipitation-station-data-version-3 *(quote on uncertainty handling; describes the gauge-undercatch correction new in v3)*
+- **Funk et al. (2015)** *Scientific Data* 2:150066 — original CHIRPS algorithm paper — https://www.nature.com/articles/sdata201566
+- **Dinku, Funk, Peterson et al. (2018)** *QJRMS* 144:292–312 — CHIRPS validation over eastern Africa (~1,200 gauges) — https://rmets.onlinelibrary.wiley.com/doi/10.1002/qj.3244
+- **Cattani et al. (2022)** *J. Hydrometeorology* 23:259–278 — validation of satellite rainfall (IMERG, TMPA, CHIRPS, MSWEP) over equatorial East Africa; biases up to 9 % at monthly/annual — https://journals.ametsoc.org/view/journals/hydr/23/2/JHM-D-21-0145.1.xml
+- **CHIRTS-ERA5 product page** (Climate Hazards Center, UCSB) — https://www.chc.ucsb.edu/data/chirts-era5
+- **Verdin et al. (2020)** *Scientific Data* 7:303 — CHIRTS-daily development + validation; African correlations 0.81 (TMAX) / 0.67 (TMIN) for hot 3-month period — https://www.nature.com/articles/s41597-020-00643-7
+- **Funk et al. (2019)** *J. Climate* 32:5639–5658 — CHIRTSmax climatology — https://journals.ametsoc.org/view/journals/clim/32/17/jcli-d-18-0698.1.xml
+- **Sheridan, Pope, Nimusiima & Bah (2022)** *Climate* 10(7):98 — CHIRTS evaluation at 8 diverse African sites (Niger, Ghana, Kenya, Tanzania, Zambia) — TMAX bias ± 0.5 °C at 7/8 sites; TMIN systematic warm bias 0.6–6.4 °C — https://www.mdpi.com/2225-1154/10/7/98
 
 ## Appendix B — pipeline implications
 
