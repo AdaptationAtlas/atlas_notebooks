@@ -2078,25 +2078,102 @@ recentChanges_obs = {
 
   // chartDownloadMenu handles PNG / SVG / CSV exports. Wrap chart +
   // legend together so the download button sits below the legend
-  // (issue #5 part a, Pete 2026-05-21). Declared AFTER `legend` to
-  // avoid the TDZ ReferenceError Pete hit 2026-05-22.
-  //
-  // TODO: include the legend in the PNG export too (issue #5 part c).
-  // The earlier pngOverride approach (elementToPngBlob via
-  // foreignObject) failed silently in some browsers — the nested SVG
-  // inside an XHTML foreignObject inside an SVG envelope appears to
-  // taint the canvas, so canvas.toBlob returned null. Reverted to the
-  // default chart-SVG-only PNG so the button keeps working; PNG-with-
-  // legend revisit needs a different approach (probably rebuild the
-  // legend as inline SVG marks via Plot.legend or hand-build a
-  // composite canvas pipeline that rasterises each layer separately).
+  // (issue #5 part a). Composite PNG export rasterises the chart SVG
+  // via the proven SVG → Image path, then rasterises the legend HTML
+  // separately via foreignObject, then stacks them vertically on a
+  // single canvas (issue #5 part c). The legend step is in a try/catch
+  // so the button still works even if foreignObject silently taints
+  // the canvas in some browser — falls back to chart-only PNG.
   const chartAndLegend = html`<div style="background:#fff; display:block;"></div>`;
   chartAndLegend.appendChild(chart);
   if (legend) chartAndLegend.appendChild(legend);
+
+  const compositeChartLegendPng = async () => {
+    const dpr = 2;
+    const loadImg = (url) => new Promise((res, rej) => {
+      const im = new Image();
+      im.onload  = () => res(im);
+      im.onerror = (e) => rej(new Error("image load failed"));
+      im.src = url;
+    });
+
+    // Layer 1 — chart SVG. Plot.plot returns a self-contained SVG;
+    // serialize it standalone and rasterise via Image.
+    const chartSvgString = new XMLSerializer().serializeToString(chart);
+    const chartBlob = new Blob([chartSvgString], { type: "image/svg+xml;charset=utf-8" });
+    const chartUrl = URL.createObjectURL(chartBlob);
+    const chartRect = chart.getBoundingClientRect();
+    const chartW = Math.max(1, Math.ceil(chartRect.width));
+    const chartH = Math.max(1, Math.ceil(chartRect.height));
+
+    // Layer 2 — legend HTML (skip when no legend items rendered).
+    // Wrap in foreignObject envelope so Image can rasterise the live
+    // HTML node. Catches taint / parse errors so the button still
+    // works in the chart-only fallback path.
+    let legendUrl = null;
+    let legendW = 0, legendH = 0;
+    if (legend && typeof legend.getBoundingClientRect === "function") {
+      try {
+        const lRect = legend.getBoundingClientRect();
+        legendW = Math.max(1, Math.ceil(lRect.width));
+        legendH = Math.max(1, Math.ceil(lRect.height));
+        const lClone = legend.cloneNode(true);
+        const xhtml = document.createElement("div");
+        xhtml.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+        xhtml.style.background = "#ffffff";
+        xhtml.appendChild(lClone);
+        const fo = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+        fo.setAttribute("x", "0"); fo.setAttribute("y", "0");
+        fo.setAttribute("width", String(legendW));
+        fo.setAttribute("height", String(legendH));
+        fo.appendChild(xhtml);
+        const svgEnv = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svgEnv.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        svgEnv.setAttribute("width", String(legendW));
+        svgEnv.setAttribute("height", String(legendH));
+        svgEnv.appendChild(fo);
+        const lXml = new XMLSerializer().serializeToString(svgEnv);
+        const lBlob = new Blob([lXml], { type: "image/svg+xml;charset=utf-8" });
+        legendUrl = URL.createObjectURL(lBlob);
+      } catch (e) {
+        console.warn("Composite PNG: legend rasterise prep failed, exporting chart only:", e);
+        legendUrl = null;
+      }
+    }
+
+    // Load images. Legend may fail at decode time → fall back to chart-only.
+    const chartImg = await loadImg(chartUrl);
+    let legendImg = null;
+    if (legendUrl) {
+      try { legendImg = await loadImg(legendUrl); }
+      catch (e) { console.warn("Composite PNG: legend image decode failed, exporting chart only:", e); legendImg = null; }
+    }
+
+    // Composite onto a single canvas.
+    const compW = Math.max(chartW, legendW);
+    const compH = chartH + (legendImg ? legendH : 0);
+    const canvas = document.createElement("canvas");
+    canvas.width  = compW * dpr;
+    canvas.height = compH * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(chartImg, 0, 0, chartW * dpr, chartH * dpr);
+    if (legendImg) ctx.drawImage(legendImg, 0, chartH * dpr, legendW * dpr, legendH * dpr);
+
+    URL.revokeObjectURL(chartUrl);
+    if (legendUrl) URL.revokeObjectURL(legendUrl);
+
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob((b) => b ? resolve(b) : reject(new Error("canvas.toBlob returned null (canvas tainted?)")), "image/png");
+    });
+  };
+
   const chartAndLegendWithDownload = chartDownloadMenu(chartAndLegend, {
     filename,
     data: observed_obs,
     csvColumns: ["adminName", "year", "month", "value_mean", "value_plot", "z", "cls"],
+    pngOverride: compositeChartLegendPng,
   });
 
   // Fetch-time status header, mirroring the map's. Pete confirmed
