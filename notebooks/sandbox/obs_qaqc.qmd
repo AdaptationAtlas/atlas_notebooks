@@ -34,7 +34,8 @@ Earlier Stage 1 QAQC + COG spot-checks are archived at [`archive/obs_qaqc_full.q
 
 ```{ojs}
 //| output: false
-import { chartDownloadMenu } from "/helpers/chartDownloadMenu.ojs";
+import { chartDownloadMenu }                  from "/helpers/chartDownloadMenu.ojs";
+import { mannKendall, trendOverlayMarks }     from "/helpers/trend.ojs";
 ```
 
 ```{ojs}
@@ -146,6 +147,11 @@ viewof viewType_E = {
 }
 
 viewof anomaly_E = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: false });
+
+// Toggle the Mann-Kendall + Theil-Sen trend layer (line + 95 % CI band
+// + badge + IPCC qualifier). Defaults to ON. Independent of plot type
+// — turning off here suppresses every trend artefact at once.
+viewof showTrend_E = Inputs.toggle({ label: "Show trend layer (Mann-Kendall + Theil-Sen)", value: true });
 ```
 
 ```{ojs}
@@ -195,6 +201,12 @@ seasonLastMonth = ({
 ```
 
 ## Timeseries
+
+::: {.callout-note collapse="true"}
+## How to read the trend layer
+
+Trends are computed over the full observational record (CHIRPS v3 from 1981; CHIRTS-ERA5 from 1983) using the **Mann-Kendall** test with the **Theil-Sen** slope estimator. Trend-free pre-whitening (Yue et al. 2002) is applied where the lag-1 autocorrelation of the detrended series exceeds 0.1 — the badge notes when this kicks in. Anomalies use the **WMO 1991-2020** standard climatological normal as the baseline. Statistical significance is reported at the **5 % level**. Confidence statements follow IPCC AR6 calibrated language: *high confidence* = significant trend; trends that are not significant are reported explicitly — on a ~45-year record, internal variability can mask modest forced changes, particularly for precipitation. SPEI variables suppress the slope-per-decade number (z-score-per-decade has no physical meaning); a dry-month-frequency view is forthcoming (Phase 2). The difference between two adjacent 30-year normals is *not* a trend — the windows overlap by 20 years; report the slope over the full record instead.
+:::
 
 ```{ojs}
 //| output: false
@@ -328,10 +340,32 @@ recentChanges_E = {
     : baseline_E.mean;
 
   const meanForBands = useAnomaly_E ? 0 : baseline_E.mean;
-  const bands = (!isSPEI_E && baseline_E.sd > 0) ? [
-    { y1: meanForBands - 2 * baseline_E.sd, y2: meanForBands + 2 * baseline_E.sd, fill: "rgba(70,130,180,0.10)" },
-    { y1: meanForBands - baseline_E.sd,     y2: meanForBands + baseline_E.sd,     fill: "rgba(70,130,180,0.18)" },
-  ] : [];
+  // Hazard-gradient background bands. Inside ±1σ stays unshaded (the
+  // "normal" zone needs no visual flag). 1σ–2σ tinted with the same
+  // amber as the "unusual" dot/bar colour. >2σ tinted with a slightly
+  // more saturated red matching "extreme". Both halves (above + below
+  // baseline) get matching bands. Extreme bands cap at max(±3σ, data
+  // extent) so they don't extend to infinity when Plot auto-fits y.
+  const _bandUnusual = "rgba(244, 162, 97, 0.10)";  // matches extremeColour_E.unusual at low alpha
+  const _bandExtreme = "rgba(225,  87, 89, 0.14)";  // matches extremeColour_E.extreme at slightly higher alpha
+  let bands = [];
+  if (!isSPEI_E && baseline_E.sd > 0) {
+    const dataYMin = d3.min(observed_E, (d) => d.value_plot);
+    const dataYMax = d3.max(observed_E, (d) => d.value_plot);
+    const topCap    = Math.max(dataYMax, meanForBands + 3 * baseline_E.sd);
+    const bottomCap = Math.min(dataYMin, meanForBands - 3 * baseline_E.sd);
+    bands = [
+      // Outer "extreme" zone, above baseline
+      { y1: meanForBands + 2 * baseline_E.sd, y2: topCap, fill: _bandExtreme },
+      // Outer "extreme" zone, below baseline
+      { y1: bottomCap, y2: meanForBands - 2 * baseline_E.sd, fill: _bandExtreme },
+      // Inner "unusual" zone (1σ–2σ), above baseline
+      { y1: meanForBands + baseline_E.sd, y2: meanForBands + 2 * baseline_E.sd, fill: _bandUnusual },
+      // Inner "unusual" zone (1σ–2σ), below baseline
+      { y1: meanForBands - 2 * baseline_E.sd, y2: meanForBands - baseline_E.sd, fill: _bandUnusual },
+      // ±1σ inside zone deliberately left unshaded.
+    ];
+  }
 
   const speiLines = isSPEI_E ? [
     { y: -2,   stroke: "#e15759" },
@@ -390,6 +424,13 @@ recentChanges_E = {
     ];
   } else if (plotType_E === "bars") {
     marks = [
+      ...bands.map((b) =>
+        Plot.rect([b], {
+          x1: d3.min(observed_E, (d) => d[xField]),
+          x2: d3.max(observed_E, (d) => d[xField]),
+          y1: "y1", y2: "y2", fill: "fill",
+        })
+      ),
       Plot.ruleY([barBaseline], { stroke: "#4682b4", strokeDasharray: "3,2" }),
       barMark,
     ];
@@ -422,6 +463,36 @@ recentChanges_E = {
     ];
   }
 
+  // Trend layer (Mann-Kendall + Theil-Sen). Skipped entirely when
+  // the user has toggled the trend layer off. When on, computed once
+  // on the current observed_E series regardless of plot type. The
+  // OVERLAY (line + CI band) only renders for plot types where it
+  // makes visual sense — see trendMarks below. The BADGE + IPCC
+  // qualifier always render so the headline number is visible even
+  // on the stripes-only or bars-only views.
+  const trendStats = (!showTrend_E || isSPEI_E)
+    ? null  // off, or SPEI (slope-per-decade meaningless — badge handled separately)
+    : mannKendall(observed_E.map((d) => d.value_plot), {
+        xValues: observed_E.map((d) => Number(d.year)),
+      });
+
+  // Overlay (line + CI band) only on plot types where the trend line
+  // reads naturally alongside the data. Stripes alone = the trend IS
+  // the stripe colour gradient, so a line on top is redundant.
+  const trendStroke = variable_E === "PTOT" ? "#1f5fa0" : "#b21010";
+  const trendMarks = (showTrend_E && !isSPEI_E && trendStats && !trendStats.error &&
+                      (plotType_E === "line" || plotType_E === "line+stripes" || plotType_E === "bars"))
+    ? trendOverlayMarks(observed_E, {
+        xField: "year",
+        yField: "value_plot",
+        showCI: true,
+        ciOpacity: 0.15,
+        trendStroke,
+        trendStrokeWidth: 1.5,
+        trendStrokeDasharray: "4 3",
+      })
+    : [];
+
   const chart = Plot.plot({
     width: 1200,
     height: 380,
@@ -431,8 +502,69 @@ recentChanges_E = {
     style: { color: "#333", background: "#fff" },
     x: { label: "Year", tickFormat: (d) => `${Math.floor(d)}` },
     y: { label: yLabel, grid: true, nice: true },
-    marks,
+    marks: [...marks, ...trendMarks],
   });
+
+  // Trend badge above the chart + IPCC-style confidence qualifier
+  // below. SPEI gets a distinct treatment per the dispatch (slope-
+  // per-decade suppressed because z-score-per-decade is meaningless;
+  // dry-month-frequency reframe is Phase 2).
+  const trendDisplayUnit = variable_E === "PTOT"
+    ? (viewType_E === "monthly" ? "mm/month" : "mm")
+    : "°C";
+  const fmtSlope = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2));
+  const fmtP = (p) => p < 0.001 ? "< 0.001" : p < 0.01 ? "< 0.01" : `= ${p.toFixed(2)}`;
+  const yearSpan = (trendStats && !trendStats.error)
+    ? `${trendStats.xStart}–${trendStats.xEnd}`
+    : `${d3.min(observed_E, d => d.year)}–${d3.max(observed_E, d => d.year)}`;
+  // Region label local to this cell — renderLabel in the map cell is
+  // out of scope here.
+  const chartRegionLabel =
+    admin1_names.length === 0 ? country.name :
+    admin1_names.length === 1 ? `${admin1_names[0]}, ${country.name}` :
+    `${country.name} (${admin1_names.length} admin1s)`;
+
+  let trendBadge, ipccQualifier;
+  if (!showTrend_E) {
+    // Trend layer turned off — no badge, no qualifier.
+    trendBadge = "";
+    ipccQualifier = "";
+  } else if (isSPEI_E) {
+    // SPEI: skip slope-per-decade; report MK p only + deferral note.
+    const speiStats = mannKendall(observed_E.map((d) => d.value_plot), {
+      xValues: observed_E.map((d) => Number(d.year)),
+    });
+    if (speiStats && !speiStats.error) {
+      trendBadge = html`<div style="font-size: 0.9em; padding: 6px 10px; background: #f6f6f6; border-left: 3px solid #888; margin-bottom: 6px;">
+        <strong>${variable_E} trend:</strong> Mann-Kendall p ${fmtP(speiStats.pValue)} · n = ${speiStats.n} years (${yearSpan})${speiStats.usedTFPW ? " · TFPW applied" : ""}.
+        <em>For SPEI trend interpretation see the dry-month-frequency view (forthcoming Phase 2).</em>
+      </div>`;
+    } else {
+      trendBadge = html`<div style="font-size: 0.9em; color: #999; margin-bottom: 6px;">Insufficient data for trend test (need ≥ 20 years).</div>`;
+    }
+    ipccQualifier = ""; // SPEI confidence qualifier deferred per dispatch
+  } else if (!trendStats || trendStats.error) {
+    trendBadge = html`<div style="font-size: 0.9em; color: #999; margin-bottom: 6px;">Insufficient data for trend test (${trendStats?.error ?? "no data"}).</div>`;
+    ipccQualifier = "";
+  } else if (trendStats.significant5pct) {
+    trendBadge = html`<div style="font-size: 0.95em; padding: 8px 12px; background: #f6f6f6; border-left: 3px solid ${trendStroke}; margin-bottom: 6px;">
+      <strong>Trend:</strong> ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade
+      · 95 % CI ${fmtSlope(trendStats.slopeLower95 * 10)} to ${fmtSlope(trendStats.slopeUpper95 * 10)}
+      · MK p ${fmtP(trendStats.pValue)}
+      · n = ${trendStats.n} years (${yearSpan})${trendStats.usedTFPW ? " · TFPW applied" : ""}
+    </div>`;
+    ipccQualifier = html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
+      <em>High confidence</em> that ${variable_E} has ${trendStats.slope > 0 ? "increased" : "decreased"} over ${chartRegionLabel} during ${yearSpan} (Theil-Sen ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade, MK p ${fmtP(trendStats.pValue)}).
+    </div>`;
+  } else {
+    trendBadge = html`<div style="font-size: 0.95em; padding: 8px 12px; background: #fafafa; border-left: 3px solid #999; margin-bottom: 6px;">
+      <strong>Trend:</strong> no significant change at 5 % (MK p ${fmtP(trendStats.pValue)} · n = ${trendStats.n} years, ${yearSpan})${trendStats.usedTFPW ? " · TFPW applied" : ""}.
+      At this scale, observed inter-annual variability dominates the record; a forced trend cannot yet be resolved.
+    </div>`;
+    ipccQualifier = html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
+      <em>Insufficient evidence</em> to detect a trend in ${variable_E} over ${chartRegionLabel} during ${yearSpan} at the 5 % level (MK p ${fmtP(trendStats.pValue)}).
+    </div>`;
+  }
 
   // Hand off to the shared chartDownloadMenu helper — split-button
   // sits below the chart with PNG (default) + SVG + CSV in the
@@ -444,11 +576,105 @@ recentChanges_E = {
       : country.iso3;
   const filename = `obs_chart_${country.iso3}_${regionToken}_${variable_E}_${season_E}_${viewType_E}`
     .split(" ").join("_");
-  return chartDownloadMenu(chart, {
+  const chartWithDownload = chartDownloadMenu(chart, {
     filename,
     data: observed_E,
     csvColumns: ["year", "month", "value_mean", "value_plot", "z", "cls"],
   });
+
+  // Adaptive legend — only surfaces elements actually present in the
+  // current view. Lives below the chart so it acts as a key after the
+  // user has seen what's plotted.
+  const legendItems = [];
+  const isStripesOnly = plotType_E === "stripes";
+  const showsBars       = isSPEI_E || plotType_E === "bars";
+  const showsLineDots   = !isSPEI_E && (plotType_E === "line" || plotType_E === "line+stripes");
+  const showsStripes    = !isSPEI_E && (plotType_E === "stripes" || plotType_E === "line+stripes");
+  const showsBands      = !isSPEI_E && (plotType_E === "line" || plotType_E === "bars") && baseline_E.sd > 0;
+  const showsBaselineRule = !isSPEI_E && !isStripesOnly;
+  const showsTrendOverlay = showTrend_E && !isSPEI_E && trendStats && !trendStats.error &&
+                            (plotType_E === "line" || plotType_E === "line+stripes" || plotType_E === "bars");
+
+  // Classification swatch shape matches the chart mark — circles for
+  // dot-based plots (Line / Line+stripes), squares for bar-based
+  // plots (Bars / SPEI bars). Pete flagged that squares-for-dots
+  // confused the reading.
+  const classKind = showsLineDots ? "dot" : "fill";
+  if (showsBars || showsLineDots) {
+    if (isSPEI_E) {
+      // SPEI uses WMO categorical thresholds on its standardised scale —
+      // 1.0 / 1.5 / 2.0 are moderate / severe / extreme, NOT 1σ / 2σ
+      // of a z-score. Keep the SPEI-specific vocabulary.
+      legendItems.push({ kind: classKind, color: extremeColour_E.normal,  label: "normal (|SPEI| < 1)" });
+      legendItems.push({ kind: classKind, color: extremeColour_E.unusual, label: "unusual (1 ≤ |SPEI| < 1.5)" });
+      legendItems.push({ kind: classKind, color: extremeColour_E.extreme, label: "extreme (|SPEI| ≥ 1.5)" });
+    } else {
+      // σ-based labels match the ±σ bands in the same chart — same
+      // quantity, same vocabulary.
+      legendItems.push({ kind: classKind, color: extremeColour_E.normal,  label: "normal (|departure| < 1σ)" });
+      legendItems.push({ kind: classKind, color: extremeColour_E.unusual, label: "unusual (1σ ≤ |departure| < 2σ)" });
+      legendItems.push({ kind: classKind, color: extremeColour_E.extreme, label: "extreme (|departure| ≥ 2σ)" });
+    }
+  }
+  if (showsBands) {
+    // Band swatches use the SAME colours as the on-chart hazard bands
+    // (amber unusual, red extreme) so legend ↔ chart are visually
+    // self-evident. Inside ±1σ has no band (and no legend entry).
+    legendItems.push({ kind: "band", color: _bandUnusual, label: "unusual zone shading (1σ–2σ)" });
+    legendItems.push({ kind: "band", color: _bandExtreme, label: "extreme zone shading (>2σ)" });
+  }
+  if (showsBaselineRule) {
+    legendItems.push({ kind: "rule", color: "#4682b4", dasharray: "3 2", label: "1991-2020 baseline mean" });
+  }
+  if (isSPEI_E) {
+    legendItems.push({ kind: "rule", color: "#e15759", dasharray: "2 3", label: "WMO SPEI thresholds (±1, ±1.5, ±2)" });
+  }
+  if (showsStripes) {
+    const colors = variable_E === "PTOT"
+      ? ["#8c510a", "#f5f5f5", "#01665e"]  // BrBG endpoints
+      : ["#2166ac", "#f5f5f5", "#b2182b"]; // RdBu endpoints
+    legendItems.push({
+      kind: "gradient",
+      colors,
+      label: variable_E === "PTOT" ? "dry ← anomaly vs baseline → wet" : "cool ← anomaly vs baseline → warm",
+    });
+  }
+  if (showsTrendOverlay) {
+    legendItems.push({ kind: "rule", color: trendStroke, dasharray: "4 3", label: "Theil-Sen trend line" });
+    legendItems.push({ kind: "band", color: trendStroke, opacity: 0.15, label: "95 % CI (slope envelope)" });
+  }
+
+  const swatchOf = (item) => {
+    if (item.kind === "fill") {
+      return html`<span style="display:inline-block; width:14px; height:14px; background:${item.color}; border:1px solid #999; border-radius:2px;"></span>`;
+    }
+    if (item.kind === "dot") {
+      return html`<svg width="14" height="14" style="display:inline-block; vertical-align:middle;">
+        <circle cx="7" cy="7" r="4.5" fill="${item.color}" stroke="#666" stroke-width="0.8"/>
+      </svg>`;
+    }
+    if (item.kind === "rule") {
+      return html`<svg width="22" height="6" style="display:inline-block; vertical-align:middle;">
+        <line x1="1" y1="3" x2="21" y2="3" stroke="${item.color}" stroke-width="2" stroke-dasharray="${item.dasharray || ""}"/>
+      </svg>`;
+    }
+    if (item.kind === "band") {
+      return html`<span style="display:inline-block; width:22px; height:10px; background:${item.color}; opacity:${item.opacity == null ? 1 : item.opacity}; border:1px solid #ddd;"></span>`;
+    }
+    if (item.kind === "gradient") {
+      return html`<span style="display:inline-block; width:54px; height:12px; background:linear-gradient(to right, ${item.colors.join(", ")}); border:1px solid #999;"></span>`;
+    }
+    return "";
+  };
+
+  const legend = legendItems.length === 0 ? "" : html`<div style="display:flex; flex-wrap:wrap; gap:10px 18px; font-size:0.82em; line-height:1.3; color:#444; padding:8px 12px; border-top:1px solid #eee; margin-top:6px;">
+    ${legendItems.map((item) => html`<span style="display:inline-flex; align-items:flex-start; gap:6px; max-width:260px;">
+      <span style="flex-shrink:0; display:inline-flex; align-items:center; height:1.3em;">${swatchOf(item)}</span>
+      <span style="white-space:normal; word-break:normal; overflow-wrap:break-word;">${item.label}</span>
+    </span>`)}
+  </div>`;
+
+  return html`<div>${trendBadge}${chartWithDownload}${legend}${ipccQualifier}</div>`;
 }
 
 recentChanges_caption_E = {
@@ -465,7 +691,7 @@ recentChanges_caption_E = {
     ? `SPEI is the ${variable_E.replace("SPEI-","").replace(/^0+/, "")}-month accumulation ending in month ${speiMonth}. Reference lines: ±1 moderate, ±1.5 severe, ±2 extreme (WMO).`
     : "";
   return md`
-*Region: **${region}** · Variable: **${variable_E}** · Season: **${season_E}** · View: **${viewType_E}** · Plot: **${plotType_E}**${useAnomaly_E ? " · **anomaly mode**" : ""}*
+*Region: **${region}** · Variable: **${variable_E}** · Season: **${season_E}** · View: **${viewType_E}** · Plot: **${plotType_E}**${useAnomaly_E ? " · **anomaly mode**" : ""}${showTrend_E ? " · **trend layer on**" : ""}*
 
 ${baselineCopy} ${speiCopy}
   `;

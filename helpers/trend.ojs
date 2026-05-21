@@ -1,0 +1,339 @@
+/**
+ * trend.ojs
+ *
+ * Mann-Kendall trend test + Theil-Sen slope estimator, plus a
+ * Plot-marks helper for drop-in overlay onto Observable Plot charts.
+ *
+ * Methodology follows the IPCC AR6 / WMO No. 1203 conventions
+ * documented in
+ *   playbook/handovers/climateRationale/context/04_observed-trend-best-practice.md
+ *
+ * Implements:
+ *   - Theil-Sen median pairwise slope (robust to outliers, no
+ *     normality assumption)
+ *   - Mann-Kendall S-statistic with tie correction + normal-
+ *     approximation p-value
+ *   - 95 % CI on Theil-Sen via the MK S-statistic variance
+ *     (Hollander-Wolfe rank-based bounds)
+ *   - Trend-free pre-whitening (Yue et al. 2002) when |lag-1 AC|
+ *     of detrended residuals exceeds threshold
+ *
+ * Used by:
+ *   - notebooks/sandbox/obs_qaqc.qmd (Recent Changes prototype)
+ *   - eventually notebooks/climateRationale/notebook.qmd Recent
+ *     Changes timeseries cells (separate dispatch / commit)
+ */
+
+
+/**
+ * Sorted-array median. O(n log n).
+ */
+function _trend_median(arr) {
+  const s = arr.slice().sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+
+/**
+ * Lag-k autocorrelation of an array (Pearson).
+ */
+function _trend_lagAutocorr(arr, lag) {
+  const n = arr.length;
+  if (n <= lag) return 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += arr[i];
+  const mean = sum / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    const di = arr[i] - mean;
+    den += di * di;
+    if (i + lag < n) num += di * (arr[i + lag] - mean);
+  }
+  return den === 0 ? 0 : num / den;
+}
+
+
+/**
+ * Tie-group sizes used in MK variance correction. Returns an array
+ * of integers, one per group of equal values, for groups of size > 1.
+ */
+function _trend_countTies(values) {
+  const counts = new Map();
+  for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
+  return Array.from(counts.values()).filter((c) => c > 1);
+}
+
+
+/**
+ * Standard-normal CDF via Abramowitz & Stegun 7.1.26 (erf
+ * approximation). Accurate to ~1e-7 — more than enough for p-value
+ * reporting at 5 % / 1 % thresholds.
+ */
+function _trend_normCdf(x) {
+  const sign = x < 0 ? -1 : 1;
+  const a = Math.abs(x) / Math.sqrt(2);
+  const a1 =  0.254829592;
+  const a2 = -0.284496736;
+  const a3 =  1.421413741;
+  const a4 = -1.453152027;
+  const a5 =  1.061405429;
+  const p  =  0.3275911;
+  const t = 1.0 / (1.0 + p * a);
+  const y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-a * a);
+  return 0.5 * (1 + sign * y);
+}
+
+
+/**
+ * Mann-Kendall + Theil-Sen trend stats for a 1-D timeseries.
+ *
+ * @param {Array<number>} values - timeseries values in time order.
+ *                                 null / undefined / NaN are dropped
+ *                                 pairwise; the surviving x positions
+ *                                 are taken as integer indices unless
+ *                                 `xValues` is supplied.
+ * @param {object} [opts]
+ * @param {Array<number>} [opts.xValues] - explicit x positions (e.g.
+ *                                         years). Must match `values`
+ *                                         length. Defaults to
+ *                                         0, 1, 2, ..., n-1.
+ * @param {number} [opts.tfpwThreshold=0.1] - apply trend-free pre-
+ *                                            whitening when |lag-1 AC|
+ *                                            of detrended residuals
+ *                                            exceeds this threshold.
+ *                                            Set to Infinity to
+ *                                            disable.
+ * @param {number} [opts.minN=20] - minimum valid n; below this returns
+ *                                  an `error` field. 20 is the rule-
+ *                                  of-thumb floor for MK reliability
+ *                                  (memo §6).
+ * @returns {object} stats:
+ *   {
+ *     n, slope, slopePerDecade,
+ *     slopeLower95, slopeUpper95,
+ *     pValue, significant5pct,
+ *     lag1AC, usedTFPW,
+ *     intercept,            // intercept of the Theil-Sen line at x = xValues[0]
+ *     xStart, xEnd,         // first and last x used (after NA drop)
+ *     error                 // only present when n < minN
+ *   }
+ */
+function mannKendall(values, opts) {
+  const o = opts || {};
+  const tfpwThreshold = o.tfpwThreshold == null ? 0.1 : o.tfpwThreshold;
+  const minN = o.minN == null ? 20 : o.minN;
+  const xValues = o.xValues;
+
+  // 1. Clean — drop NaN / null / undefined pairwise.
+  const cleaned = [];
+  for (let i = 0; i < values.length; i++) {
+    const yi = Number(values[i]);
+    if (!isFinite(yi)) continue;
+    const xi = xValues ? Number(xValues[i]) : i;
+    if (!isFinite(xi)) continue;
+    cleaned.push({ x: xi, y: yi });
+  }
+  cleaned.sort((a, b) => a.x - b.x);
+  const n = cleaned.length;
+  if (n < minN) {
+    return { n, error: `n < ${minN} (got ${n}); trend test not reliable` };
+  }
+
+  // 2. Theil-Sen slope = median of all pairwise slopes.
+  const slopes = [];
+  for (let i = 0; i < n - 1; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const dx = cleaned[j].x - cleaned[i].x;
+      if (dx === 0) continue;
+      slopes.push((cleaned[j].y - cleaned[i].y) / dx);
+    }
+  }
+  slopes.sort((a, b) => a - b);
+  const slope = _trend_median(slopes);
+
+  // 3. Lag-1 AC on residuals from Theil-Sen line. Intercept = median
+  //    of (y - slope·x) — robust intercept matching the robust slope.
+  const intercept = _trend_median(cleaned.map((d) => d.y - slope * d.x));
+  const residuals = cleaned.map((d) => d.y - (slope * d.x + intercept));
+  const lag1AC = _trend_lagAutocorr(residuals, 1);
+
+  // 4. Trend-free pre-whitening (Yue et al. 2002) if AC exceeds threshold.
+  //    Algorithm:
+  //      (a) Compute residuals r_t = y_t - (slope·x_t + intercept).
+  //      (b) Whiten the residuals: wr_t = r_t - lag1AC · r_{t-1}, with
+  //          wr_0 = r_0.
+  //      (c) Reconstruct test series: z_t = wr_t + slope·x_t + intercept.
+  //      (d) Run MK on z.
+  //    Validated against the Python reference in
+  //      playbook/handovers/climateRationale/context/05_trend-validation-reference.py
+  //    The earlier (incorrect) formulation whitened the OBSERVED
+  //    series and added slope·Δx per step — that's not what Yue
+  //    specifies and gave the wrong p when AC was moderate-to-strong.
+  let mkY = cleaned.map((d) => d.y);
+  let usedTFPW = false;
+  if (Math.abs(lag1AC) > tfpwThreshold) {
+    const tfpwResiduals = cleaned.map((d) => d.y - (slope * d.x + intercept));
+    const whitenedResiduals = new Array(n);
+    whitenedResiduals[0] = tfpwResiduals[0];
+    for (let t = 1; t < n; t++) {
+      whitenedResiduals[t] = tfpwResiduals[t] - lag1AC * tfpwResiduals[t - 1];
+    }
+    // Re-add the deterministic Theil-Sen line so MK sees the trend
+    // through clean (whitened) noise.
+    mkY = whitenedResiduals.map((wr, i) => wr + slope * cleaned[i].x + intercept);
+    usedTFPW = true;
+  }
+
+  // 5. MK S-statistic (count concordant minus discordant pairs).
+  let S = 0;
+  for (let i = 0; i < n - 1; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const diff = mkY[j] - mkY[i];
+      if (diff > 0) S++;
+      else if (diff < 0) S--;
+    }
+  }
+
+  // Variance of S with tie correction.
+  const ties = _trend_countTies(mkY);
+  let tieSum = 0;
+  for (const t of ties) tieSum += t * (t - 1) * (2 * t + 5);
+  const varS = (n * (n - 1) * (2 * n + 5) - tieSum) / 18;
+
+  // Z statistic with continuity correction.
+  let Z;
+  if (S > 0)       Z = (S - 1) / Math.sqrt(varS);
+  else if (S < 0)  Z = (S + 1) / Math.sqrt(varS);
+  else             Z = 0;
+
+  // Two-sided p.
+  const pValue = 2 * (1 - _trend_normCdf(Math.abs(Z)));
+
+  // 6. 95 % CI on Theil-Sen via Hollander-Wolfe rank bounds.
+  const zAlpha2 = 1.959964; // z_{0.025}
+  const cAlpha = zAlpha2 * Math.sqrt(varS);
+  const N = slopes.length;
+  // Use the formulation from Hollander & Wolfe (1973) — slope ranked
+  // at (N - C_alpha)/2 (lower) and (N + C_alpha)/2 + 1 (upper).
+  const lowerIdx = Math.max(0, Math.floor((N - cAlpha) / 2));
+  const upperIdx = Math.min(N - 1, Math.floor((N + cAlpha) / 2));
+  const slopeLower95 = slopes[lowerIdx];
+  const slopeUpper95 = slopes[upperIdx];
+
+  return {
+    n,
+    slope,
+    slopePerDecade: slope * 10,
+    slopeLower95,
+    slopeUpper95,
+    pValue,
+    significant5pct: pValue < 0.05,
+    lag1AC,
+    usedTFPW,
+    intercept,
+    xStart: cleaned[0].x,
+    xEnd:   cleaned[n - 1].x,
+  };
+}
+
+
+/**
+ * Build Plot marks for a trend overlay: line + (optional) 95 % CI band.
+ * Caller spreads the returned array into `Plot.plot({ marks: [...] })`.
+ *
+ * The CI band represents *slope* uncertainty (envelope of Theil-Sen
+ * lines with slope between slopeLower95 and slopeUpper95, anchored at
+ * the midpoint of the x range). It is *not* a prediction interval.
+ *
+ * When `groupField` is supplied, the data is split per group and one
+ * trend line + band is returned per group. Groups with n < minN are
+ * silently skipped.
+ *
+ * @param {Array<object>} data
+ * @param {object} [opts]
+ * @param {string} [opts.xField="year"]
+ * @param {string} [opts.yField="value"]
+ * @param {string|null} [opts.groupField=null]
+ * @param {boolean} [opts.showCI=true]
+ * @param {number} [opts.ciOpacity=0.15]
+ * @param {string} [opts.trendStroke="currentColor"]
+ * @param {number} [opts.trendStrokeWidth=1.5]
+ * @param {string} [opts.trendStrokeDasharray="4 3"]
+ * @param {object} [opts.mkOpts] - forwarded to mannKendall()
+ * @returns {Array<Plot.Mark>}
+ */
+function trendOverlayMarks(data, opts) {
+  const o = opts || {};
+  const xField = o.xField || "year";
+  const yField = o.yField || "value";
+  const groupField = o.groupField || null;
+  const showCI = o.showCI !== false;
+  const ciOpacity = o.ciOpacity == null ? 0.15 : o.ciOpacity;
+  const trendStroke = o.trendStroke || "currentColor";
+  const trendStrokeWidth = o.trendStrokeWidth == null ? 1.5 : o.trendStrokeWidth;
+  const trendStrokeDasharray = o.trendStrokeDasharray == null ? "4 3" : o.trendStrokeDasharray;
+  const mkOpts = o.mkOpts || {};
+
+  // Group data.
+  const groups = new Map();
+  if (groupField) {
+    for (const d of data) {
+      const k = d[groupField];
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(d);
+    }
+  } else {
+    groups.set("__all__", data);
+  }
+
+  const marks = [];
+  for (const [, groupData] of groups) {
+    const sorted = groupData.slice().sort((a, b) => a[xField] - b[xField]);
+    const xs = sorted.map((d) => Number(d[xField]));
+    const ys = sorted.map((d) => Number(d[yField]));
+    const stats = mannKendall(ys, Object.assign({ xValues: xs }, mkOpts));
+    if (stats.error) continue;
+
+    const x0 = stats.xStart, x1 = stats.xEnd;
+    const xMid = (x0 + x1) / 2;
+    const yMid = stats.intercept + stats.slope * xMid;
+
+    if (showCI) {
+      // Envelope of lines through (xMid, yMid) with slope in
+      // [slopeLower95, slopeUpper95]. y1 = lower envelope, y2 = upper.
+      const band = sorted.map((d) => {
+        const x = Number(d[xField]);
+        const dx = x - xMid;
+        const yLo = yMid + stats.slopeLower95 * dx;
+        const yHi = yMid + stats.slopeUpper95 * dx;
+        return {
+          [xField]: x,
+          y1: Math.min(yLo, yHi),
+          y2: Math.max(yLo, yHi),
+        };
+      });
+      marks.push(Plot.areaY(band, {
+        x: xField,
+        y1: "y1",
+        y2: "y2",
+        fill: trendStroke,
+        fillOpacity: ciOpacity,
+      }));
+    }
+
+    const lineData = [
+      { [xField]: x0, [yField]: stats.intercept + stats.slope * x0 },
+      { [xField]: x1, [yField]: stats.intercept + stats.slope * x1 },
+    ];
+    marks.push(Plot.line(lineData, {
+      x: xField,
+      y: yField,
+      stroke: trendStroke,
+      strokeWidth: trendStrokeWidth,
+      strokeDasharray: trendStrokeDasharray,
+    }));
+  }
+
+  return marks;
+}
