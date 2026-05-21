@@ -1145,7 +1145,11 @@ Inputs.bind(
 ```
 
 ```{ojs}
-viewof anomaly_obs = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: false });
+// Defaults to ON so bar / line views read as anomalies relative to the
+// 1991-2020 WMO baseline (per Pete's 2026-05-21 review — absolute
+// values cram inter-annual variation against a non-zero baseline). SPEI
+// ignores this toggle (it's already a standardised z-score).
+viewof anomaly_obs = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: true });
 ```
 
 :::
@@ -1153,22 +1157,39 @@ viewof anomaly_obs = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", va
 ::: {.controls-row .cols-3}
 
 ```{ojs}
-// View type is meaningful only for non-SPEI variables — SPEI queries
-// always pin to a single month per year (the season's last month;
-// see seasonLastMonth) so "monthly" vs "periods" doesn't change the
-// returned rows. Greying out the selector under SPEI makes that
-// constraint visible.
-viewof viewType_obs = {
+// Monthly view checkbox. Only meaningful when the selected season is
+// "annual" (otherwise the season's 3-month window already specifies a
+// fixed month range, and "monthly" is redundant). SPEI also disables
+// — SPEI queries pin to a single month per year regardless. The
+// derived `viewType_obs` string downstream resolves to "monthly" or
+// "periods" based on this checkbox + the gating rules.
+viewof monthly_obs = {
   const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
-  return Inputs.select(
-    ["periods", "monthly"],
-    {
-      label: isSPEI ? "View type (N/A — SPEI is annual-per-season)" : "View type",
-      value: "periods",
-      format: (d) => d === "periods" ? "Annual / season" : "Monthly",
-      disabled: isSPEI,
-    }
-  );
+  const season = seasonSelect.season;
+  const enabled = season === "annual" && !isSPEI;
+  return Inputs.toggle({
+    label: enabled
+      ? "Show monthly resolution (within annual)"
+      : (isSPEI
+          ? "Monthly view (N/A — SPEI is one value per year)"
+          : "Monthly view (only available when season = Annual)"),
+    value: false,
+    disabled: !enabled,
+  });
+}
+```
+
+```{ojs}
+//| output: false
+// Derived view-type used by the data fetch + render cells. Resolves to
+// "monthly" only when the gating conditions hold AND the checkbox is on;
+// otherwise "periods" (the seasonal / annual query against the
+// admin-periods parquet).
+viewType_obs = {
+  const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
+  const season = seasonSelect.season;
+  const enabled = season === "annual" && !isSPEI;
+  return enabled && monthly_obs ? "monthly" : "periods";
 }
 ```
 
@@ -1265,75 +1286,107 @@ obsAdmin0Name = (admin0Select[0] && admin0Select[0].translation)
 
 ```{ojs}
 //| output: false
+// Per-admin1 fetch. Behaviour:
+//   0 admin1s  → national query (adm0 parquet), one group ("National").
+//   1 admin1   → admin1 query, one group.
+//   2+ admin1s → admin1 query with IN-list, N groups (facet, per Pete's
+//                multi-admin override on 2026-05-21). The deprecated
+//                country-fallback for 2+ is removed; faceting was the
+//                old production behaviour and is now restored.
+// Every returned row carries `adminName` so downstream cells can group
+// without re-deriving it.
 observed_obs_raw = {
   if (obsAdmin0Iso3 == null) return [];
   if (!obsVarCodes.includes(climateVarSelect.id)) return [];  // heat-index placeholder branch
   const gaul = mainGaul.get(obsAdmin0Iso3);
   if (gaul == null) return [];
-  // Single-admin1 selection → query at admin1. Empty OR 2+ → query at
-  // country (no admin1 filter). Map can still show multi-admin1
-  // visually; the chart deliberately doesn't try to average them.
-  const isAdmin1 = admin1Names.length === 1;
-  const adminName = isAdmin1 ? admin1Names[0] : null;
-  const baseURL = isAdmin1 ? monthlyAdm1URL : monthlyAdm0URL;
-  const periodsURL = isAdmin1 ? periodsAdm1URL : periodsAdm0URL;
+  const useAdm1 = admin1Names.length > 0;
+  const baseURL    = useAdm1 ? monthlyAdm1URL : monthlyAdm0URL;
+  const periodsURL = useAdm1 ? periodsAdm1URL : periodsAdm0URL;
   const variable = climateVarSelect.id;
   const season = seasonSelect.season;
+
+  // Build SELECT'd adminName: literal national label when no admin1,
+  // else admin1_name column. SQL-quote admin1 names defensively.
+  const adminSelect = useAdm1
+    ? "admin1_name AS adminName"
+    : `'${obsAdmin0Name.replace(/'/g, "''")}' AS adminName`;
+  const admin1Filter = useAdm1
+    ? `AND admin1_name IN (${admin1Names.map((n) => `'${n.replace(/'/g, "''")}'`).join(", ")})`
+    : "";
 
   let q;
   if (isSPEI_obs) {
     const mo = seasonLastMonth[season];
     q = `
-      SELECT year, month, value_mean
+      SELECT ${adminSelect}, year, month, value_mean
       FROM read_parquet('${baseURL}')
       WHERE iso3 = '${obsAdmin0Iso3}'
         AND gaul0_code = ${gaul}
-        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
+        ${admin1Filter}
         AND variable = '${variable}'
         AND month = ${mo}
         AND value_mean IS NOT NULL AND isfinite(value_mean)
-      ORDER BY year
+      ORDER BY adminName, year
     `;
   } else if (viewType_obs === "monthly") {
     q = `
-      SELECT year, month, value_mean
+      SELECT ${adminSelect}, year, month, value_mean
       FROM read_parquet('${baseURL}')
       WHERE iso3 = '${obsAdmin0Iso3}'
         AND gaul0_code = ${gaul}
-        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
+        ${admin1Filter}
         AND variable = '${variable}'
         AND value_mean IS NOT NULL AND isfinite(value_mean)
-      ORDER BY year, month
+      ORDER BY adminName, year, month
     `;
   } else {
     q = `
-      SELECT year, value_mean
+      SELECT ${adminSelect}, year, value_mean
       FROM read_parquet('${periodsURL}')
       WHERE iso3 = '${obsAdmin0Iso3}'
         AND gaul0_code = ${gaul}
-        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
+        ${admin1Filter}
         AND variable = '${variable}'
         AND period = '${season}'
         AND value_mean IS NOT NULL AND isfinite(value_mean)
-      ORDER BY year
+      ORDER BY adminName, year
     `;
   }
   const resp = await db.query(q);
   return Array.from(resp);
 }
 
-baseline_obs = {
-  const baseline = observed_obs_raw.filter((d) => d.year >= 1991 && d.year <= 2020);
-  if (baseline.length === 0) return { mean: 0, sd: 0, n: 0 };
-  const vals = baseline.map((d) => d.value_mean);
-  const mean = d3.mean(vals);
-  const sd = d3.deviation(vals) ?? 0;
-  return { mean, sd, n: vals.length };
+// Per-admin baseline {mean, sd, n} keyed by adminName. The 1991-2020
+// WMO normal is computed independently per admin1 so each facet's
+// hazard bands + z-scores reference the right baseline.
+baselines_obs = {
+  const byAdmin = new Map();
+  for (const row of observed_obs_raw) {
+    if (row.year < 1991 || row.year > 2020) continue;
+    if (!byAdmin.has(row.adminName)) byAdmin.set(row.adminName, []);
+    byAdmin.get(row.adminName).push(row.value_mean);
+  }
+  const result = new Map();
+  for (const [name, vals] of byAdmin) {
+    const mean = d3.mean(vals);
+    const sd = d3.deviation(vals) ?? 0;
+    result.set(name, { mean, sd, n: vals.length });
+  }
+  return result;
+}
+
+// Distinct admin names in the fetched data, preserving the order in
+// which admin1Names was selected. Drives faceting + per-admin trend.
+adminNames_obs = {
+  if (admin1Names.length === 0) return [obsAdmin0Name];
+  return [...new Set(observed_obs_raw.map((d) => d.adminName))];
 }
 
 observed_obs = observed_obs_raw.map((d) => {
-  const v = useAnomaly_obs ? d.value_mean - baseline_obs.mean : d.value_mean;
-  const z = baseline_obs.sd > 0 ? (d.value_mean - baseline_obs.mean) / baseline_obs.sd : 0;
+  const base = baselines_obs.get(d.adminName) ?? { mean: 0, sd: 0, n: 0 };
+  const v = useAnomaly_obs ? d.value_mean - base.mean : d.value_mean;
+  const z = base.sd > 0 ? (d.value_mean - base.mean) / base.sd : 0;
   let cls = "normal";
   if (isSPEI_obs) {
     const av = Math.abs(d.value_mean);
@@ -1409,12 +1462,16 @@ recentChanges_obs = {
 
   const xField = viewType_obs === "monthly" || (isSPEI_obs && viewType_obs === "monthly") ? "year_frac" : "year";
   const stripeWidth = viewType_obs === "monthly" ? 1/12 : 1;
+  const nFacets = adminNames_obs.length;
+  const isFaceted = nFacets > 1;
 
-  // Diverging colour for stripes — anomaly mapped to ±2σ of baseline.
+  // Diverging colour for stripes — anomaly mapped to ±2σ of admin's
+  // OWN baseline (per-facet, since baselines differ across admin1s).
   // RdBu (reversed) for temperature, BrBG for precipitation.
   const stripeColour = (d) => {
-    const anom = d.value_mean - baseline_obs.mean;
-    const scale = baseline_obs.sd > 0 ? baseline_obs.sd * 2 : 1;
+    const base = baselines_obs.get(d.adminName) ?? { mean: 0, sd: 1 };
+    const anom = d.value_mean - base.mean;
+    const scale = base.sd > 0 ? base.sd * 2 : 1;
     const t = Math.max(-1, Math.min(1, anom / scale));
     if (variable === "PTOT") {
       return d3.interpolateBrBG(0.5 + t * 0.5);
@@ -1423,177 +1480,271 @@ recentChanges_obs = {
   };
 
   // For bars on temperature in ABSOLUTE mode, anchor bars at the
-  // baseline mean (delta-style) so 1-2°C variation isn't crushed
-  // against a 0 baseline. PTOT bars start from 0. Anomaly mode →
-  // all bars from 0.
-  const barBaseline = useAnomaly_obs ? 0
-    : variable === "PTOT" ? 0
-    : baseline_obs.mean;
+  // ADMIN'S baseline mean (delta-style) so 1-2°C variation isn't
+  // crushed against a 0 baseline. PTOT bars start from 0. Anomaly
+  // mode → all bars from 0. Returned per-row so each facet uses
+  // its own baseline.
+  const barBaselineFor = (d) => {
+    if (useAnomaly_obs) return 0;
+    if (variable === "PTOT") return 0;
+    return (baselines_obs.get(d.adminName)?.mean) ?? 0;
+  };
 
-  const meanForBands = useAnomaly_obs ? 0 : baseline_obs.mean;
-  // Hazard-gradient background bands. Inside ±1σ stays unshaded.
-  // 1σ–2σ tinted amber (matches "unusual" colour); >2σ tinted red
-  // (matches "extreme"). Caps at max(±3σ, data extent).
-  const _bandUnusual = "rgba(244, 162, 97, 0.10)";
-  const _bandExtreme = "rgba(225,  87, 89, 0.14)";
-  let bands = [];
-  if (!isSPEI_obs && baseline_obs.sd > 0) {
-    const dataYMin = d3.min(observed_obs, (d) => d.value_plot);
-    const dataYMax = d3.max(observed_obs, (d) => d.value_plot);
-    const topCap    = Math.max(dataYMax, meanForBands + 3 * baseline_obs.sd);
-    const bottomCap = Math.min(dataYMin, meanForBands - 3 * baseline_obs.sd);
-    bands = [
-      { y1: meanForBands + 2 * baseline_obs.sd, y2: topCap, fill: _bandExtreme },
-      { y1: bottomCap, y2: meanForBands - 2 * baseline_obs.sd, fill: _bandExtreme },
-      { y1: meanForBands + baseline_obs.sd, y2: meanForBands + 2 * baseline_obs.sd, fill: _bandUnusual },
-      { y1: meanForBands - 2 * baseline_obs.sd, y2: meanForBands - baseline_obs.sd, fill: _bandUnusual },
-    ];
+  // Bumped opacities (was 0.10 / 0.14 — too faint to read against the
+  // chart background). 0.20 / 0.28 still reads as "background tint"
+  // without competing with the data layer for attention.
+  const _bandUnusual = "rgba(244, 162, 97, 0.20)";
+  const _bandExtreme = "rgba(225,  87, 89, 0.28)";
+
+  // Per-admin hazard bands. One band-row per (admin, level, sign).
+  // Plot.rect data carries adminName so the facet system routes each
+  // band to the right panel automatically when faceted; when not
+  // faceted, all rows are drawn into the single panel.
+  //
+  // Non-SPEI uses σ-based zones (1σ unusual, 2σ extreme) around the
+  // admin's baseline mean. SPEI uses fixed WMO categorical thresholds
+  // (|SPEI| = 1 unusual, 1.5 extreme) regardless of empirical sd, so
+  // bars match the categorical dot colours from extremeColour_obs.
+  const bandsData = [];
+  for (const adminName of adminNames_obs) {
+    const adminVals = observed_obs.filter((d) => d.adminName === adminName).map((d) => d.value_plot);
+    if (adminVals.length === 0) continue;
+    const dataYMin = d3.min(adminVals);
+    const dataYMax = d3.max(adminVals);
+    if (isSPEI_obs) {
+      const topCap    = Math.max(dataYMax, 2.5);
+      const bottomCap = Math.min(dataYMin, -2.5);
+      bandsData.push(
+        { adminName, y1: 1.5,        y2: topCap,    fill: _bandExtreme },
+        { adminName, y1: bottomCap,  y2: -1.5,      fill: _bandExtreme },
+        { adminName, y1: 1.0,        y2: 1.5,       fill: _bandUnusual },
+        { adminName, y1: -1.5,       y2: -1.0,      fill: _bandUnusual },
+      );
+    } else {
+      const base = baselines_obs.get(adminName);
+      if (!base || base.sd === 0) continue;
+      const mFb = useAnomaly_obs ? 0 : base.mean;
+      const topCap    = Math.max(dataYMax, mFb + 3 * base.sd);
+      const bottomCap = Math.min(dataYMin, mFb - 3 * base.sd);
+      bandsData.push(
+        { adminName, y1: mFb + 2 * base.sd, y2: topCap,                   fill: _bandExtreme },
+        { adminName, y1: bottomCap,         y2: mFb - 2 * base.sd,        fill: _bandExtreme },
+        { adminName, y1: mFb + base.sd,     y2: mFb + 2 * base.sd,        fill: _bandUnusual },
+        { adminName, y1: mFb - 2 * base.sd, y2: mFb - base.sd,            fill: _bandUnusual },
+      );
+    }
   }
 
-  const speiLines = isSPEI_obs ? [
-    { y: -2,   stroke: "#e15759" },
-    { y: -1.5, stroke: "#e15759" },
-    { y: -1,   stroke: "#f4a261" },
-    { y:  0,   stroke: "#999"    },
-    { y:  1,   stroke: "#76b7b2" },
-    { y:  1.5, stroke: "#76b7b2" },
-    { y:  2,   stroke: "#76b7b2" },
-  ] : [];
+  // SPEI reference rule lines (still drawn for context). Per admin
+  // so they sit inside each facet.
+  const speiRuleData = isSPEI_obs
+    ? adminNames_obs.flatMap((adminName) =>
+        [-2, -1.5, -1, 0, 1, 1.5, 2].map((y) => ({ adminName, y })))
+    : [];
+
+  // X-axis domain padding (issue #10) — pull the axis out by half a
+  // year (annual) / half a month (monthly) so edge bars don't get
+  // clipped at the plot border.
+  const xMinRaw = d3.min(observed_obs, (d) => d[xField]);
+  const xMaxRaw = d3.max(observed_obs, (d) => d[xField]);
+  const xPad = viewType_obs === "monthly" ? 1/24 : 0.6;
+  const xDomain = [xMinRaw - xPad, xMaxRaw + xPad];
+
+  // Per-admin baseline ruleY data. Drawn one per facet.
+  const baselineRuleData = isSPEI_obs ? [] : adminNames_obs
+    .map((adminName) => {
+      const base = baselines_obs.get(adminName);
+      if (!base) return null;
+      return { adminName, y: useAnomaly_obs ? 0 : base.mean };
+    })
+    .filter((r) => r != null);
 
   // Mark builders.
-  const stripesMark = (yMin, yMax) => Plot.rect(observed_obs, {
+  const stripesMark = Plot.rect(observed_obs, {
     x1: (d) => d[xField] - stripeWidth/2,
     x2: (d) => d[xField] + stripeWidth/2,
-    y1: yMin, y2: yMax,
+    // Per-facet yMin / yMax — fall back to global if single facet.
+    y1: (d) => d3.min(observed_obs.filter((x) => x.adminName === d.adminName), (x) => x.value_plot),
+    y2: (d) => d3.max(observed_obs.filter((x) => x.adminName === d.adminName), (x) => x.value_plot),
     fill: stripeColour,
     stroke: null,
-    channels: { year: "year", value: "value_mean" },
+    fy: isFaceted ? "adminName" : undefined,
+    channels: { admin: "adminName", year: "year", value: "value_mean" },
     tip: true,
   });
   const barMark = Plot.rect(observed_obs, {
     x1: (d) => d[xField] - stripeWidth * 0.4,
     x2: (d) => d[xField] + stripeWidth * 0.4,
-    y1: barBaseline,
+    y1: barBaselineFor,
     y2: "value_plot",
     fill: (d) => extremeColour_obs[d.cls],
     stroke: (d) => extremeColour_obs[d.cls],
-    channels: { year: "year", value: "value_mean", anomaly: "value_plot", classification: "cls" },
+    fy: isFaceted ? "adminName" : undefined,
+    channels: { admin: "adminName", year: "year", value: "value_mean", anomaly: "value_plot", classification: "cls" },
     tip: true,
   });
   const lineMarks = [
-    Plot.line(observed_obs, { x: xField, y: "value_plot", stroke: "#333", strokeWidth: 1 }),
+    Plot.line(observed_obs, {
+      x: xField, y: "value_plot", stroke: "#333",
+      strokeWidth: plotLineWidth,
+      z: isFaceted ? "adminName" : undefined,
+      fy: isFaceted ? "adminName" : undefined,
+    }),
     Plot.dot(observed_obs, {
       x: xField, y: "value_plot", r: 2.5,
       fill: (d) => extremeColour_obs[d.cls],
       stroke: (d) => extremeColour_obs[d.cls],
-      channels: { year: "year", value: "value_mean", anomaly: "value_plot", z: "z", classification: "cls" },
+      fy: isFaceted ? "adminName" : undefined,
+      channels: { admin: "adminName", year: "year", value: "value_mean", anomaly: "value_plot", z: "z", classification: "cls" },
       tip: true,
     }),
   ];
 
-  // Split into bgMarks + dataLayerMarks so the trend CI band + obs
-  // uncertainty band can interleave between them (see z-order below).
+  // Hazard-band mark (per-facet via fy if faceted). Spans the full x
+  // domain inside each facet.
+  const hazardBandMark = (bandsData.length === 0) ? null : Plot.rect(bandsData, {
+    x1: xDomain[0],
+    x2: xDomain[1],
+    y1: "y1", y2: "y2", fill: "fill",
+    fy: isFaceted ? "adminName" : undefined,
+  });
+
+  // SPEI reference lines as data-driven ruleY (per-facet via fy).
+  const speiRuleMark = speiRuleData.length === 0 ? null : Plot.ruleY(speiRuleData, {
+    y: "y",
+    stroke: (d) => Math.abs(d.y) === 0 ? "#999" : (Math.abs(d.y) >= 1.5 ? "#e15759" : (Math.abs(d.y) >= 1 ? "#f4a261" : "#76b7b2")),
+    strokeDasharray: "2,3",
+    fy: isFaceted ? "adminName" : undefined,
+  });
+
+  // Baseline mean rule (per-facet).
+  const baselineRuleMark = (baselineRuleData.length === 0 || isSPEI_obs) ? null : Plot.ruleY(baselineRuleData, {
+    y: "y",
+    stroke: "#4682b4",
+    strokeDasharray: "3,2",
+    fy: isFaceted ? "adminName" : undefined,
+  });
+
+  // Split into bgMarks + dataLayerMarks so trend CI + obs uncertainty
+  // bands can interleave between them.
   let bgMarks = [];
   let dataLayerMarks = [];
   if (isSPEI_obs) {
-    bgMarks = speiLines.map((l) => Plot.ruleY([l.y], { stroke: l.stroke, strokeDasharray: "2,3" }));
+    bgMarks = [hazardBandMark, speiRuleMark].filter((m) => m != null);
     dataLayerMarks = [
       Plot.barY(observed_obs, {
         x: xField, y: "value_plot",
         fill: (d) => extremeColour_obs[d.cls],
         stroke: (d) => extremeColour_obs[d.cls],
-        channels: { year: "year", value: "value_mean", classification: "cls" },
+        fy: isFaceted ? "adminName" : undefined,
+        channels: { admin: "adminName", year: "year", value: "value_mean", classification: "cls" },
         tip: true,
       }),
     ];
   } else if (plotType_obs === "bars") {
-    bgMarks = [
-      ...bands.map((b) =>
-        Plot.rect([b], {
-          x1: d3.min(observed_obs, (d) => d[xField]),
-          x2: d3.max(observed_obs, (d) => d[xField]),
-          y1: "y1", y2: "y2", fill: "fill",
-        })
-      ),
-      Plot.ruleY([barBaseline], { stroke: "#4682b4", strokeDasharray: "3,2" }),
-    ];
+    bgMarks = [hazardBandMark, baselineRuleMark].filter((m) => m != null);
     dataLayerMarks = [barMark];
   } else if (plotType_obs === "stripes") {
-    const yMin = d3.min(observed_obs, (d) => d.value_plot);
-    const yMax = d3.max(observed_obs, (d) => d.value_plot);
     bgMarks = [];
-    dataLayerMarks = [stripesMark(yMin, yMax)];
+    dataLayerMarks = [stripesMark];
   } else if (plotType_obs === "line+stripes") {
-    const yMin = d3.min(observed_obs, (d) => d.value_plot);
-    const yMax = d3.max(observed_obs, (d) => d.value_plot);
-    bgMarks = [
-      stripesMark(yMin, yMax),
-      Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" }),
-    ];
+    bgMarks = [stripesMark, baselineRuleMark].filter((m) => m != null);
     dataLayerMarks = lineMarks;
   } else {
-    bgMarks = [
-      ...bands.map((b) =>
-        Plot.rect([b], {
-          x1: d3.min(observed_obs, (d) => d[xField]),
-          x2: d3.max(observed_obs, (d) => d[xField]),
-          y1: "y1", y2: "y2", fill: "fill",
-        })
-      ),
-      Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" }),
-    ];
+    bgMarks = [hazardBandMark, baselineRuleMark].filter((m) => m != null);
     dataLayerMarks = lineMarks;
   }
 
-  // Trend layer (Mann-Kendall + Theil-Sen). Skipped when off or for SPEI.
-  const trendStats = (!showTrend_obs || isSPEI_obs)
-    ? null
-    : mannKendall(observed_obs.map((d) => d.value_plot), {
-        xValues: observed_obs.map((d) => Number(d.year)),
+  // Per-admin trend stats (issue #1). One mannKendall per admin so
+  // each facet's trend overlay + badge uses the right slope.
+  const trendStatsByAdmin = new Map();
+  if (showTrend_obs && !isSPEI_obs) {
+    for (const adminName of adminNames_obs) {
+      const adminData = observed_obs.filter((d) => d.adminName === adminName);
+      const ts = mannKendall(adminData.map((d) => d.value_plot), {
+        xValues: adminData.map((d) => Number(d.year)),
       });
+      trendStatsByAdmin.set(adminName, ts);
+    }
+  }
+  // Single-admin convenience reference (used by legend + filename
+  // generation below; never the badge).
+  const trendStats = trendStatsByAdmin.get(adminNames_obs[0]) ?? null;
 
-  const trendStroke = variable === "PTOT" ? "#1f5fa0" : "#b21010";
+  // Unified neutral trend colour (issue #6) — was variable-coded
+  // (PTOT blue, others red), which read as jarring when switching
+  // variables. Dark grey now, same regardless of variable.
+  const trendStroke = "#333";
   const trendMarks = (showTrend_obs && !isSPEI_obs && trendStats && !trendStats.error &&
                       (plotType_obs === "line" || plotType_obs === "line+stripes" || plotType_obs === "bars"))
     ? trendOverlayMarks(observed_obs, {
         xField: "year",
         yField: "value_plot",
+        groupField: isFaceted ? "adminName" : null,
         showCI: true,
-        ciOpacity: 0.15,
+        ciOpacity: 0.18,
         trendStroke,
-        trendStrokeWidth: 1.5,
+        trendStrokeWidth: plotLineWidth,
         trendStrokeDasharray: "4 3",
       })
     : [];
 
   // Observational-uncertainty band (heuristic; not a statistical CI).
-  // Suppressed for SPEI and for stripes-only (no data line to wrap).
+  // Suppressed for SPEI and for stripes-only. Per-admin when faceted.
   const obsBandMarks = (showObsUncertainty_obs && !isSPEI_obs && plotType_obs !== "stripes")
     ? observationalUncertaintyMarks(observed_obs, {
         xField: "year",
         yField: "value_plot",
+        groupField: isFaceted ? "adminName" : null,
         variable,
         fill: "#666",
-        fillOpacity: 0.10,
+        fillOpacity: 0.14,
       })
     : [];
 
-  // Split trendMarks into [CI band, trend line] for explicit z-order
-  // interleaving — CI band under data line, trend line on top.
-  const trendCIMarks   = trendMarks.length === 2 ? [trendMarks[0]] : [];
-  const trendLineMarks = trendMarks.length === 2 ? [trendMarks[1]] : trendMarks;
+  // Split trendMarks into [CI band(s), trend line(s)] for explicit
+  // z-order interleaving. trendOverlayMarks returns 2 marks per group
+  // when showCI:true (CI band, then line). With groupField, that's
+  // 2*N marks: alternating [areaY, line, areaY, line, …]. Split.
+  const trendCIMarks = [];
+  const trendLineMarks = [];
+  if (trendMarks.length > 0) {
+    // Even indices = CI bands, odd = lines (per trendOverlayMarks docs).
+    for (let i = 0; i < trendMarks.length; i++) {
+      if (i % 2 === 0) trendCIMarks.push(trendMarks[i]);
+      else trendLineMarks.push(trendMarks[i]);
+    }
+  }
 
+  // Wire sidebar plot controls (issue #3): plotTextSize / plotTextBold
+  // / plotLineWidth feed the chart's font + line styling.
+  const facetCount = isFaceted ? nFacets : 1;
+  const perFacetHeight = isFaceted ? 200 : 380;
   const chart = Plot.plot({
     width: 1200,
-    height: 380,
+    height: facetCount * perFacetHeight + (isFaceted ? 30 : 0),
     marginLeft: 70,
     marginBottom: 50,
     marginTop: 30,
-    style: { color: "#333", background: "#fff" },
-    x: { label: "Year", tickFormat: (d) => `${Math.floor(d)}` },
+    style: {
+      color: "#333",
+      background: "#fff",
+      fontSize: `${plotTextSize}px`,
+      fontWeight: plotTextBold ? "bold" : "normal",
+    },
+    x: {
+      label: "Year",
+      domain: xDomain,
+      tickFormat: (d) => `${Math.floor(d)}`,
+      // tickSpacing controls density at default ticks (issue #7) — for
+      // 45-year ranges we want ~9 ticks (every 5 years), and Plot's
+      // tickSpacing arg accepts pixels-per-tick which scales with width.
+      ticks: Math.ceil((xDomain[1] - xDomain[0]) / 5),
+    },
     y: { label: yLabel, grid: true, nice: true },
-    // Z-order bottom → top: bg bands + baseline rule, obs uncertainty
-    // band, trend CI band, data layer, trend line.
+    fy: isFaceted
+      ? { label: null, padding: 0.08 }
+      : undefined,
     marks: [...bgMarks, ...obsBandMarks, ...trendCIMarks, ...dataLayerMarks, ...trendLineMarks],
   });
 
@@ -1619,49 +1770,71 @@ recentChanges_obs = {
     admin1Names.length === 1 ? `${admin1Names[0]}, ${obsAdmin0Name}` :
     `${obsAdmin0Name} (${admin1Names.length} admin1s)`;
 
+  // Single-admin badge renderer. Same wording as the original, with
+  // unified trend colour (was variable-coded).
+  const renderSingleBadge = (adminName, ts) => {
+    if (!ts || ts.error) {
+      return html`<div style="font-size: 0.9em; color: #999; margin-bottom: 6px;">Insufficient data for trend test (${ts?.error ?? "no data"}).</div>`;
+    }
+    if (ts.significant5pct) {
+      return html`<div style="font-size: 0.95em; padding: 8px 12px; background: #f6f6f6; border-left: 3px solid ${trendStroke}; margin-bottom: 6px;">
+        <div>
+          <strong>${isFaceted ? `${adminName} — Trend:` : "Trend:"}</strong> ${ts.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(ts.slopePerDecade)} ${trendDisplayUnit}/decade
+          · <em>statistical</em> 95 % CI ${fmtSlope(ts.slopeLower95 * 10)} to ${fmtSlope(ts.slopeUpper95 * 10)}
+          · MK p ${fmtP(ts.pValue)}
+          · n = ${ts.n} years (${`${ts.xStart}–${ts.xEnd}`})${ts.usedTFPW ? " · TFPW applied" : ""}
+        </div>
+        ${isFaceted ? "" : html`<div style="font-size: 0.85em; color: #777; margin-top: 4px; font-style: italic;">
+          CI reflects sampling uncertainty in the slope given the observed values; it does not include observational uncertainty in the underlying ${sourceProduct} estimates.
+        </div>`}
+      </div>`;
+    }
+    return html`<div style="font-size: 0.95em; padding: 8px 12px; background: #fafafa; border-left: 3px solid #999; margin-bottom: 6px;">
+      <strong>${isFaceted ? `${adminName} — Trend:` : "Trend:"}</strong> no significant change at 5 % (MK p ${fmtP(ts.pValue)} · n = ${ts.n} years, ${`${ts.xStart}–${ts.xEnd}`})${ts.usedTFPW ? " · TFPW applied" : ""}.
+    </div>`;
+  };
+
   let trendBadge, ipccQualifier;
   if (!showTrend_obs) {
     trendBadge = "";
     ipccQualifier = "";
   } else if (isSPEI_obs) {
-    const speiStats = mannKendall(observed_obs.map((d) => d.value_plot), {
-      xValues: observed_obs.map((d) => Number(d.year)),
-    });
-    if (speiStats && !speiStats.error) {
-      trendBadge = html`<div style="font-size: 0.9em; padding: 6px 10px; background: #f6f6f6; border-left: 3px solid #888; margin-bottom: 6px;">
-        <strong>${variable} trend:</strong> Mann-Kendall p ${fmtP(speiStats.pValue)} · n = ${speiStats.n} years (${yearSpan})${speiStats.usedTFPW ? " · TFPW applied" : ""}.
-        <em>For SPEI trend interpretation see the dry-month-frequency view (forthcoming Phase 2).</em>
+    // Per-admin SPEI MK p-only badges.
+    const speiBadges = adminNames_obs.map((adminName) => {
+      const adminData = observed_obs.filter((d) => d.adminName === adminName);
+      const ts = mannKendall(adminData.map((d) => d.value_plot), {
+        xValues: adminData.map((d) => Number(d.year)),
+      });
+      if (!ts || ts.error) {
+        return html`<div style="font-size: 0.9em; color: #999; margin-bottom: 4px;">${isFaceted ? `${adminName}: ` : ""}Insufficient data for trend test (need ≥ 20 years).</div>`;
+      }
+      return html`<div style="font-size: 0.9em; padding: 6px 10px; background: #f6f6f6; border-left: 3px solid #888; margin-bottom: 4px;">
+        <strong>${isFaceted ? `${adminName} — ${variable} trend:` : `${variable} trend:`}</strong> Mann-Kendall p ${fmtP(ts.pValue)} · n = ${ts.n} years (${`${ts.xStart}–${ts.xEnd}`})${ts.usedTFPW ? " · TFPW applied" : ""}.
       </div>`;
-    } else {
-      trendBadge = html`<div style="font-size: 0.9em; color: #999; margin-bottom: 6px;">Insufficient data for trend test (need ≥ 20 years).</div>`;
-    }
+    });
+    trendBadge = html`<div>${speiBadges}${isFaceted ? "" : html`<div style="font-size: 0.85em; color: #777; margin-bottom: 6px; font-style: italic;">For SPEI trend interpretation see the dry-month-frequency view (forthcoming Phase 2).</div>`}</div>`;
     ipccQualifier = "";
-  } else if (!trendStats || trendStats.error) {
-    trendBadge = html`<div style="font-size: 0.9em; color: #999; margin-bottom: 6px;">Insufficient data for trend test (${trendStats?.error ?? "no data"}).</div>`;
-    ipccQualifier = "";
-  } else if (trendStats.significant5pct) {
-    trendBadge = html`<div style="font-size: 0.95em; padding: 8px 12px; background: #f6f6f6; border-left: 3px solid ${trendStroke}; margin-bottom: 6px;">
-      <div>
-        <strong>Trend:</strong> ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade
-        · <em>statistical</em> 95 % CI ${fmtSlope(trendStats.slopeLower95 * 10)} to ${fmtSlope(trendStats.slopeUpper95 * 10)}
-        · MK p ${fmtP(trendStats.pValue)}
-        · n = ${trendStats.n} years (${yearSpan})${trendStats.usedTFPW ? " · TFPW applied" : ""}
-      </div>
-      <div style="font-size: 0.85em; color: #777; margin-top: 4px; font-style: italic;">
-        CI reflects sampling uncertainty in the slope given the observed values; it does not include observational uncertainty in the underlying ${sourceProduct} estimates.
-      </div>
-    </div>`;
-    ipccQualifier = html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
-      <em>High confidence</em> that ${variable} has ${trendStats.slope > 0 ? "increased" : "decreased"} over ${chartRegionLabel} during ${yearSpan} (Theil-Sen ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade, MK p ${fmtP(trendStats.pValue)}).
+  } else if (isFaceted) {
+    // Multi-admin: stack one badge per admin. IPCC qualifier rolled
+    // into per-admin text to avoid a wall of repeated copy.
+    trendBadge = html`<div>${adminNames_obs.map((adminName) => renderSingleBadge(adminName, trendStatsByAdmin.get(adminName)))}</div>`;
+    ipccQualifier = html`<div style="font-size: 0.85em; color: #777; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px; font-style: italic;">
+      Trends estimated independently per admin1 (Mann-Kendall + Theil-Sen). 95 % CIs reflect sampling uncertainty given the observed values; they do not include observational uncertainty in the underlying ${sourceProduct} estimates.
     </div>`;
   } else {
-    trendBadge = html`<div style="font-size: 0.95em; padding: 8px 12px; background: #fafafa; border-left: 3px solid #999; margin-bottom: 6px;">
-      <strong>Trend:</strong> no significant change at 5 % (MK p ${fmtP(trendStats.pValue)} · n = ${trendStats.n} years, ${yearSpan})${trendStats.usedTFPW ? " · TFPW applied" : ""}.
-      At this scale, observed inter-annual variability dominates the record; a forced trend cannot yet be resolved.
-    </div>`;
-    ipccQualifier = html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
-      <em>Insufficient evidence</em> to detect a trend in ${variable} over ${chartRegionLabel} during ${yearSpan} at the 5 % level (MK p ${fmtP(trendStats.pValue)}).
-    </div>`;
+    trendBadge = renderSingleBadge(adminNames_obs[0], trendStats);
+    // IPCC calibrated-language qualifier (single-admin view only).
+    if (trendStats && !trendStats.error) {
+      ipccQualifier = trendStats.significant5pct
+        ? html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
+            <em>High confidence</em> that ${variable} has ${trendStats.slope > 0 ? "increased" : "decreased"} over ${chartRegionLabel} during ${yearSpan} (Theil-Sen ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade, MK p ${fmtP(trendStats.pValue)}).
+          </div>`
+        : html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
+            <em>Insufficient evidence</em> to detect a trend in ${variable} over ${chartRegionLabel} during ${yearSpan} at the 5 % level (MK p ${fmtP(trendStats.pValue)}).
+          </div>`;
+    } else {
+      ipccQualifier = "";
+    }
   }
 
   // chartDownloadMenu handles PNG / SVG / CSV exports.
@@ -1675,7 +1848,7 @@ recentChanges_obs = {
   const chartWithDownload = chartDownloadMenu(chart, {
     filename,
     data: observed_obs,
-    csvColumns: ["year", "month", "value_mean", "value_plot", "z", "cls"],
+    csvColumns: ["adminName", "year", "month", "value_mean", "value_plot", "z", "cls"],
   });
 
   // Adaptive legend.
@@ -1684,7 +1857,10 @@ recentChanges_obs = {
   const showsBars       = isSPEI_obs || plotType_obs === "bars";
   const showsLineDots   = !isSPEI_obs && (plotType_obs === "line" || plotType_obs === "line+stripes");
   const showsStripes    = !isSPEI_obs && (plotType_obs === "stripes" || plotType_obs === "line+stripes");
-  const showsBands      = !isSPEI_obs && (plotType_obs === "line" || plotType_obs === "bars") && baseline_obs.sd > 0;
+  // Bands now also render for SPEI (issue #8). Always show in bar /
+  // line views when a baseline exists for at least one admin.
+  const anyAdminHasBaseline = adminNames_obs.some((n) => (baselines_obs.get(n)?.sd ?? 0) > 0);
+  const showsBands      = (plotType_obs === "line" || plotType_obs === "bars") && (isSPEI_obs || anyAdminHasBaseline);
   const showsBaselineRule = !isSPEI_obs && !isStripesOnly;
   const showsTrendOverlay = showTrend_obs && !isSPEI_obs && trendStats && !trendStats.error &&
                             (plotType_obs === "line" || plotType_obs === "line+stripes" || plotType_obs === "bars");
@@ -1702,14 +1878,22 @@ recentChanges_obs = {
     }
   }
   if (showsBands) {
-    legendItems.push({ kind: "band", color: _bandUnusual, label: "unusual zone shading (1σ–2σ)" });
-    legendItems.push({ kind: "band", color: _bandExtreme, label: "extreme zone shading (>2σ)" });
+    legendItems.push({
+      kind: "band",
+      color: _bandUnusual,
+      label: isSPEI_obs ? "unusual zone shading (1 ≤ |SPEI| < 1.5)" : "unusual zone shading (1σ–2σ)",
+    });
+    legendItems.push({
+      kind: "band",
+      color: _bandExtreme,
+      label: isSPEI_obs ? "extreme zone shading (|SPEI| ≥ 1.5)" : "extreme zone shading (>2σ)",
+    });
   }
   if (showsBaselineRule) {
     legendItems.push({ kind: "rule", color: "#4682b4", dasharray: "3 2", label: "1991-2020 baseline mean" });
   }
   if (isSPEI_obs) {
-    legendItems.push({ kind: "rule", color: "#e15759", dasharray: "2 3", label: "WMO SPEI thresholds (±1, ±1.5, ±2)" });
+    legendItems.push({ kind: "rule", color: "#e15759", dasharray: "2 3", label: "WMO SPEI reference lines (±1, ±1.5, ±2)" });
   }
   if (showsStripes) {
     const colors = variable === "PTOT"
@@ -1772,11 +1956,27 @@ recentChanges_obs_caption = {
   const region = admin1Names.length === 1
     ? `${admin1Names[0]}, ${obsAdmin0Name}`
     : admin1Names.length > 1
-      ? `${obsAdmin0Name} (national — ${admin1Names.length} admin1 regions selected)`
+      ? `${obsAdmin0Name} — ${admin1Names.length} admin1 regions (faceted)`
       : `${obsAdmin0Name} (national)`;
-  const baselineCopy = baseline_obs.n > 0
-    ? `Baseline (1991-2020): μ = ${baseline_obs.mean.toFixed(2)}, σ = ${baseline_obs.sd.toFixed(2)}, n = ${baseline_obs.n} years.`
-    : `Baseline (1991-2020): insufficient data.`;
+  // Per-admin baseline summary. Single admin → one line; multi-admin →
+  // compact list. Faceted in the chart above, so listing per-admin
+  // baselines here gives the reader the numeric ground truth for each
+  // facet without crowding the chart legend.
+  let baselineCopy;
+  if (adminNames_obs.length === 1) {
+    const b = baselines_obs.get(adminNames_obs[0]);
+    baselineCopy = (b && b.n > 0)
+      ? `Baseline (1991-2020): μ = ${b.mean.toFixed(2)}, σ = ${b.sd.toFixed(2)}, n = ${b.n} years.`
+      : `Baseline (1991-2020): insufficient data.`;
+  } else {
+    const lines = adminNames_obs.map((name) => {
+      const b = baselines_obs.get(name);
+      return (b && b.n > 0)
+        ? `**${name}**: μ = ${b.mean.toFixed(2)}, σ = ${b.sd.toFixed(2)}, n = ${b.n}`
+        : `**${name}**: insufficient data`;
+    });
+    baselineCopy = `Per-admin baselines (1991-2020): ${lines.join(" · ")}.`;
+  }
   const speiCopy = isSPEI_obs
     ? `SPEI is the ${variable.replace("SPEI-","").replace(/^0+/, "")}-month accumulation ending in month ${speiMonth}. Reference lines: ±1 moderate, ±1.5 severe, ±2 extreme (WMO).`
     : "";
@@ -1802,7 +2002,7 @@ ${baselineCopy} ${speiCopy}${multiCountryNote}
   // from already-fetched data — they must NOT trip the loader, or
   // they race with the render cell and the spinner clobbers the
   // rendered viz (see feedback_loader-render-race memory).
-  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect, viewType_obs, plotType_obs, anomaly_obs];
+  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect, monthly_obs, plotType_obs, anomaly_obs];
   const div = document.getElementById("recent-changes-plot");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -1818,6 +2018,610 @@ ${baselineCopy} ${speiCopy}${multiCountryNote}
 
 ```{ojs}
 recentChanges_obs_caption
+```
+
+### Map — observational climatology (1991–2020 mean)
+
+Reads the COG directly from S3 via geotiff.js (HTTP Range requests under the hood — only the bytes for the country bbox get fetched, not the full Africa-wide raster). Pixels render into an offscreen canvas at the COG's native resolution, then up-sampled onto the visible canvas with the browser's built-in bilinear smoothing. Admin0 + admin1 outlines are overlaid as SVG paths using the same `(lon, lat) → (px_x, px_y)` projection.
+
+Map controls (affect this map only — ramp scaling + decoration overlays):
+
+::: {.controls-row .cols-3}
+
+```{ojs}
+viewof rampLockFixed_obs = Inputs.toggle({ label: "Lock map ramp to global limits (off = rescale to admin1 / country data)", value: false });
+```
+
+```{ojs}
+viewof showGraticule_obs = Inputs.toggle({ label: "Show lat/lon ticks on map", value: false });
+```
+
+```{ojs}
+viewof showAdmin1Labels_obs = Inputs.toggle({ label: "Show admin1 names on map", value: false });
+```
+
+:::
+
+```{ojs}
+//| output: false
+// geotiff.js + topojson-client via esm.sh ESM. OJS handles dynamic
+// imports natively and resolves each cell to the module namespace,
+// which downstream cells reference via dataflow.
+GeoTIFF_obs        = await import("https://esm.sh/geotiff@2.1.3");
+topojsonClient_obs = await import("https://esm.sh/topojson-client@3.1.0");
+```
+
+```{ojs}
+//| output: false
+admin0_geo_obs = {
+  const tj = await FileAttachment("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").json();
+  const objectName = Object.keys(tj.objects)[0];
+  return topojsonClient_obs.feature(tj, tj.objects[objectName]);
+}
+
+admin0_feature_obs = {
+  const iso3 = obsAdmin0Iso3;
+  if (iso3 == null) return null;
+  const f = admin0_geo_obs.features.find((f) => f.properties && (f.properties.iso3 === iso3 || f.properties.ISO3 === iso3 || f.properties.iso_3 === iso3));
+  return f ?? null;
+}
+
+admin1_geo_obs = {
+  const tj = await FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json();
+  const objectName = Object.keys(tj.objects)[0];
+  return topojsonClient_obs.feature(tj, tj.objects[objectName]);
+}
+
+// admin1 polygons for the currently-selected admin1Names array.
+// Returns an array (possibly empty). Match is on (iso3, admin1_name).
+admin1_features_obs = {
+  if (!admin1Names || admin1Names.length === 0 || obsAdmin0Iso3 == null) return [];
+  const iso3 = obsAdmin0Iso3;
+  return admin1Names
+    .map((name) => admin1_geo_obs.features.find((f) =>
+      f.properties &&
+      f.properties.iso3 === iso3 &&
+      f.properties.admin1_name === name
+    ))
+    .filter((f) => f != null);
+}
+
+cogURL_for_obs = ({ variable, season, clim = "1991-2020", stat = "mean" }) => {
+  // CR-076: all COGs land in a single physical directory regardless of
+  // their (variable × period × clim × stat) tokens. Construct against
+  // that single directory and let the filename carry the metadata.
+  // The path pattern is brittle until the pipeline fix lands (4 PTOT
+  // COGs are dispatched as broken — see
+  // dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md).
+  const dir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=climatology/variable=PTOT/period=AMJ/clim=wmo_1991-2020/stat=max";
+  return `${dir}/${variable}_${season}_${clim}_${stat}.tif`;
+}
+```
+
+```{ojs}
+//| output: false
+// Standalone cell so any preprocessor weirdness here can't take down
+// the upstream loader cells. SPEI 1991-2020 *mean* is ~0 by
+// construction (standardisation window), so switch SPEI to stat=sd
+// to show real spatial variability.
+mapStat_obs = (climateVarSelect.id || "").startsWith("SPEI") ? "sd" : "mean";
+```
+
+```{ojs}
+//| output: false
+// Reusable colour-ramp helper. stops sorted by `at`; linear RGB
+// interpolation between adjacent stops; clamps at endpoints; returns
+// null (transparent) for NaN / non-finite values.
+colorRamp_obs = (value, stops) => {
+  if (value == null || !isFinite(value)) return null;
+  if (value <= stops[0].at) return [...stops[0].rgb, 255];
+  const last = stops[stops.length - 1];
+  if (value >= last.at) return [...last.rgb, 255];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i], b = stops[i + 1];
+    if (value >= a.at && value <= b.at) {
+      const t = (value - a.at) / (b.at - a.at);
+      return [
+        Math.round(a.rgb[0] + t * (b.rgb[0] - a.rgb[0])),
+        Math.round(a.rgb[1] + t * (b.rgb[1] - a.rgb[1])),
+        Math.round(a.rgb[2] + t * (b.rgb[2] - a.rgb[2])),
+        255,
+      ];
+    }
+  }
+  return null;
+}
+
+ramps_obs = ({
+  TAVG: [
+    { at:  0, rgb: [ 68,   1,  84] },
+    { at: 10, rgb: [ 59,  82, 139] },
+    { at: 20, rgb: [ 32, 144, 140] },
+    { at: 25, rgb: [ 94, 201,  98] },
+    { at: 30, rgb: [253, 231,  37] },
+    { at: 40, rgb: [253, 100,  20] },
+  ],
+  TMAX: [
+    { at:  5, rgb: [ 68,   1,  84] },
+    { at: 15, rgb: [ 59,  82, 139] },
+    { at: 25, rgb: [ 32, 144, 140] },
+    { at: 35, rgb: [ 94, 201,  98] },
+    { at: 40, rgb: [253, 231,  37] },
+    { at: 45, rgb: [253, 100,  20] },
+  ],
+  TMIN: [
+    { at: -10, rgb: [ 68,   1,  84] },
+    { at:   0, rgb: [ 59,  82, 139] },
+    { at:  10, rgb: [ 32, 144, 140] },
+    { at:  20, rgb: [ 94, 201,  98] },
+    { at:  25, rgb: [253, 231,  37] },
+    { at:  35, rgb: [253, 100,  20] },
+  ],
+  PTOT: [
+    { at:    0, rgb: [247, 251, 255] },
+    { at:  100, rgb: [222, 235, 247] },
+    { at:  300, rgb: [198, 219, 239] },
+    { at:  600, rgb: [158, 202, 225] },
+    { at: 1000, rgb: [107, 174, 214] },
+    { at: 1500, rgb: [ 49, 130, 189] },
+    { at: 2000, rgb: [  8,  81, 156] },
+    { at: 2500, rgb: [  8,  48, 107] },
+  ],
+  "SPEI-03": [
+    { at: 0.5, rgb: [247, 252, 245] },
+    { at: 0.7, rgb: [199, 233, 192] },
+    { at: 0.9, rgb: [161, 217, 155] },
+    { at: 1.0, rgb: [254, 224, 144] },
+    { at: 1.1, rgb: [253, 174,  97] },
+    { at: 1.3, rgb: [244, 109,  67] },
+    { at: 1.5, rgb: [165,   0,  38] },
+  ],
+  "SPEI-12": [
+    { at: 0.5, rgb: [247, 252, 245] },
+    { at: 0.7, rgb: [199, 233, 192] },
+    { at: 0.9, rgb: [161, 217, 155] },
+    { at: 1.0, rgb: [254, 224, 144] },
+    { at: 1.1, rgb: [253, 174,  97] },
+    { at: 1.3, rgb: [244, 109,  67] },
+    { at: 1.5, rgb: [165,   0,  38] },
+  ],
+})
+```
+
+```{ojs}
+//| output: false
+// Compute the geographic bbox of a GeoJSON feature (Polygon or
+// MultiPolygon) in EPSG:4326, with a small percentage pad.
+featureBbox_obs = (feature, padPct = 0.02) => {
+  let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+  const visit = (coords) => {
+    if (typeof coords[0] === "number") {
+      if (coords[0] < xmin) xmin = coords[0];
+      if (coords[0] > xmax) xmax = coords[0];
+      if (coords[1] < ymin) ymin = coords[1];
+      if (coords[1] > ymax) ymax = coords[1];
+    } else {
+      for (const c of coords) visit(c);
+    }
+  };
+  visit(feature.geometry.coordinates);
+  const px = (xmax - xmin) * padPct;
+  const py = (ymax - ymin) * padPct;
+  return { xmin: xmin - px, ymin: ymin - py, xmax: xmax + px, ymax: ymax + py };
+}
+```
+
+```{ojs}
+//| output: false
+// XML/HTML-attribute escape for text we inject into raw SVG markup.
+// Standalone cell — chained .replace regex literals kept far from any
+// top-level object literal (OJS preprocessor quirk).
+escapeXml_obs = (str) => String(str)
+  .split("&").join("&amp;")
+  .split("<").join("&lt;")
+  .split(">").join("&gt;")
+  .split('"').join("&quot;");
+```
+
+```{ojs}
+//| output: false
+// Country-level raster cache. Depends ONLY on (country, variable,
+// season, mapStat). Admin1 selection does NOT invalidate this cell —
+// OJS dataflow memoises for free.
+countryRaster_obs = {
+  if (obsAdmin0Iso3 == null) return { error: "No country selected." };
+  if (!obsVarCodes.includes(climateVarSelect.id)) return { error: "Variable not available in observational record." };
+  const f = admin0_feature_obs;
+  if (!f) return { error: `No admin0 polygon for ${obsAdmin0Iso3}.` };
+
+  const bbox = featureBbox_obs(f);
+  const cogUrl = cogURL_for_obs({ variable: climateVarSelect.id, season: seasonSelect.season, stat: mapStat_obs });
+  const t0 = performance.now();
+
+  try {
+    const tiff = await GeoTIFF_obs.fromUrl(cogUrl);
+    const image = await tiff.getImage();
+
+    const imgBbox = image.getBoundingBox();
+    const imgW = image.getWidth();
+    const imgH = image.getHeight();
+    const xRes = (imgBbox[2] - imgBbox[0]) / imgW;
+    const yRes = (imgBbox[3] - imgBbox[1]) / imgH;
+
+    const wx1 = Math.max(0,    Math.floor((bbox.xmin  - imgBbox[0]) / xRes));
+    const wy1 = Math.max(0,    Math.floor((imgBbox[3] - bbox.ymax)  / yRes));
+    const wx2 = Math.min(imgW, Math.ceil ((bbox.xmax  - imgBbox[0]) / xRes));
+    const wy2 = Math.min(imgH, Math.ceil ((imgBbox[3] - bbox.ymin)  / yRes));
+    if (wx2 <= wx1 || wy2 <= wy1) {
+      // Almost always CR-076 in practice: publish pipeline has shipped
+      // a COG whose actual geographic extent is wrong. See
+      // dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md.
+      return { error:
+        `Country bbox does not overlap COG extent — likely a CR-076 mis-published COG. ` +
+        `image bbox = [${imgBbox.map(v => v.toFixed(3)).join(", ")}], ` +
+        `country bbox = [${bbox.xmin.toFixed(3)}, ${bbox.ymin.toFixed(3)}, ${bbox.xmax.toFixed(3)}, ${bbox.ymax.toFixed(3)}], ` +
+        `image size = ${imgW}×${imgH}, ` +
+        `cogUrl = ${cogUrl}`
+      };
+    }
+
+    const rasters = await image.readRasters({ window: [wx1, wy1, wx2, wy2] });
+    const data = rasters[0];
+    const w = rasters.width, h = rasters.height;
+
+    const actualBbox = {
+      xmin: imgBbox[0] + wx1 * xRes,
+      ymax: imgBbox[3] - wy1 * yRes,
+      xmax: imgBbox[0] + wx2 * xRes,
+      ymin: imgBbox[3] - wy2 * yRes,
+    };
+
+    const noData = typeof image.getGDALNoData === "function" ? image.getGDALNoData() : null;
+
+    return {
+      data, w, h, xRes, yRes,
+      bbox: actualBbox,
+      noData,
+      cogUrl,
+      fetchMs: performance.now() - t0,
+    };
+  } catch (e) {
+    console.error("countryRaster_obs fetch", e);
+    return { error: String(e) };
+  }
+}
+```
+
+```{ojs}
+//| output: false
+// Horizontal colour-bar legend mirroring colorRamp_obs interpolation.
+buildLegend_obs = (stops, variable, stat) => {
+  const W = 600;
+  const barH = 14;
+  const padTop = 6, padBottom = 22, padX = 8;
+  const totalH = padTop + barH + padBottom;
+
+  const v0 = stops[0].at;
+  const v1 = stops[stops.length - 1].at;
+  const range = v1 - v0;
+  const xForVal = (v) => padX + (v - v0) / range * (W - 2 * padX);
+
+  const gradientId = "legend-grad-obs-" + variable.split("-").join("_") + "-" + stat;
+  const gradientStops = stops.map((s) => {
+    const pct = ((s.at - v0) / range * 100).toFixed(2);
+    return `<stop offset="${pct}%" stop-color="rgb(${s.rgb.join(",")})" />`;
+  }).join("");
+
+  const ticks = stops.map((s) => {
+    const x = xForVal(s.at);
+    const label = Math.abs(s.at) >= 100 ? Math.round(s.at) : (Math.abs(s.at) >= 10 ? s.at.toFixed(0) : s.at.toFixed(1));
+    return `
+      <line x1="${x}" x2="${x}" y1="${padTop}" y2="${padTop + barH + 3}" stroke="#333" stroke-width="0.8"/>
+      <text x="${x}" y="${padTop + barH + 16}" font-size="10" fill="#333" text-anchor="middle" font-family="system-ui, sans-serif">${label}</text>
+    `;
+  }).join("");
+
+  const unit = variable === "PTOT" ? "mm" : variable.startsWith("SPEI") ? (stat === "sd" ? "σ (z)" : "z") : "°C";
+  const titleText = `${variable} (${stat}) — ${unit}`;
+
+  const svgMarkup = `
+    <svg width="${W}" height="${totalH}" style="display:block; margin-top: 6px;" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="${gradientId}" x1="0" x2="1" y1="0" y2="0">
+          ${gradientStops}
+        </linearGradient>
+      </defs>
+      <rect x="${padX}" y="${padTop}" width="${W - 2 * padX}" height="${barH}" fill="url(#${gradientId})" stroke="#333" stroke-width="0.6"/>
+      ${ticks}
+    </svg>
+  `;
+  const container = html`<div style="font-size: 11px; color: #333; margin-top: 4px;">
+    <div style="font-weight: 500; margin-bottom: 2px;">${titleText}</div>
+  </div>`;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgMarkup, "image/svg+xml");
+  const svgEl = document.importNode(doc.documentElement, true);
+  container.appendChild(svgEl);
+  return container;
+}
+```
+
+```{ojs}
+recentChangesMap_obs = {
+  if (countryRaster_obs.error) {
+    return html`<div style="padding: 1em; color: #c33;">${countryRaster_obs.error}</div>`;
+  }
+
+  const W = 600;
+  const status = html`<div style="font-size: 0.85em; color: #666; margin-bottom: 4px; min-height: 1.2em;"></div>`;
+  const setStatus = (msg) => { status.textContent = msg; };
+
+  // Full admin1 set for the country — drives mask + always-drawn
+  // boundary layer. Using admin1 (not admin0) for the mask keeps the
+  // boundary line and the mask edge from the SAME simplification, so
+  // they align perfectly.
+  const countryAdmin1Features = admin1_geo_obs.features.filter((f) =>
+    f.properties && f.properties.iso3 === obsAdmin0Iso3
+  );
+
+  const renderFeatures = admin1_features_obs.length > 0
+    ? admin1_features_obs
+    : (countryAdmin1Features.length > 0 ? countryAdmin1Features : [admin0_feature_obs]);
+  const renderLabel =
+    admin1_features_obs.length === 0 ? obsAdmin0Name :
+    admin1_features_obs.length === 1 ? `${admin1_features_obs[0].properties.admin1_name}, ${obsAdmin0Name}` :
+    `${obsAdmin0Name} (${admin1_features_obs.length} admin1s)`;
+
+  // Union bbox across selected features, then pad.
+  const featBboxes = renderFeatures.map((f) => featureBbox_obs(f, 0));
+  const unionRaw = featBboxes.reduce((acc, b) => ({
+    xmin: Math.min(acc.xmin, b.xmin), ymin: Math.min(acc.ymin, b.ymin),
+    xmax: Math.max(acc.xmax, b.xmax), ymax: Math.max(acc.ymax, b.ymax),
+  }), { xmin: Infinity, ymin: Infinity, xmax: -Infinity, ymax: -Infinity });
+  const padPct = 0.02;
+  const renderBbox = {
+    xmin: unionRaw.xmin - (unionRaw.xmax - unionRaw.xmin) * padPct,
+    ymin: unionRaw.ymin - (unionRaw.ymax - unionRaw.ymin) * padPct,
+    xmax: unionRaw.xmax + (unionRaw.xmax - unionRaw.xmin) * padPct,
+    ymax: unionRaw.ymax + (unionRaw.ymax - unionRaw.ymin) * padPct,
+  };
+
+  const { data, w: cw, h: ch, bbox: cbbox } = countryRaster_obs;
+  const cxRes = (cbbox.xmax - cbbox.xmin) / cw;
+  const cyRes = (cbbox.ymax - cbbox.ymin) / ch;
+  let sx1 = Math.max(0,  Math.floor((renderBbox.xmin - cbbox.xmin) / cxRes));
+  let sy1 = Math.max(0,  Math.floor((cbbox.ymax - renderBbox.ymax) / cyRes));
+  let sx2 = Math.min(cw, Math.ceil ((renderBbox.xmax - cbbox.xmin) / cxRes));
+  let sy2 = Math.min(ch, Math.ceil ((cbbox.ymax - renderBbox.ymin) / cyRes));
+  if (sx2 <= sx1 || sy2 <= sy1) {
+    sx1 = 0; sy1 = 0; sx2 = cw; sy2 = ch;
+  }
+  const sw = sx2 - sx1, sh = sy2 - sy1;
+  const actualRenderBbox = {
+    xmin: cbbox.xmin + sx1 * cxRes,
+    ymax: cbbox.ymax - sy1 * cyRes,
+    xmax: cbbox.xmin + sx2 * cxRes,
+    ymin: cbbox.ymax - sy2 * cyRes,
+  };
+
+  const noData = countryRaster_obs.noData;
+  const isNoData = (v) => {
+    if (!isFinite(v)) return true;
+    if (noData != null && v === noData) return true;
+    if (v <= -9999) return true;
+    return false;
+  };
+
+  // First pass: scan sub-window to learn min / max of visible data.
+  let nValid = 0, vMin = Infinity, vMax = -Infinity;
+  for (let row = 0; row < sh; row++) {
+    for (let col = 0; col < sw; col++) {
+      const v = data[(sy1 + row) * cw + (sx1 + col)];
+      if (isNoData(v)) continue;
+      nValid++;
+      if (v < vMin) vMin = v;
+      if (v > vMax) vMax = v;
+    }
+  }
+
+  const globalStops = ramps_obs[climateVarSelect.id] ?? ramps_obs.TAVG;
+  let activeStops = globalStops;
+  let rampLabel = "fixed";
+  if (!rampLockFixed_obs && nValid > 1 && vMax > vMin) {
+    const g0 = globalStops[0].at;
+    const g1 = globalStops[globalStops.length - 1].at;
+    const gRange = g1 - g0;
+    const newRange = vMax - vMin;
+    activeStops = globalStops.map((s) => ({
+      at: vMin + ((s.at - g0) / gRange) * newRange,
+      rgb: s.rgb,
+    }));
+    rampLabel = "dynamic";
+  }
+
+  // Second pass: paint each sub-window pixel via the active ramp.
+  const offscreen = document.createElement("canvas");
+  offscreen.width = sw;
+  offscreen.height = sh;
+  const offCtx = offscreen.getContext("2d");
+  const img = offCtx.createImageData(sw, sh);
+  for (let row = 0; row < sh; row++) {
+    for (let col = 0; col < sw; col++) {
+      const v = data[(sy1 + row) * cw + (sx1 + col)];
+      if (isNoData(v)) continue;
+      const c = colorRamp_obs(v, activeStops);
+      if (c) {
+        const j = (row * sw + col) * 4;
+        img.data[j]     = c[0];
+        img.data[j + 1] = c[1];
+        img.data[j + 2] = c[2];
+        img.data[j + 3] = c[3];
+      }
+    }
+  }
+  offCtx.putImageData(img, 0, 0);
+
+  const H = Math.round(W * sh / sw);
+  const display = document.createElement("canvas");
+  display.width = W;
+  display.height = H;
+  display.style.display = "block";
+  display.style.border = "1px solid #ddd";
+  display.style.background = "#fafafa";
+  const dctx = display.getContext("2d");
+  dctx.imageSmoothingEnabled = true;
+  dctx.imageSmoothingQuality = "high";
+
+  const tx = (lon) => (lon - actualRenderBbox.xmin) / (actualRenderBbox.xmax - actualRenderBbox.xmin) * W;
+  const ty = (lat) => (actualRenderBbox.ymax - lat) / (actualRenderBbox.ymax - actualRenderBbox.ymin) * H;
+
+  const buildPath2D = (feature) => {
+    const p = new Path2D();
+    const addRing = (ring) => {
+      ring.forEach(([lo, la], i) => {
+        const x = tx(lo);
+        const y = ty(la);
+        if (i === 0) p.moveTo(x, y);
+        else p.lineTo(x, y);
+      });
+      p.closePath();
+    };
+    const g = feature.geometry;
+    if (g.type === "Polygon") g.coordinates.forEach(addRing);
+    else if (g.type === "MultiPolygon") g.coordinates.forEach((poly) => poly.forEach(addRing));
+    return p;
+  };
+
+  const combinedMask = new Path2D();
+  renderFeatures.forEach((f) => combinedMask.addPath(buildPath2D(f)));
+  dctx.save();
+  dctx.clip(combinedMask, "evenodd");
+  dctx.drawImage(offscreen, 0, 0, W, H);
+  dctx.restore();
+
+  // SVG overlay: thin admin1 lines + bold selected-admin1 accents.
+  const ringToPath = (ring) => "M" + ring.map(([lo, la]) => `${tx(lo).toFixed(1)},${ty(la).toFixed(1)}`).join("L") + "Z";
+  const featureToPath = (feat) => {
+    const g = feat.geometry;
+    if (g.type === "Polygon") return g.coordinates.map(ringToPath).join(" ");
+    if (g.type === "MultiPolygon") return g.coordinates.flatMap((poly) => poly.map(ringToPath)).join(" ");
+    return "";
+  };
+  const allAdmin1Paths      = countryAdmin1Features.map(featureToPath).join(" ");
+  const selectedAdmin1Paths = admin1_features_obs.map(featureToPath).join(" ");
+
+  let graticuleMarkup = "";
+  if (showGraticule_obs) {
+    const tickStroke = "#333";
+    const lonTicks = d3.ticks(actualRenderBbox.xmin, actualRenderBbox.xmax, 5);
+    const latTicks = d3.ticks(actualRenderBbox.ymin, actualRenderBbox.ymax, 5);
+    const fmt = (v) => v.toFixed(Math.abs(v) >= 10 ? 0 : 1);
+    const lonAxis = lonTicks.map((lo) => {
+      const x = tx(lo);
+      return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${H - 6}" y2="${H}" stroke="${tickStroke}" stroke-width="0.8"/>
+              <text x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="${tickStroke}" font-family="system-ui, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2">${fmt(lo)}°${lo >= 0 ? "E" : "W"}</text>`;
+    }).join("");
+    const latAxis = latTicks.map((la) => {
+      const y = ty(la);
+      return `<line x1="0" x2="6" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${tickStroke}" stroke-width="0.8"/>
+              <text x="8" y="${(y + 3).toFixed(1)}" text-anchor="start" font-size="9" fill="${tickStroke}" font-family="system-ui, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2">${fmt(Math.abs(la))}°${la >= 0 ? "N" : "S"}</text>`;
+    }).join("");
+    graticuleMarkup = lonAxis + latAxis;
+  }
+
+  let labelsMarkup = "";
+  if (showAdmin1Labels_obs) {
+    const iso3 = obsAdmin0Iso3;
+    const centroidOf = (f) => {
+      if (typeof d3.geoCentroid === "function") return d3.geoCentroid(f);
+      const b = featureBbox_obs(f, 0);
+      return [(b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2];
+    };
+    labelsMarkup = admin1_geo_obs.features
+      .filter((f) => f.properties && f.properties.iso3 === iso3)
+      .map((f) => ({ f, c: centroidOf(f) }))
+      .filter(({ c }) =>
+        c[0] >= actualRenderBbox.xmin && c[0] <= actualRenderBbox.xmax &&
+        c[1] >= actualRenderBbox.ymin && c[1] <= actualRenderBbox.ymax
+      )
+      .map(({ f, c }) => {
+        const x = tx(c[0]).toFixed(1);
+        const y = ty(c[1]).toFixed(1);
+        const name = escapeXml_obs(f.properties.admin1_name || "");
+        return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="10" font-weight="500" fill="#111" font-family="system-ui, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2.5" stroke-linejoin="round">${name}</text>`;
+      })
+      .join("");
+  }
+
+  const svgMarkup = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="position: absolute; top: 0; left: 0; pointer-events: none;">
+      <path d="${allAdmin1Paths}" stroke="#555" stroke-width="0.7" fill="none" opacity="0.75"/>
+      ${selectedAdmin1Paths ? `
+        <path d="${selectedAdmin1Paths}" stroke="#ffffff" stroke-width="4.5" fill="none" stroke-linejoin="round"/>
+        <path d="${selectedAdmin1Paths}" stroke="#d62728" stroke-width="2.2" fill="none" stroke-linejoin="round"/>
+      ` : ""}
+      ${graticuleMarkup}
+      ${labelsMarkup}
+    </svg>
+  `;
+  const svgOverlay = new DOMParser()
+    .parseFromString(svgMarkup, "image/svg+xml")
+    .documentElement;
+
+  const legend = buildLegend_obs(activeStops, climateVarSelect.id, mapStat_obs);
+
+  const mapStack = html`<div style="position: relative; width: ${W}px;"></div>`;
+  mapStack.appendChild(display);
+  mapStack.appendChild(svgOverlay);
+
+  // Download button — composites canvas + SVG overlay into one PNG.
+  const dlBtn = html`<button style="margin-left: auto; padding: 2px 10px; font-size: 0.85em;">Download map (PNG)</button>`;
+  dlBtn.onclick = async () => {
+    const composite = document.createElement("canvas");
+    composite.width = W;
+    composite.height = H;
+    const cctx = composite.getContext("2d");
+    cctx.fillStyle = "#ffffff";
+    cctx.fillRect(0, 0, W, H);
+    cctx.drawImage(display, 0, 0);
+    const svgString = new XMLSerializer().serializeToString(svgOverlay);
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => { cctx.drawImage(im, 0, 0); URL.revokeObjectURL(svgUrl); resolve(); };
+      im.onerror = (e) => { URL.revokeObjectURL(svgUrl); reject(e); };
+      im.src = svgUrl;
+    });
+    composite.toBlob((blob) => {
+      const a = document.createElement("a");
+      const slug = (renderLabel || "map").replace(/[^a-zA-Z0-9._-]+/g, "_");
+      a.href = URL.createObjectURL(blob);
+      a.download = `obs_${climateVarSelect.id}_${seasonSelect.season}_${mapStat_obs}_${slug}.png`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }, "image/png");
+  };
+
+  const statLabel = mapStat_obs === "mean" ? "1991-2020 mean" : `1991-2020 ${mapStat_obs}`;
+  const fetchSec = (countryRaster_obs.fetchMs / 1000).toFixed(1);
+  const rangeStr = nValid > 0 ? `data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "no valid pixels";
+  setStatus(`${climateVarSelect.id} ${seasonSelect.season} (${statLabel}) for ${renderLabel} · country fetch ${fetchSec}s · sub-window ${sw}×${sh} → ${W}×${H} · ${rangeStr} · ramp: ${rampLabel}`);
+
+  const header = html`<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">${status}${dlBtn}</div>`;
+  return html`<div>${header}${mapStack}${legend}</div>`;
+}
+```
+
+::: {#recent-changes-map-wrap}
+:::
+
+```{ojs}
+//| output: false
+{
+  const div = document.getElementById("recent-changes-map-wrap");
+  if (div) div.replaceChildren(recentChangesMap_obs);
+}
 ```
 
 ### `{ojs} _lang(nbText.general.quickInsight)`
