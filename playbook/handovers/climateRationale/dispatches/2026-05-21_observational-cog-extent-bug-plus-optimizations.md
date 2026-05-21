@@ -204,3 +204,57 @@ PREDICTOR=3 compresses Float32 climatology fields ~10-20 % better
 - Publish script (S3 upload): `R/observational/6_publish_obs_to_s3.R` — the `name_fn` / S3DirUploader block per CR-076 part 1.
 - Consumer notebook: `notebooks/sandbox/obs_qaqc.qmd` in `atlas_notebooks` (the `countryRaster_E` cell reads the COG via `geotiff.js`; the error this dispatch fixes surfaces there).
 - Original CR-076 ticket: `playbook/handovers/climateRationale/ISSUES.md` — both the partition-collapse and stats-sentinel parts are documented; this dispatch adds the new extent-bug evidence + the overviews ask.
+
+---
+
+## STATUS UPDATE — 2026-05-21 (close-out)
+
+All three asks landed. End state on S3: 1416 climatology COGs with correct Africa-wide extent (1500×1600), real `STATISTICS_MEAN`/`STATISTICS_STDDEV` embedded, and OVERVIEWS=AUTO pyramid. STAGE 4 republish: 1416 files in 355.7s.
+
+### What worked as described
+
+- **Extent fix.** Re-ran `R/observational/5_make_obs_map_climatologies.R` after isolating smoke output to a `_smoke/` subdir ([hazards_prototype 1a80341](https://github.com/AdaptationAtlas/hazards_prototype/commit/1a80341)) so future smokes can't overwrite production-path files.
+- **OVERVIEWS=AUTO + OVERVIEW_RESAMPLING=AVERAGE.** Applied via `cog_gdal_opts` ([hazards_prototype 1a80341](https://github.com/AdaptationAtlas/hazards_prototype/commit/1a80341)). 1500×1600 COGs now ship pyramids at 750×800, 375×400, 188×200, 94×100, 47×50.
+
+### Stats fix needed a different recipe
+
+The dispatch suggested using `gdalinfo -stats` to write real stats into a PAM sidecar. **That doesn't work.** `terra::writeRaster(filetype="COG")` embeds `STATISTICS_MEAN=-9999` directly into TIFF band metadata; subsequent `gdalinfo -stats` runs see existing (sentinel) values and refuse to recompute. `gdal_edit.py -unsetstats` refuses on COGs (would break layout protection). Verified recipe:
+
+```
+COG  -> gdal_translate -of GTiff       (plain GTiff, carries -9999 metadata)
+     -> gdal_edit.py -unsetstats       (works on plain GTiff)
+     -> gdal_translate -of COG -stats  (fresh COG, real stats embedded)
+     -> atomic mv
+```
+
+Captured in [hazards_prototype 5054076](https://github.com/AdaptationAtlas/hazards_prototype/commit/5054076) (one-shot remediation runbook STAGE 0b) and the rewritten `compute_cog_stats()` helper in [R/observational/5_make_obs_map_climatologies.R](../../../../../hazards_prototype/R/observational/5_make_obs_map_climatologies.R) (see commit landing after this dispatch update). ~3-5 s per file; bakes all stats correctly going forward.
+
+### Surprise: S3 partition mismatch
+
+Step 6 uses `AtlasDataManageR 0.0.0.9000`, whose `S3DirUploader$new()` does NOT expose an `overwrite` argument — uploads default to skip-if-exists. Earlier smoke runs (pre-isolation) had published files to non-canonical S3 partitions (everything dumped into `variable=PTOT/period={AMJ,annual}/stat=max/` regardless of filename). The full bake re-uploaded to canonical paths, but the 2806 stale objects at non-canonical paths were never overwritten. Diff against step 6's `--dry-run` plan showed only 2/2808 S3 keys matched canonical paths.
+
+Resolution: nuke the two bad partition subtrees recursively, then republish from scratch:
+```
+aws s3 rm s3://digital-atlas/.../variable=PTOT/period=AMJ/clim=wmo_1991-2020/stat=max/ --recursive
+aws s3 rm s3://digital-atlas/.../variable=PTOT/period=annual/clim=wmo_1991-2020/stat=max/ --recursive
+```
+Then `Rscript R/observational/6_publish_obs_to_s3.R --full --tier 2` → 1416 files in 355.7s, all at canonical paths.
+
+### Follow-up
+
+- **AtlasDataManageR `overwrite=`.** Worth landing as a feature ask on the data-management repo — current "delete keys manually" workaround is fine for one-off remediations but brittle for routine re-publishes.
+- **Stats embed via writeRaster.** The 3-pass `compute_cog_stats()` doubles bake time. A custom GDAL writer that calls `band.SetMetadataItem("STATISTICS_MEAN", ...)` before close would do it in one pass. Defer until obs-bake time matters more.
+- **Step 5 helper now self-fixes future bakes** — no manual remediation needed.
+
+### Runbook + audit trail
+
+[hazards_prototype/scripts/2026-05-21_obs_s3_stale_purge.sh.txt](../../../../../hazards_prototype/scripts/2026-05-21_obs_s3_stale_purge.sh.txt) — paste-able blocks for the remediation. Logs under `hazards_prototype/logs/obs_s3_purge_*_20260521_*.log`.
+
+### Verification
+
+```
+gdalinfo /vsicurl/https://digital-atlas.s3.amazonaws.com/.../variable=PTOT/period=annual/clim=wmo_1991-2020/stat=mean/PTOT_annual_1991-2020_mean.tif
+# Size is 1500, 1600
+# Mean=644.311, StdDev=653.405
+# Overviews: 750x800, 375x400, 188x200, 94x100, 47x50
+```
