@@ -1465,6 +1465,28 @@ recentChanges_obs = {
   const nFacets = adminNames_obs.length;
   const isFaceted = nFacets > 1;
 
+  // NxM facet grid wiring (issue #6). The sidebar `facetCols` input
+  // controls how many columns the facet grid uses; the row count is
+  // derived. Each admin gets a (_fx, _fy) position. When unfaceted
+  // (single admin / national), these resolve to (0, 0) and Plot draws
+  // a single panel regardless.
+  const facetColsValue = Math.max(1, Math.min(facetCols || 3, Math.max(1, nFacets)));
+  const nRows = Math.max(1, Math.ceil(nFacets / facetColsValue));
+  const positionMap = new Map(
+    adminNames_obs.map((name, i) => [name, {
+      _fx: i % facetColsValue,
+      _fy: Math.floor(i / facetColsValue),
+    }])
+  );
+  const fxOf = (adminName) => positionMap.get(adminName)?._fx ?? 0;
+  const fyOf = (adminName) => positionMap.get(adminName)?._fy ?? 0;
+  // Decorator: stamps _fx + _fy onto an existing data row from its
+  // adminName. Used to augment all data inputs (observed_obs, bands,
+  // rule data) so Plot.plot's facet channels route each row into the
+  // right cell of the NxM grid.
+  const withFP = (d) => ({ ...d, _fx: fxOf(d.adminName), _fy: fyOf(d.adminName) });
+  const observed_obs_aug = observed_obs.map(withFP);
+
   // Diverging colour for stripes — anomaly mapped to ±2σ of admin's
   // OWN baseline (per-facet, since baselines differ across admin1s).
   // RdBu (reversed) for temperature, BrBG for precipitation.
@@ -1511,14 +1533,15 @@ recentChanges_obs = {
     if (adminVals.length === 0) continue;
     const dataYMin = d3.min(adminVals);
     const dataYMax = d3.max(adminVals);
+    const _fx = fxOf(adminName), _fy = fyOf(adminName);
     if (isSPEI_obs) {
       const topCap    = Math.max(dataYMax, 2.5);
       const bottomCap = Math.min(dataYMin, -2.5);
       bandsData.push(
-        { adminName, y1: 1.5,        y2: topCap,    fill: _bandExtreme },
-        { adminName, y1: bottomCap,  y2: -1.5,      fill: _bandExtreme },
-        { adminName, y1: 1.0,        y2: 1.5,       fill: _bandUnusual },
-        { adminName, y1: -1.5,       y2: -1.0,      fill: _bandUnusual },
+        { adminName, _fx, _fy, y1: 1.5,        y2: topCap,    fill: _bandExtreme },
+        { adminName, _fx, _fy, y1: bottomCap,  y2: -1.5,      fill: _bandExtreme },
+        { adminName, _fx, _fy, y1: 1.0,        y2: 1.5,       fill: _bandUnusual },
+        { adminName, _fx, _fy, y1: -1.5,       y2: -1.0,      fill: _bandUnusual },
       );
     } else {
       const base = baselines_obs.get(adminName);
@@ -1527,10 +1550,10 @@ recentChanges_obs = {
       const topCap    = Math.max(dataYMax, mFb + 3 * base.sd);
       const bottomCap = Math.min(dataYMin, mFb - 3 * base.sd);
       bandsData.push(
-        { adminName, y1: mFb + 2 * base.sd, y2: topCap,                   fill: _bandExtreme },
-        { adminName, y1: bottomCap,         y2: mFb - 2 * base.sd,        fill: _bandExtreme },
-        { adminName, y1: mFb + base.sd,     y2: mFb + 2 * base.sd,        fill: _bandUnusual },
-        { adminName, y1: mFb - 2 * base.sd, y2: mFb - base.sd,            fill: _bandUnusual },
+        { adminName, _fx, _fy, y1: mFb + 2 * base.sd, y2: topCap,                   fill: _bandExtreme },
+        { adminName, _fx, _fy, y1: bottomCap,         y2: mFb - 2 * base.sd,        fill: _bandExtreme },
+        { adminName, _fx, _fy, y1: mFb + base.sd,     y2: mFb + 2 * base.sd,        fill: _bandUnusual },
+        { adminName, _fx, _fy, y1: mFb - 2 * base.sd, y2: mFb - base.sd,            fill: _bandUnusual },
       );
     }
   }
@@ -1538,8 +1561,10 @@ recentChanges_obs = {
   // SPEI reference rule lines (still drawn for context). Per admin
   // so they sit inside each facet.
   const speiRuleData = isSPEI_obs
-    ? adminNames_obs.flatMap((adminName) =>
-        [-2, -1.5, -1, 0, 1, 1.5, 2].map((y) => ({ adminName, y })))
+    ? adminNames_obs.flatMap((adminName) => {
+        const _fx = fxOf(adminName), _fy = fyOf(adminName);
+        return [-2, -1.5, -1, 0, 1, 1.5, 2].map((y) => ({ adminName, _fx, _fy, y }));
+      })
     : [];
 
   // X-axis domain padding (issue #10) — pull the axis out by half a
@@ -1555,66 +1580,85 @@ recentChanges_obs = {
     .map((adminName) => {
       const base = baselines_obs.get(adminName);
       if (!base) return null;
-      return { adminName, y: useAnomaly_obs ? 0 : base.mean };
+      return { adminName, _fx: fxOf(adminName), _fy: fyOf(adminName), y: useAnomaly_obs ? 0 : base.mean };
     })
     .filter((r) => r != null);
 
-  // Mark builders.
-  const stripesMark = Plot.rect(observed_obs, {
+  // Admin-label data for the per-facet name tag (Plot.text, top-right
+  // of each panel). Only emitted when faceting.
+  const adminLabelData = isFaceted
+    ? adminNames_obs.map((name) => ({ adminName: name, _fx: fxOf(name), _fy: fyOf(name) }))
+    : [];
+
+  // Per-admin yMin/yMax precompute for stripe marks (O(N) not O(N²)).
+  const yRangesByAdmin = new Map();
+  for (const name of adminNames_obs) {
+    const vals = observed_obs.filter((d) => d.adminName === name).map((d) => d.value_plot);
+    yRangesByAdmin.set(name, { yMin: d3.min(vals), yMax: d3.max(vals) });
+  }
+
+  // Mark builders. All marks consume observed_obs_aug (carries _fx/_fy)
+  // so the facet system routes them into the right grid cell.
+  const stripesMark = Plot.rect(observed_obs_aug, {
     x1: (d) => d[xField] - stripeWidth/2,
     x2: (d) => d[xField] + stripeWidth/2,
-    // Per-facet yMin / yMax — fall back to global if single facet.
-    y1: (d) => d3.min(observed_obs.filter((x) => x.adminName === d.adminName), (x) => x.value_plot),
-    y2: (d) => d3.max(observed_obs.filter((x) => x.adminName === d.adminName), (x) => x.value_plot),
+    y1: (d) => yRangesByAdmin.get(d.adminName)?.yMin,
+    y2: (d) => yRangesByAdmin.get(d.adminName)?.yMax,
     fill: stripeColour,
     stroke: null,
-    fy: isFaceted ? "adminName" : undefined,
+    fx: isFaceted ? "_fx" : undefined,
+    fy: isFaceted ? "_fy" : undefined,
     channels: { admin: "adminName", year: "year", value: "value_mean" },
     tip: true,
   });
-  const barMark = Plot.rect(observed_obs, {
+  const barMark = Plot.rect(observed_obs_aug, {
     x1: (d) => d[xField] - stripeWidth * 0.4,
     x2: (d) => d[xField] + stripeWidth * 0.4,
     y1: barBaselineFor,
     y2: "value_plot",
     fill: (d) => extremeColour_obs[d.cls],
     stroke: (d) => extremeColour_obs[d.cls],
-    fy: isFaceted ? "adminName" : undefined,
+    fx: isFaceted ? "_fx" : undefined,
+    fy: isFaceted ? "_fy" : undefined,
     channels: { admin: "adminName", year: "year", value: "value_mean", anomaly: "value_plot", classification: "cls" },
     tip: true,
   });
   const lineMarks = [
-    Plot.line(observed_obs, {
+    Plot.line(observed_obs_aug, {
       x: xField, y: "value_plot", stroke: "#333",
       strokeWidth: plotLineWidth,
       z: isFaceted ? "adminName" : undefined,
-      fy: isFaceted ? "adminName" : undefined,
+      fx: isFaceted ? "_fx" : undefined,
+      fy: isFaceted ? "_fy" : undefined,
     }),
-    Plot.dot(observed_obs, {
+    Plot.dot(observed_obs_aug, {
       x: xField, y: "value_plot", r: 2.5,
       fill: (d) => extremeColour_obs[d.cls],
       stroke: (d) => extremeColour_obs[d.cls],
-      fy: isFaceted ? "adminName" : undefined,
+      fx: isFaceted ? "_fx" : undefined,
+      fy: isFaceted ? "_fy" : undefined,
       channels: { admin: "adminName", year: "year", value: "value_mean", anomaly: "value_plot", z: "z", classification: "cls" },
       tip: true,
     }),
   ];
 
-  // Hazard-band mark (per-facet via fy if faceted). Spans the full x
-  // domain inside each facet.
+  // Hazard-band mark (per-facet via _fx/_fy if faceted). Spans the
+  // full x domain inside each facet.
   const hazardBandMark = (bandsData.length === 0) ? null : Plot.rect(bandsData, {
     x1: xDomain[0],
     x2: xDomain[1],
     y1: "y1", y2: "y2", fill: "fill",
-    fy: isFaceted ? "adminName" : undefined,
+    fx: isFaceted ? "_fx" : undefined,
+    fy: isFaceted ? "_fy" : undefined,
   });
 
-  // SPEI reference lines as data-driven ruleY (per-facet via fy).
+  // SPEI reference lines as data-driven ruleY.
   const speiRuleMark = speiRuleData.length === 0 ? null : Plot.ruleY(speiRuleData, {
     y: "y",
     stroke: (d) => Math.abs(d.y) === 0 ? "#999" : (Math.abs(d.y) >= 1.5 ? "#e15759" : (Math.abs(d.y) >= 1 ? "#f4a261" : "#76b7b2")),
     strokeDasharray: "2,3",
-    fy: isFaceted ? "adminName" : undefined,
+    fx: isFaceted ? "_fx" : undefined,
+    fy: isFaceted ? "_fy" : undefined,
   });
 
   // Baseline mean rule (per-facet).
@@ -1622,7 +1666,19 @@ recentChanges_obs = {
     y: "y",
     stroke: "#4682b4",
     strokeDasharray: "3,2",
-    fy: isFaceted ? "adminName" : undefined,
+    fx: isFaceted ? "_fx" : undefined,
+    fy: isFaceted ? "_fy" : undefined,
+  });
+
+  // Per-facet admin name label (top-right of each panel).
+  const adminLabelMark = (!isFaceted) ? null : Plot.text(adminLabelData, {
+    fx: "_fx", fy: "_fy",
+    frameAnchor: "top-right",
+    dx: -6, dy: 4,
+    text: "adminName",
+    fontSize: (plotTextSize || 10) + 1,
+    fontWeight: "bold",
+    fill: "#222",
   });
 
   // Split into bgMarks + dataLayerMarks so trend CI + obs uncertainty
@@ -1632,11 +1688,12 @@ recentChanges_obs = {
   if (isSPEI_obs) {
     bgMarks = [hazardBandMark, speiRuleMark].filter((m) => m != null);
     dataLayerMarks = [
-      Plot.barY(observed_obs, {
+      Plot.barY(observed_obs_aug, {
         x: xField, y: "value_plot",
         fill: (d) => extremeColour_obs[d.cls],
         stroke: (d) => extremeColour_obs[d.cls],
-        fy: isFaceted ? "adminName" : undefined,
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
         channels: { admin: "adminName", year: "year", value: "value_mean", classification: "cls" },
         tip: true,
       }),
@@ -1677,10 +1734,13 @@ recentChanges_obs = {
   const trendStroke = "#333";
   const trendMarks = (showTrend_obs && !isSPEI_obs && trendStats && !trendStats.error &&
                       (plotType_obs === "line" || plotType_obs === "line+stripes" || plotType_obs === "bars"))
-    ? trendOverlayMarks(observed_obs, {
+    ? trendOverlayMarks(observed_obs_aug, {
         xField: "year",
         yField: "value_plot",
         groupField: isFaceted ? "adminName" : null,
+        preserveFields: isFaceted ? ["_fx", "_fy"] : [],
+        fx: isFaceted ? "_fx" : null,
+        fy: isFaceted ? "_fy" : null,
         showCI: true,
         ciOpacity: 0.18,
         trendStroke,
@@ -1692,10 +1752,13 @@ recentChanges_obs = {
   // Observational-uncertainty band (heuristic; not a statistical CI).
   // Suppressed for SPEI and for stripes-only. Per-admin when faceted.
   const obsBandMarks = (showObsUncertainty_obs && !isSPEI_obs && plotType_obs !== "stripes")
-    ? observationalUncertaintyMarks(observed_obs, {
+    ? observationalUncertaintyMarks(observed_obs_aug, {
         xField: "year",
         yField: "value_plot",
         groupField: isFaceted ? "adminName" : null,
+        preserveFields: isFaceted ? ["_fx", "_fy"] : [],
+        fx: isFaceted ? "_fx" : null,
+        fy: isFaceted ? "_fy" : null,
         variable,
         fill: "#666",
         fillOpacity: 0.14,
@@ -1718,11 +1781,12 @@ recentChanges_obs = {
 
   // Wire sidebar plot controls (issue #3): plotTextSize / plotTextBold
   // / plotLineWidth feed the chart's font + line styling.
-  const facetCount = isFaceted ? nFacets : 1;
+  // Height scales with row count (issue #6 NxM grid) so each row keeps
+  // ~200px usable plot area regardless of how wide the grid is.
   const perFacetHeight = isFaceted ? 200 : 380;
   const chart = Plot.plot({
     width: 1200,
-    height: facetCount * perFacetHeight + (isFaceted ? 30 : 0),
+    height: nRows * perFacetHeight + (isFaceted ? 40 : 0),
     marginLeft: 70,
     marginBottom: 50,
     marginTop: 30,
@@ -1736,16 +1800,24 @@ recentChanges_obs = {
       label: "Year",
       domain: xDomain,
       tickFormat: (d) => `${Math.floor(d)}`,
-      // tickSpacing controls density at default ticks (issue #7) — for
-      // 45-year ranges we want ~9 ticks (every 5 years), and Plot's
-      // tickSpacing arg accepts pixels-per-tick which scales with width.
+      // ~one tick per 5 years across the data range — keeps the year
+      // labels legible (issue #7) instead of every-year cramming.
       ticks: Math.ceil((xDomain[1] - xDomain[0]) / 5),
     },
     y: { label: yLabel, grid: true, nice: true },
-    fy: isFaceted
-      ? { label: null, padding: 0.08 }
-      : undefined,
-    marks: [...bgMarks, ...obsBandMarks, ...trendCIMarks, ...dataLayerMarks, ...trendLineMarks],
+    // Hide the auto fx/fy axes when faceting — the admin labels are
+    // drawn via Plot.text per facet instead (cleaner than Plot's
+    // default "_fx=0, _fx=1, …" auto-ticks).
+    fx: isFaceted ? { axis: null, padding: 0.05 } : undefined,
+    fy: isFaceted ? { axis: null, padding: 0.08 } : undefined,
+    marks: [
+      ...bgMarks,
+      ...obsBandMarks,
+      ...trendCIMarks,
+      ...dataLayerMarks,
+      ...trendLineMarks,
+      ...(adminLabelMark ? [adminLabelMark] : []),
+    ],
   });
 
   // Trend badge above the chart + IPCC-style confidence qualifier
@@ -2038,6 +2110,19 @@ viewof showGraticule_obs = Inputs.toggle({ label: "Show lat/lon ticks on map", v
 
 ```{ojs}
 viewof showAdmin1Labels_obs = Inputs.toggle({ label: "Show admin1 names on map", value: false });
+```
+
+```{ojs}
+// Map colour palette. "Default" keeps the per-variable ramp (viridis-
+// like for temperature, white→blue for PTOT, green→amber→red for SPEI
+// — chosen for semantic fit). The other options remap the variable's
+// existing breakpoints onto a single d3-scale-chromatic interpolator
+// so the user can flip palettes without breaking the legend's
+// numeric ticks.
+viewof mapPalette_obs = Inputs.select(
+  ["default", "viridis", "magma", "inferno", "turbo", "warm-cool (RdYlBu reversed)"],
+  { label: "Map palette", value: "default" }
+);
 ```
 
 :::
@@ -2424,7 +2509,31 @@ recentChangesMap_obs = {
     }
   }
 
-  const globalStops = ramps_obs[climateVarSelect.id] ?? ramps_obs.TAVG;
+  // Variable-default ramp (sequential viridis-like for temperature,
+  // white→deep-blue for PTOT, green→amber→red for SPEI-sd). Selected
+  // palette overrides the RGB stops while preserving each variable's
+  // value breakpoints, so the legend's numeric ticks stay valid.
+  const baseStops = ramps_obs[climateVarSelect.id] ?? ramps_obs.TAVG;
+  const paletteInterp = ({
+    "viridis":                       (typeof d3.interpolateViridis === "function") ? d3.interpolateViridis : null,
+    "magma":                         (typeof d3.interpolateMagma   === "function") ? d3.interpolateMagma   : null,
+    "inferno":                       (typeof d3.interpolateInferno === "function") ? d3.interpolateInferno : null,
+    "turbo":                         (typeof d3.interpolateTurbo   === "function") ? d3.interpolateTurbo   : null,
+    "warm-cool (RdYlBu reversed)":   (typeof d3.interpolateRdYlBu  === "function") ? ((t) => d3.interpolateRdYlBu(1 - t)) : null,
+  })[mapPalette_obs] || null;
+  const paletteAdjustedStops = paletteInterp
+    ? (() => {
+        const v0 = baseStops[0].at;
+        const v1 = baseStops[baseStops.length - 1].at;
+        const range = v1 - v0 || 1;
+        return baseStops.map((s) => {
+          const t = (s.at - v0) / range;
+          const c = d3.color(paletteInterp(t));
+          return { at: s.at, rgb: c ? [c.r, c.g, c.b] : s.rgb };
+        });
+      })()
+    : baseStops;
+  const globalStops = paletteAdjustedStops;
   let activeStops = globalStops;
   let rampLabel = "fixed";
   if (!rampLockFixed_obs && nValid > 1 && vMax > vMin) {
@@ -2548,17 +2657,28 @@ recentChangesMap_obs = {
         const x = tx(c[0]).toFixed(1);
         const y = ty(c[1]).toFixed(1);
         const name = escapeXml_obs(f.properties.admin1_name || "");
-        return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="10" font-weight="500" fill="#111" font-family="system-ui, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2.5" stroke-linejoin="round">${name}</text>`;
+        // Issue #3: scale admin1 label font size + halo with the
+        // sidebar plotTextSize input. Default 10pt → scale proportionally.
+        const fontSize = (plotTextSize || 10);
+        const haloW = Math.max(1.5, fontSize / 4);
+        return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="${fontSize}" font-weight="${plotTextBold ? '700' : '500'}" fill="#111" font-family="system-ui, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="${haloW}" stroke-linejoin="round">${name}</text>`;
       })
       .join("");
   }
 
+  // Boundary stroke widths scale with plotLineWidth (issue #3) and
+  // start from stronger defaults (issue #1 — previous 0.7px line at
+  // 0.75 opacity was barely visible). Selected admin1 stays a hair
+  // bolder so the user's selection remains unambiguous.
+  const adminLineW    = Math.max(0.6, (plotLineWidth || 1.5) * 0.7);
+  const selectedHaloW = Math.max(2.5, (plotLineWidth || 1.5) * 3.0);
+  const selectedLineW = Math.max(1.5, (plotLineWidth || 1.5) * 1.5);
   const svgMarkup = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="position: absolute; top: 0; left: 0; pointer-events: none;">
-      <path d="${allAdmin1Paths}" stroke="#555" stroke-width="0.7" fill="none" opacity="0.75"/>
+      <path d="${allAdmin1Paths}" stroke="#222" stroke-width="${adminLineW}" fill="none" opacity="0.95"/>
       ${selectedAdmin1Paths ? `
-        <path d="${selectedAdmin1Paths}" stroke="#ffffff" stroke-width="4.5" fill="none" stroke-linejoin="round"/>
-        <path d="${selectedAdmin1Paths}" stroke="#d62728" stroke-width="2.2" fill="none" stroke-linejoin="round"/>
+        <path d="${selectedAdmin1Paths}" stroke="#ffffff" stroke-width="${selectedHaloW}" fill="none" stroke-linejoin="round"/>
+        <path d="${selectedAdmin1Paths}" stroke="#d62728" stroke-width="${selectedLineW}" fill="none" stroke-linejoin="round"/>
       ` : ""}
       ${graticuleMarkup}
       ${labelsMarkup}
@@ -2574,9 +2694,18 @@ recentChangesMap_obs = {
   mapStack.appendChild(display);
   mapStack.appendChild(svgOverlay);
 
-  // Download button — composites canvas + SVG overlay into one PNG.
-  const dlBtn = html`<button style="margin-left: auto; padding: 2px 10px; font-size: 0.85em;">Download map (PNG)</button>`;
-  dlBtn.onclick = async () => {
+  const statLabel = mapStat_obs === "mean" ? "1991-2020 mean" : `1991-2020 ${mapStat_obs}`;
+  const fetchSec = (countryRaster_obs.fetchMs / 1000).toFixed(1);
+  const rangeStr = nValid > 0 ? `data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "no valid pixels";
+  setStatus(`${climateVarSelect.id} ${seasonSelect.season} (${statLabel}) for ${renderLabel} · country fetch ${fetchSec}s · sub-window ${sw}×${sh} → ${W}×${H} · ${rangeStr} · ramp: ${rampLabel}`);
+
+  // Issues #4 + #5: download button moves below the map, styled
+  // identically to the chart's split-button via chartDownloadMenu.
+  // The map is a canvas+SVG composite (no Plot SVG to rasterise), so
+  // we pass a pngOverride that composites the layers ourselves. SVG
+  // and CSV menu items are suppressed (no real SVG to export beyond
+  // the boundary overlay; no underlying dataframe for CSV).
+  const compositePng = async () => {
     const composite = document.createElement("canvas");
     composite.width = W;
     composite.height = H;
@@ -2593,23 +2722,20 @@ recentChangesMap_obs = {
       im.onerror = (e) => { URL.revokeObjectURL(svgUrl); reject(e); };
       im.src = svgUrl;
     });
-    composite.toBlob((blob) => {
-      const a = document.createElement("a");
-      const slug = (renderLabel || "map").replace(/[^a-zA-Z0-9._-]+/g, "_");
-      a.href = URL.createObjectURL(blob);
-      a.download = `obs_${climateVarSelect.id}_${seasonSelect.season}_${mapStat_obs}_${slug}.png`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    }, "image/png");
+    return await new Promise((resolve) => composite.toBlob((b) => resolve(b), "image/png"));
   };
+  const mapAndLegend = html`<div></div>`;
+  mapAndLegend.appendChild(mapStack);
+  mapAndLegend.appendChild(legend);
+  const slug = (renderLabel || "map").replace(/[^a-zA-Z0-9._-]+/g, "_");
+  const filename = `obs_map_${climateVarSelect.id}_${seasonSelect.season}_${mapStat_obs}_${slug}`;
+  const withDownload = chartDownloadMenu(mapAndLegend, {
+    filename,
+    pngOverride: compositePng,
+    disableSvg: true,
+  });
 
-  const statLabel = mapStat_obs === "mean" ? "1991-2020 mean" : `1991-2020 ${mapStat_obs}`;
-  const fetchSec = (countryRaster_obs.fetchMs / 1000).toFixed(1);
-  const rangeStr = nValid > 0 ? `data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "no valid pixels";
-  setStatus(`${climateVarSelect.id} ${seasonSelect.season} (${statLabel}) for ${renderLabel} · country fetch ${fetchSec}s · sub-window ${sw}×${sh} → ${W}×${H} · ${rangeStr} · ramp: ${rampLabel}`);
-
-  const header = html`<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">${status}${dlBtn}</div>`;
-  return html`<div>${header}${mapStack}${legend}</div>`;
+  return html`<div>${status}${withDownload}</div>`;
 }
 ```
 

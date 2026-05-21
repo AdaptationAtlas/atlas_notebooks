@@ -203,14 +203,18 @@ function _chartDownloadMenu_ensureStyle() {
  *   show, hide } so the wrapper can wire global keydown / click-outside
  *   handlers.
  */
-function _chartDownloadMenu_buildSplitButton({ onPng, onSvg, onCsv, svgAvailable, csvAvailable }) {
+function _chartDownloadMenu_buildSplitButton({ onPng, onSvg, onCsv, pngAvailable, svgAvailable, csvAvailable }) {
+  // Backwards compat: callers that pass only svgAvailable (the original
+  // API, when PNG was always the SVG-rasterised path) still work — the
+  // primary button stays gated by SVG presence in that case.
+  if (pngAvailable === undefined) pngAvailable = svgAvailable;
   const primary = document.createElement("button");
   primary.type = "button";
   primary.className = "cdm-primary";
   primary.textContent = "Download PNG";
   primary.setAttribute("aria-label", "Download chart as PNG");
-  primary.disabled = !svgAvailable;
-  if (svgAvailable) primary.onclick = onPng;
+  primary.disabled = !pngAvailable;
+  if (pngAvailable) primary.onclick = onPng;
 
   const caret = document.createElement("button");
   caret.type = "button";
@@ -302,6 +306,19 @@ function _chartDownloadMenu_buildSplitButton({ onPng, onSvg, onCsv, svgAvailable
  * @param {Array<string>} [opts.csvColumns] - Explicit column order
  *                                            for CSV; otherwise the
  *                                            keys of data[0].
+ * @param {Function}      [opts.pngOverride] - Async function returning
+ *                                            a Blob — used in place of
+ *                                            the default SVG → PNG
+ *                                            rasterise. Lets non-SVG
+ *                                            charts (canvas composites,
+ *                                            for example) plug into the
+ *                                            same split-button UX.
+ * @param {boolean}       [opts.disableSvg] - Force-hide the SVG menu
+ *                                            item even when an SVG is
+ *                                            present (useful when the
+ *                                            chart's "real" output is a
+ *                                            canvas composite the SVG
+ *                                            alone wouldn't capture).
  * @returns {HTMLElement} A div containing the chart on top and the
  *                       split-button row below.
  */
@@ -311,15 +328,23 @@ function chartDownloadMenu(chartElement, opts) {
   const data = o.data;
   const csvColumns = o.csvColumns;
   const hasData = Array.isArray(data) && data.length > 0;
+  const pngOverride = o.pngOverride;
+  const disableSvg = !!o.disableSvg;
 
   // Find the SVG for PNG/SVG export. CSV doesn't need it.
   const svg = _chartDownloadMenu_findSvg(chartElement);
-  const svgAvailable = !!svg;
+  // PNG is available whenever EITHER an SVG was found OR an override
+  // PNG handler was supplied. SVG menu item only when an SVG exists
+  // and the caller hasn't suppressed it.
+  const pngAvailable = !!svg || typeof pngOverride === "function";
+  const svgAvailable = !!svg && !disableSvg;
 
   // Export actions
   const onPng = async () => {
     try {
-      const blob = await _chartDownloadMenu_svgToPng(svg, 2);
+      const blob = pngOverride
+        ? await pngOverride()
+        : await _chartDownloadMenu_svgToPng(svg, 2);
       _chartDownloadMenu_triggerDownload(blob, baseName + ".png");
     } catch (e) {
       console.error("chartDownloadMenu PNG export failed", e);
@@ -340,6 +365,7 @@ function chartDownloadMenu(chartElement, opts) {
   _chartDownloadMenu_ensureStyle();
   const sb = _chartDownloadMenu_buildSplitButton({
     onPng, onSvg, onCsv,
+    pngAvailable,
     svgAvailable,
     csvAvailable: hasData,
   });

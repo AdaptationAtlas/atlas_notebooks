@@ -260,6 +260,14 @@ function mannKendall(values, opts) {
  * @param {string} [opts.trendStroke="currentColor"]
  * @param {number} [opts.trendStrokeWidth=1.5]
  * @param {string} [opts.trendStrokeDasharray="4 3"]
+ * @param {Array<string>} [opts.preserveFields=[]] - field names to copy
+ *   from the source data onto each derived band/line row. Required when
+ *   the marks need to participate in Plot.plot facet channels — e.g.
+ *   `preserveFields: ["_fx","_fy"]` plus `fx:"_fx", fy:"_fy"` routes each
+ *   group's trend overlay into its own facet cell in an Nx M grid.
+ * @param {string|null} [opts.fx=null] - field name passed as `fx` channel
+ *   to the internal Plot.line / Plot.areaY marks.
+ * @param {string|null} [opts.fy=null] - field name passed as `fy` channel.
  * @param {object} [opts.mkOpts] - forwarded to mannKendall()
  * @returns {Array<Plot.Mark>}
  */
@@ -273,6 +281,9 @@ function trendOverlayMarks(data, opts) {
   const trendStroke = o.trendStroke || "currentColor";
   const trendStrokeWidth = o.trendStrokeWidth == null ? 1.5 : o.trendStrokeWidth;
   const trendStrokeDasharray = o.trendStrokeDasharray == null ? "4 3" : o.trendStrokeDasharray;
+  const preserveFields = o.preserveFields || [];
+  const fxField = o.fx || null;
+  const fyField = o.fy || null;
   const mkOpts = o.mkOpts || {};
 
   // Group data.
@@ -299,6 +310,12 @@ function trendOverlayMarks(data, opts) {
     const xMid = (x0 + x1) / 2;
     const yMid = stats.intercept + stats.slope * xMid;
 
+    // Preserve-field values are constant within a group; pluck them from
+    // the first row and stamp onto every derived band/line row so the
+    // mark inherits them and Plot's facet channels resolve correctly.
+    const preserved = {};
+    for (const f of preserveFields) preserved[f] = groupData[0]?.[f];
+
     if (showCI) {
       // Envelope of lines through (xMid, yMid) with slope in
       // [slopeLower95, slopeUpper95]. y1 = lower envelope, y2 = upper.
@@ -308,31 +325,38 @@ function trendOverlayMarks(data, opts) {
         const yLo = yMid + stats.slopeLower95 * dx;
         const yHi = yMid + stats.slopeUpper95 * dx;
         return {
+          ...preserved,
           [xField]: x,
           y1: Math.min(yLo, yHi),
           y2: Math.max(yLo, yHi),
         };
       });
-      marks.push(Plot.areaY(band, {
+      const areaOpts = {
         x: xField,
         y1: "y1",
         y2: "y2",
         fill: trendStroke,
         fillOpacity: ciOpacity,
-      }));
+      };
+      if (fxField) areaOpts.fx = fxField;
+      if (fyField) areaOpts.fy = fyField;
+      marks.push(Plot.areaY(band, areaOpts));
     }
 
     const lineData = [
-      { [xField]: x0, [yField]: stats.intercept + stats.slope * x0 },
-      { [xField]: x1, [yField]: stats.intercept + stats.slope * x1 },
+      { ...preserved, [xField]: x0, [yField]: stats.intercept + stats.slope * x0 },
+      { ...preserved, [xField]: x1, [yField]: stats.intercept + stats.slope * x1 },
     ];
-    marks.push(Plot.line(lineData, {
+    const lineOpts = {
       x: xField,
       y: yField,
       stroke: trendStroke,
       strokeWidth: trendStrokeWidth,
       strokeDasharray: trendStrokeDasharray,
-    }));
+    };
+    if (fxField) lineOpts.fx = fxField;
+    if (fyField) lineOpts.fy = fyField;
+    marks.push(Plot.line(lineData, lineOpts));
   }
 
   return marks;
