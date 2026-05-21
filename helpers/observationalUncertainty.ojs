@@ -1,0 +1,187 @@
+/**
+ * observationalUncertainty.ojs
+ *
+ * Heuristic observational-uncertainty bands for the observational
+ * Recent Changes prototype (and eventually the production drop-in).
+ *
+ * Returns indicative bands around the observed value — these are NOT
+ * statistical CIs. The scientifically defensible upgrade is multi-
+ * product spread across independent observational products; that's
+ * pipeline-side work and tracked as Phase 2 (see memo §12.2 option 2).
+ *
+ * Each default is anchored to a peer-reviewed African validation study —
+ * see playbook/handovers/climateRationale/context/04 §12 and the
+ * citation block in Appendix A.
+ *
+ *   PTOT  ± 10 %   — Dinku et al. (2018) QJRMS 144:292–312;
+ *                    Cattani et al. (2022) J. Hydrometeorology 23:259–278.
+ *                    African country-scale annual PBIAS typically < 10 %.
+ *   TMAX  ± 0.5 °C — Sheridan et al. (2022) Climate 10(7):98. Daily bias
+ *                    between -0.5 and +0.5 °C at 7 of 8 diverse African
+ *                    sites.
+ *   TAVG  ± 0.5 °C — Computed as (TMAX + TMIN) / 2; TMAX-dominated.
+ *   TMIN  ± 1.0 °C — Sheridan et al. (2022). Systematic positive bias
+ *                    0.6–2.3 °C at moderate-gauge sites; larger (3–6 °C)
+ *                    near large water bodies / lowland tropical sites.
+ *
+ * All heuristics are illustrative, not statistical CIs. Multi-product
+ * spread (memo §12.2 option 2) is the scientifically defensible upgrade.
+ */
+
+
+// Per-variable defaults. PTOT is *relative* (fraction of value);
+// temperatures are *absolute* (°C). Override via opts.heuristic per
+// region / dataset without re-deploying.
+//
+// Returned from a function rather than declared as a top-level const
+// — OJS module files only accept top-level `function` and OJS-cell
+// (`name = ...`) declarations. A top-level `const` invalidates the
+// whole module parse and silently breaks every export, surfacing
+// downstream as "X is not defined" with no clue about the root cause.
+function _ouDefaults() {
+  return {
+    ptot:    { relative: 0.10 },
+    tmax:    { absolute: 0.5  },
+    tavg:    { absolute: 0.5  },
+    tmin:    { absolute: 1.0  },
+  };
+}
+
+
+/**
+ * Normalise variable names so callers can pass "PTOT", "ptot",
+ * "TAVG", "TMAX", "TMIN" — or upstream variants — and we resolve to
+ * a single key. SPEI returns null (band suppressed).
+ */
+function _ouVariableKey(variable) {
+  if (!variable) return null;
+  const v = String(variable).toUpperCase();
+  if (v.startsWith("SPEI")) return null;  // band suppressed for SPEI
+  if (v === "PTOT") return "ptot";
+  if (v === "TMAX") return "tmax";
+  if (v === "TMIN") return "tmin";
+  if (v === "TAVG") return "tavg";
+  return null;
+}
+
+
+/**
+ * Compute the lower / upper uncertainty bounds for a single value.
+ *
+ * @param {number} value
+ * @param {string} variable - "PTOT" / "TAVG" / "TMAX" / "TMIN" / SPEI-*
+ * @param {object} [opts]
+ * @param {object} [opts.heuristic] - per-variable override of the
+ *   default constants. Same shape as the internal defaults:
+ *     { ptot: { relative: 0.15 }, tmax: { absolute: 0.7 }, ... }
+ *   Only the keys you want to override need to be present; defaults
+ *   are filled in for the rest.
+ * @returns {object|null} { lower, upper } or null when no band
+ *   should be drawn (SPEI; unknown variable; non-finite value).
+ */
+function observationalUncertaintyBand(value, variable, opts) {
+  const key = _ouVariableKey(variable);
+  if (key == null) return null;
+  if (value == null || !isFinite(Number(value))) return null;
+
+  const o = opts || {};
+  const overrides = o.heuristic || {};
+  const spec = Object.assign({}, _ouDefaults()[key], overrides[key] || {});
+
+  let delta;
+  if (spec.relative != null)      delta = Math.abs(value) * spec.relative;
+  else if (spec.absolute != null) delta = spec.absolute;
+  else                            return null;
+
+  let lower = value - delta;
+  let upper = value + delta;
+  // PTOT can't be negative — clip the lower bound.
+  if (key === "ptot") lower = Math.max(0, lower);
+  return { lower, upper };
+}
+
+
+/**
+ * Build Plot marks for the uncertainty band. Companion to
+ * trendOverlayMarks in trend.ojs — same shape (array of Plot marks
+ * ready to spread into Plot.plot({marks: [...]})).
+ *
+ * One Plot.areaY per group (group resolution via opts.groupField,
+ * matching trendOverlayMarks). Styled neutral grey so it's
+ * visually distinct from the trend CI band (which is variable-
+ * coloured at slightly higher opacity).
+ *
+ * Returns [] when the band should not render at all (SPEI variable;
+ * empty data; unrecognised variable).
+ *
+ * @param {Array<object>} data
+ * @param {object} [opts]
+ * @param {string} [opts.xField="year"]
+ * @param {string} [opts.yField="value"]
+ * @param {string} [opts.variable] - one of PTOT / TMAX / TMIN / TAVG.
+ *   Required (the band rule is variable-specific).
+ * @param {string|null} [opts.groupField=null]
+ * @param {string} [opts.fill="#777"]
+ * @param {number} [opts.fillOpacity=0.10]
+ * @param {object} [opts.heuristic] - forwarded to
+ *   observationalUncertaintyBand for per-call overrides
+ * @returns {Array<Plot.Mark>}
+ */
+function observationalUncertaintyMarks(data, opts) {
+  const o = opts || {};
+  const xField = o.xField || "year";
+  const yField = o.yField || "value";
+  const variable = o.variable;
+  const groupField = o.groupField || null;
+  const fill = o.fill || "#777";
+  const fillOpacity = o.fillOpacity == null ? 0.10 : o.fillOpacity;
+  const heuristic = o.heuristic;
+
+  if (!data || data.length === 0) return [];
+  if (_ouVariableKey(variable) == null) return [];
+
+  // Build (lower, upper) per row.
+  const rows = [];
+  for (const d of data) {
+    const v = Number(d[yField]);
+    if (!isFinite(v)) continue;
+    const band = observationalUncertaintyBand(v, variable, { heuristic });
+    if (!band) continue;
+    const row = {
+      [xField]: d[xField],
+      _ou_lower: band.lower,
+      _ou_upper: band.upper,
+    };
+    if (groupField) row[groupField] = d[groupField];
+    rows.push(row);
+  }
+  if (rows.length === 0) return [];
+
+  // Group rows if groupField is supplied. One areaY mark per group
+  // so each group gets its own continuous band (Plot.areaY without
+  // grouping would draw a single ragged area across groups).
+  const groups = new Map();
+  if (groupField) {
+    for (const r of rows) {
+      const k = r[groupField];
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+  } else {
+    groups.set("__all__", rows);
+  }
+
+  const marks = [];
+  for (const [, groupRows] of groups) {
+    const sorted = groupRows.slice().sort((a, b) => a[xField] - b[xField]);
+    marks.push(Plot.areaY(sorted, {
+      x: xField,
+      y1: "_ou_lower",
+      y2: "_ou_upper",
+      fill,
+      fillOpacity,
+      stroke: "none",
+    }));
+  }
+  return marks;
+}

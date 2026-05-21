@@ -34,8 +34,9 @@ Earlier Stage 1 QAQC + COG spot-checks are archived at [`archive/obs_qaqc_full.q
 
 ```{ojs}
 //| output: false
-import { chartDownloadMenu }                  from "/helpers/chartDownloadMenu.ojs";
-import { mannKendall, trendOverlayMarks }     from "/helpers/trend.ojs";
+import { chartDownloadMenu }                                          from "/helpers/chartDownloadMenu.ojs";
+import { mannKendall, trendOverlayMarks }                             from "/helpers/trend.ojs";
+import { observationalUncertaintyBand, observationalUncertaintyMarks } from "/helpers/observationalUncertainty.ojs";
 ```
 
 ```{ojs}
@@ -52,6 +53,25 @@ db = await DuckDBClient.of();
 
 ## Controls
 
+```{=html}
+<style>
+/* Lay out the sidebar controls 3 per row to save vertical space.
+   Each OJS viewof cell renders inside a Quarto .cell wrapper; the
+   grid targets those wrappers directly. */
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 18px;
+  margin: 0 0 12px 0;
+}
+.controls-grid > .cell { margin: 0; }
+.controls-grid form { margin: 0; }
+/* Tighten Inputs.toggle labels so they wrap nicely inside one column
+   rather than overflowing. */
+.controls-grid form label { line-height: 1.25; }
+</style>
+```
+
 ```{ojs}
 //| output: false
 // Hardcoded country selector (sandbox scope). Production view will reuse
@@ -62,13 +82,6 @@ countries = [
   { iso3: "TGO", name: "Togo"   },
   { iso3: "KEN", name: "Kenya"  },
 ];
-```
-
-```{ojs}
-viewof country = Inputs.select(countries, {
-  label: "Country",
-  format: (d) => `${d.iso3} — ${d.name}`,
-});
 ```
 
 ```{ojs}
@@ -97,13 +110,24 @@ mainGaul = {
 }
 ```
 
+General controls (drive what's selected — affect both the chart below and the map further down):
+
+::: {.controls-grid}
+
+```{ojs}
+viewof country = Inputs.select(countries, {
+  label: "Country",
+  format: (d) => `${d.iso3} — ${d.name}`,
+});
+```
+
 ```{ojs}
 viewof admin1_names = {
   // Multi-select admin1. Empty selection = country (national) view.
   // 1 admin1 = single-region timeseries + map zoom. 2+ = map shows
-  // them all (mask + boundaries), timeseries falls back to country
-  // aggregate (no automatic averaging — would be misleading for
-  // mixed precipitation totals across regions of different sizes).
+  // them all (mask + boundaries); timeseries falls back to country
+  // aggregate (no implicit averaging — misleading for PTOT totals
+  // across different-sized regions).
   const iso3 = country.iso3;
   const gaul = mainGaul.get(iso3);
   if (gaul == null) {
@@ -117,22 +141,54 @@ viewof admin1_names = {
   const options = Array.from(resp).map((d) => d.admin1_name);
   return Inputs.select(options, { label: "Region(s) — admin1 (empty = country)", multiple: 8, value: [] });
 }
+```
 
+```{ojs}
 viewof variable_E = Inputs.select(
   ["TAVG", "TMAX", "TMIN", "PTOT", "SPEI-03", "SPEI-12"],
   { label: "Variable", value: "TAVG" }
 );
+```
 
+```{ojs}
 viewof season_E = Inputs.select(
   ["annual","JFM","FMA","MAM","AMJ","MJJ","JJA","JAS","ASO","SON","OND","NDJ","DJF"],
   { label: "Season", value: "annual" }
 );
+```
 
-// View type is meaningful only for non-SPEI variables. SPEI queries
+:::
+
+```{ojs}
+//| output: false
+isSPEI_E = variable_E.startsWith("SPEI");
+useAnomaly_E = anomaly_E && !isSPEI_E;
+seasonLastMonth = ({
+  annual: 12, JFM: 3, FMA: 4, MAM: 5, AMJ: 6, MJJ: 7, JJA: 8, JAS: 9,
+  ASO: 10, SON: 11, OND: 12, NDJ: 1, DJF: 2,
+});
+```
+
+## Timeseries
+
+::: {.callout-note collapse="true"}
+## How to read the trend layer
+
+Trends are computed over the full observational record (CHIRPS v3 from 1981; CHIRTS-ERA5 from 1983) using the **Mann-Kendall** test with the **Theil-Sen** slope estimator. Trend-free pre-whitening (Yue et al. 2002) is applied where the lag-1 autocorrelation of the detrended series exceeds 0.1 — the badge notes when this kicks in. Anomalies use the **WMO 1991-2020** standard climatological normal as the baseline. Statistical significance is reported at the **5 % level**. Confidence statements follow IPCC AR6 calibrated language: *high confidence* = significant trend; trends that are not significant are reported explicitly — on a ~45-year record, internal variability can mask modest forced changes, particularly for precipitation. SPEI variables suppress the slope-per-decade number (z-score-per-decade has no physical meaning); a dry-month-frequency view is forthcoming (Phase 2). The difference between two adjacent 30-year normals is *not* a trend — the windows overlap by 20 years; report the slope over the full record instead.
+
+**Observational uncertainty.** Rainfall estimates (CHIRPS v3) and temperature estimates (CHIRTS-ERA5) are deterministic satellite–gauge blended products; no formal uncertainty layer ships with either. The indicative bands around each year's value (toggleable in the controls) are heuristics anchored to published African validation studies — **PTOT ± 10 %** (Dinku et al. 2018; Cattani et al. 2022 — country-scale annual percent-bias typically below 10 %), **TMAX / TAVG ± 0.5 °C** (Sheridan et al. 2022 — daily-bias range at 7 of 8 diverse African sites), and **TMIN ± 1.0 °C** (Sheridan et al. 2022 — systematic warm bias 0.6–2.3 °C at moderate-gauge sites; larger near large water bodies and in lowland tropical zones, where biases of 3 °C or more have been documented). These bands are *not* statistical confidence intervals. CHIRTS-ERA5 corrects ERA5's documented cool bias over Africa via the CHIRTS monthly climatology (Verdin et al. 2020); the underlying daily-anomaly skill is inherited from ERA5. The statistical CI on the trend slope reflects sampling uncertainty in the slope given the observed values — it does not include the observational uncertainty in those values.
+:::
+
+Plot controls (affect this chart only — view type / plot type / anomaly / overlays):
+
+::: {.controls-grid}
+
+```{ojs}
+// View type is meaningful only for non-SPEI variables — SPEI queries
 // always pin to a single month per year (the season's last month;
 // see seasonLastMonth) so "monthly" vs "periods" doesn't change the
 // returned rows. Greying out the selector under SPEI makes that
-// constraint visible to the user.
+// constraint visible.
 viewof viewType_E = {
   const isSPEI = variable_E.startsWith("SPEI");
   return Inputs.select(
@@ -145,22 +201,11 @@ viewof viewType_E = {
     }
   );
 }
-
-viewof anomaly_E = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: false });
-
-// Toggle the Mann-Kendall + Theil-Sen trend layer (line + 95 % CI band
-// + badge + IPCC qualifier). Defaults to ON. Independent of plot type
-// — turning off here suppresses every trend artefact at once.
-viewof showTrend_E = Inputs.toggle({ label: "Show trend layer (Mann-Kendall + Theil-Sen)", value: true });
 ```
 
 ```{ojs}
 // Plot-type selector. Available options depend on the chosen variable:
-//   - SPEI:        bars only (a line is meaningless for a discrete index)
-//   - PTOT:        line / bars / wet-dry stripes / line+stripes
-//   - Temperature: line / bars / warming stripes / line+stripes
-// When the variable changes the dropdown rebuilds; if the previous
-// type isn't in the new option set, the selector resets to default.
+// SPEI = bars only; PTOT and temperature = line / bars / stripes / line+stripes.
 viewof plotType_E = {
   const isSPEI = variable_E.startsWith("SPEI");
   const options = isSPEI ? ["bars"] : ["line", "bars", "stripes", "line+stripes"];
@@ -179,33 +224,25 @@ viewof plotType_E = {
 ```
 
 ```{ojs}
-// Map-only toggle: dynamic ramp rescales each render to the visible
-// data range (max contrast within a view); fixed ramp keeps the
-// 0–40°C / 0–2500 mm / SPEI-sd absolute limits (cross-region
-// comparable). Doesn't affect the timeseries chart.
-viewof rampLockFixed_E = Inputs.toggle({ label: "Lock map ramp to global limits (off = rescale to admin1 / country data)", value: false });
-
-// Map decoration toggles.
-viewof showGraticule_E    = Inputs.toggle({ label: "Show lat/lon ticks on map", value: false });
-viewof showAdmin1Labels_E = Inputs.toggle({ label: "Show admin1 names on map",   value: false });
+viewof anomaly_E = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: false });
 ```
 
 ```{ojs}
-//| output: false
-isSPEI_E = variable_E.startsWith("SPEI");
-useAnomaly_E = anomaly_E && !isSPEI_E;
-seasonLastMonth = ({
-  annual: 12, JFM: 3, FMA: 4, MAM: 5, AMJ: 6, MJJ: 7, JJA: 8, JAS: 9,
-  ASO: 10, SON: 11, OND: 12, NDJ: 1, DJF: 2,
-});
+// Mann-Kendall + Theil-Sen trend layer (line + 95 % CI band + badge
+// + IPCC qualifier). Defaults to ON. Off here suppresses every trend
+// artefact at once.
+viewof showTrend_E = Inputs.toggle({ label: "Show trend layer (Mann-Kendall + Theil-Sen)", value: true });
 ```
 
-## Timeseries
+```{ojs}
+// Heuristic observational-uncertainty band around the data line.
+// Defaults to OFF — the "(indicative)" qualifier is important so
+// users don't read it as a statistical CI. Suppressed for SPEI
+// regardless of toggle. See helpers/observationalUncertainty.ojs
+// for the per-variable defaults and citation anchors.
+viewof showObsUncertainty_E = Inputs.toggle({ label: "Show observational uncertainty band (indicative)", value: false });
+```
 
-::: {.callout-note collapse="true"}
-## How to read the trend layer
-
-Trends are computed over the full observational record (CHIRPS v3 from 1981; CHIRTS-ERA5 from 1983) using the **Mann-Kendall** test with the **Theil-Sen** slope estimator. Trend-free pre-whitening (Yue et al. 2002) is applied where the lag-1 autocorrelation of the detrended series exceeds 0.1 — the badge notes when this kicks in. Anomalies use the **WMO 1991-2020** standard climatological normal as the baseline. Statistical significance is reported at the **5 % level**. Confidence statements follow IPCC AR6 calibrated language: *high confidence* = significant trend; trends that are not significant are reported explicitly — on a ~45-year record, internal variability can mask modest forced changes, particularly for precipitation. SPEI variables suppress the slope-per-decade number (z-score-per-decade has no physical meaning); a dry-month-frequency view is forthcoming (Phase 2). The difference between two adjacent 30-year normals is *not* a trend — the windows overlap by 20 years; report the slope over the full record instead.
 :::
 
 ```{ojs}
@@ -410,10 +447,16 @@ recentChanges_E = {
     }),
   ];
 
-  let marks = [];
+  // Split marks into "background" (drawn first — hazard bands, baseline
+  // rule, stripes) and "data" (drawn on top — line + dots, or bars).
+  // The dispatch z-order needs us to interleave the obs uncertainty
+  // band + trend CI BETWEEN background and data, so they sit under the
+  // data line but over the hazard bands.
+  let bgMarks = [];
+  let dataLayerMarks = [];
   if (isSPEI_E) {
-    marks = [
-      ...speiLines.map((l) => Plot.ruleY([l.y], { stroke: l.stroke, strokeDasharray: "2,3" })),
+    bgMarks = speiLines.map((l) => Plot.ruleY([l.y], { stroke: l.stroke, strokeDasharray: "2,3" }));
+    dataLayerMarks = [
       Plot.barY(observed_E, {
         x: xField, y: "value_plot",
         fill: (d) => extremeColour_E[d.cls],
@@ -423,7 +466,7 @@ recentChanges_E = {
       }),
     ];
   } else if (plotType_E === "bars") {
-    marks = [
+    bgMarks = [
       ...bands.map((b) =>
         Plot.rect([b], {
           x1: d3.min(observed_E, (d) => d[xField]),
@@ -432,25 +475,27 @@ recentChanges_E = {
         })
       ),
       Plot.ruleY([barBaseline], { stroke: "#4682b4", strokeDasharray: "3,2" }),
-      barMark,
     ];
+    dataLayerMarks = [barMark];
   } else if (plotType_E === "stripes") {
     // Pure stripes — keep °C axis (per dispatch), full-height
-    // coloured rects span the data's y-range.
+    // coloured rects span the data's y-range. Stripes ARE the data
+    // here, so they go in the data layer.
     const yMin = d3.min(observed_E, (d) => d.value_plot);
     const yMax = d3.max(observed_E, (d) => d.value_plot);
-    marks = [stripesMark(yMin, yMax)];
+    bgMarks = [];
+    dataLayerMarks = [stripesMark(yMin, yMax)];
   } else if (plotType_E === "line+stripes") {
     const yMin = d3.min(observed_E, (d) => d.value_plot);
     const yMax = d3.max(observed_E, (d) => d.value_plot);
-    marks = [
+    bgMarks = [
       stripesMark(yMin, yMax),
       Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" }),
-      ...lineMarks,
     ];
+    dataLayerMarks = lineMarks;
   } else {
-    // Default "line" — bands behind, baseline reference line, line + dots.
-    marks = [
+    // Default "line" — hazard bands behind, baseline rule, then line + dots.
+    bgMarks = [
       ...bands.map((b) =>
         Plot.rect([b], {
           x1: d3.min(observed_E, (d) => d[xField]),
@@ -459,8 +504,8 @@ recentChanges_E = {
         })
       ),
       Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" }),
-      ...lineMarks,
     ];
+    dataLayerMarks = lineMarks;
   }
 
   // Trend layer (Mann-Kendall + Theil-Sen). Skipped entirely when
@@ -493,6 +538,27 @@ recentChanges_E = {
       })
     : [];
 
+  // Observational-uncertainty band (heuristic; not a statistical CI).
+  // Suppressed for SPEI (z-score-propagated uncertainty has no
+  // defensible single-number representation — memo §12.1) and for the
+  // stripes-only plot type (no data line to wrap).
+  const obsBandMarks = (showObsUncertainty_E && !isSPEI_E && plotType_E !== "stripes")
+    ? observationalUncertaintyMarks(observed_E, {
+        xField: "year",
+        yField: "value_plot",
+        variable: variable_E,
+        fill: "#666",
+        fillOpacity: 0.10,
+      })
+    : [];
+
+  // Split trendMarks into [CI band, trend line] when both are
+  // present so we can interleave them around the data layer per the
+  // dispatch z-order. trendOverlayMarks returns [areaY, line] when
+  // showCI:true; [line] when showCI:false; [] when no trend.
+  const trendCIMarks   = trendMarks.length === 2 ? [trendMarks[0]] : [];
+  const trendLineMarks = trendMarks.length === 2 ? [trendMarks[1]] : trendMarks;
+
   const chart = Plot.plot({
     width: 1200,
     height: 380,
@@ -502,7 +568,14 @@ recentChanges_E = {
     style: { color: "#333", background: "#fff" },
     x: { label: "Year", tickFormat: (d) => `${Math.floor(d)}` },
     y: { label: yLabel, grid: true, nice: true },
-    marks: [...marks, ...trendMarks],
+    // Z-order per dispatch §3, bottom → top:
+    //   1–2. Hazard bands + baseline rule (bgMarks)
+    //   3.   Observational uncertainty band (heuristic)
+    //   4.   Trend CI band (statistical, slope envelope)
+    //   5.   Data line + points / bars (dataLayerMarks)
+    //   6.   Trend line (dashed)
+    // Plot draws marks in array order; later = on top.
+    marks: [...bgMarks, ...obsBandMarks, ...trendCIMarks, ...dataLayerMarks, ...trendLineMarks],
   });
 
   // Trend badge above the chart + IPCC-style confidence qualifier
@@ -512,8 +585,17 @@ recentChanges_E = {
   const trendDisplayUnit = variable_E === "PTOT"
     ? (viewType_E === "monthly" ? "mm/month" : "mm")
     : "°C";
-  const fmtSlope = (v) => (Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(2));
+  // 2 significant figures for slopes per decade (e.g. +0.19 rather than
+  // +0.193) — dispatch §6. PTOT slopes thus print as +2.3 not +2.314.
+  const fmtSlope = (v) => {
+    if (!isFinite(v) || v === 0) return Number(v).toFixed(2);
+    const digits = Math.ceil(Math.log10(Math.abs(v)));
+    const decimals = Math.max(0, 2 - digits);
+    return v.toFixed(decimals);
+  };
   const fmtP = (p) => p < 0.001 ? "< 0.001" : p < 0.01 ? "< 0.01" : `= ${p.toFixed(2)}`;
+  // Product name for the trend-CI scope disclaimer — varies by variable.
+  const sourceProduct = variable_E === "PTOT" ? "CHIRPS v3" : "CHIRTS-ERA5";
   const yearSpan = (trendStats && !trendStats.error)
     ? `${trendStats.xStart}–${trendStats.xEnd}`
     : `${d3.min(observed_E, d => d.year)}–${d3.max(observed_E, d => d.year)}`;
@@ -548,10 +630,15 @@ recentChanges_E = {
     ipccQualifier = "";
   } else if (trendStats.significant5pct) {
     trendBadge = html`<div style="font-size: 0.95em; padding: 8px 12px; background: #f6f6f6; border-left: 3px solid ${trendStroke}; margin-bottom: 6px;">
-      <strong>Trend:</strong> ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade
-      · 95 % CI ${fmtSlope(trendStats.slopeLower95 * 10)} to ${fmtSlope(trendStats.slopeUpper95 * 10)}
-      · MK p ${fmtP(trendStats.pValue)}
-      · n = ${trendStats.n} years (${yearSpan})${trendStats.usedTFPW ? " · TFPW applied" : ""}
+      <div>
+        <strong>Trend:</strong> ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade
+        · <em>statistical</em> 95 % CI ${fmtSlope(trendStats.slopeLower95 * 10)} to ${fmtSlope(trendStats.slopeUpper95 * 10)}
+        · MK p ${fmtP(trendStats.pValue)}
+        · n = ${trendStats.n} years (${yearSpan})${trendStats.usedTFPW ? " · TFPW applied" : ""}
+      </div>
+      <div style="font-size: 0.85em; color: #777; margin-top: 4px; font-style: italic;">
+        CI reflects sampling uncertainty in the slope given the observed values; it does not include observational uncertainty in the underlying ${sourceProduct} estimates.
+      </div>
     </div>`;
     ipccQualifier = html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
       <em>High confidence</em> that ${variable_E} has ${trendStats.slope > 0 ? "increased" : "decreased"} over ${chartRegionLabel} during ${yearSpan} (Theil-Sen ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade, MK p ${fmtP(trendStats.pValue)}).
@@ -641,7 +728,16 @@ recentChanges_E = {
   }
   if (showsTrendOverlay) {
     legendItems.push({ kind: "rule", color: trendStroke, dasharray: "4 3", label: "Theil-Sen trend line" });
-    legendItems.push({ kind: "band", color: trendStroke, opacity: 0.15, label: "95 % CI (slope envelope)" });
+    legendItems.push({ kind: "band", color: trendStroke, opacity: 0.15, label: "95 % CI (slope envelope, statistical)" });
+  }
+  // Observational uncertainty band — only listed when the toggle is on
+  // and the variable supports it (non-SPEI). Listed AFTER the trend
+  // entries so the reader sees "trend / CI" together; the obs band is
+  // a separate concept (uncertainty in the source observations, not
+  // in the slope estimator).
+  const showsObsBand = showObsUncertainty_E && !isSPEI_E && plotType_E !== "stripes" && obsBandMarks.length > 0;
+  if (showsObsBand) {
+    legendItems.push({ kind: "band", color: "#666", opacity: 0.10, label: "observational uncertainty band (indicative — see methods)" });
   }
 
   const swatchOf = (item) => {
@@ -691,7 +787,7 @@ recentChanges_caption_E = {
     ? `SPEI is the ${variable_E.replace("SPEI-","").replace(/^0+/, "")}-month accumulation ending in month ${speiMonth}. Reference lines: ±1 moderate, ±1.5 severe, ±2 extreme (WMO).`
     : "";
   return md`
-*Region: **${region}** · Variable: **${variable_E}** · Season: **${season_E}** · View: **${viewType_E}** · Plot: **${plotType_E}**${useAnomaly_E ? " · **anomaly mode**" : ""}${showTrend_E ? " · **trend layer on**" : ""}*
+*Region: **${region}** · Variable: **${variable_E}** · Season: **${season_E}** · View: **${viewType_E}** · Plot: **${plotType_E}**${useAnomaly_E ? " · **anomaly mode**" : ""}${showTrend_E ? " · **trend layer on**" : ""}${showObsUncertainty_E && !isSPEI_E ? " · **obs uncertainty band on**" : ""}*
 
 ${baselineCopy} ${speiCopy}
   `;
@@ -726,6 +822,27 @@ Reads the COG directly from S3 via geotiff.js (HTTP Range requests under the hoo
 **Ramp**: dynamic by default — the colour ramp rescales to the visible data range for maximum contrast in each view. Flip the "Lock map ramp to global limits" toggle to use the fixed cross-region scale (0–40 °C, 0–2500 mm, etc.) for cross-region comparison.
 
 **Download**: the map has a "Download map (PNG)" button that composites the canvas + boundary overlay into a single PNG (white background). The timeseries chart uses the shared `chartDownloadMenu` helper from `/helpers/chartDownloadMenu.ojs` — primary click = PNG (2× DPR), caret dropdown = SVG (vector) or CSV (the dataframe driving the chart).
+
+Map controls (affect this map only — ramp scaling + decoration overlays):
+
+::: {.controls-grid}
+
+```{ojs}
+// Map-only: dynamic ramp rescales to the visible data range (max
+// contrast); fixed keeps the 0–40°C / 0–2500 mm / SPEI-sd absolute
+// limits for cross-region comparison. Doesn't affect the chart.
+viewof rampLockFixed_E = Inputs.toggle({ label: "Lock map ramp to global limits (off = rescale to admin1 / country data)", value: false });
+```
+
+```{ojs}
+viewof showGraticule_E = Inputs.toggle({ label: "Show lat/lon ticks on map", value: false });
+```
+
+```{ojs}
+viewof showAdmin1Labels_E = Inputs.toggle({ label: "Show admin1 names on map", value: false });
+```
+
+:::
 
 ```{ojs}
 //| output: false
@@ -941,7 +1058,20 @@ countryRaster_E = {
     const wx2 = Math.min(imgW, Math.ceil ((bbox.xmax  - imgBbox[0]) / xRes));
     const wy2 = Math.min(imgH, Math.ceil ((imgBbox[3] - bbox.ymin)  / yRes));
     if (wx2 <= wx1 || wy2 <= wy1) {
-      return { error: `Country bbox does not overlap COG extent.` };
+      // Almost always CR-076 in practice: the publish pipeline has
+      // shipped a COG whose actual geographic extent is wrong (e.g.
+      // a Horn-of-Africa-only file landing at the PTOT_annual path
+      // intended to be Africa-wide). The Hive partition collapse +
+      // metadata bugs in CR-076 produce mis-named files at the right
+      // S3 key. Pipeline-side fix; flag the COG URL so the right
+      // people can re-bake.
+      return { error:
+        `Country bbox does not overlap COG extent — likely a CR-076 mis-published COG. ` +
+        `image bbox = [${imgBbox.map(v => v.toFixed(3)).join(", ")}], ` +
+        `country bbox = [${bbox.xmin.toFixed(3)}, ${bbox.ymin.toFixed(3)}, ${bbox.xmax.toFixed(3)}, ${bbox.ymax.toFixed(3)}], ` +
+        `image size = ${imgW}×${imgH}, ` +
+        `cogUrl = ${cogUrl}`
+      };
     }
 
     const rasters = await image.readRasters({ window: [wx1, wy1, wx2, wy2] });
