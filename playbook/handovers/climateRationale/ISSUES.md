@@ -1527,6 +1527,8 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **STATUS:** Open. Pipeline-side. Notebook-side workaround for the eventual [[CR-062]] view: glob the single physical S3 directory and parse the filename to locate the right COG. Stats metadata: ignore the embedded mean/stddev for now and compute colour-scale defaults from a value-range table (could be a small lookup baked into the notebook).
 
+- **2026-05-21 update — third finding bundled into the dispatch.** Sandbox QAQC surfaced a fourth class of bug in the same publish: exactly 4 files (`PTOT × annual × clim=wmo_1991-2020 × {mean, sd, min, max}`) ship at a ~Kenya-region crop (170×210 px, origin 33.5/5.5) instead of the canonical Africa-wide extent (1500×1600 px, origin -20/40). Spot-checked across sibling slices: every other (variable × period × clim × stat) tuple sampled is correct. Likely cause: a leftover QA crop / interrupted re-publish overwrote 4 outputs at the right S3 key. Coordinated re-bake covered in [`dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md`](dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md), which bundles: (1) the 4-file extent re-bake, (2) the stats-sentinel fix (CR-076 part 2 above), and (3) an OVERVIEWS=AUTO ask — the single biggest perf improvement available for the upcoming Atlas observational map view (today every continental-zoom render fetches ~3.5 MB to display 600 px wide; with overviews it drops to ~5 KB).
+
 - **before-string:** n/a (publish / metadata fix).
 
 ---
