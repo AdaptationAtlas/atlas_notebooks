@@ -480,3 +480,133 @@ Short-day session — observational-uncertainty dispatch executed end-to-end + p
 3. If new dispatch present → read + draft plan-for-approval per the pattern.
 4. Otherwise → propose starting CR-078 + CR-079 production migration as a single coordinated sweep. Phase 1 the 3 dispatch-validation cells (Recent Changes / Future Projections / Crop & Livestock Exposure) first, then the remaining 14.
 5. Push when Pete asks (none pushed since session-9; 6 commits ahead of `origin/dev/climateRationale`).
+
+## Session state — 2026-05-21 → 2026-05-22, session 11 (sandbox → production integration + three review passes + COG re-bake fallout)
+
+Long session bridging sandbox-into-production migration through three Pete-led review iterations and a series of hot-fixes when the COG re-bake landed mid-session. ~20 commits this session, all on `dev/climateRationale`. Working tree ends clean (apart from `.DS_Store` noise).
+
+### What landed (chronological)
+
+**Two dispatches first** — committed before any code work:
+
+- `2124f6d` — `dispatches/2026-05-21_faostat-v5-byproducts-toggle.md`. Supersedes the 2026-05-20 FAOSTAT v5 notebook-consumption dispatch with a single "Include byproducts" checkbox UX (gated by variable type — monetary rolls up to commodity_group, non-monetary keeps raw and surfaces a caveat) that maps directly to the I-1 sum-safety invariant.
+- `23c02b8` — `dispatches/2026-05-21_sandbox-integration-recent-changes.md`. The 350-line plan-for-approval for lifting `notebooks/sandbox/obs_qaqc.qmd` into `notebooks/climateRationale/notebook.qmd`'s Recent Changes section. Replace in place, wire to production sticky controls, insert "Why two datasets?" bridge, add framing callouts, extend Methods with trend-estimation + observational-uncertainty subsections, English copy now / French deferred.
+
+**Sandbox → production integration (`5c730e2`).** Big lift, 890 ins / 495 del across 4 files:
+
+- Imports added at top: `chartDownloadMenu`, `mannKendall` + `trendOverlayMarks`, `observationalUncertaintyBand` + `observationalUncertaintyMarks`.
+- New top-level `observationalSources` block in `data/climateRationale/nbData.json` (sibling to `data: []`, NOT inside it — see Session-12-fallout below for why this matters).
+- `mainGaul` lookup lifted from sandbox lines 92-110 into the production file alongside the URL derivations.
+- `hazards_obj` extended with `TMIN`, `SPEI-03`, `SPEI-12` (smoke test against the refreshed parquet confirmed the obs record has 9 variables: PTOT / TAVG / TMAX / TMIN / SPEI-{01,03,06,12,24}; the 6 heat indices already in production hazards_obj are projection-only).
+- Recent Changes section's variable selector binds a section-local **filtered** hazards list (6 obs variables); when a heat index is selected from elsewhere the chart renders a "see Future Projections" placeholder.
+- 427 lines of dead `barplot_recentChanges` / `warmingStripes_recentChanges` function defs deleted (the NEX-GDDP historical fetch `recentChanges_plotData` kept alive — still feeds Future Projections' `baselineStdByAdmin` / `baselineMeanByAdmin` per Pete's explicit Q3 confirmation).
+- "Why two datasets?" bridge section + framing callouts on both Recent Changes and Future Projections + two new Methods subsections (`#methods-trend-estimation`, `#methods-observational-uncertainty`) + Recent Changes inline hyperlink upgraded to a 3-anchor strip.
+
+**Review pass 1 — Pete's 10 issues (`b48dc34`).** 986 ins / 182 del:
+
+- (1) Multi-admin1 faceting restored: per-admin1 fetch via `IN (…)`, `baselines_obs` is a `Map<adminName, {mean, sd, n}>` per facet, `Plot.plot` `fy:"adminName"` (single column), per-admin hazard bands / baseline rules / trend overlays / trend badges stacked vertically below the chart.
+- (2) Map cell lifted from sandbox (`recentChangesMap_obs` + map controls + topojson/geotiff imports + ramps + COG fetch via geotiff.js HTTP Range requests). PTOT initially failed on the old path (see fallout below).
+- (3) Plot text size / bold / line width controls wired from sidebar.
+- (4) Monthly view-type changed from select to `viewof monthly_obs` checkbox, enabled only when season = Annual && not SPEI; derived `viewType_obs` resolves to "monthly"/"periods".
+- (5) `anomaly_obs` default → `true`.
+- (6) Trend line unified to `#333` regardless of variable.
+- (7) X-axis tick interval ≈ every 5 years.
+- (8) SPEI bar plot now gets the same amber/red band shading as other variables (WMO categorical thresholds `|SPEI|=1` unusual, `1.5` extreme).
+- (9) Bumped band opacities (0.10/0.14 → 0.20/0.28).
+- (10) X-domain padded ±0.6 (annual) / ±1/24 (monthly) so edge bars sit flush inside the plot border.
+
+**Review pass 2 — Pete's 6 issues (`31659a0`).** 264 ins / 78 del, 4 files:
+
+- (1) Map admin1 boundaries strengthened (`#555 → #222`, opacity `0.75 → 0.95`, stroke widths scale with `plotLineWidth`).
+- (2) New `viewof mapPalette_obs` selector with 6 options (default / viridis / magma / inferno / turbo / RdYlBu-reversed); palette re-samples the chosen d3-scale-chromatic interpolator at the variable's existing breakpoints so the legend's numeric ticks stay valid.
+- (3) Map admin1 label font-size scales with `plotTextSize` + bold toggle.
+- (4) Map download button moved BELOW the map + legend (was floated next to status header).
+- (5) Map download went through `chartDownloadMenu` for visual consistency with the chart — added new `pngOverride` + `disableSvg` opts to the helper (extension committed in same commit).
+- (6) `facetCols` sidebar input wired into chart — NxM grid via `_fx`/`_fy` position fields. `trendOverlayMarks` + `observationalUncertaintyMarks` helpers extended with `preserveFields` + `fx`/`fy` opts so their internal `Plot.line` / `Plot.areaY` calls inherit the facet position; auto fx/fy axes hidden, replaced with per-facet `Plot.text` admin name labels.
+
+**Review pass 3 — Pete's 12 issues (`7b98299`).** 306 ins / 92 del, 5 files:
+
+- (1) "Include National" sidebar toggle wired — second SQL query against national parquet when toggle on AND 1+ admin1s selected; appended as last facet labeled with country name.
+- (2)(3) Trend badges moved below chart; per-admin baseline numbers stay in the caption cell below.
+- (4) Dropped the "Region: X · Variable: Y · …" meta-info caption line.
+- (5) Download button moved below legend (wrapped chart+legend before passing to chartDownloadMenu); PNG override attempt #1 via `elementToPngBlob` foreignObject composite — *this part later failed silently and was reverted, see Session-12-fallout below*.
+- (6) PTOT obs-uncertainty band fix — new `valueField` opt on the helper so width is computed from raw `value_mean` while position stays on `value_plot` (anomaly). Was producing a tilted band before.
+- (7) Tooltip cleaned via shared `tipOpts = { format: { x: null, y: null, x1: null, ... fill: null, stroke: null } }` — only `channels: { … }` entries surface in the tip.
+- (8) Map highlight `#d62728` → `#000000`.
+- (9) Map narrative rewritten — 4-paragraph technical explainer → 2-paragraph user-facing description + collapsible "Methods notes" callout.
+- (10) DOI hyperlinks added to Methods.trendEstimation and Methods.observationalUncertainty text (Mann 1945 JSTOR, Sen 1968, Yue et al. 2002, Dinku et al. 2018, Sheridan et al. 2022, Verdin et al. 2020, IPCC AR6 calibrated language, CHIRPS / CHIRTS / ERA5 product pages).
+- (11) Three new entries added to `nbData.json` `data[]` for the observational sources — *this caused the notebook hang documented below*.
+- (12) Cross-references swept (climate-var description's "More in Methods →" replaced with a 4-link strip; framing callouts cross-reference Data sources + product pages).
+
+### Session-12 fallout — five hot-fixes for the integration's cascading issues
+
+The integration + three review passes shipped a lot at once. Several issues surfaced when Pete previewed:
+
+- **`013fa88` — Revert nbData.json data[] entries.** The 3 new observational dataset entries from Issue #11 triggered `helpers/std.ojs:6 generateDB()` to attempt `CREATE VIEW "<key>" AS SELECT * FROM read_parquet("<s3_path>")` for each. Two real parquets and one wildcard path. The wildcard (`variable=*/period=*/clim=…/stat=mean`) lacks a `.parquet` extension and hangs DuckDB-WASM trying to glob over HTTPS. Pete saw the whole notebook stuck loading for several minutes after hard refresh. Reverted; CHIRPS/CHIRTS still documented via inline methods-text links + see follow-up CR-082+CR-083 below.
+
+- **`5a38df7` — `cogURL_for_obs` `period=AMJ` → `period=annual`.** Pete's mid-session COG re-bake (closed out as `736a8d4` against the 2026-05-21 cog-extent dispatch) moved the CR-076 single-physical-directory placeholder token from `period=AMJ` to `period=annual`. Old AMJ URLs now 404 across the board. Every map-cell evaluation hit a 404 in geotiff.js; reactivity re-fired the cell on each input change, accumulating 168 console errors and never resolving the spinner. Single-line fix; HEAD-probed all 24 (variable × season) combinations on the new path to confirm.
+
+- **`bb008c0` — TDZ on `legend`.** Issue-#5 chart wrapper from `7b98299` placed `chartAndLegend.appendChild(legend)` BEFORE the `const legend = …` declaration later in the cell. JS const TDZ — Quarto rendered the cell with an "OJS Error: Cannot access 'legend' before initialization". Moved the wrapper block AFTER `legend` is declared.
+
+- **`01ed3ff` — Fetch-time status header above chart.** Pete asked to see per-section data fetch timing surfaced like the map's already shows. Refactored `observed_obs_raw` to return `{ rows, fetchMs, nQueries, source }`; downstream consumers updated to read `.rows`; status line reads `data fetch X.Xs · N rows · M queries · source: <adm1 / national / adm1 + national overlay>`.
+
+- **`1202953` — Duplicate `const nRows` in chart cell.** The fetch-time block declared `const nRows = observed_obs.length` but `nRows` was already declared 600 lines earlier as the facet-grid row count (`Math.ceil(nFacets / facetColsValue)`). Duplicate-const SyntaxError. Quarto silently rendered the WHOLE 650-line chart cell as raw markdown source code instead of executing it — Pete saw the source dumped onto the page and said "you broke something — again". Renamed local to `nObsRows`. **This bug class is the trigger for the new auto-memory ([feedback_node-check-ojs-cells.md](file:///Users/pstewarda/.claude/projects/-Users-pstewarda-Documents-rprojects-atlas-notebooks/memory/feedback_node-check-ojs-cells.md)) — `node --check` on the extracted cell body would have caught it in 1 s.**
+
+**Plus four PNG-download iterations** (one to revert, two to attempt composite, one final revert + dispatch):
+
+- `4de4ca1` — drop pngOverride entirely. Default chart-only PNG works; legend not included.
+- `48a2e82` — composite attempt #2 via per-layer (chart SVG rasterised separately from legend foreignObject) with try/catch fallback. Still fails — chart layer's `XMLSerializer().serializeToString(chart)` is missing `xmlns` attribute, Image can't decode.
+- `24feca1` — backfill xmlns/xmlns:xlink/width/height on the chart SVG clone before serialise (mirror the chartDownloadMenu helper's `_serializeSvg` pattern). PNG STILL fails for Pete.
+- `7448b95` — final revert. PNG = chart only; legend-in-export deferred. Wrote `dispatches/2026-05-22_recent-changes-followups.md` covering both the parquet performance issue and the legend-in-export design space.
+
+### Pattern decisions captured this session
+
+- **`generateDB` is non-skippable.** `helpers/std.ojs:6 generateDB(data)` creates a VIEW or TABLE for every `data[]` entry. `sql.table: false` means VIEW, not skip. There is no "metadata-only" path; if you add an entry to `data[]`, DuckDB-WASM fetches the parquet header. **Don't add documentation-only entries to `data[]`.** Document data sources via methods text + inline product-page links instead, OR build a parallel `documentationData[]` array consumed only by the data-sources renderer (not by `generateDB`). This was the cause of the notebook hang on first commit `7b98299`.
+
+- **The CR-076 placeholder token shifted from `AMJ` to `annual`.** The COG single-physical-directory workaround is still in place (all 1,404 climatology COGs land in one directory with placeholder Hive-partition tokens). The 2026-05-21 re-bake changed the placeholder from `period=AMJ` (old, random first-file value) to `period=annual` (post-rebake value). `cogURL_for_obs` hardcodes that token. If anyone touches that helper, the path is `…/variable=PTOT/period=annual/clim=wmo_1991-2020/stat=max/{file}.tif` — NOT `period=AMJ`.
+
+- **OJS cell-internal `const` name collisions are silently catastrophic.** Quarto OJS catches a JS SyntaxError in a cell and falls back to rendering the cell as a literal fenced code block (with syntax highlighting). The page LOOKS like Quarto failed dramatically when really one `const nRows` collided with another 600 lines away. **`node --check` on an extracted cell body is the canonical cheap defence — memory saved.**
+
+- **NxM facet grid in Plot.plot needs preserveFields on helpers.** Plot's auto-facet via `fx`/`fy` channels works fine for inline marks (`Plot.rect(data, { fx: "_fx", fy: "_fy", ... })`) but helper-built marks (trendOverlayMarks's internal Plot.line / Plot.areaY) need explicit pass-through. Solution applied: `preserveFields: ["_fx", "_fy"]` opt to copy the position fields onto each derived row + `fx` / `fy` opts to forward as channels.
+
+- **Composite PNG via foreignObject is fragile.** Three attempts to include the legend in PNG via SVG-foreignObject envelopes all silently tainted the canvas in Pete's browser. Recommend approach: build a native-SVG version of the adaptive legend from the same `legendItems` array (no foreignObject), stitch below chart SVG at export time. ~60-100 LOC. Deferred to CR-083.
+
+- **Pete owns the whole stack on this branch.** Notebook AND `hazards_prototype` pipeline — no separate "Brayden" persona on `dev/climateRationale`. Saved as feedback memory ([feedback_pete-owns-the-whole-stack.md](file:///Users/pstewarda/.claude/projects/-Users-pstewarda-Documents-rprojects-atlas-notebooks/memory/feedback_pete-owns-the-whole-stack.md)). Older entries in ISSUES.md / DECISIONS.md predating this correction are left alone.
+
+### Memory updates this session
+
+Two new feedback memories saved:
+
+- `feedback_pete-owns-the-whole-stack.md` — Pete is the sole contributor on `dev/climateRationale` (notebook AND `hazards_prototype` pipeline). Do not attribute pipeline-side work to "Brayden" in new dispatches / ISSUES / comments.
+- `feedback_node-check-ojs-cells.md` — `awk` + `node --check` pattern for the chart cell body. Catches TDZ, duplicate-const, brace-mismatch errors that Quarto otherwise either OJS-errors or silently renders as raw source.
+
+### ISSUES.md updates this session
+
+- ✓ Closed **CR-076** — COG re-bake landed; all 24 (variable × season) combinations now return 200 at the corrected `period=annual` path.
+- ✓ Closed **CR-079** — Mann-Kendall trend overlay shipped for Recent Changes via the sandbox integration sweep. Future Projections / Extreme Events still lack the trend; refile if wanted.
+- ✓ Closed **CR-080** — per-admin trend overlay when 2+ admin1s landed in `b48dc34`.
+- + Added **CR-082** — observational parquets need row-group statistics for fast subset reads (the 69s fetch). Pipeline-side.
+- + Added **CR-083** — Recent Changes chart download: legend not included in PNG/SVG exports. Notebook-side; recommended approach in dispatch.
+- + Added **CR-084** — Recent Changes Quick Insights cells still read NEX-GDDP historical (TODO comment in notebook flagging this).
+
+### In flight / uncommitted
+
+- `dev/climateRationale` is **~20 commits ahead** of `origin/dev/climateRationale` at end-of-session — none pushed in this session. Working tree clean apart from `.DS_Store` noise + `notebooks/sandbox/img/` (legacy archived PNGs).
+- One open dispatch awaiting action (Pete's own pipeline-side work): `2026-05-22_recent-changes-followups.md` (parquet row-group stats + legend-in-export approach decision — covers both CR-082 + CR-083).
+- Recent Changes section is FUNCTIONAL but unusably slow on cold-start fetches (~70s for a national-only query) until CR-082's parquet re-bake lands.
+
+### Open questions for next session
+
+- **Has CR-082's parquet re-bake landed?** Quick check: `duckdb -c "INSTALL httpfs; LOAD httpfs; SELECT COUNT(DISTINCT row_group_id) AS n_groups FROM parquet_metadata('https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet')"`. If `> 1`, re-bake landed; if `= 1`, still pending.
+- **CR-083 legend-in-export approach** — pick approach (a) native-SVG legend renderer (recommended, ~60-100 LOC) vs (b) full Plot.legend migration (~150 LOC). Don't pick until CR-082 lands so the chart actually renders in usable time.
+- **CR-084 Quick Insights re-pointing** — low priority but worth tackling once CR-082 unblocks the cold-start cost (two fetches against the same parquet hit the cache once it's warm).
+- **CR-078 chartDownloadMenu production migration** (17 cells outside Recent Changes) — still pending. The Recent Changes section uses chartDownloadMenu now (was the test case); time to sweep the rest.
+- **Any new dispatches** dropped into `playbook/handovers/climateRationale/dispatches/` between sessions — canonical first move remains `ls -lt playbook/handovers/climateRationale/dispatches/ playbook/handovers/climateRationale/context/ | head -20`.
+
+### Suggested next step
+
+1. `ls -lt playbook/handovers/climateRationale/dispatches/ playbook/handovers/climateRationale/context/ | head -20` — spot anything new.
+2. Probe parquet row-group count + stats per the CR-082 validation recipe in `2026-05-22_recent-changes-followups.md`. If re-baked, the cold-start fetch should drop from ~70 s to ~3-8 s.
+3. If parquet re-baked → tackle CR-083 legend-in-export per approach (a). Native-SVG legend renderer from the same `legendItems` array; stitch below chart SVG at export time; `pngOverride` calls into it.
+4. If parquet NOT yet re-baked → defer CR-083 + CR-084; sweep CR-078 production migration of chartDownloadMenu across the other 17 figure cells. The Recent Changes integration is the validated reference implementation; mostly mechanical from here.
+5. Push when Pete asks (none pushed since session-10; ~20 commits ahead of `origin/dev/climateRationale`).

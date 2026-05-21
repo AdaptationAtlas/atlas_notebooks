@@ -1525,9 +1525,9 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **discovered:** 2026-05-20 during Stage 1 QAQC probes of the freshly-published observational data + Pete's "what about the maps?" follow-up. Documented in the sandbox notebook Section D (`notebooks/sandbox/obs_qaqc.qmd`) with three grayscale PNG thumbnails (PTOT / TAVG / SPEI-12 annual_1995-2014_mean) confirming the raster contents are sound — the bugs are in the publish layer, not the bake of the underlying values.
 
-- **STATUS:** Open. Pipeline-side. Notebook-side workaround for the eventual [[CR-062]] view: glob the single physical S3 directory and parse the filename to locate the right COG. Stats metadata: ignore the embedded mean/stddev for now and compute colour-scale defaults from a value-range table (could be a small lookup baked into the notebook).
+- **STATUS:** ✓ **RESOLVED 2026-05-22.** Pete re-baked the climatology COGs per the 2026-05-21 dispatch close-out (Pete is the sole maintainer on this branch — notebook + pipeline). Confirmed via curl HEAD probes: all 24 (variable × season) combinations on the wmo_1991-2020 baseline now return HTTP 200 at the re-baked path. The physical directory is still single-bucket (the CR-076 partition-token collapse is unchanged structurally) but the placeholder token shifted from `period=AMJ` to `period=annual`. Notebook-side `cogURL_for_obs` updated accordingly in `5a38df7`. Stats-sentinel fix landed per the close-out append commit `736a8d4` to the dispatch. The lingering Hive-partition collapse (part 1 of the original CR-076) is now a known design choice rather than a bug — the dispatch's per-file-token recompute is still on the wish list but no longer blocking any consumer.
 
-- **2026-05-21 update — third finding bundled into the dispatch.** Sandbox QAQC surfaced a fourth class of bug in the same publish: exactly 4 files (`PTOT × annual × clim=wmo_1991-2020 × {mean, sd, min, max}`) ship at a ~Kenya-region crop (170×210 px, origin 33.5/5.5) instead of the canonical Africa-wide extent (1500×1600 px, origin -20/40). Spot-checked across sibling slices: every other (variable × period × clim × stat) tuple sampled is correct. Likely cause: a leftover QA crop / interrupted re-publish overwrote 4 outputs at the right S3 key. Coordinated re-bake covered in [`dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md`](dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md), which bundles: (1) the 4-file extent re-bake, (2) the stats-sentinel fix (CR-076 part 2 above), and (3) an OVERVIEWS=AUTO ask — the single biggest perf improvement available for the upcoming Atlas observational map view (today every continental-zoom render fetches ~3.5 MB to display 600 px wide; with overviews it drops to ~5 KB).
+- **2026-05-21 update — third finding bundled into the dispatch.** Sandbox QAQC surfaced a fourth class of bug in the same publish: exactly 4 files (`PTOT × annual × clim=wmo_1991-2020 × {mean, sd, min, max}`) shipped at a ~Kenya-region crop (170×210 px, origin 33.5/5.5) instead of the canonical Africa-wide extent (1500×1600 px, origin -20/40). Spot-checked across sibling slices: every other (variable × period × clim × stat) tuple sampled was correct. Likely cause: a leftover QA crop / interrupted re-publish overwrote 4 outputs at the right S3 key. Coordinated re-bake covered in [`dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md`](dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md), which bundled: (1) the 4-file extent re-bake, (2) the stats-sentinel fix (CR-076 part 2 above), and (3) an OVERVIEWS=AUTO ask — the single biggest perf improvement available for the upcoming Atlas observational map view (today every continental-zoom render fetches ~3.5 MB to display 600 px wide; with overviews it drops to ~5 KB). All three items resolved in the re-bake per `736a8d4` close-out.
 
 - **before-string:** n/a (publish / metadata fix).
 
@@ -1598,7 +1598,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **discovered:** 2026-05-21. Dispatch [`dispatches/2026-05-21_recent-changes-trend-overlay.md`](dispatches/2026-05-21_recent-changes-trend-overlay.md). Methods backing in [`context/04_observed-trend-best-practice.md`](context/04_observed-trend-best-practice.md). Sandbox-first sequence locked in this session.
 
-- **STATUS:** Open. Sequence with CR-078.
+- **STATUS:** ✓ **RESOLVED 2026-05-22 — for the Recent Changes section.** Shipped via the sandbox → production integration sweep (commits `5c730e2` through `b48dc34`). The Recent Changes section now uses `mannKendall` + `trendOverlayMarks` per the dispatch pattern: per-admin trend lines, 95% CI band, slope/p-value badge, IPCC calibrated-language qualifier, hazard-gradient bands, methods callout. Same treatment also added to the lifted observational view (CHIRPS / CHIRTS-ERA5, 1991-2020 WMO baseline) — the NEX-GDDP historical fetch is no longer the primary source for this section. Other timeseries sections (Future Projections, Extreme Events) still lack the trend overlay; if those want it, file as a fresh ticket scoped to those sections specifically.
 
 - **before-string:** n/a (additive change per cell).
 
@@ -1624,7 +1624,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **discovered:** 2026-05-21. Pete flagged in trend-overlay plan-for-approval: "we do need an end point where we can look at trends in admin1 areas." Phase-1 satisfies this via single-admin selection; Phase-2 satisfies it for multi-admin too.
 
-- **STATUS:** Open. Lower priority than CR-078 + CR-079 production migrations.
+- **STATUS:** ✓ **RESOLVED 2026-05-22.** Landed in commit `b48dc34` as part of Pete's 10-issue review pass. `observed_obs_raw` now fetches per-admin1 via `admin1_name IN (…)` when 2+ admin1s selected; `baselines_obs` is a `Map<adminName, {mean, sd, n}>` per facet; `recentChanges_obs` uses `Plot.plot` `fx`/`fy` channels for an NxM grid (facet count configurable via the sidebar's `facetCols` input); `trendOverlayMarks` + `observationalUncertaintyMarks` take `preserveFields` + `fx`/`fy` opts so each group's overlay lands in the correct cell. Per-admin trend badges stack vertically below the chart. "Include National" sidebar toggle adds a national-aggregate facet as the last cell when enabled (Pete's 2026-05-21 12-issue review).
 
 - **before-string:** sandbox `observed_E_raw = { … isAdmin1 = admin1_names.length === 1 … }` — needs `else if (admin1_names.length > 1) GROUP BY admin1_name` branch.
 
@@ -1652,6 +1652,94 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 - **STATUS:** Open. Phase 2.
 
 - **before-string:** n/a (new helper function + new sandbox plot type).
+
+---
+
+### CR-082 — Observational parquets need row-group statistics for fast subset reads [NEW 2026-05-22]
+
+- **id:** CR-082
+- **title:** `adm0_obs.parquet` / `adm1_obs.parquet` (both `admin-monthly` and `admin-periods`) ship as single-row-group files with NULL `stats_min` / `stats_max` for the filter columns (`iso3`, `variable`, `period`). DuckDB-WASM has no way to skip work and downloads + scans the entire file for every cold-start query.
+- **type:** pipeline / publish
+- **severity:** high (performance — Pete observed a 69 s cold-start fetch for 45 rows; the chart appears stuck loading for over a minute on each variable/season change before any client-side cache kicks in)
+- **where:** Upstream — wherever the observational parquets are written (the `hazards_prototype` observational pipeline). Consumer-side surface: the Recent Changes section in `notebooks/climateRationale/notebook.qmd` (the lifted `observed_obs_raw` query).
+
+- **why-this-matters:** Verified 2026-05-22 via `parquet_metadata()`:
+
+  ```
+  URL: …/processing=admin-periods/variable=adm0_obs.parquet  (4.8 MB compressed)
+  row_group_id  column     num_values  stats_min  stats_max
+  0             iso3       302841      NULL       NULL
+  0             year       302841      1980       2026
+  0             period     302841      NULL       NULL
+  0             variable   302841      NULL       NULL
+  ```
+
+  Two problems compound:
+  1. **One row group containing all 302,841 rows.** DuckDB-WASM can only skip work at the row-group level. With one group, no skipping is possible regardless of stats.
+  2. **NULL stats on `iso3` / `period` / `variable`.** Even if the file were chunked, DuckDB would still have to read every group because there's no information saying which iso3 / period / variable values live in each.
+
+  Combined effect: every cold-start query downloads the full 5 MB parquet, decompresses it, scans 302K rows, and filters. On a modest connection that's 60–70 s. The adm1 parquets (~50 MB) would extrapolate to ~10 min of cold-start lag if they weren't already cached.
+
+- **proposed-change:** Re-bake all four observational parquets (adm0 + adm1, monthly + periods) with:
+  1. **Multiple row groups** — target ~64K–128K rows per group (≈ 1–2 MB compressed). A 300K-row file should end up in 2–5 groups.
+  2. **Sort by `(iso3, variable, period, year)`** before writing so each row group is dense for a small subset of (iso3 × variable × period) combinations.
+  3. **Enable column statistics for `iso3`, `variable`, `period`** (and ideally `gaul0_code`, `admin1_name`). In `pyarrow` / DuckDB COPY this is the default with `write_statistics=True`; in R `arrow::write_parquet` set `write_statistics = TRUE`. Confirm via `parquet_metadata()` that `stats_min` / `stats_max` are populated.
+
+  Expected cold-start fetch drops from ~70 s to ~3–8 s. Subsequent queries against the same parquet (different variable / season for the same country) should be sub-second thanks to DuckDB-WASM's internal cache.
+
+- **dependencies:** `hazards_prototype` observational pipeline (Pete owns this end-to-end on the branch). Dispatch covering the exact fix + validation recipe: [`dispatches/2026-05-22_recent-changes-followups.md`](dispatches/2026-05-22_recent-changes-followups.md).
+
+- **discovered:** 2026-05-22 by Pete during live preview of the integrated Recent Changes section. Fetch-time status header (added in commit `01ed3ff` for exactly this kind of diagnostic) made the slowness measurable.
+
+- **STATUS:** Open. Pipeline-side. Notebook is functional but unusably slow on cold-start until this lands. Highest priority among the remaining follow-ups.
+
+- **before-string:** n/a (publish-layer fix).
+
+---
+
+### CR-083 — Recent Changes chart download: legend not included in PNG / SVG exports [NEW 2026-05-22]
+
+- **id:** CR-083
+- **title:** PNG / SVG downloads from the Recent Changes chart's `chartDownloadMenu` include the chart only — the adaptive legend (showing what each colour / shape / band means) is dropped from the export.
+- **type:** notebook UX / polish
+- **severity:** low (downloads still work for the chart; readers lose the legend context for slides / publications)
+- **where:** [notebooks/climateRationale/notebook.qmd](notebooks/climateRationale/notebook.qmd) Recent Changes section (`recentChanges_obs` cell, around the `chartAndLegend` wrapper + `chartDownloadMenu` invocation).
+
+- **why-this-matters:** The adaptive legend below the Recent Changes chart explains the dot/bar colour classification (normal / unusual / extreme), the σ-zone shading, the baseline rule, the SPEI reference lines, the trend line + CI band, and the observational uncertainty band — all conditional on which plot type + variable are active. Without it, a downloaded chart is much harder to interpret in isolation.
+
+- **proposed-change (recommended approach a):** Build a native-SVG version of the legend from the same `legendItems` array, alongside the existing HTML legend (HTML legend stays for on-screen display — flex wrapping reads better in browser). At export time the SVG legend gets stitched below the chart SVG so both PNG and SVG include it. ~60–100 LOC for the SVG layout / text-wrapping logic. Self-contained; no canvas-taint risk.
+
+  **Alternative (b):** Migrate the legend to `Plot.legend(…)` marks inside the chart SVG. Cleaner architecturally but more invasive (changes how marks declare colour scales). ~150 LOC.
+
+- **dependencies:** None. `chartDownloadMenu` helper already supports a `pngOverride` opt — the SVG-layout work in (a) would supply a custom override that builds a composite SVG.
+
+- **discovered:** 2026-05-22 by Pete on the chart's first download tests. Two attempts to composite via foreignObject (commits `48a2e82` + `24feca1`) failed — the nested SVG inside XHTML inside SVG envelope appears to taint the canvas in this browser, so `canvas.toBlob` returns null and the button looks dead. Reverted to chart-only PNG in commit `7448b95`. Full failure analysis in [`dispatches/2026-05-22_recent-changes-followups.md`](dispatches/2026-05-22_recent-changes-followups.md).
+
+- **STATUS:** Open. Low priority — defer until CR-082 (parquet performance) is fixed; the chart taking 70 s to render makes legend-in-export a poor return on effort right now.
+
+- **before-string:** `recentChanges_obs` cell wraps `(chart + legend)` in a `<div>` then passes to `chartDownloadMenu`; the helper's default `findSvg` returns just the chart SVG.
+
+---
+
+### CR-084 — Recent Changes Quick Insights cells still read NEX-GDDP historical [NEW 2026-05-22]
+
+- **id:** CR-084
+- **title:** The two Quick Insights cells in the Recent Changes section (`seasonInsight` and `climateInsight`, rendered into `#insightRecentSeason` and `#insightRecentClimate`) still read from the NEX-GDDP-CMIP6 historical hindcast (1995–2014 baseline) via `recentChanges_plotData`. The lifted Recent Changes chart above now uses the observational record (CHIRPS v3 + CHIRTS-ERA5, 1991–2020 baseline) — the two summaries describe slightly different quantities.
+- **type:** notebook (data plumbing)
+- **severity:** low (insight prose still renders sensibly; just internally inconsistent with the chart above it)
+- **where:** [notebooks/climateRationale/notebook.qmd](notebooks/climateRationale/notebook.qmd) Recent Changes section, the `### Quick Insights` block. TODO comment is already in the notebook above the cells flagging this.
+
+- **why-this-matters:** The chart above shows observational change against the WMO 1991–2020 baseline. The Quick Insights below say things like "X warmed by Y°C between 1995 and 2014" — drawn from the NEX-GDDP-CMIP6 historical hindcast, NOT the observed record. A reader scrolling from chart to insights sees two different "warming numbers" without knowing why.
+
+- **proposed-change:** Re-point `seasonInsight()` / `climateInsight()` (or their data inputs) to `observed_obs` from the lifted Recent Changes cells. Update the prose templates in `nbText.json` so the baseline year-range references match (currently mention "1995–2014"; should be "1991–2020" for the observational record). Keep the Quick Insights for Future Projections unchanged (they correctly read from the projection data).
+
+- **dependencies:** None — pure rewiring. May want to defer until CR-082 lands so the observational fetch is fast enough to feed the insight cells too without doubling the cold-start cost.
+
+- **discovered:** 2026-05-21 during the sandbox-to-production integration. Dispatched out of scope per the integration dispatch §1.6; TODO comment landed in commit `5c730e2` directly above the insight cells.
+
+- **STATUS:** Open. Low priority.
+
+- **before-string:** `renderToDiv("insightRecentSeason", () => seasonInsight());` and `renderToDiv("insightRecentClimate", () => createCountryInsights([climateInsight]));` — both reference helpers defined further down the notebook that filter `recentChanges_plotData`.
 
 ---
 

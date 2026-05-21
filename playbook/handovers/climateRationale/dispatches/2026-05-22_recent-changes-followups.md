@@ -127,5 +127,5 @@ Recommend (a) for the next iteration — it's incremental and doesn't touch the 
 
 Both follow-ups should ship as separate workstreams:
 
-1. **Pipeline re-bake** — Brayden's territory (`hazards_prototype` / `R/observational/` pipeline). Dispatch above describes the exact fix and validation recipe.
-2. **Legend-in-export** — Notebook-side work, blocked behind acceptance of approach (a) vs (b). Defer until after Brayden's re-bake unblocks usability.
+1. **Pipeline re-bake** — pipeline-side (`hazards_prototype` / `R/observational/`). Pete owns this end-to-end on the branch. Dispatch above describes the exact fix and validation recipe.
+2. **Legend-in-export** — Notebook-side work, blocked behind acceptance of approach (a) vs (b). Defer until after the parquet re-bake unblocks usability.
