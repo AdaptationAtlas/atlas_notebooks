@@ -92,17 +92,24 @@ mainGaul = {
 ```
 
 ```{ojs}
-viewof admin1_name = {
+viewof admin1_names = {
+  // Multi-select admin1. Empty selection = country (national) view.
+  // 1 admin1 = single-region timeseries + map zoom. 2+ = map shows
+  // them all (mask + boundaries), timeseries falls back to country
+  // aggregate (no automatic averaging — would be misleading for
+  // mixed precipitation totals across regions of different sizes).
   const iso3 = country.iso3;
   const gaul = mainGaul.get(iso3);
-  if (gaul == null) return Inputs.select(["(country)"], { label: "Region (admin1)" });
+  if (gaul == null) {
+    return Inputs.select([], { label: "Region(s) — admin1 (empty = country)", multiple: 8, value: [] });
+  }
   const resp = await db.query(`
     SELECT DISTINCT admin1_name FROM read_parquet('${monthlyAdm1URL}')
     WHERE iso3 = '${iso3}' AND gaul0_code = ${gaul}
     ORDER BY admin1_name
   `);
-  const options = ["(country)", ...Array.from(resp).map((d) => d.admin1_name)];
-  return Inputs.select(options, { label: "Region (admin1)", value: "(country)" });
+  const options = Array.from(resp).map((d) => d.admin1_name);
+  return Inputs.select(options, { label: "Region(s) — admin1 (empty = country)", multiple: 8, value: [] });
 }
 
 viewof variable_E = Inputs.select(
@@ -121,6 +128,16 @@ viewof viewType_E = Inputs.select(
 );
 
 viewof anomaly_E = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: false });
+
+// Map-only toggle: dynamic ramp rescales each render to the visible
+// data range (max contrast within a view); fixed ramp keeps the
+// 0–40°C / 0–2500 mm / SPEI-sd absolute limits (cross-region
+// comparable). Doesn't affect the timeseries chart.
+viewof rampLockFixed_E = Inputs.toggle({ label: "Lock map ramp to global limits (off = rescale to admin1 / country data)", value: false });
+
+// Map decoration toggles.
+viewof showGraticule_E    = Inputs.toggle({ label: "Show lat/lon ticks on map", value: false });
+viewof showAdmin1Labels_E = Inputs.toggle({ label: "Show admin1 names on map",   value: false });
 ```
 
 ```{ojs}
@@ -141,7 +158,11 @@ observed_E_raw = {
   const iso3 = country.iso3;
   const gaul = mainGaul.get(iso3);
   if (gaul == null) return [];
-  const isAdmin1 = admin1_name !== "(country)";
+  // Single-admin1 selection → query at admin1. Empty OR 2+ → query at
+  // country (no admin1 filter). Map can still show multi-admin1
+  // visually; the chart deliberately doesn't try to average them.
+  const isAdmin1 = admin1_names.length === 1;
+  const adminName = isAdmin1 ? admin1_names[0] : null;
   const baseURL = isAdmin1 ? monthlyAdm1URL : monthlyAdm0URL;
   const periodsURL = isAdmin1 ? periodsAdm1URL : periodsAdm0URL;
 
@@ -153,7 +174,7 @@ observed_E_raw = {
       FROM read_parquet('${baseURL}')
       WHERE iso3 = '${iso3}'
         AND gaul0_code = ${gaul}
-        ${isAdmin1 ? `AND admin1_name = '${admin1_name.replace(/'/g, "''")}'` : ""}
+        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
         AND variable = '${variable_E}'
         AND month = ${mo}
         AND value_mean IS NOT NULL AND isfinite(value_mean)
@@ -165,7 +186,7 @@ observed_E_raw = {
       FROM read_parquet('${baseURL}')
       WHERE iso3 = '${iso3}'
         AND gaul0_code = ${gaul}
-        ${isAdmin1 ? `AND admin1_name = '${admin1_name.replace(/'/g, "''")}'` : ""}
+        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
         AND variable = '${variable_E}'
         AND value_mean IS NOT NULL AND isfinite(value_mean)
       ORDER BY year, month
@@ -176,7 +197,7 @@ observed_E_raw = {
       FROM read_parquet('${periodsURL}')
       WHERE iso3 = '${iso3}'
         AND gaul0_code = ${gaul}
-        ${isAdmin1 ? `AND admin1_name = '${admin1_name.replace(/'/g, "''")}'` : ""}
+        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
         AND variable = '${variable_E}'
         AND period = '${season_E}'
         AND value_mean IS NOT NULL AND isfinite(value_mean)
@@ -226,10 +247,15 @@ extremeColour_E = ({ normal: "#bbbbbb", unusual: "#f4a261", extreme: "#e15759" }
 recentChanges_E = {
   if (observed_E.length === 0) return html`<div style="padding: 1em; color: #999;">No data for this selection.</div>`;
 
-  const unit = isSPEI_E ? "(z-score)"
+  // SPEI is its own named quantity — the values plotted come straight
+  // from the parquet, we don't z-score anything ourselves. Labelling
+  // "(z-score)" implied a transform we don't perform.
+  const unit = isSPEI_E ? ""
     : variable_E === "PTOT" ? (viewType_E === "monthly" ? "(mm / month)" : "(mm / period)")
     : "(°C)";
-  const yLabel = useAnomaly_E ? `${variable_E} anomaly ${unit}` : `${variable_E} ${unit}`;
+  const yLabel = isSPEI_E
+    ? variable_E
+    : (useAnomaly_E ? `${variable_E} anomaly ${unit}` : `${variable_E} ${unit}`);
 
   const meanForBands = useAnomaly_E ? 0 : baseline_E.mean;
   const bands = (!isSPEI_E && baseline_E.sd > 0) ? [
@@ -249,13 +275,13 @@ recentChanges_E = {
 
   const xField = viewType_E === "monthly" || (isSPEI_E && viewType_E === "monthly") ? "year_frac" : "year";
 
-  return Plot.plot({
+  const chart = Plot.plot({
     width: 1200,
     height: 380,
     marginLeft: 70,
     marginBottom: 50,
     marginTop: 30,
-    style: { color: "#333" },
+    style: { color: "#333", background: "#fff" },
     x: { label: "Year", tickFormat: (d) => `${Math.floor(d)}` },
     y: { label: yLabel, grid: true, nice: true },
     marks: [
@@ -295,11 +321,29 @@ recentChanges_E = {
           ]),
     ],
   });
+
+  // Download button — Plot.plot returns an SVG element, so we
+  // serialize → rasterize via <img> → composite onto a canvas with
+  // a white background → PNG. Same SVG-to-PNG pattern the map uses;
+  // factored out into downloadSvgAsPng_E below.
+  const region = admin1_names.length === 1 ? admin1_names[0] : country.iso3;
+  const fname = `obs_chart_${variable_E}_${season_E}_${region}.png`.replace(/[^a-zA-Z0-9._-]+/g, "_");
+  const dlBtn = html`<button style="padding: 2px 10px; font-size: 0.85em;">Download chart (PNG)</button>`;
+  dlBtn.onclick = () => downloadSvgAsPng_E(chart, fname);
+
+  return html`<div>
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 4px;">${dlBtn}</div>
+    ${chart}
+  </div>`;
 }
 
 recentChanges_caption_E = {
   const speiMonth = isSPEI_E ? seasonLastMonth[season_E] : null;
-  const region = admin1_name === "(country)" ? `${country.name} (national)` : `${admin1_name}, ${country.name}`;
+  const region = admin1_names.length === 1
+    ? `${admin1_names[0]}, ${country.name}`
+    : admin1_names.length > 1
+      ? `${country.name} (national — map shows ${admin1_names.length} admin1 regions)`
+      : `${country.name} (national)`;
   const baselineCopy = baseline_E.n > 0
     ? `Baseline (1991-2020): μ = ${baseline_E.mean.toFixed(2)}, σ = ${baseline_E.sd.toFixed(2)}, n = ${baseline_E.n} years.`
     : `Baseline (1991-2020): insufficient data.`;
@@ -331,7 +375,17 @@ recentChanges_caption_E
 
 ## Map (interactive — geotiff.js + canvas)
 
-Reads the COG directly from S3 via geotiff.js (HTTP Range requests under the hood — only the bytes for the country bbox get fetched, not the full Africa-wide raster). Pixels render into an offscreen canvas at the COG's native resolution, then up-sampled onto the visible canvas with the browser's built-in bilinear smoothing. Admin0 outline is overlaid as an SVG path using the same `(lon, lat) → (px_x, px_y)` projection. **Admin1 selection does NOT filter the map** — the whole country renders so the spatial pattern stays visible; the admin1 dropdown only affects the timeseries.
+Reads the COG directly from S3 via geotiff.js (HTTP Range requests under the hood — only the bytes for the country bbox get fetched, not the full Africa-wide raster). Pixels render into an offscreen canvas at the COG's native resolution, then up-sampled onto the visible canvas with the browser's built-in bilinear smoothing. Admin0 + admin1 outlines are overlaid as SVG paths using the same `(lon, lat) → (px_x, px_y)` projection.
+
+**Admin1 behaviour** (multi-select): empty selection = country (national) view. One admin1 = zoom + mask + red boundary accent. Two or more = zoom + mask to the union of all selected admin1s, each accented. The country-level COG pixels stay cached in memory — switching admin1 selections re-crops the existing array client-side, with **no second HTTP fetch**. Changing the country / variable / season triggers a new COG download.
+
+**Boundaries**: all of the current country's admin1 boundaries are drawn as thin gray lines for context. Selected admin1s get a red accent on top of a white halo so the selection is obvious against any colour ramp. The country outline is *not* drawn separately — it would misalign against the admin1 layer by 1–3 px (the two topojson files are simplified independently). The admin1 union traces the country shape naturally.
+
+**Mask**: pixels outside the active polygon (union of all admin1s if none selected; union of selected admin1s otherwise) are clipped to the canvas background — only the AoI's data is painted. The mask and the boundary layer come from the same admin1 simplification, so they align perfectly.
+
+**Ramp**: dynamic by default — the colour ramp rescales to the visible data range for maximum contrast in each view. Flip the "Lock map ramp to global limits" toggle to use the fixed cross-region scale (0–40 °C, 0–2500 mm, etc.) for cross-region comparison.
+
+**Download**: click the "Download map (PNG)" button to save a composite PNG of the canvas + boundary overlay (white background). The timeseries chart has its own "Download chart (PNG)" button.
 
 ```{ojs}
 //| output: false
@@ -358,6 +412,26 @@ admin0_feature_E = {
   const iso3 = country.iso3;
   const f = admin0_geo_E.features.find((f) => f.properties && (f.properties.iso3 === iso3 || f.properties.ISO3 === iso3 || f.properties.iso_3 === iso3));
   return f ?? null;
+}
+
+admin1_geo_E = {
+  const tj = await FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json();
+  const objectName = Object.keys(tj.objects)[0];
+  return topojsonClient_E.feature(tj, tj.objects[objectName]);
+}
+
+// admin1 polygons for the currently-selected admin1_names array.
+// Returns an array (possibly empty). Match is on (iso3, admin1_name).
+admin1_features_E = {
+  if (!admin1_names || admin1_names.length === 0) return [];
+  const iso3 = country.iso3;
+  return admin1_names
+    .map((name) => admin1_geo_E.features.find((f) =>
+      f.properties &&
+      f.properties.iso3 === iso3 &&
+      f.properties.admin1_name === name
+    ))
+    .filter((f) => f != null);
 }
 
 cogURL_for_E = ({ variable, season, clim = "1991-2020", stat = "mean" }) => {
@@ -467,188 +541,488 @@ ramps_E = ({
 ```
 
 ```{ojs}
-recentChangesMap_E = {
-  const iso3 = country.iso3;
-  const f = admin0_feature_E;
-  if (!f) return html`<div style="padding: 1em; color: #999;">No admin0 polygon for ${iso3}.</div>`;
-
-  // Status indicator + display canvas wrapper. Dynamic `<img>`-style
-  // we own — no Leaflet container sizing race.
-  const W = 600;
-  const status = html`<div style="font-size: 0.85em; color: #666; margin-bottom: 4px; min-height: 1.2em;">Reading COG…</div>`;
-  const wrap = html`<div style="position: relative; width: ${W}px; max-width: 100%;"></div>`;
-  const container = html`<div>${status}${wrap}</div>`;
-
-  const setStatus = (msg) => { status.textContent = msg; };
-
-  // Compute country bbox in EPSG:4326 from the GeoJSON feature.
-  const computeBbox = (feature) => {
-    let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
-    const visit = (coords) => {
-      if (typeof coords[0] === "number") {
-        if (coords[0] < xmin) xmin = coords[0];
-        if (coords[0] > xmax) xmax = coords[0];
-        if (coords[1] < ymin) ymin = coords[1];
-        if (coords[1] > ymax) ymax = coords[1];
-      } else {
-        for (const c of coords) visit(c);
-      }
-    };
-    visit(feature.geometry.coordinates);
-    // Small 2% pad so the country isn't flush against the canvas edge
-    const px = (xmax - xmin) * 0.02;
-    const py = (ymax - ymin) * 0.02;
-    return { xmin: xmin - px, ymin: ymin - py, xmax: xmax + px, ymax: ymax + py };
-  };
-
-  const bbox = computeBbox(f);
-
-  // Render once into the wrap, async.
-  const run = async () => {
-    try {
-      const cogUrl = cogURL_for_E({ variable: variable_E, season: season_E, stat: mapStat_E });
-      setStatus(`Reading COG header (${cogUrl.split("/").pop()})…`);
-      const t0 = performance.now();
-
-      // 1. Open the COG via geotiff.js. Internally this uses HTTP Range
-      // requests to fetch ONLY the bytes needed for our pixel window.
-      const tiff = await GeoTIFF_E.fromUrl(cogUrl);
-      const image = await tiff.getImage();
-
-      // 2. Compute the COG's georeferencing manually rather than relying
-      // on readRasters({bbox}) — that parameter silently returns the
-      // ENTIRE raster for some COG flavours in this collection (TAVG +
-      // SPEI), apparently due to projection-tag differences. Building
-      // an explicit pixel `window` from the image's bounding box +
-      // resolution forces the right crop for every variable.
-      const imgBbox = image.getBoundingBox();                    // [xmin, ymin, xmax, ymax] in COG CRS
-      const imgW = image.getWidth();
-      const imgH = image.getHeight();
-      const xRes = (imgBbox[2] - imgBbox[0]) / imgW;
-      const yRes = (imgBbox[3] - imgBbox[1]) / imgH;
-
-      let wx1 = Math.max(0,    Math.floor((bbox.xmin   - imgBbox[0]) / xRes));
-      let wy1 = Math.max(0,    Math.floor((imgBbox[3]  - bbox.ymax)  / yRes));   // y-flip: raster row 0 is at ymax
-      let wx2 = Math.min(imgW, Math.ceil ((bbox.xmax   - imgBbox[0]) / xRes));
-      let wy2 = Math.min(imgH, Math.ceil ((imgBbox[3]  - bbox.ymin)  / yRes));
-      if (wx2 <= wx1 || wy2 <= wy1) {
-        setStatus(`Country bbox does not overlap COG extent (image: ${imgBbox.map(v => v.toFixed(1)).join(", ")} vs country: ${bbox.xmin.toFixed(1)},${bbox.ymin.toFixed(1)},${bbox.xmax.toFixed(1)},${bbox.ymax.toFixed(1)}).`);
-        return;
-      }
-
-      setStatus(`Fetching pixels for ${country.name} (window ${wx2 - wx1}×${wy2 - wy1} of source ${imgW}×${imgH})…`);
-
-      // 3. Read raster pixels for our pixel window. window is [x1, y1, x2, y2]
-      // in source pixel coordinates with y growing downward.
-      const rasters = await image.readRasters({ window: [wx1, wy1, wx2, wy2] });
-      const data = rasters[0];                                  // typed array (Float32Array for these COGs)
-      const w = rasters.width, h = rasters.height;
-
-      // The actual geographic extent of the pixel window (may be
-      // slightly larger than our padded country bbox because of integer
-      // pixel snapping). Use THIS for the SVG overlay projection so
-      // the outline aligns to the canvas perfectly.
-      const actualBbox = {
-        xmin: imgBbox[0] + wx1 * xRes,
-        ymax: imgBbox[3] - wy1 * yRes,
-        xmax: imgBbox[0] + wx2 * xRes,
-        ymin: imgBbox[3] - wy2 * yRes,
-      };
-
-      // Detect common NoData sentinels (CR-076 noted STATISTICS_MEAN=-9999;
-      // production COGs likely use either NaN or -9999 / -3.4e38). Treat
-      // both as transparent in the colour ramp.
-      const noData = typeof image.getGDALNoData === "function" ? image.getGDALNoData() : null;
-      const isNoData = (v) => {
-        if (!isFinite(v)) return true;
-        if (noData != null && v === noData) return true;
-        if (v <= -9999) return true;
-        return false;
-      };
-
-      setStatus(`Rendering ${w}×${h} pixels → ${W} px canvas (smooth resample)…`);
-
-      // 4. Build offscreen canvas at SOURCE resolution and paint each
-      // pixel via the colour ramp. NoData stays transparent.
-      const offscreen = document.createElement("canvas");
-      offscreen.width = w;
-      offscreen.height = h;
-      const offCtx = offscreen.getContext("2d");
-      const img = offCtx.createImageData(w, h);
-      const stops = ramps_E[variable_E] ?? ramps_E.TAVG;
-      let nValid = 0, vMin = Infinity, vMax = -Infinity;
-      for (let i = 0; i < w * h; i++) {
-        const v = data[i];
-        if (isNoData(v)) continue;
-        nValid++;
-        if (v < vMin) vMin = v;
-        if (v > vMax) vMax = v;
-        const c = colorRamp_E(v, stops);
-        if (c) {
-          img.data[i * 4]     = c[0];
-          img.data[i * 4 + 1] = c[1];
-          img.data[i * 4 + 2] = c[2];
-          img.data[i * 4 + 3] = c[3];
-        }
-      }
-      offCtx.putImageData(img, 0, 0);
-
-      // 5. Visible display canvas, scaled up from source. Browser bilinear
-      // resampling via imageSmoothing — this matters! Skipping it
-      // reproduces exactly the block-artefact pattern of nearest-
-      // neighbour gdal_translate pre-renders. Do NOT "simplify" this
-      // by drawing the source canvas at 1:1 then CSS-scaling — CSS
-      // upscaling is nearest-neighbour by default in most browsers.
-      const H = Math.round(W * h / w);
-      const display = document.createElement("canvas");
-      display.width  = W;
-      display.height = H;
-      display.style.display = "block";
-      display.style.border = "1px solid #ddd";
-      display.style.background = "#fafafa";
-      const dctx = display.getContext("2d");
-      dctx.imageSmoothingEnabled = true;
-      dctx.imageSmoothingQuality = "high";
-      dctx.drawImage(offscreen, 0, 0, W, H);
-
-      // 6. Admin0 outline SVG overlay. Uses the ACTUAL pixel-window
-      // geo-extent (not the padded country bbox) for perfect alignment.
-      const tx = (lon) => (lon - actualBbox.xmin) / (actualBbox.xmax - actualBbox.xmin) * W;
-      const ty = (lat) => (actualBbox.ymax - lat) / (actualBbox.ymax - actualBbox.ymin) * H;
-      const ringToPath = (ring) => "M" + ring.map(([lo, la]) => `${tx(lo).toFixed(1)},${ty(la).toFixed(1)}`).join("L") + "Z";
-      const featureToPath = (feat) => {
-        const g = feat.geometry;
-        if (g.type === "Polygon") return g.coordinates.map(ringToPath).join(" ");
-        if (g.type === "MultiPolygon") return g.coordinates.flatMap((poly) => poly.map(ringToPath)).join(" ");
-        return "";
-      };
-      const pathD = featureToPath(f);
-      const svgOverlay = html`<svg width="${W}" height="${H}" style="position: absolute; top: 0; left: 0; pointer-events: none;">
-        <path d="${pathD}" stroke="#222" stroke-width="1.2" fill="none" />
-      </svg>`;
-
-      // 7. Legend — horizontal colour bar with tick labels at each stop.
-      const legend = buildLegend_E(stops, variable_E, mapStat_E);
-
-      // Mount
-      wrap.innerHTML = "";
-      const mapStack = html`<div style="position: relative; width: ${W}px;"></div>`;
-      mapStack.appendChild(display);
-      mapStack.appendChild(svgOverlay);
-      wrap.appendChild(mapStack);
-      wrap.appendChild(legend);
-
-      const totalMs = performance.now() - t0;
-      const statLabel = mapStat_E === "mean" ? "1991-2020 mean" : `1991-2020 ${mapStat_E}`;
-      const rangeStr = nValid > 0 ? ` · data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "";
-      setStatus(`Loaded ${variable_E} ${season_E} (${statLabel}) for ${country.name} — fetched + parsed + rendered in ${(totalMs/1000).toFixed(1)}s · source ${w}×${h} upsampled to ${W}×${H}${rangeStr}`);
-    } catch (e) {
-      console.error("recentChangesMap_E", e);
-      setStatus(`Error: ${String(e)}`);
+//| output: false
+// Compute the geographic bbox of a GeoJSON feature (Polygon or
+// MultiPolygon) in EPSG:4326. Includes a small percentage pad so the
+// outline isn't flush against the rendered canvas edge.
+featureBbox_E = (feature, padPct = 0.02) => {
+  let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+  const visit = (coords) => {
+    if (typeof coords[0] === "number") {
+      if (coords[0] < xmin) xmin = coords[0];
+      if (coords[0] > xmax) xmax = coords[0];
+      if (coords[1] < ymin) ymin = coords[1];
+      if (coords[1] > ymax) ymax = coords[1];
+    } else {
+      for (const c of coords) visit(c);
     }
   };
-  run();
-  return container;
+  visit(feature.geometry.coordinates);
+  const px = (xmax - xmin) * padPct;
+  const py = (ymax - ymin) * padPct;
+  return { xmin: xmin - px, ymin: ymin - py, xmax: xmax + px, ymax: ymax + py };
+}
+```
+
+```{ojs}
+//| output: false
+// COUNTRY-level raster cache. Depends ONLY on (country, variable,
+// season, mapStat). Admin1 selection does NOT invalidate this cell —
+// OJS dataflow gives us memoisation for free. Switching admin1 inside
+// the same country re-runs only the render cell (sub-arrays the data
+// already in memory) — no second COG fetch, no second HTTP Range
+// request to S3.
+countryRaster_E = {
+  const f = admin0_feature_E;
+  if (!f) return { error: `No admin0 polygon for ${country.iso3}.` };
+
+  const bbox = featureBbox_E(f);
+  const cogUrl = cogURL_for_E({ variable: variable_E, season: season_E, stat: mapStat_E });
+  const t0 = performance.now();
+
+  try {
+    // 1. Open the COG. geotiff.js uses HTTP Range requests under the hood
+    // so only the bytes for our pixel window get fetched — the full
+    // Africa-wide raster never crosses the wire.
+    const tiff = await GeoTIFF_E.fromUrl(cogUrl);
+    const image = await tiff.getImage();
+
+    // 2. Manual pixel window from image georef + country bbox. Don't
+    // use readRasters({bbox}) — silently returns full raster for some
+    // COG flavours in this collection (see commit history).
+    const imgBbox = image.getBoundingBox();
+    const imgW = image.getWidth();
+    const imgH = image.getHeight();
+    const xRes = (imgBbox[2] - imgBbox[0]) / imgW;
+    const yRes = (imgBbox[3] - imgBbox[1]) / imgH;
+
+    const wx1 = Math.max(0,    Math.floor((bbox.xmin  - imgBbox[0]) / xRes));
+    const wy1 = Math.max(0,    Math.floor((imgBbox[3] - bbox.ymax)  / yRes));
+    const wx2 = Math.min(imgW, Math.ceil ((bbox.xmax  - imgBbox[0]) / xRes));
+    const wy2 = Math.min(imgH, Math.ceil ((imgBbox[3] - bbox.ymin)  / yRes));
+    if (wx2 <= wx1 || wy2 <= wy1) {
+      return { error: `Country bbox does not overlap COG extent.` };
+    }
+
+    const rasters = await image.readRasters({ window: [wx1, wy1, wx2, wy2] });
+    const data = rasters[0];
+    const w = rasters.width, h = rasters.height;
+
+    // Snap geo-extent to the pixel window's actual edges.
+    const actualBbox = {
+      xmin: imgBbox[0] + wx1 * xRes,
+      ymax: imgBbox[3] - wy1 * yRes,
+      xmax: imgBbox[0] + wx2 * xRes,
+      ymin: imgBbox[3] - wy2 * yRes,
+    };
+
+    // NoData sentinel handling (CR-076 etc.). Cache the resolver too
+    // so the render cell doesn't re-derive it.
+    const noData = typeof image.getGDALNoData === "function" ? image.getGDALNoData() : null;
+
+    return {
+      data, w, h, xRes, yRes,
+      bbox: actualBbox,
+      noData,
+      cogUrl,
+      fetchMs: performance.now() - t0,
+    };
+  } catch (e) {
+    console.error("countryRaster_E fetch", e);
+    return { error: String(e) };
+  }
+}
+```
+
+```{ojs}
+recentChangesMap_E = {
+  if (countryRaster_E.error) {
+    return html`<div style="padding: 1em; color: #c33;">${countryRaster_E.error}</div>`;
+  }
+
+  const W = 600;
+  const status = html`<div style="font-size: 0.85em; color: #666; margin-bottom: 4px; min-height: 1.2em;"></div>`;
+  const setStatus = (msg) => { status.textContent = msg; };
+
+  // The full admin1 set for the current country — also used as the
+  // mask AND the always-drawn boundary layer when no admin1 is
+  // explicitly selected. Using the admin1 collection (rather than
+  // admin0) for the mask means the mask edge and the drawn admin1
+  // boundary line come from the SAME simplification source, so they
+  // align perfectly. The admin0 file is simplified independently
+  // and was producing a few-pixel offset against the admin1 lines —
+  // we drop it from the SVG overlay entirely.
+  const countryAdmin1Features = admin1_geo_E.features.filter((f) =>
+    f.properties && f.properties.iso3 === country.iso3
+  );
+
+  // Render features (drives mask + bbox):
+  //   0 admin1s selected → all country admin1s (≈ country shape)
+  //   1+ admin1s selected → only the selected admin1s
+  // The country raster covers admin0; sub-clipping just re-slices the
+  // already-fetched typed array, no second HTTP fetch.
+  const renderFeatures = admin1_features_E.length > 0
+    ? admin1_features_E
+    : (countryAdmin1Features.length > 0 ? countryAdmin1Features : [admin0_feature_E]);
+  const renderLabel =
+    admin1_features_E.length === 0 ? country.name :
+    admin1_features_E.length === 1 ? `${admin1_features_E[0].properties.admin1_name}, ${country.name}` :
+    `${country.name} (${admin1_features_E.length} admin1s)`;
+
+  // Union bbox across selected features, then pad.
+  const featBboxes = renderFeatures.map((f) => featureBbox_E(f, 0));
+  const unionRaw = featBboxes.reduce((acc, b) => ({
+    xmin: Math.min(acc.xmin, b.xmin), ymin: Math.min(acc.ymin, b.ymin),
+    xmax: Math.max(acc.xmax, b.xmax), ymax: Math.max(acc.ymax, b.ymax),
+  }), { xmin: Infinity, ymin: Infinity, xmax: -Infinity, ymax: -Infinity });
+  const padPct = 0.02;
+  const renderBbox = {
+    xmin: unionRaw.xmin - (unionRaw.xmax - unionRaw.xmin) * padPct,
+    ymin: unionRaw.ymin - (unionRaw.ymax - unionRaw.ymin) * padPct,
+    xmax: unionRaw.xmax + (unionRaw.xmax - unionRaw.xmin) * padPct,
+    ymax: unionRaw.ymax + (unionRaw.ymax - unionRaw.ymin) * padPct,
+  };
+
+  // Sub-pixel window inside the cached country data corresponding to
+  // the render bbox. If admin1, this is a small sub-rectangle of the
+  // already-fetched array.
+  const { data, w: cw, h: ch, bbox: cbbox } = countryRaster_E;
+  const cxRes = (cbbox.xmax - cbbox.xmin) / cw;
+  const cyRes = (cbbox.ymax - cbbox.ymin) / ch;
+  let sx1 = Math.max(0,  Math.floor((renderBbox.xmin - cbbox.xmin) / cxRes));
+  let sy1 = Math.max(0,  Math.floor((cbbox.ymax - renderBbox.ymax) / cyRes));
+  let sx2 = Math.min(cw, Math.ceil ((renderBbox.xmax - cbbox.xmin) / cxRes));
+  let sy2 = Math.min(ch, Math.ceil ((cbbox.ymax - renderBbox.ymin) / cyRes));
+  if (sx2 <= sx1 || sy2 <= sy1) {
+    sx1 = 0; sy1 = 0; sx2 = cw; sy2 = ch;
+  }
+  const sw = sx2 - sx1, sh = sy2 - sy1;
+  const actualRenderBbox = {
+    xmin: cbbox.xmin + sx1 * cxRes,
+    ymax: cbbox.ymax - sy1 * cyRes,
+    xmax: cbbox.xmin + sx2 * cxRes,
+    ymin: cbbox.ymax - sy2 * cyRes,
+  };
+
+  const noData = countryRaster_E.noData;
+  const isNoData = (v) => {
+    if (!isFinite(v)) return true;
+    if (noData != null && v === noData) return true;
+    if (v <= -9999) return true;
+    return false;
+  };
+
+  // First pass: scan sub-window to learn min / max of the visible
+  // data so we can build a data-driven ramp. We need this BEFORE
+  // painting so the colours match the legend.
+  let nValid = 0, vMin = Infinity, vMax = -Infinity;
+  for (let row = 0; row < sh; row++) {
+    for (let col = 0; col < sw; col++) {
+      const v = data[(sy1 + row) * cw + (sx1 + col)];
+      if (isNoData(v)) continue;
+      nValid++;
+      if (v < vMin) vMin = v;
+      if (v > vMax) vMax = v;
+    }
+  }
+
+  // Ramp selection.
+  //   `globalStops` = the fixed cross-region ramp from ramps_E.
+  //   `activeStops` = what we'll actually draw with. Either the global
+  //   stops (toggle on) OR a rescaled version where the original
+  //   stops' `at` values get linearly remapped to [vMin, vMax]. The
+  //   colour sequence is preserved; only the breakpoints move. The
+  //   legend ticks match what's drawn.
+  const globalStops = ramps_E[variable_E] ?? ramps_E.TAVG;
+  let activeStops = globalStops;
+  let rampLabel = "fixed";
+  if (!rampLockFixed_E && nValid > 1 && vMax > vMin) {
+    const g0 = globalStops[0].at;
+    const g1 = globalStops[globalStops.length - 1].at;
+    const gRange = g1 - g0;
+    const newRange = vMax - vMin;
+    activeStops = globalStops.map((s) => ({
+      at: vMin + ((s.at - g0) / gRange) * newRange,
+      rgb: s.rgb,
+    }));
+    rampLabel = "dynamic";
+  }
+
+  // Second pass: paint each sub-window pixel via the active ramp.
+  const offscreen = document.createElement("canvas");
+  offscreen.width = sw;
+  offscreen.height = sh;
+  const offCtx = offscreen.getContext("2d");
+  const img = offCtx.createImageData(sw, sh);
+  for (let row = 0; row < sh; row++) {
+    for (let col = 0; col < sw; col++) {
+      const v = data[(sy1 + row) * cw + (sx1 + col)];
+      if (isNoData(v)) continue;
+      const c = colorRamp_E(v, activeStops);
+      if (c) {
+        const j = (row * sw + col) * 4;
+        img.data[j]     = c[0];
+        img.data[j + 1] = c[1];
+        img.data[j + 2] = c[2];
+        img.data[j + 3] = c[3];
+      }
+    }
+  }
+  offCtx.putImageData(img, 0, 0);
+
+  const H = Math.round(W * sh / sw);
+  const display = document.createElement("canvas");
+  display.width = W;
+  display.height = H;
+  display.style.display = "block";
+  display.style.border = "1px solid #ddd";
+  display.style.background = "#fafafa";
+  const dctx = display.getContext("2d");
+  dctx.imageSmoothingEnabled = true;
+  dctx.imageSmoothingQuality = "high";
+
+  // Geographic ↔ canvas-pixel projection.
+  const tx = (lon) => (lon - actualRenderBbox.xmin) / (actualRenderBbox.xmax - actualRenderBbox.xmin) * W;
+  const ty = (lat) => (actualRenderBbox.ymax - lat) / (actualRenderBbox.ymax - actualRenderBbox.ymin) * H;
+
+  // Build a Path2D in canvas-pixel space from a GeoJSON feature.
+  // Used for BOTH the canvas mask AND (via path-d string) the SVG
+  // outline so the two stay perfectly aligned.
+  const buildPath2D = (feature) => {
+    const p = new Path2D();
+    const addRing = (ring) => {
+      ring.forEach(([lo, la], i) => {
+        const x = tx(lo);
+        const y = ty(la);
+        if (i === 0) p.moveTo(x, y);
+        else p.lineTo(x, y);
+      });
+      p.closePath();
+    };
+    const g = feature.geometry;
+    if (g.type === "Polygon") g.coordinates.forEach(addRing);
+    else if (g.type === "MultiPolygon") g.coordinates.forEach((poly) => poly.forEach(addRing));
+    return p;
+  };
+
+  // Mask: clip to the union of render features (admin0 if no admin1s
+  // selected, else the union of selected admin1s). evenodd winding
+  // correctly carves out polygon holes (GeoJSON outer-ring CCW + holes
+  // CW). Painting happens *inside* save/restore so the clip doesn't
+  // leak into the next render.
+  const combinedMask = new Path2D();
+  renderFeatures.forEach((f) => combinedMask.addPath(buildPath2D(f)));
+  dctx.save();
+  dctx.clip(combinedMask, "evenodd");
+  dctx.drawImage(offscreen, 0, 0, W, H);
+  dctx.restore();
+
+  // SVG overlay: admin0 always drawn (thin); each selected admin1
+  // drawn bolder. SVG markup is parsed as image/svg+xml so every
+  // <path> lands in the SVG namespace (the previous nested-html
+  // template was silently producing HTMLUnknownElements — invisible
+  // inside an SVG parent).
+  const ringToPath = (ring) => "M" + ring.map(([lo, la]) => `${tx(lo).toFixed(1)},${ty(la).toFixed(1)}`).join("L") + "Z";
+  const featureToPath = (feat) => {
+    const g = feat.geometry;
+    if (g.type === "Polygon") return g.coordinates.map(ringToPath).join(" ");
+    if (g.type === "MultiPolygon") return g.coordinates.flatMap((poly) => poly.map(ringToPath)).join(" ");
+    return "";
+  };
+  // Boundary layers:
+  //   1. ALL country admin1 boundaries — thin gray (provides context
+  //      + traces the country shape since admin1s tile it).
+  //   2. SELECTED admin1 boundaries — bold red with a white halo for
+  //      accent. Drawn on top so the selection is unambiguous against
+  //      any colour ramp underneath.
+  // admin0 outline deliberately omitted — using it next to the
+  // admin1 layer produced visible 1–3 px ghosting because the two
+  // topojsons are simplified independently.
+  const allAdmin1Paths      = countryAdmin1Features.map(featureToPath).join(" ");
+  const selectedAdmin1Paths = admin1_features_E.map(featureToPath).join(" ");
+
+  // Optional graticule layer — nice round-number lat/lon ticks via
+  // d3.ticks. Drawn as small black lines at the canvas edges + text
+  // labels. Cheap (~10 ticks total) so we just build it every render
+  // when the toggle is on.
+  let graticuleMarkup = "";
+  if (showGraticule_E) {
+    const tickStroke = "#333";
+    const lonTicks = d3.ticks(actualRenderBbox.xmin, actualRenderBbox.xmax, 5);
+    const latTicks = d3.ticks(actualRenderBbox.ymin, actualRenderBbox.ymax, 5);
+    const fmt = (v) => v.toFixed(Math.abs(v) >= 10 ? 0 : 1);
+    const lonAxis = lonTicks.map((lo) => {
+      const x = tx(lo);
+      return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${H - 6}" y2="${H}" stroke="${tickStroke}" stroke-width="0.8"/>
+              <text x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="9" fill="${tickStroke}" font-family="system-ui, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2">${fmt(lo)}°${lo >= 0 ? "E" : "W"}</text>`;
+    }).join("");
+    const latAxis = latTicks.map((la) => {
+      const y = ty(la);
+      return `<line x1="0" x2="6" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${tickStroke}" stroke-width="0.8"/>
+              <text x="8" y="${(y + 3).toFixed(1)}" text-anchor="start" font-size="9" fill="${tickStroke}" font-family="system-ui, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2">${fmt(Math.abs(la))}°${la >= 0 ? "N" : "S"}</text>`;
+    }).join("");
+    graticuleMarkup = lonAxis + latAxis;
+  }
+
+  // Optional admin1 name labels — only for admin1s belonging to the
+  // current country whose polygon centroid falls inside the render
+  // bbox. d3.geoCentroid does the spherical-correct centroid (the
+  // arithmetic-mean of coords would skew on long thin polygons).
+  // Halo via paint-order:stroke + white stroke for readability over
+  // varied raster colours. No collision-avoidance — for the sandbox
+  // it's enough.
+  let labelsMarkup = "";
+  if (showAdmin1Labels_E) {
+    const iso3 = country.iso3;
+    // Centroid resolver — prefer d3.geoCentroid (spherical-correct,
+    // robust to long thin polygons) and fall back to bbox-center if
+    // the d3 bundle this notebook loads doesn't include d3-geo.
+    const centroidOf = (f) => {
+      if (typeof d3.geoCentroid === "function") return d3.geoCentroid(f);
+      const b = featureBbox_E(f, 0);
+      return [(b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2];
+    };
+    labelsMarkup = admin1_geo_E.features
+      .filter((f) => f.properties && f.properties.iso3 === iso3)
+      .map((f) => ({ f, c: centroidOf(f) }))
+      .filter(({ c }) =>
+        c[0] >= actualRenderBbox.xmin && c[0] <= actualRenderBbox.xmax &&
+        c[1] >= actualRenderBbox.ymin && c[1] <= actualRenderBbox.ymax
+      )
+      .map(({ f, c }) => {
+        const x = tx(c[0]).toFixed(1);
+        const y = ty(c[1]).toFixed(1);
+        const name = escapeXml_E(f.properties.admin1_name || "");
+        return `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="middle" font-size="10" font-weight="500" fill="#111" font-family="system-ui, sans-serif" paint-order="stroke" stroke="#fff" stroke-width="2.5" stroke-linejoin="round">${name}</text>`;
+      })
+      .join("");
+  }
+
+  const svgMarkup = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" style="position: absolute; top: 0; left: 0; pointer-events: none;">
+      <path d="${allAdmin1Paths}" stroke="#555" stroke-width="0.7" fill="none" opacity="0.75"/>
+      ${selectedAdmin1Paths ? `
+        <path d="${selectedAdmin1Paths}" stroke="#ffffff" stroke-width="4.5" fill="none" stroke-linejoin="round"/>
+        <path d="${selectedAdmin1Paths}" stroke="#d62728" stroke-width="2.2" fill="none" stroke-linejoin="round"/>
+      ` : ""}
+      ${graticuleMarkup}
+      ${labelsMarkup}
+    </svg>
+  `;
+  const svgOverlay = new DOMParser()
+    .parseFromString(svgMarkup, "image/svg+xml")
+    .documentElement;
+
+  const legend = buildLegend_E(activeStops, variable_E, mapStat_E);
+
+  const mapStack = html`<div style="position: relative; width: ${W}px;"></div>`;
+  mapStack.appendChild(display);
+  mapStack.appendChild(svgOverlay);
+
+  // Download button. Composites the data canvas + SVG overlay into a
+  // single PNG (renders the SVG via an Image off a Blob URL — the
+  // standard pattern for "save what's on screen" with stacked canvas
+  // + SVG layers).
+  const dlBtn = html`<button style="margin-left: auto; padding: 2px 10px; font-size: 0.85em;">Download map (PNG)</button>`;
+  dlBtn.onclick = async () => {
+    const composite = document.createElement("canvas");
+    composite.width = W;
+    composite.height = H;
+    const cctx = composite.getContext("2d");
+    cctx.fillStyle = "#ffffff";
+    cctx.fillRect(0, 0, W, H);
+    cctx.drawImage(display, 0, 0);
+    const svgString = new XMLSerializer().serializeToString(svgOverlay);
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const svgUrl = URL.createObjectURL(svgBlob);
+    await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => { cctx.drawImage(im, 0, 0); URL.revokeObjectURL(svgUrl); resolve(); };
+      im.onerror = (e) => { URL.revokeObjectURL(svgUrl); reject(e); };
+      im.src = svgUrl;
+    });
+    composite.toBlob((blob) => {
+      const a = document.createElement("a");
+      const slug = (renderLabel || "map").replace(/[^a-zA-Z0-9._-]+/g, "_");
+      a.href = URL.createObjectURL(blob);
+      a.download = `obs_${variable_E}_${season_E}_${mapStat_E}_${slug}.png`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }, "image/png");
+  };
+
+  const statLabel = mapStat_E === "mean" ? "1991-2020 mean" : `1991-2020 ${mapStat_E}`;
+  const fetchSec = (countryRaster_E.fetchMs / 1000).toFixed(1);
+  const rangeStr = nValid > 0 ? `data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "no valid pixels";
+  setStatus(`${variable_E} ${season_E} (${statLabel}) for ${renderLabel} · country fetch ${fetchSec}s · sub-window ${sw}×${sh} → ${W}×${H} · ${rangeStr} · ramp: ${rampLabel}`);
+
+  const header = html`<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">${status}${dlBtn}</div>`;
+  return html`<div>${header}${mapStack}${legend}</div>`;
+}
+```
+
+```{ojs}
+//| output: false
+// XML/HTML-attribute escape for text we inject into raw SVG markup
+// strings (admin1 names contain accented characters and could in
+// theory contain quote / angle-bracket chars that would break the
+// surrounding XML). Standalone cell — the chained .replace regex
+// literals are kept far from any top-level object literal, mirroring
+// the extremeColour_E split that fixed an earlier OJS parser issue.
+escapeXml_E = (str) => String(str)
+  .split("&").join("&amp;")
+  .split("<").join("&lt;")
+  .split(">").join("&gt;")
+  .split('"').join("&quot;");
+```
+
+```{ojs}
+//| output: false
+// SVG → PNG download helper. Serialises an SVG node, rasterises it
+// via an <img> on a Blob URL, composites onto a fresh canvas with a
+// white background (transparent PNGs are awkward to paste into docs),
+// and triggers a download. Used by both the map (composite canvas +
+// SVG already handled in the map cell — this is only called by the
+// chart) and the timeseries chart.
+downloadSvgAsPng_E = async (svgNode, filename, scale = 2) => {
+  // Embed an explicit width/height + xmlns so serialised SVG is
+  // self-contained enough for <img>.src to render.
+  const clone = svgNode.cloneNode(true);
+  const bbox = svgNode.getBoundingClientRect();
+  const w = clone.getAttribute("width")  ? parseFloat(clone.getAttribute("width"))  : bbox.width;
+  const h = clone.getAttribute("height") ? parseFloat(clone.getAttribute("height")) : bbox.height;
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clone.setAttribute("width",  w);
+  clone.setAttribute("height", h);
+  const svgString = new XMLSerializer().serializeToString(clone);
+  const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+  const svgUrl = URL.createObjectURL(svgBlob);
+  try {
+    await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width  = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(im, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(a.href);
+          resolve();
+        }, "image/png");
+      };
+      im.onerror = reject;
+      im.src = svgUrl;
+    });
+  } finally {
+    URL.revokeObjectURL(svgUrl);
+  }
 }
 ```
 
