@@ -426,3 +426,57 @@ Other sandbox additions across the session (folded into the bundle commits above
 ### Suggested next step
 
 Read the new observational-uncertainty-band dispatch in [`dispatches/2026-05-21_observational-uncertainty-band.md`](dispatches/2026-05-21_observational-uncertainty-band.md), summarise + draft a plan-for-approval matching the pattern established in commits B / C / D. Don't open the production migration until the sandbox feature set stabilises (next dispatch may add more sandbox surface area).
+
+---
+
+## Session state — 2026-05-21, session 10 (observational uncertainty band + pipeline COG dispatch)
+
+Short-day session — observational-uncertainty dispatch executed end-to-end + pipeline COG bug diagnosed and dispatched. Three commits landed.
+
+### What landed
+
+**Commit `3c2e808` — memo + dispatch tracked.** `context/04_observed-trend-best-practice.md` §12 substantially expanded with per-variable heuristics anchored to peer-reviewed African validation studies: PTOT ± 10 % (Dinku et al. 2018; Cattani et al. 2022), TMAX ± 0.5 °C / TAVG ± 0.5 °C (Sheridan et al. 2022), TMIN ± 1.0 °C (Sheridan et al. 2022 — systematic positive bias). New "CHIRPS / CHIRTS validation literature" block added to Appendix A. The dispatch [`dispatches/2026-05-21_observational-uncertainty-band.md`](dispatches/2026-05-21_observational-uncertainty-band.md) drafts the sandbox-side implementation.
+
+**Commit `5024429` — sandbox implementation + 3-col controls.**
+- New helper `helpers/observationalUncertainty.ojs` (`observationalUncertaintyBand(value, variable, opts)` + `observationalUncertaintyMarks(data, opts)`). Per-variable defaults in the citation comment block; `opts.heuristic` hook for per-region override; SPEI suppressed (returns null).
+- New `viewof showObsUncertainty_E` toggle (default OFF).
+- Mark composition reordered into `bgMarks` + `obsBandMarks` + `trendCIMarks` + `dataLayerMarks` + `trendLineMarks` per the dispatch z-order (data line never obscured; obs band sits under trend CI which sits under data line).
+- Trend badge re-labelled: `*statistical* 95 % CI ...` qualifier + muted second-line note (`CI reflects sampling uncertainty in the slope given the observed values; it does not include observational uncertainty in the underlying <product> estimates`). Product name (`CHIRTS-ERA5` / `CHIRPS v3`) swaps per variable.
+- Methods callout gains the dispatch's full citation-bearing disclaimer paragraph.
+- Numeric label precision audit: trend slope + CI bounds now print at 2 sig figs (e.g. `+0.19` not `+0.193`).
+- Adaptive legend gains one entry when the toggle is ON.
+- **Controls layout restructured** — three sections, each a 3-column `.controls-grid`:
+  - Under `## Controls`: country / admin1 / variable / season (general — affect both chart and map)
+  - Inside `## Timeseries` after methods callout: view type / plot type / anomaly / show trend / show obs uncertainty (chart-only)
+  - Inside `## Map` after intro: lock ramp / lat-lon ticks / admin1 labels (map-only)
+
+**Commit `cf45bf6` — pipeline dispatch (Brayden / hazards_prototype).** Diagnosed via side-by-side `gdalinfo` against the broken PTOT COG and a working TAVG COG: 4 files in the slice `PTOT × annual × clim=wmo_1991-2020 × {mean, sd, min, max}` ship at a ~Kenya-region crop (170×210 px, origin 33.5/5.5) instead of Africa-wide (1500×1600 px, origin -20/40). Confirmed bug scope is exactly those 4 files; every other sibling combination tested is correct. Dispatch [`dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md`](dispatches/2026-05-21_observational-cog-extent-bug-plus-optimizations.md) bundles three coordinated fixes: (1) 4-file extent re-bake; (2) `STATISTICS_MEAN/STDDEV = -9999` sentinel fix (CR-076 part 2); (3) `OVERVIEWS=NONE → AUTO` for browser-render perf (single biggest improvement available — drops continental-zoom from ~3.5 MB to ~5 KB per render). While in the bake, A/B PREDICTOR=2 vs PREDICTOR=3 for Float32 compression. CR-076 in ISSUES.md gets a cross-reference + the new evidence appended.
+
+### Pattern decisions captured this session
+
+- **OJS module files cannot have top-level `const` / `let` / `var` declarations.** Only `function name(…) {}` and OJS-cell-style `name = …`. A top-level `const` invalidates the *whole* module parse and silently breaks every export — surfaces downstream as `X is not defined` with no root-cause hint. Caught when `observationalUncertainty.ojs` originally declared `const _DEFAULTS_OU = {…}` at module top level; fixed by moving the defaults inside a function (`function _ouDefaults() { return {…}; }`). Adds to the list of OJS preprocessor sensitivities from session 9 (regex + trailing object literal, optional-chaining `?.()`, nested `html\`<svg-child>\`` templates, `export function`).
+- **Mark z-order matters for layered overlays.** Plot draws marks in array order; later = on top. To get the dispatch's intended order (baseline hazard bands → obs band → trend CI → data line → trend line), `marks` was split into `bgMarks` / `dataLayerMarks` and the trend overlay's `[CI band, line]` was split into `trendCIMarks` / `trendLineMarks` for explicit interleaving. Trend overlay return shape `trendMarks.length === 2 ? [trendMarks[0]] : []` is the brittle bit — worth a follow-up if `trendOverlayMarks` API grows.
+- **Controls layout: 3 per row, grouped by scope, not all together.** Vertical-space pressure on the sandbox notebook resolved by splitting one 12-control block into three smaller `.controls-grid` divs (general / plot / map), each rendered next to the thing it affects. The earlier "all 12 in one grid above everything" layout was confusing because users had to scroll up to change selection then back down to see the result. Reuse this pattern for the eventual production drop-in.
+- **GitHub-only handovers.** OneDrive sync for dispatches is no longer offered — recipients work from the repo. The 2026-05-18 hazards_prototype dispatch OneDrive copy was a one-time exception, now retracted. Saved to user memory ([feedback_dispatch-routing-github-only.md](file:///Users/pstewarda/.claude/projects/-Users-pstewarda-Documents-rprojects-atlas-notebooks/memory/feedback_dispatch-routing-github-only.md)) so future sessions don't re-suggest.
+
+### In flight / uncommitted
+
+- `dev/climateRationale` is **1 commit ahead** of `origin/dev/climateRationale` (last pushed = `4d1d8c8` `chartDownloadMenu`; local-only since then: `fa307fb`, `9dbef92`, `e90890e`, `3c2e808`, `5024429`, `cf45bf6`). Working tree is clean apart from `.DS_Store` noise + the `notebooks/sandbox/img/` directory (legacy archived PNGs).
+- All session-10 work fully tracked + committed. Nothing in the worktree to recover.
+- PTOT map remains broken in the sandbox until Brayden re-bakes the 4 affected COGs per the new pipeline dispatch. Other variables (TAVG / TMAX / TMIN / SPEI-03 / SPEI-12) render correctly.
+- Mid-session diagnostic check confirmed the new helper module loads correctly once Quarto preview is fully restarted (kill + re-run, not just browser refresh). Sandbox is in a working state for non-PTOT-annual-1991-2020 variables.
+
+### Open questions for next session
+
+- **Has Brayden re-baked the 4 PTOT files?** Quick spot-check: `gdalinfo /vsicurl/https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=climatology/variable=PTOT/period=AMJ/clim=wmo_1991-2020/stat=max/PTOT_annual_1991-2020_mean.tif | grep "Size is"`. If output is `Size is 1500, 1600`, the bug is fixed; if `Size is 170, 210`, still broken.
+- **CR-078 + CR-079 production migration** (chartDownloadMenu across 17 figure cells + trend overlay across Recent Changes timeseries cells in `notebooks/climateRationale/notebook.qmd`) — biggest pending body of work. Sequence them together so each touched cell gets both upgrades. Sandbox is now stable enough to mine as the reference implementation.
+- **`helpers/vendor/` decision** (production COG renderer hardening — Option C from the loader-strategy dispatch) — still gated. Worth pulling forward once CR-076 + the extent bug land so the production view isn't tied to esm.sh availability.
+- **Any new dispatches** dropped into `playbook/handovers/climateRationale/dispatches/` between sessions — Pete's working pattern is dispatch-driven, so the canonical first move in a fresh session is `ls -lt playbook/handovers/climateRationale/dispatches/ | head` to spot anything new (memo too: `playbook/handovers/climateRationale/context/`).
+
+### Suggested next step
+
+1. `ls -lt playbook/handovers/climateRationale/dispatches/ playbook/handovers/climateRationale/context/ | head -20` — spot any new dispatch or memo update dropped between sessions.
+2. `gdalinfo /vsicurl/.../PTOT_annual_1991-2020_mean.tif | grep "Size is"` — quick check on the pipeline fix status.
+3. If new dispatch present → read + draft plan-for-approval per the pattern.
+4. Otherwise → propose starting CR-078 + CR-079 production migration as a single coordinated sweep. Phase 1 the 3 dispatch-validation cells (Recent Changes / Future Projections / Crop & Livestock Exposure) first, then the remaining 14.
+5. Push when Pete asks (none pushed since session-9; 6 commits ahead of `origin/dev/climateRationale`).
