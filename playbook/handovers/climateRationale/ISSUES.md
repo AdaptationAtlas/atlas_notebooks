@@ -1531,6 +1531,33 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+### CR-077 — `chartDownloadMenu` CSV exports full IEEE-754 precision [NEW 2026-05-21]
+
+- **id:** CR-077
+- **title:** CSV exports from the new `chartDownloadMenu` helper render numeric values with native JS `Number.toString()` precision (14–17 significant digits) instead of a sensible publication-grade precision (3–4 sig figs).
+- **type:** notebook UX / polish
+- **severity:** low (data is faithful; just visually noisy in Excel)
+- **where:** [helpers/chartDownloadMenu.ojs](helpers/chartDownloadMenu.ojs) — `_chartDownloadMenu_toCsv()` calls `String(val)` per the dispatch's explicit "don't try to localise" line. Surfaces in every CSV export across all figure cells that use the helper.
+
+- **why-this-matters:** Spot-checked 2026-05-21 on the sandbox AGO TAVG annual periods chart — `value_mean` column rendered values like `23.210545382536000` (15 digits) when 3-4 sig figs (`23.2` / `23.21`) would be all that's meaningful given the underlying parquet's precision and the climate-science use case. Doesn't affect downstream re-users who load the CSV programmatically (Python / R parse the strings back to floats), but does make the file harder to skim in Excel and conveys false precision to non-technical readers.
+
+- **proposed-change:** Add a `csvFormat` option to `chartDownloadMenu(...)` that the caller can pass per figure:
+  - `csvFormat: "raw"` (default — current behaviour, full precision)
+  - `csvFormat: "round:3"` (round to 3 decimal places)
+  - `csvFormat: "sigfig:4"` (round to 4 significant figures)
+  - Or pass a callback `csvFormat: (val, columnName) => string` for per-column formatting (e.g. years stay as integers, anomalies round to 2 dp).
+  Default stays "raw" to preserve current behaviour for any callers that genuinely want full precision (e.g. for diff/audit purposes).
+
+- **dependencies:** None. Pure helper change. Each call site decides what precision suits its data (years = integer, °C / mm = 1-2 dp, z-scores / SPEI = 2 dp).
+
+- **discovered:** 2026-05-21 by Pete on the first CSV export from the sandbox after the helper landed. Dispatch deliberately punted on number formatting ("pass through native JS String(value) — don't try to localise") so this is a known follow-up, not a regression.
+
+- **STATUS:** Open. Low priority — punt until the production migration of the 17 call sites lands and we have a clearer sense of which figures actually want which precision.
+
+- **before-string:** `csv = data.map(row => cols.map(c => escape(row[c])).join(",")).join("\r\n")` — in `_chartDownloadMenu_toCsv`.
+
+---
+
 ## Proposed PR groupings
 
 Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.

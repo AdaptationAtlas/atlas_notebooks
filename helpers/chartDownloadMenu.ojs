@@ -1,0 +1,374 @@
+/**
+ * chartDownloadMenu.ojs
+ *
+ * Wraps a chart element with a split-button download menu offering
+ * PNG, SVG, and CSV exports. Built for OJS notebooks under
+ * notebooks/climateRationale/ but kept dependency-free so it can
+ * be reused anywhere htl.html is available.
+ *
+ * Primary click  = PNG (2× device-pixel-ratio for crisp output).
+ * Caret dropdown = SVG (vector, editable in Illustrator/Inkscape)
+ *                + CSV (the dataframe backing the chart).
+ *
+ * The split-button sits BELOW the chart.
+ *
+ * See playbook/handovers/climateRationale/dispatches/
+ *     2026-05-21_chart-download-menu.md for the design rationale
+ *     and validation checklist.
+ */
+
+
+/**
+ * Convert an array of objects to a CSV string per RFC 4180.
+ * \r\n line endings; fields containing comma / quote / CR / LF
+ * are quoted and internal quotes are doubled. Null and undefined
+ * become empty strings. The UTF-8 BOM that Excel needs to read
+ * diacritics is added at blob-build time, not here.
+ *
+ * @param {Array<object>} data
+ * @param {Array<string>} [columns] - explicit column order;
+ *                                    otherwise Object.keys(data[0]).
+ * @returns {string}
+ */
+function _chartDownloadMenu_toCsv(data, columns) {
+  if (!data || !data.length) return "";
+  const cols = columns || Object.keys(data[0]);
+  const escape = (val) => {
+    if (val == null) return "";
+    const str = String(val);
+    const needsQuote =
+      str.indexOf(",")  !== -1 ||
+      str.indexOf('"')  !== -1 ||
+      str.indexOf("\n") !== -1 ||
+      str.indexOf("\r") !== -1;
+    if (!needsQuote) return str;
+    return '"' + str.split('"').join('""') + '"';
+  };
+  const header = cols.map(escape).join(",");
+  const rows = data.map((row) => cols.map((c) => escape(row[c])).join(","));
+  return [header].concat(rows).join("\r\n");
+}
+
+
+/**
+ * Trigger a browser download for a Blob + filename. Anchored to
+ * document.body briefly (Safari refuses if the anchor isn't in
+ * the DOM) and revokes the object URL once the click fires.
+ */
+function _chartDownloadMenu_triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
+/**
+ * Locate the SVG element to export. Plot.plot returns an SVG
+ * directly; some charts wrap it in a <figure> or <div>. Returns
+ * null if no SVG is found (CSV export still works in that case;
+ * PNG/SVG menu items get disabled).
+ */
+function _chartDownloadMenu_findSvg(chartElement) {
+  if (!chartElement) return null;
+  if (chartElement.tagName && chartElement.tagName.toLowerCase() === "svg") return chartElement;
+  if (typeof chartElement.querySelector === "function") return chartElement.querySelector("svg");
+  return null;
+}
+
+
+/**
+ * Serialise an SVG element so it renders standalone (in Illustrator
+ * or via <img>.src). Ensures xmlns + xmlns:xlink + width + height
+ * attributes are set on the clone. Doesn't mutate the live SVG.
+ */
+function _chartDownloadMenu_serializeSvg(svg) {
+  const clone = svg.cloneNode(true);
+  if (!clone.getAttribute("xmlns")) {
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  }
+  if (!clone.getAttribute("xmlns:xlink")) {
+    clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+  }
+  const bbox = svg.getBoundingClientRect();
+  if (!clone.getAttribute("width"))  clone.setAttribute("width",  bbox.width);
+  if (!clone.getAttribute("height")) clone.setAttribute("height", bbox.height);
+  return new XMLSerializer().serializeToString(clone);
+}
+
+
+/**
+ * Rasterise an SVG element to a PNG Blob at the given scale.
+ * Composites onto a white background — transparent PNGs paste
+ * badly into slides and docs.
+ *
+ * @param {SVGElement} svg
+ * @param {number} [scale=2] - device-pixel-ratio multiplier
+ * @returns {Promise<Blob>}
+ */
+function _chartDownloadMenu_svgToPng(svg, scale) {
+  const dpr = scale || 2;
+  const svgString = _chartDownloadMenu_serializeSvg(svg);
+  const bbox = svg.getBoundingClientRect();
+  const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+  const svgUrl = URL.createObjectURL(svgBlob);
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width  = Math.round(bbox.width  * dpr);
+      canvas.height = Math.round(bbox.height * dpr);
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(im, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        URL.revokeObjectURL(svgUrl);
+        if (blob) resolve(blob);
+        else      reject(new Error("canvas.toBlob returned null"));
+      }, "image/png");
+    };
+    im.onerror = (e) => {
+      URL.revokeObjectURL(svgUrl);
+      reject(e);
+    };
+    im.src = svgUrl;
+  });
+}
+
+
+/**
+ * Inject the helper's CSS once per page (idempotent — the style
+ * element is identified by id and skipped on subsequent calls).
+ */
+function _chartDownloadMenu_ensureStyle() {
+  if (document.getElementById("cdm-style")) return;
+  const style = document.createElement("style");
+  style.id = "cdm-style";
+  style.textContent = [
+    ".cdm-row { display: flex; justify-content: flex-end; margin-top: 6px; }",
+    ".cdm-split-group { position: relative; display: inline-flex; }",
+    ".cdm-primary, .cdm-caret {",
+    "  font: inherit;",
+    "  font-size: 0.85em;",
+    "  padding: 4px 10px;",
+    "  background: #fff;",
+    "  border: 1px solid #ccc;",
+    "  cursor: pointer;",
+    "  line-height: 1.2;",
+    "}",
+    ".cdm-primary { border-radius: 3px 0 0 3px; border-right: none; }",
+    ".cdm-caret   { border-radius: 0 3px 3px 0; padding: 4px 8px; }",
+    ".cdm-primary:hover, .cdm-caret:hover { background: #f4f4f4; }",
+    ".cdm-primary:focus, .cdm-caret:focus { outline: 2px solid #4a90e2; outline-offset: -2px; }",
+    ".cdm-menu {",
+    "  position: absolute;",
+    "  top: 100%;",
+    "  right: 0;",
+    "  margin: 2px 0 0;",
+    "  padding: 4px 0;",
+    "  list-style: none;",
+    "  background: #fff;",
+    "  border: 1px solid #ccc;",
+    "  border-radius: 3px;",
+    "  box-shadow: 0 2px 6px rgba(0,0,0,0.12);",
+    "  z-index: 10;",
+    "  min-width: 180px;",
+    "}",
+    ".cdm-menu button {",
+    "  font: inherit;",
+    "  font-size: 0.85em;",
+    "  display: block;",
+    "  width: 100%;",
+    "  text-align: left;",
+    "  padding: 5px 12px;",
+    "  background: none;",
+    "  border: none;",
+    "  cursor: pointer;",
+    "}",
+    ".cdm-menu button:hover:not([disabled]) { background: #f4f4f4; }",
+    ".cdm-menu button:focus { outline: 2px solid #4a90e2; outline-offset: -2px; }",
+    ".cdm-menu button[disabled] { color: #aaa; cursor: not-allowed; }",
+  ].join("\n");
+  document.head.appendChild(style);
+}
+
+
+/**
+ * Build the split-button DOM. Returns { group, primary, caret, menu,
+ *   show, hide } so the wrapper can wire global keydown / click-outside
+ *   handlers.
+ */
+function _chartDownloadMenu_buildSplitButton({ onPng, onSvg, onCsv, svgAvailable, csvAvailable }) {
+  const primary = document.createElement("button");
+  primary.type = "button";
+  primary.className = "cdm-primary";
+  primary.textContent = "Download PNG";
+  primary.setAttribute("aria-label", "Download chart as PNG");
+  primary.disabled = !svgAvailable;
+  if (svgAvailable) primary.onclick = onPng;
+
+  const caret = document.createElement("button");
+  caret.type = "button";
+  caret.className = "cdm-caret";
+  caret.setAttribute("aria-haspopup", "true");
+  caret.setAttribute("aria-expanded", "false");
+  caret.setAttribute("aria-label", "Other download formats");
+  caret.innerHTML = "&#9662;"; // ▾
+
+  const menu = document.createElement("ul");
+  menu.className = "cdm-menu";
+  menu.setAttribute("role", "menu");
+  menu.hidden = true;
+
+  const show = () => {
+    menu.hidden = false;
+    caret.setAttribute("aria-expanded", "true");
+    const first = menu.querySelector("button:not([disabled])");
+    if (first) first.focus();
+  };
+  const hide = () => {
+    menu.hidden = true;
+    caret.setAttribute("aria-expanded", "false");
+  };
+
+  const mkItem = (label, fn, enabled) => {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.setAttribute("role", "menuitem");
+    btn.textContent = label;
+    btn.disabled = !enabled;
+    if (enabled) btn.onclick = () => { hide(); fn(); };
+    li.appendChild(btn);
+    return li;
+  };
+  menu.appendChild(mkItem("Download as SVG",   onSvg, svgAvailable));
+  menu.appendChild(mkItem("Download data (CSV)", onCsv, csvAvailable));
+
+  caret.onclick = () => (menu.hidden ? show() : hide());
+
+  // Keyboard:
+  //  - Enter on primary triggers PNG (button default behaviour, no extra handler needed)
+  //  - ArrowDown on either primary or caret opens the menu
+  //  - Escape closes the menu and returns focus
+  const onKeyOpen = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); show(); }
+  };
+  primary.addEventListener("keydown", onKeyOpen);
+  caret.addEventListener("keydown", (e) => {
+    onKeyOpen(e);
+    if (e.key === "Escape") { hide(); primary.focus(); }
+  });
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { hide(); caret.focus(); }
+  });
+
+  const group = document.createElement("div");
+  group.className = "cdm-split-group";
+  group.appendChild(primary);
+  group.appendChild(caret);
+  group.appendChild(menu);
+
+  return { group, primary, caret, menu, show, hide };
+}
+
+
+/**
+ * Wrap a chart element with a download split-button menu.
+ *
+ * Primary action: PNG (2× DPR).
+ * Caret menu: SVG, CSV.
+ * Split-button sits BELOW the chart.
+ *
+ * Menu items are auto-disabled when their source is unavailable
+ * (no SVG → PNG + SVG disabled; no data → CSV disabled).
+ *
+ * @param {HTMLElement|SVGElement} chartElement - The chart to wrap.
+ *                                                Plot.plot output
+ *                                                works directly.
+ * @param {object} [opts]
+ * @param {string}        [opts.filename]   - Base name without
+ *                                            extension. The helper
+ *                                            appends .png / .svg
+ *                                            / .csv. Falls back to
+ *                                            `chart_<timestamp>`.
+ * @param {Array<object>} [opts.data]       - Dataframe backing the
+ *                                            chart. Required for CSV.
+ * @param {Array<string>} [opts.csvColumns] - Explicit column order
+ *                                            for CSV; otherwise the
+ *                                            keys of data[0].
+ * @returns {HTMLElement} A div containing the chart on top and the
+ *                       split-button row below.
+ */
+function chartDownloadMenu(chartElement, opts) {
+  const o = opts || {};
+  const baseName = o.filename || ("chart_" + Date.now());
+  const data = o.data;
+  const csvColumns = o.csvColumns;
+  const hasData = Array.isArray(data) && data.length > 0;
+
+  // Find the SVG for PNG/SVG export. CSV doesn't need it.
+  const svg = _chartDownloadMenu_findSvg(chartElement);
+  const svgAvailable = !!svg;
+
+  // Export actions
+  const onPng = async () => {
+    try {
+      const blob = await _chartDownloadMenu_svgToPng(svg, 2);
+      _chartDownloadMenu_triggerDownload(blob, baseName + ".png");
+    } catch (e) {
+      console.error("chartDownloadMenu PNG export failed", e);
+    }
+  };
+  const onSvg = () => {
+    const svgString = _chartDownloadMenu_serializeSvg(svg);
+    const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    _chartDownloadMenu_triggerDownload(blob, baseName + ".svg");
+  };
+  const onCsv = () => {
+    const csv = _chartDownloadMenu_toCsv(data, csvColumns);
+    // UTF-8 BOM so Excel recognises diacritics in admin names etc.
+    const blob = new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" });
+    _chartDownloadMenu_triggerDownload(blob, baseName + ".csv");
+  };
+
+  _chartDownloadMenu_ensureStyle();
+  const sb = _chartDownloadMenu_buildSplitButton({
+    onPng, onSvg, onCsv,
+    svgAvailable,
+    csvAvailable: hasData,
+  });
+
+  const row = document.createElement("div");
+  row.className = "cdm-row";
+  row.appendChild(sb.group);
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "cdm-wrapper";
+  wrapper.appendChild(chartElement);
+  wrapper.appendChild(row);
+
+  // Click-outside closes the menu. Scoped to the wrapper instance.
+  const onDocClick = (e) => {
+    if (!wrapper.contains(e.target)) sb.hide();
+  };
+  document.addEventListener("click", onDocClick);
+  // Clean up the listener if the wrapper is removed from the DOM
+  // (e.g. when OJS re-runs the cell and replaces it). MutationObserver
+  // on the parent is overkill — a WeakRef-style cleanup via a single
+  // MutationObserver at document level handles this generically.
+  const mo = new MutationObserver(() => {
+    if (!document.body.contains(wrapper)) {
+      document.removeEventListener("click", onDocClick);
+      mo.disconnect();
+    }
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+
+  return wrapper;
+}

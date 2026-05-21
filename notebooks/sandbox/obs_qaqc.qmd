@@ -34,6 +34,11 @@ Earlier Stage 1 QAQC + COG spot-checks are archived at [`archive/obs_qaqc_full.q
 
 ```{ojs}
 //| output: false
+import { chartDownloadMenu } from "/helpers/chartDownloadMenu.ojs";
+```
+
+```{ojs}
+//| output: false
 obsBase = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/";
 monthlyAdm0URL = obsBase + "processing=admin-monthly/variable=adm0_obs.parquet";
 monthlyAdm1URL = obsBase + "processing=admin-monthly/variable=adm1_obs.parquet";
@@ -322,19 +327,21 @@ recentChanges_E = {
     ],
   });
 
-  // Download button — Plot.plot returns an SVG element, so we
-  // serialize → rasterize via <img> → composite onto a canvas with
-  // a white background → PNG. Same SVG-to-PNG pattern the map uses;
-  // factored out into downloadSvgAsPng_E below.
-  const region = admin1_names.length === 1 ? admin1_names[0] : country.iso3;
-  const fname = `obs_chart_${variable_E}_${season_E}_${region}.png`.replace(/[^a-zA-Z0-9._-]+/g, "_");
-  const dlBtn = html`<button style="padding: 2px 10px; font-size: 0.85em;">Download chart (PNG)</button>`;
-  dlBtn.onclick = () => downloadSvgAsPng_E(chart, fname);
-
-  return html`<div>
-    <div style="display: flex; justify-content: flex-end; margin-bottom: 4px;">${dlBtn}</div>
-    ${chart}
-  </div>`;
+  // Hand off to the shared chartDownloadMenu helper — split-button
+  // sits below the chart with PNG (default) + SVG + CSV in the
+  // dropdown. CSV exports the dataframe currently driving the chart.
+  const regionToken = admin1_names.length === 1
+    ? admin1_names[0]
+    : admin1_names.length > 1
+      ? `${country.iso3}-multi${admin1_names.length}`
+      : country.iso3;
+  const filename = `obs_chart_${country.iso3}_${regionToken}_${variable_E}_${season_E}_${viewType_E}`
+    .split(" ").join("_");
+  return chartDownloadMenu(chart, {
+    filename,
+    data: observed_E,
+    csvColumns: ["year", "month", "value_mean", "value_plot", "z", "cls"],
+  });
 }
 
 recentChanges_caption_E = {
@@ -385,7 +392,7 @@ Reads the COG directly from S3 via geotiff.js (HTTP Range requests under the hoo
 
 **Ramp**: dynamic by default — the colour ramp rescales to the visible data range for maximum contrast in each view. Flip the "Lock map ramp to global limits" toggle to use the fixed cross-region scale (0–40 °C, 0–2500 mm, etc.) for cross-region comparison.
 
-**Download**: click the "Download map (PNG)" button to save a composite PNG of the canvas + boundary overlay (white background). The timeseries chart has its own "Download chart (PNG)" button.
+**Download**: the map has a "Download map (PNG)" button that composites the canvas + boundary overlay into a single PNG (white background). The timeseries chart uses the shared `chartDownloadMenu` helper from `/helpers/chartDownloadMenu.ojs` — primary click = PNG (2× DPR), caret dropdown = SVG (vector) or CSV (the dataframe driving the chart).
 
 ```{ojs}
 //| output: false
@@ -974,56 +981,6 @@ escapeXml_E = (str) => String(str)
   .split("<").join("&lt;")
   .split(">").join("&gt;")
   .split('"').join("&quot;");
-```
-
-```{ojs}
-//| output: false
-// SVG → PNG download helper. Serialises an SVG node, rasterises it
-// via an <img> on a Blob URL, composites onto a fresh canvas with a
-// white background (transparent PNGs are awkward to paste into docs),
-// and triggers a download. Used by both the map (composite canvas +
-// SVG already handled in the map cell — this is only called by the
-// chart) and the timeseries chart.
-downloadSvgAsPng_E = async (svgNode, filename, scale = 2) => {
-  // Embed an explicit width/height + xmlns so serialised SVG is
-  // self-contained enough for <img>.src to render.
-  const clone = svgNode.cloneNode(true);
-  const bbox = svgNode.getBoundingClientRect();
-  const w = clone.getAttribute("width")  ? parseFloat(clone.getAttribute("width"))  : bbox.width;
-  const h = clone.getAttribute("height") ? parseFloat(clone.getAttribute("height")) : bbox.height;
-  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  clone.setAttribute("width",  w);
-  clone.setAttribute("height", h);
-  const svgString = new XMLSerializer().serializeToString(clone);
-  const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-  const svgUrl = URL.createObjectURL(svgBlob);
-  try {
-    await new Promise((resolve, reject) => {
-      const im = new Image();
-      im.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width  = Math.round(w * scale);
-        canvas.height = Math.round(h * scale);
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(im, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => {
-          const a = document.createElement("a");
-          a.href = URL.createObjectURL(blob);
-          a.download = filename;
-          a.click();
-          URL.revokeObjectURL(a.href);
-          resolve();
-        }, "image/png");
-      };
-      im.onerror = reject;
-      im.src = svgUrl;
-    });
-  } finally {
-    URL.revokeObjectURL(svgUrl);
-  }
-}
 ```
 
 ```{ojs}
