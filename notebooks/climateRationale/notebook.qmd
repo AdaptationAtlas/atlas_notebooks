@@ -24,6 +24,10 @@ import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
 
 import { atlasTOC } from "/helpers/toc.ojs";
 
+import { chartDownloadMenu }                                          from "/helpers/chartDownloadMenu.ojs";
+import { mannKendall, trendOverlayMarks }                             from "/helpers/trend.ojs";
+import { observationalUncertaintyBand, observationalUncertaintyMarks } from "/helpers/observationalUncertainty.ojs";
+
 // Old hero (white-boxed title overlaid on a generic crop photo).
 // Replaced by the warming-stripes hero in the cell below. Left commented
 // pending Pete's verification — remove once the new hero is signed off.
@@ -1083,9 +1087,24 @@ renderToDiv("insightCommodity", () => createCountryInsights([exposureInsight]));
 
 # `{ojs} heading3` {#recentChanges}
 
-<p class="below-h1-methods-link"><a href="#methods-climate-data">→ Methods and data sources for this section</a></p>
+<p class="below-h1-methods-link">
+  <a href="#methods-climate-data">→ Climate data sources</a>
+  &nbsp;·&nbsp;
+  <a href="#methods-trend-estimation">→ Trend estimation</a>
+  &nbsp;·&nbsp;
+  <a href="#methods-observational-uncertainty">→ Observational uncertainty</a>
+</p>
 
 `{ojs} _lang(nbText.sections.recentChanges.introText)`
+
+```{ojs}
+md`<details class="alert alert-info help-callout" role="note">
+<summary>${_lang(nbText.sections.recentChanges.help.framingTitle)}</summary>
+
+${_lang(nbText.sections.recentChanges.help.framing)}
+
+</details>`;
+```
 
 ```{ojs}
 md`<details class="alert alert-info help-callout" role="note">
@@ -1109,8 +1128,15 @@ Inputs.bind(
 ```
 
 ```{ojs}
+// Section-local variable bind — only the 6 observational-record variables
+// are selectable here (TAVG / TMAX / TMIN / PTOT / SPEI-03 / SPEI-12).
+// The 6 heat indices in hazards_obj (NDWL0 / NDWS / NTx35 / NTx40 /
+// THI-max / HSH-max) are NOT in the CHIRPS / CHIRTS observational
+// parquet — they're projection-only. When the user picks a heat
+// index elsewhere (e.g. Future Projections), the chart below renders
+// a "not available in observational record" placeholder.
 Inputs.bind(
-  Inputs.select(hazards_obj, {
+  Inputs.select(obsHazards, {
     format: (d) => _lang(d.name),
     label: _lang(general_translations.climateVar),
   }),
@@ -1119,32 +1145,73 @@ Inputs.bind(
 ```
 
 ```{ojs}
-viewof viewRecentChanges = Inputs.select(
-  ["divergingBar", "warmingStripes", "table"],
-  {
-    label: "View Type",
-    value: "divergingBar",
-    format: (d) => _lang(general_translations.viewTypes[d]),
-  }
-);
+viewof anomaly_obs = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: false });
+```
+
+:::
+
+::: {.controls-row .cols-3}
+
+```{ojs}
+// View type is meaningful only for non-SPEI variables — SPEI queries
+// always pin to a single month per year (the season's last month;
+// see seasonLastMonth) so "monthly" vs "periods" doesn't change the
+// returned rows. Greying out the selector under SPEI makes that
+// constraint visible.
+viewof viewType_obs = {
+  const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
+  return Inputs.select(
+    ["periods", "monthly"],
+    {
+      label: isSPEI ? "View type (N/A — SPEI is annual-per-season)" : "View type",
+      value: "periods",
+      format: (d) => d === "periods" ? "Annual / season" : "Monthly",
+      disabled: isSPEI,
+    }
+  );
+}
 ```
 
 ```{ojs}
-viewof paletteRecent = paletteSelector({ value: "BuRd", label: "Palette" });
+// Plot-type selector. Available options depend on the chosen variable:
+// SPEI = bars only; PTOT and temperature = line / bars / stripes / line+stripes;
+// plus "table" as a tabular fallback (replaces the deprecated
+// viewRecentChanges = "table" branch).
+viewof plotType_obs = {
+  const id = climateVarSelect.id || "";
+  const isSPEI = id.startsWith("SPEI");
+  const options = isSPEI
+    ? ["bars", "table"]
+    : ["line", "bars", "stripes", "line+stripes", "table"];
+  const labels = {
+    "line":         "Line + bands",
+    "bars":         "Bars",
+    "stripes":      id === "PTOT" ? "Wet-dry stripes" : "Warming stripes",
+    "line+stripes": id === "PTOT" ? "Line + wet-dry stripes" : "Line + warming stripes",
+    "table":        "Table",
+  };
+  return Inputs.select(options, {
+    label: "Plot type",
+    value: isSPEI ? "bars" : "line",
+    format: (k) => labels[k],
+  });
+}
 ```
 
 ```{ojs}
-viewof showRecentAnomaly = Inputs.toggle({
-  label: "Show as anomaly (vs 1995–2014)",
-  value: true,
-});
+// Mann-Kendall + Theil-Sen trend layer (line + 95 % CI band + badge
+// + IPCC qualifier). Defaults to ON. Off here suppresses every trend
+// artefact at once.
+viewof showTrend_obs = Inputs.toggle({ label: "Show trend layer (Mann-Kendall + Theil-Sen)", value: true });
 ```
 
 ```{ojs}
-viewof highlightExtremes = Inputs.toggle({
-  label: "Highlight unusual / extreme",
-  value: false,
-});
+// Heuristic observational-uncertainty band around the data line.
+// Defaults to OFF — the "(indicative)" qualifier is important so
+// users don't read it as a statistical CI. Suppressed for SPEI
+// regardless of toggle. See helpers/observationalUncertainty.ojs
+// for the per-variable defaults and citation anchors.
+viewof showObsUncertainty_obs = Inputs.toggle({ label: "Show observational uncertainty band (indicative)", value: false });
 ```
 
 :::
@@ -1164,18 +1231,579 @@ viewof highlightExtremes = Inputs.toggle({
 ```
 
 ```{ojs}
-loaderDiv("plotRecentChanges");
+//| output: false
+// Whitelist of variable codes present in the observational parquet
+// (per the smoke-test against the refreshed parquet, 2026-05-21).
+// SPEI windows beyond 03 / 12 exist in the parquet (01, 06, 24) but
+// are not exposed in hazards_obj — limited per dispatch scope.
+obsVarCodes = ["TAVG", "TMAX", "TMIN", "PTOT", "SPEI-03", "SPEI-12"];
+
+// Filtered subset of hazards_obj. The Recent Changes variable selector
+// binds this list (instead of the full hazards_obj) so heat indices
+// don't appear as choices here.
+obsHazards = hazards_obj.filter((h) => obsVarCodes.includes(h.id));
+
+// Section-local SPEI-aware flags driving the lifted cells below.
+isSPEI_obs = (climateVarSelect.id || "").startsWith("SPEI");
+useAnomaly_obs = anomaly_obs && !isSPEI_obs;
+
+// Map season-code → last month of season. SPEI is sampled at the
+// season's last month (one value per year) so the index aligns
+// naturally with the "JJA" / "DJF" labelling.
+seasonLastMonth = ({
+  annual: 12, JFM: 3, FMA: 4, MAM: 5, AMJ: 6, MJJ: 7, JJA: 8, JAS: 9,
+  ASO: 10, SON: 11, OND: 12, NDJ: 1, DJF: 2,
+});
+
+// admin0Iso3 is an array (renderA0Multi maxSelections=2). Observational
+// query is single-country; take the first. Same fallback name lookup.
+obsAdmin0Iso3 = admin0Iso3[0] ?? null;
+obsAdmin0Name = (admin0Select[0] && admin0Select[0].translation)
+  ? _lang(admin0Select[0].translation)
+  : (obsAdmin0Iso3 ?? "");
 ```
 
 ```{ojs}
 //| output: false
+observed_obs_raw = {
+  if (obsAdmin0Iso3 == null) return [];
+  if (!obsVarCodes.includes(climateVarSelect.id)) return [];  // heat-index placeholder branch
+  const gaul = mainGaul.get(obsAdmin0Iso3);
+  if (gaul == null) return [];
+  // Single-admin1 selection → query at admin1. Empty OR 2+ → query at
+  // country (no admin1 filter). Map can still show multi-admin1
+  // visually; the chart deliberately doesn't try to average them.
+  const isAdmin1 = admin1Names.length === 1;
+  const adminName = isAdmin1 ? admin1Names[0] : null;
+  const baseURL = isAdmin1 ? monthlyAdm1URL : monthlyAdm0URL;
+  const periodsURL = isAdmin1 ? periodsAdm1URL : periodsAdm0URL;
+  const variable = climateVarSelect.id;
+  const season = seasonSelect.season;
+
+  let q;
+  if (isSPEI_obs) {
+    const mo = seasonLastMonth[season];
+    q = `
+      SELECT year, month, value_mean
+      FROM read_parquet('${baseURL}')
+      WHERE iso3 = '${obsAdmin0Iso3}'
+        AND gaul0_code = ${gaul}
+        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
+        AND variable = '${variable}'
+        AND month = ${mo}
+        AND value_mean IS NOT NULL AND isfinite(value_mean)
+      ORDER BY year
+    `;
+  } else if (viewType_obs === "monthly") {
+    q = `
+      SELECT year, month, value_mean
+      FROM read_parquet('${baseURL}')
+      WHERE iso3 = '${obsAdmin0Iso3}'
+        AND gaul0_code = ${gaul}
+        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
+        AND variable = '${variable}'
+        AND value_mean IS NOT NULL AND isfinite(value_mean)
+      ORDER BY year, month
+    `;
+  } else {
+    q = `
+      SELECT year, value_mean
+      FROM read_parquet('${periodsURL}')
+      WHERE iso3 = '${obsAdmin0Iso3}'
+        AND gaul0_code = ${gaul}
+        ${isAdmin1 ? `AND admin1_name = '${adminName.replace(/'/g, "''")}'` : ""}
+        AND variable = '${variable}'
+        AND period = '${season}'
+        AND value_mean IS NOT NULL AND isfinite(value_mean)
+      ORDER BY year
+    `;
+  }
+  const resp = await db.query(q);
+  return Array.from(resp);
+}
+
+baseline_obs = {
+  const baseline = observed_obs_raw.filter((d) => d.year >= 1991 && d.year <= 2020);
+  if (baseline.length === 0) return { mean: 0, sd: 0, n: 0 };
+  const vals = baseline.map((d) => d.value_mean);
+  const mean = d3.mean(vals);
+  const sd = d3.deviation(vals) ?? 0;
+  return { mean, sd, n: vals.length };
+}
+
+observed_obs = observed_obs_raw.map((d) => {
+  const v = useAnomaly_obs ? d.value_mean - baseline_obs.mean : d.value_mean;
+  const z = baseline_obs.sd > 0 ? (d.value_mean - baseline_obs.mean) / baseline_obs.sd : 0;
+  let cls = "normal";
+  if (isSPEI_obs) {
+    const av = Math.abs(d.value_mean);
+    if (av >= 1.5) cls = "extreme";
+    else if (av >= 1) cls = "unusual";
+  } else {
+    const az = Math.abs(z);
+    if (az >= 2) cls = "extreme";
+    else if (az >= 1) cls = "unusual";
+  }
+  const year_frac = d.month != null ? d.year + (d.month - 1) / 12 : d.year;
+  return { ...d, value_plot: v, z, cls, year_frac };
+});
+```
+
+```{ojs}
+//| output: false
+// Standalone cell — splitting from the multi-statement cell above keeps
+// Quarto's OJS preprocessor from dropping the parens around the object
+// literal (see sandbox lineage commit 46ffda9).
+extremeColour_obs = ({ normal: "#bbbbbb", unusual: "#f4a261", extreme: "#e15759" });
+```
+
+```{ojs}
+recentChanges_obs = {
+  // Heat-index placeholder. When the user has picked a hazards_obj
+  // variable that doesn't exist in the observational parquet (NTx35
+  // etc., normally selected from another section), surface a clear
+  // message + link to Future Projections rather than rendering an
+  // empty / broken chart.
+  if (!obsVarCodes.includes(climateVarSelect.id)) {
+    return html`<div style="padding: 1.2em 1em; background: #f8f8f8; border-left: 3px solid #aaa; color: #555;">
+      <strong>${_lang(climateVarSelect.name)}</strong> is derived from CMIP6 projections — it is not part of the observational record (CHIRPS v3 + CHIRTS-ERA5) used in this section.
+      <div style="margin-top: 6px; font-size: 0.9em;">
+        See <a href="#futureProjections">→ Future Projections</a> for this variable, or pick one of TAVG / TMAX / TMIN / PTOT / SPEI-03 / SPEI-12 for the observed-record trend.
+      </div>
+    </div>`;
+  }
+  if (obsAdmin0Iso3 == null) return html`<div style="padding: 1em; color: #999;">Select a country to see the observational trend.</div>`;
+  if (observed_obs.length === 0) return html`<div style="padding: 1em; color: #999;">No data for this selection.</div>`;
+
+  // Table-view branch — replaces the deprecated viewRecentChanges = "table"
+  // path. Columns mirror the lifted observed_obs schema.
+  if (plotType_obs === "table") {
+    return html`<div>
+      ${dataTable(observed_obs, {
+        format: { year: (d) => d },
+        header: {
+          year:        "Year",
+          month:       "Month",
+          value_mean:  "Value",
+          value_plot:  useAnomaly_obs ? "Anomaly" : "Value (plotted)",
+          z:           "z (σ vs 1991-2020 baseline)",
+          cls:         "Classification",
+        },
+        columns: ["year", "month", "value_mean", "value_plot", "z", "cls"],
+      })}
+      <div class="plot-footer-row">${downloadButton(observed_obs, `obs_${obsAdmin0Iso3}_${climateVarSelect.id}_${seasonSelect.season}`)}</div>
+    </div>`;
+  }
+
+  // SPEI is its own named quantity — the values plotted come straight
+  // from the parquet, we don't z-score anything ourselves. Labelling
+  // "(z-score)" implied a transform we don't perform.
+  const variable = climateVarSelect.id;
+  const season = seasonSelect.season;
+  const unit = isSPEI_obs ? ""
+    : variable === "PTOT" ? (viewType_obs === "monthly" ? "(mm / month)" : "(mm / period)")
+    : "(°C)";
+  const yLabel = isSPEI_obs
+    ? variable
+    : (useAnomaly_obs ? `${variable} anomaly ${unit}` : `${variable} ${unit}`);
+
+  const xField = viewType_obs === "monthly" || (isSPEI_obs && viewType_obs === "monthly") ? "year_frac" : "year";
+  const stripeWidth = viewType_obs === "monthly" ? 1/12 : 1;
+
+  // Diverging colour for stripes — anomaly mapped to ±2σ of baseline.
+  // RdBu (reversed) for temperature, BrBG for precipitation.
+  const stripeColour = (d) => {
+    const anom = d.value_mean - baseline_obs.mean;
+    const scale = baseline_obs.sd > 0 ? baseline_obs.sd * 2 : 1;
+    const t = Math.max(-1, Math.min(1, anom / scale));
+    if (variable === "PTOT") {
+      return d3.interpolateBrBG(0.5 + t * 0.5);
+    }
+    return d3.interpolateRdBu(0.5 - t * 0.5);
+  };
+
+  // For bars on temperature in ABSOLUTE mode, anchor bars at the
+  // baseline mean (delta-style) so 1-2°C variation isn't crushed
+  // against a 0 baseline. PTOT bars start from 0. Anomaly mode →
+  // all bars from 0.
+  const barBaseline = useAnomaly_obs ? 0
+    : variable === "PTOT" ? 0
+    : baseline_obs.mean;
+
+  const meanForBands = useAnomaly_obs ? 0 : baseline_obs.mean;
+  // Hazard-gradient background bands. Inside ±1σ stays unshaded.
+  // 1σ–2σ tinted amber (matches "unusual" colour); >2σ tinted red
+  // (matches "extreme"). Caps at max(±3σ, data extent).
+  const _bandUnusual = "rgba(244, 162, 97, 0.10)";
+  const _bandExtreme = "rgba(225,  87, 89, 0.14)";
+  let bands = [];
+  if (!isSPEI_obs && baseline_obs.sd > 0) {
+    const dataYMin = d3.min(observed_obs, (d) => d.value_plot);
+    const dataYMax = d3.max(observed_obs, (d) => d.value_plot);
+    const topCap    = Math.max(dataYMax, meanForBands + 3 * baseline_obs.sd);
+    const bottomCap = Math.min(dataYMin, meanForBands - 3 * baseline_obs.sd);
+    bands = [
+      { y1: meanForBands + 2 * baseline_obs.sd, y2: topCap, fill: _bandExtreme },
+      { y1: bottomCap, y2: meanForBands - 2 * baseline_obs.sd, fill: _bandExtreme },
+      { y1: meanForBands + baseline_obs.sd, y2: meanForBands + 2 * baseline_obs.sd, fill: _bandUnusual },
+      { y1: meanForBands - 2 * baseline_obs.sd, y2: meanForBands - baseline_obs.sd, fill: _bandUnusual },
+    ];
+  }
+
+  const speiLines = isSPEI_obs ? [
+    { y: -2,   stroke: "#e15759" },
+    { y: -1.5, stroke: "#e15759" },
+    { y: -1,   stroke: "#f4a261" },
+    { y:  0,   stroke: "#999"    },
+    { y:  1,   stroke: "#76b7b2" },
+    { y:  1.5, stroke: "#76b7b2" },
+    { y:  2,   stroke: "#76b7b2" },
+  ] : [];
+
+  // Mark builders.
+  const stripesMark = (yMin, yMax) => Plot.rect(observed_obs, {
+    x1: (d) => d[xField] - stripeWidth/2,
+    x2: (d) => d[xField] + stripeWidth/2,
+    y1: yMin, y2: yMax,
+    fill: stripeColour,
+    stroke: null,
+    channels: { year: "year", value: "value_mean" },
+    tip: true,
+  });
+  const barMark = Plot.rect(observed_obs, {
+    x1: (d) => d[xField] - stripeWidth * 0.4,
+    x2: (d) => d[xField] + stripeWidth * 0.4,
+    y1: barBaseline,
+    y2: "value_plot",
+    fill: (d) => extremeColour_obs[d.cls],
+    stroke: (d) => extremeColour_obs[d.cls],
+    channels: { year: "year", value: "value_mean", anomaly: "value_plot", classification: "cls" },
+    tip: true,
+  });
+  const lineMarks = [
+    Plot.line(observed_obs, { x: xField, y: "value_plot", stroke: "#333", strokeWidth: 1 }),
+    Plot.dot(observed_obs, {
+      x: xField, y: "value_plot", r: 2.5,
+      fill: (d) => extremeColour_obs[d.cls],
+      stroke: (d) => extremeColour_obs[d.cls],
+      channels: { year: "year", value: "value_mean", anomaly: "value_plot", z: "z", classification: "cls" },
+      tip: true,
+    }),
+  ];
+
+  // Split into bgMarks + dataLayerMarks so the trend CI band + obs
+  // uncertainty band can interleave between them (see z-order below).
+  let bgMarks = [];
+  let dataLayerMarks = [];
+  if (isSPEI_obs) {
+    bgMarks = speiLines.map((l) => Plot.ruleY([l.y], { stroke: l.stroke, strokeDasharray: "2,3" }));
+    dataLayerMarks = [
+      Plot.barY(observed_obs, {
+        x: xField, y: "value_plot",
+        fill: (d) => extremeColour_obs[d.cls],
+        stroke: (d) => extremeColour_obs[d.cls],
+        channels: { year: "year", value: "value_mean", classification: "cls" },
+        tip: true,
+      }),
+    ];
+  } else if (plotType_obs === "bars") {
+    bgMarks = [
+      ...bands.map((b) =>
+        Plot.rect([b], {
+          x1: d3.min(observed_obs, (d) => d[xField]),
+          x2: d3.max(observed_obs, (d) => d[xField]),
+          y1: "y1", y2: "y2", fill: "fill",
+        })
+      ),
+      Plot.ruleY([barBaseline], { stroke: "#4682b4", strokeDasharray: "3,2" }),
+    ];
+    dataLayerMarks = [barMark];
+  } else if (plotType_obs === "stripes") {
+    const yMin = d3.min(observed_obs, (d) => d.value_plot);
+    const yMax = d3.max(observed_obs, (d) => d.value_plot);
+    bgMarks = [];
+    dataLayerMarks = [stripesMark(yMin, yMax)];
+  } else if (plotType_obs === "line+stripes") {
+    const yMin = d3.min(observed_obs, (d) => d.value_plot);
+    const yMax = d3.max(observed_obs, (d) => d.value_plot);
+    bgMarks = [
+      stripesMark(yMin, yMax),
+      Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" }),
+    ];
+    dataLayerMarks = lineMarks;
+  } else {
+    bgMarks = [
+      ...bands.map((b) =>
+        Plot.rect([b], {
+          x1: d3.min(observed_obs, (d) => d[xField]),
+          x2: d3.max(observed_obs, (d) => d[xField]),
+          y1: "y1", y2: "y2", fill: "fill",
+        })
+      ),
+      Plot.ruleY([meanForBands], { stroke: "#4682b4", strokeDasharray: "3,2" }),
+    ];
+    dataLayerMarks = lineMarks;
+  }
+
+  // Trend layer (Mann-Kendall + Theil-Sen). Skipped when off or for SPEI.
+  const trendStats = (!showTrend_obs || isSPEI_obs)
+    ? null
+    : mannKendall(observed_obs.map((d) => d.value_plot), {
+        xValues: observed_obs.map((d) => Number(d.year)),
+      });
+
+  const trendStroke = variable === "PTOT" ? "#1f5fa0" : "#b21010";
+  const trendMarks = (showTrend_obs && !isSPEI_obs && trendStats && !trendStats.error &&
+                      (plotType_obs === "line" || plotType_obs === "line+stripes" || plotType_obs === "bars"))
+    ? trendOverlayMarks(observed_obs, {
+        xField: "year",
+        yField: "value_plot",
+        showCI: true,
+        ciOpacity: 0.15,
+        trendStroke,
+        trendStrokeWidth: 1.5,
+        trendStrokeDasharray: "4 3",
+      })
+    : [];
+
+  // Observational-uncertainty band (heuristic; not a statistical CI).
+  // Suppressed for SPEI and for stripes-only (no data line to wrap).
+  const obsBandMarks = (showObsUncertainty_obs && !isSPEI_obs && plotType_obs !== "stripes")
+    ? observationalUncertaintyMarks(observed_obs, {
+        xField: "year",
+        yField: "value_plot",
+        variable,
+        fill: "#666",
+        fillOpacity: 0.10,
+      })
+    : [];
+
+  // Split trendMarks into [CI band, trend line] for explicit z-order
+  // interleaving — CI band under data line, trend line on top.
+  const trendCIMarks   = trendMarks.length === 2 ? [trendMarks[0]] : [];
+  const trendLineMarks = trendMarks.length === 2 ? [trendMarks[1]] : trendMarks;
+
+  const chart = Plot.plot({
+    width: 1200,
+    height: 380,
+    marginLeft: 70,
+    marginBottom: 50,
+    marginTop: 30,
+    style: { color: "#333", background: "#fff" },
+    x: { label: "Year", tickFormat: (d) => `${Math.floor(d)}` },
+    y: { label: yLabel, grid: true, nice: true },
+    // Z-order bottom → top: bg bands + baseline rule, obs uncertainty
+    // band, trend CI band, data layer, trend line.
+    marks: [...bgMarks, ...obsBandMarks, ...trendCIMarks, ...dataLayerMarks, ...trendLineMarks],
+  });
+
+  // Trend badge above the chart + IPCC-style confidence qualifier
+  // below. SPEI gets a distinct treatment (slope-per-decade
+  // suppressed because z-score-per-decade is meaningless).
+  const trendDisplayUnit = variable === "PTOT"
+    ? (viewType_obs === "monthly" ? "mm/month" : "mm")
+    : "°C";
+  const fmtSlope = (v) => {
+    if (!isFinite(v) || v === 0) return Number(v).toFixed(2);
+    const digits = Math.ceil(Math.log10(Math.abs(v)));
+    const decimals = Math.max(0, 2 - digits);
+    return v.toFixed(decimals);
+  };
+  const fmtP = (p) => p < 0.001 ? "< 0.001" : p < 0.01 ? "< 0.01" : `= ${p.toFixed(2)}`;
+  const sourceProduct = variable === "PTOT" ? "CHIRPS v3" : "CHIRTS-ERA5";
+  const yearSpan = (trendStats && !trendStats.error)
+    ? `${trendStats.xStart}–${trendStats.xEnd}`
+    : `${d3.min(observed_obs, d => d.year)}–${d3.max(observed_obs, d => d.year)}`;
+  const chartRegionLabel =
+    admin1Names.length === 0 ? obsAdmin0Name :
+    admin1Names.length === 1 ? `${admin1Names[0]}, ${obsAdmin0Name}` :
+    `${obsAdmin0Name} (${admin1Names.length} admin1s)`;
+
+  let trendBadge, ipccQualifier;
+  if (!showTrend_obs) {
+    trendBadge = "";
+    ipccQualifier = "";
+  } else if (isSPEI_obs) {
+    const speiStats = mannKendall(observed_obs.map((d) => d.value_plot), {
+      xValues: observed_obs.map((d) => Number(d.year)),
+    });
+    if (speiStats && !speiStats.error) {
+      trendBadge = html`<div style="font-size: 0.9em; padding: 6px 10px; background: #f6f6f6; border-left: 3px solid #888; margin-bottom: 6px;">
+        <strong>${variable} trend:</strong> Mann-Kendall p ${fmtP(speiStats.pValue)} · n = ${speiStats.n} years (${yearSpan})${speiStats.usedTFPW ? " · TFPW applied" : ""}.
+        <em>For SPEI trend interpretation see the dry-month-frequency view (forthcoming Phase 2).</em>
+      </div>`;
+    } else {
+      trendBadge = html`<div style="font-size: 0.9em; color: #999; margin-bottom: 6px;">Insufficient data for trend test (need ≥ 20 years).</div>`;
+    }
+    ipccQualifier = "";
+  } else if (!trendStats || trendStats.error) {
+    trendBadge = html`<div style="font-size: 0.9em; color: #999; margin-bottom: 6px;">Insufficient data for trend test (${trendStats?.error ?? "no data"}).</div>`;
+    ipccQualifier = "";
+  } else if (trendStats.significant5pct) {
+    trendBadge = html`<div style="font-size: 0.95em; padding: 8px 12px; background: #f6f6f6; border-left: 3px solid ${trendStroke}; margin-bottom: 6px;">
+      <div>
+        <strong>Trend:</strong> ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade
+        · <em>statistical</em> 95 % CI ${fmtSlope(trendStats.slopeLower95 * 10)} to ${fmtSlope(trendStats.slopeUpper95 * 10)}
+        · MK p ${fmtP(trendStats.pValue)}
+        · n = ${trendStats.n} years (${yearSpan})${trendStats.usedTFPW ? " · TFPW applied" : ""}
+      </div>
+      <div style="font-size: 0.85em; color: #777; margin-top: 4px; font-style: italic;">
+        CI reflects sampling uncertainty in the slope given the observed values; it does not include observational uncertainty in the underlying ${sourceProduct} estimates.
+      </div>
+    </div>`;
+    ipccQualifier = html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
+      <em>High confidence</em> that ${variable} has ${trendStats.slope > 0 ? "increased" : "decreased"} over ${chartRegionLabel} during ${yearSpan} (Theil-Sen ${trendStats.slopePerDecade >= 0 ? "+" : ""}${fmtSlope(trendStats.slopePerDecade)} ${trendDisplayUnit}/decade, MK p ${fmtP(trendStats.pValue)}).
+    </div>`;
+  } else {
+    trendBadge = html`<div style="font-size: 0.95em; padding: 8px 12px; background: #fafafa; border-left: 3px solid #999; margin-bottom: 6px;">
+      <strong>Trend:</strong> no significant change at 5 % (MK p ${fmtP(trendStats.pValue)} · n = ${trendStats.n} years, ${yearSpan})${trendStats.usedTFPW ? " · TFPW applied" : ""}.
+      At this scale, observed inter-annual variability dominates the record; a forced trend cannot yet be resolved.
+    </div>`;
+    ipccQualifier = html`<div style="font-size: 0.9em; color: #444; padding: 6px 10px; border-top: 1px solid #eee; margin-top: 6px;">
+      <em>Insufficient evidence</em> to detect a trend in ${variable} over ${chartRegionLabel} during ${yearSpan} at the 5 % level (MK p ${fmtP(trendStats.pValue)}).
+    </div>`;
+  }
+
+  // chartDownloadMenu handles PNG / SVG / CSV exports.
+  const regionToken = admin1Names.length === 1
+    ? admin1Names[0]
+    : admin1Names.length > 1
+      ? `${obsAdmin0Iso3}-multi${admin1Names.length}`
+      : obsAdmin0Iso3;
+  const filename = `obs_chart_${obsAdmin0Iso3}_${regionToken}_${variable}_${season}_${viewType_obs}`
+    .split(" ").join("_");
+  const chartWithDownload = chartDownloadMenu(chart, {
+    filename,
+    data: observed_obs,
+    csvColumns: ["year", "month", "value_mean", "value_plot", "z", "cls"],
+  });
+
+  // Adaptive legend.
+  const legendItems = [];
+  const isStripesOnly = plotType_obs === "stripes";
+  const showsBars       = isSPEI_obs || plotType_obs === "bars";
+  const showsLineDots   = !isSPEI_obs && (plotType_obs === "line" || plotType_obs === "line+stripes");
+  const showsStripes    = !isSPEI_obs && (plotType_obs === "stripes" || plotType_obs === "line+stripes");
+  const showsBands      = !isSPEI_obs && (plotType_obs === "line" || plotType_obs === "bars") && baseline_obs.sd > 0;
+  const showsBaselineRule = !isSPEI_obs && !isStripesOnly;
+  const showsTrendOverlay = showTrend_obs && !isSPEI_obs && trendStats && !trendStats.error &&
+                            (plotType_obs === "line" || plotType_obs === "line+stripes" || plotType_obs === "bars");
+
+  const classKind = showsLineDots ? "dot" : "fill";
+  if (showsBars || showsLineDots) {
+    if (isSPEI_obs) {
+      legendItems.push({ kind: classKind, color: extremeColour_obs.normal,  label: "normal (|SPEI| < 1)" });
+      legendItems.push({ kind: classKind, color: extremeColour_obs.unusual, label: "unusual (1 ≤ |SPEI| < 1.5)" });
+      legendItems.push({ kind: classKind, color: extremeColour_obs.extreme, label: "extreme (|SPEI| ≥ 1.5)" });
+    } else {
+      legendItems.push({ kind: classKind, color: extremeColour_obs.normal,  label: "normal (|departure| < 1σ)" });
+      legendItems.push({ kind: classKind, color: extremeColour_obs.unusual, label: "unusual (1σ ≤ |departure| < 2σ)" });
+      legendItems.push({ kind: classKind, color: extremeColour_obs.extreme, label: "extreme (|departure| ≥ 2σ)" });
+    }
+  }
+  if (showsBands) {
+    legendItems.push({ kind: "band", color: _bandUnusual, label: "unusual zone shading (1σ–2σ)" });
+    legendItems.push({ kind: "band", color: _bandExtreme, label: "extreme zone shading (>2σ)" });
+  }
+  if (showsBaselineRule) {
+    legendItems.push({ kind: "rule", color: "#4682b4", dasharray: "3 2", label: "1991-2020 baseline mean" });
+  }
+  if (isSPEI_obs) {
+    legendItems.push({ kind: "rule", color: "#e15759", dasharray: "2 3", label: "WMO SPEI thresholds (±1, ±1.5, ±2)" });
+  }
+  if (showsStripes) {
+    const colors = variable === "PTOT"
+      ? ["#8c510a", "#f5f5f5", "#01665e"]
+      : ["#2166ac", "#f5f5f5", "#b2182b"];
+    legendItems.push({
+      kind: "gradient",
+      colors,
+      label: variable === "PTOT" ? "dry ← anomaly vs baseline → wet" : "cool ← anomaly vs baseline → warm",
+    });
+  }
+  if (showsTrendOverlay) {
+    legendItems.push({ kind: "rule", color: trendStroke, dasharray: "4 3", label: "Theil-Sen trend line" });
+    legendItems.push({ kind: "band", color: trendStroke, opacity: 0.15, label: "95 % CI (slope envelope, statistical)" });
+  }
+  const showsObsBand = showObsUncertainty_obs && !isSPEI_obs && plotType_obs !== "stripes" && obsBandMarks.length > 0;
+  if (showsObsBand) {
+    legendItems.push({ kind: "band", color: "#666", opacity: 0.10, label: "observational uncertainty band (indicative — see methods)" });
+  }
+
+  const swatchOf = (item) => {
+    if (item.kind === "fill") {
+      return html`<span style="display:inline-block; width:14px; height:14px; background:${item.color}; border:1px solid #999; border-radius:2px;"></span>`;
+    }
+    if (item.kind === "dot") {
+      return html`<svg width="14" height="14" style="display:inline-block; vertical-align:middle;">
+        <circle cx="7" cy="7" r="4.5" fill="${item.color}" stroke="#666" stroke-width="0.8"/>
+      </svg>`;
+    }
+    if (item.kind === "rule") {
+      return html`<svg width="22" height="6" style="display:inline-block; vertical-align:middle;">
+        <line x1="1" y1="3" x2="21" y2="3" stroke="${item.color}" stroke-width="2" stroke-dasharray="${item.dasharray || ""}"/>
+      </svg>`;
+    }
+    if (item.kind === "band") {
+      return html`<span style="display:inline-block; width:22px; height:10px; background:${item.color}; opacity:${item.opacity == null ? 1 : item.opacity}; border:1px solid #ddd;"></span>`;
+    }
+    if (item.kind === "gradient") {
+      return html`<span style="display:inline-block; width:54px; height:12px; background:linear-gradient(to right, ${item.colors.join(", ")}); border:1px solid #999;"></span>`;
+    }
+    return "";
+  };
+
+  const legend = legendItems.length === 0 ? "" : html`<div style="display:flex; flex-wrap:wrap; gap:10px 18px; font-size:0.82em; line-height:1.3; color:#444; padding:8px 12px; border-top:1px solid #eee; margin-top:6px;">
+    ${legendItems.map((item) => html`<span style="display:inline-flex; align-items:flex-start; gap:6px; max-width:260px;">
+      <span style="flex-shrink:0; display:inline-flex; align-items:center; height:1.3em;">${swatchOf(item)}</span>
+      <span style="white-space:normal; word-break:normal; overflow-wrap:break-word;">${item.label}</span>
+    </span>`)}
+  </div>`;
+
+  return html`<div>${trendBadge}${chartWithDownload}${legend}${ipccQualifier}</div>`;
+}
+
+recentChanges_obs_caption = {
+  if (obsAdmin0Iso3 == null) return md``;
+  if (!obsVarCodes.includes(climateVarSelect.id)) return md``;
+  const variable = climateVarSelect.id;
+  const season = seasonSelect.season;
+  const speiMonth = isSPEI_obs ? seasonLastMonth[season] : null;
+  const region = admin1Names.length === 1
+    ? `${admin1Names[0]}, ${obsAdmin0Name}`
+    : admin1Names.length > 1
+      ? `${obsAdmin0Name} (national — ${admin1Names.length} admin1 regions selected)`
+      : `${obsAdmin0Name} (national)`;
+  const baselineCopy = baseline_obs.n > 0
+    ? `Baseline (1991-2020): μ = ${baseline_obs.mean.toFixed(2)}, σ = ${baseline_obs.sd.toFixed(2)}, n = ${baseline_obs.n} years.`
+    : `Baseline (1991-2020): insufficient data.`;
+  const speiCopy = isSPEI_obs
+    ? `SPEI is the ${variable.replace("SPEI-","").replace(/^0+/, "")}-month accumulation ending in month ${speiMonth}. Reference lines: ±1 moderate, ±1.5 severe, ±2 extreme (WMO).`
+    : "";
+  const multiCountryNote = admin0Iso3.length > 1
+    ? ` *Note: ${admin0Iso3.length} countries selected; the observational view shows only the first (${obsAdmin0Name}).*`
+    : "";
+  return md`
+*Region: **${region}** · Variable: **${variable}** · Season: **${season}** · View: **${viewType_obs}** · Plot: **${plotType_obs}**${useAnomaly_obs ? " · **anomaly mode**" : ""}${showTrend_obs ? " · **trend layer on**" : ""}${showObsUncertainty_obs && !isSPEI_obs ? " · **obs uncertainty band on**" : ""}*
+
+${baselineCopy} ${speiCopy}${multiCountryNote}
+  `;
+}
+```
+
+::: {#recent-changes-plot}
+:::
+
+```{ojs}
+//| output: false
 {
-  // Re-show loader only on data-changing inputs. Presentation toggles
-  // (view type, palette, anomaly, highlight) re-render synchronously from
-  // already-fetched data — they must NOT trip the loader, or they race
-  // with the render cell and the spinner clobbers the rendered viz.
-  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect];
-  const div = document.getElementById("plotRecentChanges");
+  // Re-show loader only on data-changing inputs. Plot-side toggles
+  // (showTrend_obs, showObsUncertainty_obs) re-render synchronously
+  // from already-fetched data — they must NOT trip the loader, or
+  // they race with the render cell and the spinner clobbers the
+  // rendered viz (see feedback_loader-render-race memory).
+  [admin0Iso3, admin1Names, climateVarSelect, seasonSelect, viewType_obs, plotType_obs, anomaly_obs];
+  const div = document.getElementById("recent-changes-plot");
   if (div) div.replaceChildren(loaderContent());
 }
 ```
@@ -1183,42 +1811,25 @@ loaderDiv("plotRecentChanges");
 ```{ojs}
 //| output: false
 {
-  renderToDiv("plotRecentChanges", () => {
-    if (viewRecentChanges === "divergingBar") return barplot_recentChanges();
-    if (viewRecentChanges === "warmingStripes") {
-      return warmingStripes_recentChanges();
-    }
-    return html`<div>
-      ${dataTable(recentChanges_plotData, {
-        format: { year: (d) => d },
-        header: {
-          iso3: "ISO3",
-          admin0_name: "Country",
-          admin1_name: "Admin 1",
-          season: "Season",
-          year: "Year",
-          hazard: "Hazard",
-          mean: "Mean",
-          mean_anomaly: "Mean Anomaly",
-        },
-        columns: [
-          "iso3",
-          "admin0_name",
-          "admin1_name",
-          "season",
-          "year",
-          "hazard",
-          "mean",
-          "mean_anomaly",
-        ],
-      })}
-      <div class="plot-footer-row">${downloadButton(recentChanges_plotData, "recentChanges")}</div>
-    </div>`;
-  });
+  const div = document.getElementById("recent-changes-plot");
+  if (div) div.replaceChildren(recentChanges_obs);
 }
 ```
 
+```{ojs}
+recentChanges_obs_caption
+```
+
 ### `{ojs} _lang(nbText.general.quickInsight)`
+
+<!-- TODO (follow-up dispatch): seasonInsight() / climateInsight() still
+read from the NEX-GDDP-CMIP6 historical hindcast (1995-2014 baseline)
+via recentChanges_plotData. The lifted Recent Changes chart above is
+now driven by the observational record (CHIRPS v3 + CHIRTS-ERA5,
+1991-2020 baseline), so the two summaries describe slightly different
+quantities. Re-point the insight helpers to observed_obs in a separate
+dispatch — out of scope here per dispatches/2026-05-21_sandbox-
+integration-recent-changes.md §1.6. -->
 
 ```{ojs}
 html`<div id="insightRecentSeason"></div>`;
@@ -1238,11 +1849,33 @@ html`<div id="insightRecentClimate"></div>`;
 renderToDiv("insightRecentClimate", () => createCountryInsights([climateInsight]));
 ```
 
+# `{ojs} _lang(nbText.sections.whyTwoDatasets.heading)` {#whyTwoDatasets}
+
+`{ojs} _lang(nbText.sections.whyTwoDatasets.introText)`
+
+```{ojs}
+md`<details class="alert alert-info help-callout" role="note">
+<summary>${_lang(nbText.sections.whyTwoDatasets.help.title)}</summary>
+
+${_lang(nbText.sections.whyTwoDatasets.help.body)}
+
+</details>`;
+```
+
 # `{ojs} heading4` {#futureProjections}
 
 <p class="below-h1-methods-link"><a href="#methods-climate-data">→ Methods and data sources for this section</a></p>
 
 `{ojs} _lang(nbText.sections.futureProjections.introText)`
+
+```{ojs}
+md`<details class="alert alert-info help-callout" role="note">
+<summary>${_lang(nbText.sections.futureProjections.help.framingTitle)}</summary>
+
+${_lang(nbText.sections.futureProjections.help.framing)}
+
+</details>`;
+```
 
 ```{ojs}
 md`<details class="alert alert-info help-callout" role="note">
@@ -1635,6 +2268,18 @@ md`${_lang(nbText.general.methods.intro)}`;
 
 ```{ojs}
 md`${_lang(nbText.general.methods.climateData.text)}`;
+```
+
+## `{ojs} methodsTrendTitle` {#methods-trend-estimation}
+
+```{ojs}
+md`${_lang(nbText.general.methods.trendEstimation.text)}`;
+```
+
+## `{ojs} methodsObsUncTitle` {#methods-observational-uncertainty}
+
+```{ojs}
+md`${_lang(nbText.general.methods.observationalUncertainty.text)}`;
 ```
 
 ## `{ojs} methodsExtremeTitle` {#methods-extreme-events}
@@ -2066,6 +2711,8 @@ heading6 = _lang(nbText.sections.hazardExposure.title);
 summary = _lang(general_translations.summary);
 methodsHeading = _lang(nbText.general.methods.title);
 methodsClimateTitle = _lang(nbText.general.methods.climateData.title);
+methodsTrendTitle = _lang(nbText.general.methods.trendEstimation.title);
+methodsObsUncTitle = _lang(nbText.general.methods.observationalUncertainty.title);
 methodsExtremeTitle = _lang(nbText.general.methods.extremeEvents.title);
 methodsHazardTitle = _lang(nbText.general.methods.hazardExposure.title);
 methodsSocioTitle = _lang(nbText.general.methods.socioeconomic.title);
@@ -2192,6 +2839,46 @@ NavbarAckLogos()
 data_obj = {
   const obj = await FileAttachment("/data/climateRationale/nbData.json").json();
   return obj.data
+}
+
+// Observational parquet URLs for the Recent Changes (observational) view.
+// Mirrors the s3_path pattern of `data: [...]` but lives as a top-level
+// `observationalSources` block in nbData.json so the dataset-descriptor
+// loop (buildDatasetDescriptor → datasets.data) ignores it. Consumed by
+// the lifted sandbox cells in the Recent Changes section, which use
+// read_parquet(URL) directly rather than going through `db`.
+observationalSources = {
+  const obj = await FileAttachment("/data/climateRationale/nbData.json").json();
+  return obj.observationalSources;
+}
+monthlyAdm0URL = observationalSources.base + observationalSources.monthlyAdm0;
+monthlyAdm1URL = observationalSources.base + observationalSources.monthlyAdm1;
+periodsAdm0URL = observationalSources.base + observationalSources.periodsAdm0;
+periodsAdm1URL = observationalSources.base + observationalSources.periodsAdm1;
+
+// Per-iso3 main-polygon-by-admin1-count lookup that drops disputed-
+// territory polygons. Disputed-territory polygons each carry exactly 1
+// admin1 (Bīr Ṭawīl / Hala'ib / Ilemi / Abyei), so picking the
+// gaul0_code with the largest admin1 count reliably resolves to the
+// main country polygon. Consumed by the lifted observational data
+// fetch in the Recent Changes section.
+mainGaul = {
+  const resp = await db.query(`
+    WITH per_polygon AS (
+      SELECT iso3, gaul0_code, COUNT(DISTINCT admin1_name) AS n_admin1
+      FROM read_parquet('${monthlyAdm1URL}')
+      GROUP BY iso3, gaul0_code
+    ),
+    ranked AS (
+      SELECT iso3, gaul0_code,
+             ROW_NUMBER() OVER (PARTITION BY iso3 ORDER BY n_admin1 DESC) AS rn
+      FROM per_polygon
+    )
+    SELECT iso3, gaul0_code FROM ranked WHERE rn = 1
+  `);
+  const map = new Map();
+  for (const row of resp) map.set(row.iso3, row.gaul0_code);
+  return map;
 }
 
 db ={
@@ -2780,15 +3467,18 @@ hazards_obj = {
   const input = general_translations.hazardVariables;
 
   const hazard_lookup = new Object({
-    "ndwl0": "NDWL0",
-    "ndws": "NDWS",
-    "ntx35": "NTx35",
-    "ntx40": "NTx40",
-    "ptot": "PTOT",
-    "tavg": "TAVG",
-    "thi": "THI-max",
-    "tmax": "TMAX",
-    "hsh": "HSH-max"
+    "ndwl0":   "NDWL0",
+    "ndws":    "NDWS",
+    "ntx35":   "NTx35",
+    "ntx40":   "NTx40",
+    "ptot":    "PTOT",
+    "tavg":    "TAVG",
+    "thi":     "THI-max",
+    "tmax":    "TMAX",
+    "tmin":    "TMIN",
+    "hsh":     "HSH-max",
+    "spei-03": "SPEI-03",
+    "spei-12": "SPEI-12"
   })
   return Object.entries(input).map(([id, data]) => ({
     id: hazard_lookup[id],
@@ -4608,433 +5298,6 @@ treemap_productionTrends = () => {
   });
 
   return wrap;
-};
-```
-
-### Recent changes
-
-```{ojs}
-barplot_recentChanges = () => {
-  const _data = filterAdminToggle(recentChanges_plotData);
-  if (_data.length === 0) return noDataPlaceholder();
-
-  const _season = seasonSelect.season_string;
-  const _variableName = _lang(climateVarSelect.name);
-  const _variableAxis = _lang(climateVarSelect.labelAxis);
-  const _showAnomaly = showRecentAnomaly;
-  const _anomalyText = _showAnomaly
-    ? ` (${_lang(general_translations.anomaly)})`
-    : "";
-  const _mainTitle = `${_variableName}${_anomalyText} — Season: ${_season}`;
-  const plotValue = _showAnomaly ? "mean_anomaly" : "mean";
-  const _reverse = ["PTOT"].includes(climateVarSelect.id);
-
-  // Y-domain + color domain differ between framings:
-  //   anomaly → symmetric around zero, expanded to fit ±2σ threshold lines
-  //   absolute → actual data range, with a small buffer
-  const dataMin = d3.min(_data, (d) => d[plotValue]) ?? 0;
-  const dataMax = d3.max(_data, (d) => d[plotValue]) ?? 0;
-  let yDomain, colorDomain, colorType;
-  if (_showAnomaly) {
-    const absDataMax = Math.max(Math.abs(dataMin), Math.abs(dataMax));
-    const maxStd2 = 2 * (d3.max([...baselineStdByAdmin.values()]) ?? 0);
-    const absMax = Math.max(absDataMax, maxStd2) * 1.05;
-    yDomain = [-absMax, absMax];
-    colorDomain = [-absMax, absMax];
-    colorType = "diverging";
-  } else {
-    const span = dataMax - dataMin;
-    const buf = span * 0.05;
-    yDomain = [dataMin - buf, dataMax + buf];
-    colorDomain = [dataMin, dataMax];
-    colorType = "linear";
-  }
-
-  const { chunks, cols } = adminGridSplit(_data, facetCols);
-
-  // Explicit year ticks at multiples of 5 (or 10 on narrow 4-col grids)
-  // so band-scale labels don't overlap when the data spans many years.
-  // Plot's `ticks: N` hint is unreliable on band scales — it can fall
-  // back to labelling every band, which creates the smushed-text issue.
-  const _allYears = [...new Set(_data.map((d) => d.year))].sort((a, b) => a - b);
-  const _yearStep = cols >= 4 ? 10 : 5;
-  const _yearTicks = _allYears.filter((y) => y % _yearStep === 0);
-
-  const _tails = climateVarSelect.tails ?? "both";
-  const renderRow = (rowAdmins, rowIdx, isFirst, isLast) => {
-    const padded = padFxDomain(rowAdmins, cols, rowIdx);
-    const rowData = _data.filter((d) => rowAdmins.includes(d.adminName));
-    // Threshold lines (±σ, ±2σ) are only meaningful in anomaly mode — in
-    // absolute mode the baseline-mean dashed line takes their place.
-    const rowThresholds = _showAnomaly
-      ? buildThresholdRows(rowAdmins, _tails)
-      : [];
-    const lastAdmin = rowAdmins[rowAdmins.length - 1];
-    const thresholdLabels = rowThresholds.filter(
-      (t) => t.adminName === lastAdmin,
-    );
-    // In absolute mode, draw a dashed 1995–2014 ensemble-mean per admin
-    // (same baselineMeanByAdmin used by Future Projections). In anomaly
-    // mode the baseline is implicitly the zero line drawn below.
-    const baselineRows = !_showAnomaly
-      ? rowAdmins
-          .map((a) => ({ adminName: a, y: baselineMeanByAdmin.get(a) }))
-          .filter((d) => d.y != null)
-      : [];
-    return Plot.plot({
-      width,
-      height: 380,
-      marginLeft: 70,
-      marginRight: 95,
-      marginTop: isFirst ? 80 : 40,
-      marginBottom: isLast ? 60 : 22,
-      title: isFirst ? _mainTitle : undefined,
-      x: {
-        label: isLast ? "Year" : null,
-        tickFormat: (d) => `${d}`,
-        ticks: _yearTicks,
-      },
-      y: {
-        domain: yDomain,
-        grid: true,
-        label: `${_variableAxis}${_anomalyText}`,
-        tickFormat: yTickWithUnit,
-      },
-      fx: {
-        domain: padded,
-        label: null,
-        tickFormat: gridFxTickFormat,
-      },
-      facet: { data: rowData, x: "adminName", label: null },
-      color: {
-        scheme: paletteRecent,
-        type: colorType,
-        reverse: _reverse,
-        domain: colorDomain,
-        legend: isFirst,
-        label: `${_variableAxis}${_anomalyText}`,
-      },
-      marks: [
-        Plot.barY(rowData, {
-          x: "year",
-          y1: _showAnomaly ? 0 : yDomain[0],
-          y2: plotValue,
-          fill: plotValue,
-          channels: { Admin: "adminName" },
-          ...(highlightExtremes && _showAnomaly
-            ? {
-                stroke: (d) => {
-                  const sd = baselineStdByAdmin.get(d.adminName);
-                  if (!sd) return "transparent";
-                  const abs = Math.abs(d[plotValue] / sd);
-                  if (abs >= 2) return "#c00";
-                  if (abs >= 1) return "#444";
-                  return "transparent";
-                },
-                strokeWidth: 1.5,
-              }
-            : {}),
-          tip: {
-            format: {
-              y: false,
-              fy: false,
-              fx: false,
-              Admin: true,
-              x: (d) => d,
-              color: true,
-            },
-          },
-        }),
-        Plot.ruleY(_showAnomaly ? [0] : [], { stroke: "black", strokeWidth: 1.5 }),
-        Plot.ruleY(baselineRows, {
-          fx: "adminName",
-          y: "y",
-          stroke: "#444",
-          strokeDasharray: [5, 5],
-          strokeWidth: 0.9,
-        }),
-        Plot.ruleY(highlightExtremes ? rowThresholds : [], {
-          fx: "adminName",
-          y: "y",
-          stroke: (d) => (d.level === "extreme" ? "#c00" : "#888"),
-          strokeDasharray: [3, 3],
-          strokeWidth: 0.8,
-        }),
-        Plot.text(highlightExtremes ? thresholdLabels : [], {
-          fx: "adminName",
-          y: "y",
-          frameAnchor: "right",
-          text: (d) => (d.level === "extreme" ? "Extreme" : "Unusual"),
-          textAnchor: "start",
-          fontSize: 9,
-          fontWeight: 600,
-          fill: (d) => (d.level === "extreme" ? "#c00" : "#666"),
-          dx: 6,
-          dy: -3,
-        }),
-      ],
-    });
-  };
-
-  const captionLines = [
-    "Historical annual values for 1995–2014 (20 years), by admin1 region.",
-  ];
-  if (_showAnomaly) {
-    captionLines.push(
-      "Bars show the **anomaly** from the 1995–2014 baseline mean (the black zero line). Bars above zero indicate years warmer / wetter than the historical mean; bars below zero indicate the opposite. Toggle off *Show as anomaly* in the controls above to switch to absolute values.",
-    );
-    captionLines.push(
-      html`Enable <em>Highlight unusual / extreme</em> to overlay dashed |z|=1 (grey) and |z|=2 (red) thresholds. See the <a href="#extremeEvents">Extreme Events</a> section for full definitions.`,
-    );
-  } else {
-    captionLines.push(
-      "Bars show **absolute values** for the selected variable. The dashed grey horizontal line marks the **1995–2014 ensemble-mean baseline** for the same admin1, season, and variable — a visual anchor for inter-annual variability around the historical mean. Toggle on *Show as anomaly* in the controls above to re-express every year as a departure from this baseline (and surface the ±σ / ±2σ z-score threshold overlays).",
-    );
-  }
-  captionLines.push(
-    html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a> historical scenario (ensemble mean across 18 GCMs, r1i1p1f1, 1995–2014); processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
-  );
-  const caption = multiLineText(captionLines, "atlasFigCaption");
-
-  return html`<div>
-    ${chunks.map((r, idx) =>
-      renderRow(r, idx, idx === 0, idx === chunks.length - 1),
-    )}
-    ${captionDetails(caption, undefined, downloadButton(recentChanges_plotData, "recentChanges"))}
-  </div>`;
-};
-```
-
-```{ojs}
-warmingStripes_recentChanges = () => {
-  const _data = filterAdminToggle(recentChanges_plotData);
-  if (_data.length === 0) return noDataPlaceholder();
-
-  const _season = seasonSelect.season_string;
-  const _variableName = _lang(climateVarSelect.name);
-  const _variableAxis = _lang(climateVarSelect.labelAxis);
-  const _showAnomaly = showRecentAnomaly;
-  const _anomalyText = _showAnomaly
-    ? ` (${_lang(general_translations.anomaly)})`
-    : "";
-  const _mainTitle = `${_variableName}${_anomalyText} — Season: ${_season}`;
-  const plotValue = _showAnomaly ? "mean_anomaly" : "mean";
-  const lineColor = "#000";
-
-  const yMaxData = d3.max(_data, (d) => d[plotValue]);
-  const yMinData = d3.min(_data, (d) => d[plotValue]);
-  const yExtent = Math.abs(yMaxData - yMinData);
-  const yBuffer = yExtent * 0.05;
-  // Expand to include the ±2σ threshold lines on both sides of zero
-  // (only meaningful when showing anomalies).
-  const maxStd2 = _showAnomaly
-    ? 2 * (d3.max([...baselineStdByAdmin.values()]) ?? 0)
-    : 0;
-  const yMax = Math.max(yMaxData + yBuffer, maxStd2 * 1.05);
-  const yMin = _showAnomaly
-    ? Math.min(yMinData - yBuffer, -maxStd2 * 1.05)
-    : yMinData - yBuffer;
-  const yDomain = [yMin, yMax];
-  const _reverse = ["PTOT"].includes(climateVarSelect.id);
-  // Color scheme matches the framing: diverging-on-zero in anomaly mode,
-  // sequential across the data range in absolute mode (which has no
-  // natural zero anchor for variables like TAVG).
-  const colorType = _showAnomaly ? "diverging" : "linear";
-
-  const colorExtent = d3.extent(_data, (d) => d[plotValue]);
-
-  const { chunks, cols } = adminGridSplit(_data, facetCols);
-
-  // Explicit year ticks at multiples of 5 (or 10 on narrow 4-col grids)
-  // so band-scale labels don't overlap when the data spans many years.
-  // Plot's `ticks: N` hint is unreliable on band scales — it can fall
-  // back to labelling every band, which creates the smushed-text issue.
-  const _allYears = [...new Set(_data.map((d) => d.year))].sort((a, b) => a - b);
-  const _yearStep = cols >= 4 ? 10 : 5;
-  const _yearTicks = _allYears.filter((y) => y % _yearStep === 0);
-
-  const _tails = climateVarSelect.tails ?? "both";
-  const renderRow = (rowAdmins, rowIdx, isFirst, isLast) => {
-    const padded = padFxDomain(rowAdmins, cols, rowIdx);
-    const rowData = _data.filter((d) => rowAdmins.includes(d.adminName));
-    const rowThresholds = _showAnomaly
-      ? buildThresholdRows(rowAdmins, _tails)
-      : [];
-    const lastAdmin = rowAdmins[rowAdmins.length - 1];
-    const thresholdLabels = rowThresholds.filter(
-      (t) => t.adminName === lastAdmin,
-    );
-    // In absolute mode, draw a dashed 1995–2014 ensemble-mean per admin
-    // (same baselineMeanByAdmin used by Future Projections). In anomaly
-    // mode the baseline is implicitly the zero line drawn below.
-    const baselineRows = !_showAnomaly
-      ? rowAdmins
-          .map((a) => ({ adminName: a, y: baselineMeanByAdmin.get(a) }))
-          .filter((d) => d.y != null)
-      : [];
-    return Plot.plot({
-      width,
-      height: 360,
-      marginLeft: 70,
-      marginRight: 95,
-      marginTop: isFirst ? 80 : 40,
-      marginBottom: isLast ? 60 : 22,
-      title: isFirst ? _mainTitle : undefined,
-      x: {
-        label: isLast ? "Year" : null,
-        tickFormat: (d) => `${d}`,
-        ticks: _yearTicks,
-        padding: 0,
-      },
-      y: {
-        label: `${_variableAxis}${_anomalyText}`,
-        domain: yDomain,
-        tickFormat: yTickWithUnit,
-      },
-      fx: {
-        domain: padded,
-        label: null,
-        tickFormat: gridFxTickFormat,
-      },
-      facet: { data: rowData, x: "adminName", label: null },
-      color: {
-        scheme: paletteRecent,
-        type: colorType,
-        legend: isFirst,
-        label: `${_variableAxis}${_anomalyText}`,
-        reverse: _reverse,
-        domain: colorExtent,
-      },
-      symbol: {
-        domain: ["Normal", "Unusual", "Extreme"],
-        range: ["circle", "square", "triangle"],
-        legend: isFirst && highlightExtremes,
-      },
-      marks: [
-        Plot.barY(rowData, {
-          x: "year",
-          y1: yDomain[0],
-          y2: yDomain[1],
-          fill: (d) => d[plotValue],
-        }),
-        Plot.ruleY(_showAnomaly ? [0] : [], {
-          strokeDasharray: [5],
-          stroke: lineColor,
-        }),
-        Plot.ruleY(baselineRows, {
-          fx: "adminName",
-          y: "y",
-          stroke: "#444",
-          strokeDasharray: [5, 5],
-          strokeWidth: 0.9,
-        }),
-        Plot.ruleY(highlightExtremes ? rowThresholds : [], {
-          fx: "adminName",
-          y: "y",
-          stroke: (d) => (d.level === "extreme" ? "#c00" : "#888"),
-          strokeDasharray: [3, 3],
-          strokeWidth: 0.8,
-        }),
-        Plot.text(highlightExtremes ? thresholdLabels : [], {
-          fx: "adminName",
-          y: "y",
-          frameAnchor: "right",
-          text: (d) => (d.level === "extreme" ? "Extreme" : "Unusual"),
-          textAnchor: "start",
-          fontSize: 9,
-          fontWeight: 600,
-          fill: (d) => (d.level === "extreme" ? "#c00" : "#666"),
-          dx: 6,
-          dy: -3,
-        }),
-        Plot.line(rowData, {
-          x: "year",
-          y: (d) => d[plotValue],
-          stroke: lineColor,
-          strokeWidth: plotLineWidth,
-        }),
-        Plot.dot(rowData, {
-          x: "year",
-          y: (d) => d[plotValue],
-          symbol: highlightExtremes
-            ? (d) => extremeLevel(d, _tails)
-            : () => "Normal",
-          fill: (d) => {
-            if (!highlightExtremes) return lineColor;
-            const lvl = extremeLevel(d, _tails);
-            if (lvl === "Extreme") return "#c00";
-            if (lvl === "Unusual") return "#888";
-            return lineColor;
-          },
-          r: (d) => {
-            const ds = plotLineWidth / 1.5;
-            if (!highlightExtremes) return 2.5 * ds;
-            const lvl = extremeLevel(d, _tails);
-            if (lvl === "Extreme") return 6 * ds;
-            if (lvl === "Unusual") return 5 * ds;
-            return 2.5 * ds;
-          },
-          stroke: "white",
-          strokeWidth: 1,
-        }),
-        Plot.tip(
-          rowData,
-          Plot.pointerX({
-            x: "year",
-            y: () => yMin,
-            tip: true,
-            channels: {
-              Admin: "adminName",
-              varMean: {
-                label: _variableAxis,
-                value: (d) => d.mean,
-              },
-              varMeanAnomaly: {
-                label: _lang(general_translations.anomaly),
-                value: (d) => d.mean_anomaly,
-              },
-            },
-            format: {
-              y: false,
-              fx: false,
-              Admin: true,
-              x: (d) => d,
-              varMean: true,
-              varMeanAnomaly: true,
-            },
-            lineWidth: Infinity,
-          }),
-        ),
-      ],
-    });
-  };
-
-  const wsCaptionLines = [
-    "Historical annual values for 1995–2014 (20 years), by admin1 region. Each stripe = one year; the overlaid line + dots trace the per-year ensemble mean.",
-  ];
-  if (_showAnomaly) {
-    wsCaptionLines.push(
-      "Stripes are coloured by **anomaly** relative to the 1995–2014 baseline. The dashed black zero line marks the baseline mean; warmer / wetter years sit above it, cooler / drier years below. Toggle off *Show as anomaly* in the controls above to switch to absolute values.",
-    );
-    wsCaptionLines.push(
-      html`Dashed grey lines mark the |z| = 1 threshold (unusual); dashed red lines mark |z| = 2 (extreme). See the <a href="#extremeEvents">Extreme Events</a> section for full definitions.`,
-    );
-  } else {
-    wsCaptionLines.push(
-      "Stripes are coloured by **absolute value** for the selected variable. The dashed grey horizontal line marks the **1995–2014 ensemble-mean baseline** for the same admin1 region, season, and variable — a visual anchor for inter-annual variability around the historical mean. Toggle on *Show as anomaly* in the controls above to re-express every year as a departure from this baseline.",
-    );
-  }
-  wsCaptionLines.push(
-    html`Source: NASA <a href="https://www.nccs.nasa.gov/services/data-collections/land-based-products/nex-gddp-cmip6">NEX-GDDP-CMIP6</a> historical scenario (ensemble mean across 18 GCMs, r1i1p1f1, 1995–2014); processed by the <a href="https://adaptationatlas.cgiar.org">African Agriculture Adaptation Atlas</a>. Data: <a href="https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/catalog.json">STAC catalog</a>.`,
-  );
-  const caption = multiLineText(wsCaptionLines, "atlasFigCaption");
-
-  return html`<div>
-    ${chunks.map((r, idx) =>
-      renderRow(r, idx, idx === 0, idx === chunks.length - 1),
-    )}
-    ${captionDetails(caption, undefined, downloadButton(recentChanges_plotData, "recentChanges"))}
-  </div>`;
 };
 ```
 
