@@ -1,0 +1,262 @@
+---
+pagetitle: "Sandbox — Parquet pushdown perf"
+date-created: "2026-05-25"
+---
+
+# Parquet pushdown — in-browser perf sandbox
+
+A focused A/B testbed for cold-start fetch performance against the canonical
+S3 parquets via DuckDB-WASM. Goal: identify wins available **without**
+re-baking the parquets — projection pushdown, predicate pushdown, metadata-only
+queries, and httpfs cache effects. If the floor is "fetch the whole file
+regardless", that's the diagnostic that justifies the rebake-and-promote path
+from `2026-05-25_parquet-pushdown-sandbox.md`.
+
+Two slow-loading datasets from the climateRationale notebook:
+
+- `adm0_obs_periods` — CHIRPS+CHIRTS-ERA5 observational decadal stats (admin0).
+  Dispatch flagged as ~69 s in browser; the historical pain point.
+- `cmip6_2021-2040` — NEX-GDDP-CMIP6 ensemble season timeseries, one period
+  parquet. Representative of the multi-file `parquet_scan([...])` pattern
+  used in `dbFutureHive`.
+
+## Setup
+
+```{ojs}
+import { patchWindowsCache } from "/helpers/data.js";
+```
+
+```{ojs}
+// Two canonical S3 parquets to test. Add more by appending to this array.
+perfTargets = [
+  {
+    key: "adm0_obs_periods",
+    url: "s3://digital-atlas/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet",
+    cols: ["iso3", "variable", "period", "value"],
+    isoCol: "iso3",
+    sampleIso: "AGO"
+  },
+  {
+    key: "cmip6_2021-2040",
+    url: "s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2021-2040/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
+    cols: ["iso3", "scenario", "season", "year", "mean"],
+    isoCol: "iso3",
+    sampleIso: "AGO"
+  }
+];
+```
+
+```{ojs}
+// Levers to compare. Each entry yields one row per target in the results
+// table. `cacheBust: true` forces a unique URL so DuckDB's object cache
+// can't serve a warm hit — this is how we get a real cold measurement.
+// `pragmas` are SET statements run before the query.
+perfLevers = [
+  {
+    key: "L1_cold_select_all",
+    label: "Cold • SELECT *",
+    cacheBust: true,
+    pragmas: [
+      "SET enable_object_cache = true",
+      "SET enable_http_metadata_cache = true"
+    ],
+    query: (t, url) => `SELECT * FROM read_parquet('${url}') LIMIT 1000000`
+  },
+  {
+    key: "L2_cold_select_cols",
+    label: "Cold • projection pushdown",
+    cacheBust: true,
+    pragmas: [
+      "SET enable_object_cache = true",
+      "SET enable_http_metadata_cache = true"
+    ],
+    query: (t, url) =>
+      `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}')`
+  },
+  {
+    key: "L3_cold_cols_predicate",
+    label: "Cold • projection + predicate",
+    cacheBust: true,
+    pragmas: [
+      "SET enable_object_cache = true",
+      "SET enable_http_metadata_cache = true"
+    ],
+    query: (t, url) =>
+      `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}') WHERE ${t.isoCol} = '${t.sampleIso}'`
+  },
+  {
+    key: "L4_cold_metadata_only",
+    label: "Cold • parquet_metadata()",
+    cacheBust: true,
+    pragmas: [
+      "SET enable_object_cache = true",
+      "SET enable_http_metadata_cache = true"
+    ],
+    query: (t, url) => `SELECT COUNT(*) AS row_groups FROM parquet_metadata('${url}')`
+  },
+  {
+    key: "L5_warm_cols_predicate",
+    label: "Warm • projection + predicate",
+    cacheBust: false,
+    pragmas: [
+      "SET enable_object_cache = true",
+      "SET enable_http_metadata_cache = true"
+    ],
+    query: (t, url) =>
+      `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}') WHERE ${t.isoCol} = '${t.sampleIso}'`
+  }
+];
+```
+
+```{ojs}
+// One DuckDBClient for the whole sandbox session. Levers that need cold
+// behaviour cache-bust the URL instead of recreating the client — recreating
+// would also pay the WASM init cost, which isn't what we're measuring.
+sandboxDb = await DuckDBClient.of();
+```
+
+## Runner
+
+```{ojs}
+viewof runNonce = Inputs.button([
+  ["Run all", () => Date.now()],
+  ["Re-run (new cache-bust)", () => Date.now()]
+], { value: Date.now(), label: "Action" })
+```
+
+```{ojs}
+perfResults = {
+  // Re-runs when the button is clicked.
+  runNonce;
+
+  const rows = [];
+  for (const target of perfTargets) {
+    for (const lever of perfLevers) {
+      const cb = lever.cacheBust ? `?cb=${runNonce}_${lever.key}` : "";
+      const url = patchWindowsCache(target.url) + cb;
+
+      // Apply pragmas (cheap; safe to repeat per lever).
+      for (const p of lever.pragmas) {
+        await sandboxDb.query(p);
+      }
+
+      const sql = lever.query(target, url);
+
+      // Resource-timing snapshot before / after. Browsers route DuckDB-WASM's
+      // httpfs through window.fetch, so resource-timing captures every range
+      // request. We attribute any entry whose URL starts with the target URL
+      // (sans cache-bust) to this query.
+      const matchPrefix = target.url.replace(/^s3:\/\//, "https://").replace(
+        /^https:\/\/digital-atlas\/?/,
+        "https://digital-atlas.s3.amazonaws.com/"
+      );
+      const beforeCount = performance.getEntriesByType("resource").length;
+
+      const t0 = performance.now();
+      let rowsReturned = null;
+      let errored = null;
+      try {
+        const resp = await sandboxDb.query(sql);
+        // resp can be an Arrow table or array depending on DuckDBClient version.
+        rowsReturned = (resp && typeof resp.length === "number")
+          ? resp.length
+          : (resp && resp.numRows) ?? null;
+      } catch (e) {
+        errored = String(e && e.message || e);
+      }
+      const t1 = performance.now();
+
+      const entries = performance.getEntriesByType("resource").slice(beforeCount);
+      const matched = entries.filter(
+        (e) => e.name.includes(target.url.split("/").slice(-2).join("/").replace(/^variable=/, ""))
+              || e.name.startsWith(matchPrefix)
+      );
+      const bytes = matched.reduce(
+        (a, e) => a + (e.transferSize || e.encodedBodySize || 0),
+        0
+      );
+
+      rows.push({
+        target: target.key,
+        lever: lever.label,
+        leverKey: lever.key,
+        query_ms: Math.round(t1 - t0),
+        http_reqs: matched.length,
+        http_bytes: bytes,
+        rows_returned: rowsReturned,
+        error: errored
+      });
+    }
+  }
+  return rows;
+}
+```
+
+## Results
+
+```{ojs}
+Inputs.table(perfResults, {
+  columns: ["target", "lever", "query_ms", "http_reqs", "http_bytes", "rows_returned", "error"],
+  header: {
+    target: "Target",
+    lever: "Lever",
+    query_ms: "Query (ms)",
+    http_reqs: "HTTP reqs",
+    http_bytes: "Bytes downloaded",
+    rows_returned: "Rows",
+    error: "Error"
+  },
+  format: {
+    query_ms: (v) => v == null ? "—" : v.toLocaleString(),
+    http_bytes: (v) => v == null ? "—" :
+      v >= 1e6 ? `${(v / 1e6).toFixed(2)} MB`
+        : v >= 1e3 ? `${(v / 1e3).toFixed(1)} KB`
+        : `${v} B`,
+    rows_returned: (v) => v == null ? "—" : v.toLocaleString()
+  },
+  width: { lever: 240, error: 220 }
+})
+```
+
+## Read the table
+
+- **L1 vs L2** — if `Bytes downloaded` drops sharply, projection pushdown
+  is working; the parquet reader is fetching only the relevant column chunks.
+  If it doesn't drop, DuckDB-WASM is fetching the whole file regardless and
+  no SELECT-list tweak in the production notebook will help.
+- **L2 vs L3** — if L3 fetches dramatically less than L2 (or completes faster),
+  predicate pushdown is also working. This is the rare best-case path:
+  pushdown alone solves the cold-start problem and the rebake isn't needed.
+  If L3 ≈ L2, predicate pushdown is blocked — most likely cause is that the
+  canonical parquet has one giant row group (no `min/max` stats per row group
+  for the parquet reader to skip on), which is exactly what the rebake fixes.
+- **L4** is the floor — what cold-start would cost if only metadata were
+  fetched. Treat as a target for L3.
+- **L5** is the warm second-touch reference. Shows how cheap repeat queries
+  are once the object cache is populated. Production users get this on
+  *anything but the first query*, so the cold-start pain is really an
+  L1-vs-L4 gap.
+
+## Verdict (hand-rolled)
+
+Once the table is filled in, paste the cold L3/L1 ratio per target back into
+the dispatch:
+
+```
+adm0_obs_periods : L1 = ___ms / ___MB   |  L3 = ___ms / ___KB   →  ___× speedup
+cmip6_2021-2040  : L1 = ___ms / ___MB   |  L3 = ___ms / ___KB   →  ___× speedup
+```
+
+If L3 ≥ 5× faster than L1 on both, we can ship optimisation as a
+notebook-side query-shape change and defer the rebake. If L3 < 2× faster
+than L1, the rebake is the only remaining lever and STAGE C of the parent
+dispatch becomes the path forward.
+
+## Out of scope (this sandbox)
+
+- Canonical-vs-rebake A/B against `s3://digital-atlas/sandbox/parquet-pushdown/`.
+  Skipped until the pipeline-side STAGE C upload lands.
+- Promotion commands (STAGE F). See parent dispatch.
+- Multi-file `parquet_scan([...])` A/B. We test one period file from CMIP6;
+  the UNION pattern in `dbFutureHive` would be a follow-up if pushdown works
+  on the single file.
