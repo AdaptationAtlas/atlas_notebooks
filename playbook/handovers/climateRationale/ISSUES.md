@@ -1743,6 +1743,90 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+### CR-085 — Commodity-focus view: all variables for one commodity side-by-side [NEW 2026-05-25]
+
+- **id:** CR-085
+- **title:** Add a "Commodity focus" view to the National Production Trends section that fixes a single commodity and renders production, yield, export, and import variables as a small-multiples panel, so users can scan a single crop's full economic profile in one frame.
+- **type:** notebook (new feature)
+- **severity:** low (additive feature; existing variable-pivot UX works fine for the comparison flow)
+
+- **where:** [notebooks/climateRationale/notebook.qmd](notebooks/climateRationale/notebook.qmd) National Production Trends section.
+
+- **why-this-matters:** The current section pivots on the variable axis: pick one variable, see all top-N commodities. The reverse pivot is also useful — pick one commodity (e.g. Cocoa for CIV, Maize for KEN) and see production / yield / export quantity / export value / import quantity / import value all rendered side-by-side. Storyline-friendly for proposal writers: "Here's everything FAOSTAT says about cocoa for Côte d'Ivoire". The byproducts split (per CR-063 Phase B / D) sits naturally inside a single commodity-focus panel too.
+
+- **proposed-change:** Add a new entry to the `viewProductionTrends` selector — "Commodity focus" — that switches the render to a 2×3 small-multiples grid. Each panel uses the same FAOSTAT data already loaded; no new DuckDB query needed (commodity is selected via a new dropdown that overrides the existing top-N + commodities checklist). Layout: production / yield in row 1, export quantity / export value in row 2, import quantity / import value in row 3. Each panel is a line chart with the byproducts toggle still applied where relevant. Caveats and methods text stays shared.
+
+- **dependencies:** None — uses the existing v5 schema data. Could ship after the v5 byproducts dispatch lands.
+
+- **discovered:** 2026-05-25 during live-preview review of the byproducts visual split.
+
+- **STATUS:** Open — backlog. Worth doing once the v5 dispatch and the trade-data audit ([[CR-088]]) land.
+
+---
+
+### CR-086 — Price-shock overlay: integrate FAOSTAT producer prices + WB import-price index [NEW 2026-05-25]
+
+- **id:** CR-086
+- **title:** Overlay commodity price-shock series (FAOSTAT producer prices for local; World Bank or IMF commodity prices for import) onto the National Production Trends chart so users can read climate-driven production changes against the price-shock background.
+- **type:** notebook + new pipeline pull
+- **severity:** medium (would substantially extend the section's analytical reach for climate-economic-shock storytelling)
+
+- **where:** [notebooks/climateRationale/notebook.qmd](notebooks/climateRationale/notebook.qmd) National Production Trends section + new data source.
+
+- **why-this-matters:** Climate impacts on production are easier to interpret with the price layer adjacent — a yield drop coinciding with a price spike has very different welfare implications than a yield drop into a falling-price market. FAOSTAT's PP (Producer Prices) domain provides local price series for ~150 commodities × ~200 countries × annual back to 1991. World Bank's "Pink Sheet" or IMF's PCPS gives international import-price indices that can be paired with the new `import_value_usd15` and `export_value_usd15` series.
+
+- **proposed-change:** (i) Pipeline-side — add FAOSTAT PP and an import-price index to the production pipeline; bake into the same `adm0_faostat.parquet` schema as new variable IDs (`producer_price_local`, `producer_price_usd_const`, possibly `import_price_index`). (ii) Notebook-side — add a "Price overlay" toggle next to the byproducts toggle; when on, render a faint secondary line for the producer price on the same chart with a right-side y-axis. Lots of UX detail to think through (dual-axis is dangerous — alternative: separate row in a Commodity focus view per CR-085).
+
+- **dependencies:** [[CR-085]] (commodity-focus view would be the natural home for the price overlay — easier to do dual-axis when scoped to one commodity at a time).
+
+- **discovered:** 2026-05-25 during live-preview review.
+
+- **STATUS:** Open — backlog. Substantial work; defer until the v5 byproducts dispatch and trade-data audit ([[CR-088]]) land. Likely a multi-session dispatch when picked up.
+
+---
+
+### CR-087 — Stack-order of raw / processed strata: confirm raw-on-bottom, processed-on-top [NEW 2026-05-25]
+
+- **id:** CR-087
+- **title:** Verify the stacked bar's raw/processed split renders with raw (full opacity) on the bottom and processed (55% opacity) on the top in `Plot.rectY` — Plot's default stack ordering may put processed on the bottom in some palette/series configurations.
+- **type:** notebook (visual-polish followup)
+- **severity:** very low (cosmetic — both orderings are readable; the legend explains which is which)
+
+- **where:** [notebooks/climateRationale/notebook.qmd](notebooks/climateRationale/notebook.qmd) `chart_productionTrends` `rectOpts.z` channel.
+
+- **why-this-matters:** Stack-order convention is raw (primary) at the base, processed (secondary) on top — matches reader expectation when scanning bar heights. Plot's `rectY` with implicit stack uses series order from the data when `z` is set, but the ordering may flip with palette interpolation or non-alphabetic data shuffles. Live-preview verification needed.
+
+- **proposed-change:** If the order is wrong, sort `stackedData` so raw comes before processed within each (year, commodity) group, OR pass `Plot.stackY({order: …}, {...})` explicitly with `order: (a, b) => a.stackType === "raw" ? -1 : 1`.
+
+- **dependencies:** None.
+
+- **discovered:** 2026-05-25 in commit `a3396b1`. Flagged at end-of-session as an open verification item.
+
+- **STATUS:** Open — verify on the next live-preview review of the byproducts visual split. ~10 LOC if the order is wrong.
+
+---
+
+### CR-088 — FAOSTAT trade-data audit: AGO palm oil, ZAF wine, n.e.c. juices, From Year default [NEW 2026-05-25]
+
+- **id:** CR-088
+- **title:** Investigate three data-quality concerns surfaced from the 2026-05-25 byproducts review and decide on a default From Year for trade variables before the climateRationale notebook ships to GCF: (i) AGO palm oil exports look implausibly large pre-2017; (ii) ZAF grapes / wine entirely missing from the rollup; (iii) "Juice of fruits n.e.c." structurally undercounts processed-fruit exports for KEN / ZAF / ZWE / EGY.
+- **type:** pipeline + notebook coordinated
+- **severity:** medium (the wine gap especially undersells SSA's processed-export economy; data quality concerns may mislead policy readers)
+
+- **where:** Notebook-side: trade-variable selection in National Production Trends + Methods text. Pipeline-side: `hazards_prototype/R/0.4.5_create_faostat_long.R` filter logic + `metadata/faostat_processed_to_raw.csv` curation.
+
+- **why-this-matters:** The byproducts toggle now visibly fires only for trade variables (per the I-2 invariant in CR-063 / CR-064). Live-preview review flagged three concrete cases where the trade data either looks anomalous (AGO palm oil) or is incomplete in a way that misleads (no ZAF wine despite ~$2.5–4 B/year exports). The Methods section needs to surface caveats; the From Year slider should land at a sensible default that protects users from the worst pre-2017 noise.
+
+- **proposed-change:** See full dispatch [[dispatches/2026-05-25_faostat-trade-data-audit.md]]. Pipeline-side: probe + fix wine inclusion (likely loosen the 0.25 %-of-production filter to admit trade-only items), fix the `parent_raw_item_code` gaps for Grape juice / Apple juice / Orange juice. Notebook-side: surface inline data-quality caveat under the chart when a trade variable is active; add Methods text on the QV/QCL vs TM split + byproducts model + n.e.c. caveats; land a default From Year for trade variables (decision deferred to cowork — 2015 vs 2019 vs per-variable).
+
+- **dependencies:** None — pipeline + notebook work can land independently. Notebook-side work can ship under the v5 dispatch chain (commit 7 of `2026-05-21_faostat-v5-byproducts-toggle.md`) before the pipeline-side fix lands.
+
+- **discovered:** 2026-05-25 during live-preview review of the byproducts visual split.
+
+- **STATUS:** Open — dispatch drafted; investigation pending. Cross-references CR-064 items (a), (b), (d) which overlap.
+
+---
+
 ## Proposed PR groupings
 
 Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.
