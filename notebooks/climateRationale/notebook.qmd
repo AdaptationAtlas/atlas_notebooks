@@ -1008,22 +1008,52 @@ viewof commoditiesSelect = Inputs.checkbox(productionAvailableEntities, {
 ```
 
 ```{ojs}
-// Caveat — surfaces only when the active variable is non-monetary AND
-// the byproducts toggle is on. The toggle stays interactive but the
-// data pipeline ignores it because physical quantities (tonnes, kg/ha,
-// head counts) don't combine across (raw, processed) transformation
-// states. The caveat tells the user to switch variable if they want
-// the rollup view.
+// Caveat — fires only when the byproducts toggle is on AND something
+// in the current configuration prevents the rollup from doing useful
+// work. Two failure modes are covered:
+//
+//   1. Non-monetary variable (yield / production / *_quantity). The
+//      pipeline's I-2 invariant keeps these raw-only; rollup is
+//      semantically invalid (1 t cocoa beans ≠ 1 t cocoa butter).
+//
+//   2. Monetary but no processed rows present. FAOSTAT pipeline's
+//      Phase A still has byproduct rows only for trade variables
+//      (export_*, import_*); vop_* variables are raw-only by design.
+//      Country-level coverage can also leave a monetary variable
+//      with no processed rows for some (country, year) windows.
+//
+// When fired the caveat suggests a target variable and stays
+// interactive so the user can change variable without flipping the
+// toggle off.
 {
   const isMonetary = productionMonetaryVars.has(productionVar.id);
-  if (isMonetary || !productionIncludeByproducts) return html`<span></span>`;
-  return html`<div style="font-style: italic; color: #666; font-size: 0.9em; margin: 0.5em 0 1em 0; padding: 0.4em 0.6em; border-left: 3px solid #ccc; background: #fafafa;">
-    Byproduct rollup is only valid for monetary variables — switch to
-    a Value of production, Export value, or Import value variable to
-    enable. Physical quantities (tonnes, kg/ha) can't be rolled up
-    because units don't combine across raw and processed forms
-    (1 t cocoa beans ≠ 1 t cocoa butter).
-  </div>`;
+  if (!productionIncludeByproducts) return html`<span></span>`;
+
+  if (!isMonetary) {
+    return html`<div style="font-style: italic; color: #666; font-size: 0.9em; margin: 0.5em 0 1em 0; padding: 0.4em 0.6em; border-left: 3px solid #ccc; background: #fafafa;">
+      Byproduct rollup is only valid for monetary variables — switch to
+      a Value of production, Export value, or Import value variable to
+      enable. Physical quantities (tonnes, kg/ha) can't be rolled up
+      because units don't combine across raw and processed forms
+      (1 t cocoa beans ≠ 1 t cocoa butter).
+    </div>`;
+  }
+
+  const hasProcessed = productionTrends_data.some(
+    (d) => (d.value_processed ?? 0) > 0,
+  );
+  if (!hasProcessed) {
+    return html`<div style="font-style: italic; color: #666; font-size: 0.9em; margin: 0.5em 0 1em 0; padding: 0.4em 0.6em; border-left: 3px solid #ccc; background: #fafafa;">
+      No byproducts available for ${productionVar.label} in the current
+      selection — FAOSTAT's Value of Production series is raw-only by
+      design; byproducts appear in the Trade variables. Try
+      <strong>Export value</strong>, <strong>Export value (constant)</strong>,
+      <strong>Import value</strong>, or <strong>Import value (constant)</strong>
+      to see the value-chain rollup in action.
+    </div>`;
+  }
+
+  return html`<span></span>`;
 }
 ```
 
@@ -6228,24 +6258,59 @@ chart_productionTrends = () => {
 
   const isStacked = viewProductionTrends === "stackedBar";
 
+  // When the byproducts toggle is on AND the active variable has
+  // processed rows, expand each row into separate raw + processed
+  // sub-rows for the stack. Using the `z` channel to force a per-type
+  // sub-stack inside each commodity, with `fillOpacity` distinguishing
+  // raw (full) from processed (55%). When the toggle is off, or no
+  // processed rows exist, fall back to the single-row-per-(year,
+  // commodity) shape that worked pre-v5.
+  const showSplit =
+    isStacked &&
+    productionIncludeByproducts &&
+    productionMonetaryVars.has(productionVar.id) &&
+    _data.some((d) => (d.value_processed ?? 0) > 0);
+
+  const stackedData = showSplit
+    ? _data.flatMap((d) => {
+        const rawPart = {
+          ...d,
+          stackValue: d.value_raw ?? d.value,
+          stackType: "raw",
+        };
+        if ((d.value_processed ?? 0) <= 0) return [rawPart];
+        return [
+          rawPart,
+          {
+            ...d,
+            stackValue: d.value_processed,
+            stackType: "processed",
+          },
+        ];
+      })
+    : _data.map((d) => ({ ...d, stackValue: d.value, stackType: "raw" }));
+
   const marks = isStacked
     ? [
-        Plot.rectY(_data, {
+        Plot.rectY(stackedData, {
           x: "year",
           interval: 1,
-          y: "value",
+          y: "stackValue",
           fill: "commodity",
+          fillOpacity: (d) => (d.stackType === "processed" ? 0.55 : 1),
+          z: showSplit ? (d) => `${d.commodity}|${d.stackType}` : undefined,
           stroke: "white",
           strokeWidth: 0.4,
           fy: admins.length > 1 ? "adminName" : undefined,
           tip: true,
           channels: {
             Commodity: "commodity",
+            Type: showSplit ? "stackType" : undefined,
             Region: "adminName",
             Year: { value: (d) => d3.format("d")(d.year), label: "Year" },
             Value: {
               value: (d) =>
-                `${formatNumCompactShort()(d.value)} ${d.unit ?? ""}`,
+                `${formatNumCompactShort()(d.stackValue)} ${d.unit ?? ""}`,
               label: "Value",
             },
           },
@@ -6423,7 +6488,22 @@ treemap_productionTrends = () => {
       const label = leaf.data.commodity;
       const valueText = fmtVal(leaf.data.value);
       const fillColor = colorByCommodity.get(label);
-      const tipText = `${admin} — ${label} (${leaf.data.year}): ${valueText}`;
+      // Split the box into raw (bottom, full opacity) + processed
+      // (top, 55% opacity) when the rollup is active and processed
+      // is non-zero. The processed slice sits on top to match the
+      // stacked-bar convention (secondary stratum above primary).
+      const isSplit =
+        leaf.data.isRollup && (leaf.data.value_processed ?? 0) > 0;
+      const rawFrac = isSplit
+        ? Math.max(0, Math.min(1, leaf.data.value_raw / leaf.data.value))
+        : 1;
+      const procH = isSplit ? h * (1 - rawFrac) : 0;
+      const rawH = h - procH;
+      const tipText = isSplit
+        ? `${admin} — ${label} (${leaf.data.year}): ${valueText} ` +
+          `(raw ${fmtVal(leaf.data.value_raw)}, ` +
+          `processed ${fmtVal(leaf.data.value_processed)})`
+        : `${admin} — ${label} (${leaf.data.year}): ${valueText}`;
       const textFill = treemapTextColor(fillColor);
       const haloFill = textFill === "#fff" ? "#000" : "#fff";
       const layout = treemapTextLayout(
@@ -6434,12 +6514,37 @@ treemap_productionTrends = () => {
         plotTextSize + 4,
       );
       return svg`<g transform="translate(${leaf.x0}, ${leaf.y0})">
+        ${
+          isSplit
+            ? svg`<rect
+                width="${w}"
+                height="${procH}"
+                fill="${fillColor}"
+                fill-opacity="0.55"
+                stroke="none"
+              ></rect>
+              <rect
+                width="${w}"
+                height="${rawH}"
+                y="${procH}"
+                fill="${fillColor}"
+                stroke="none"
+              ></rect>
+              <line
+                x1="0" x2="${w}"
+                y1="${procH}" y2="${procH}"
+                stroke="#fff" stroke-width="0.6"
+                stroke-dasharray="2,2"
+                opacity="0.85"
+              ></line>`
+            : ""
+        }
         <rect
           class="cr-treemap-cell"
           data-tip="${tipText}"
           width="${w}"
           height="${h}"
-          fill="${fillColor}"
+          fill="${isSplit ? "transparent" : fillColor}"
           stroke="#999"
           stroke-width="0.75"
         ><title>${tipText}</title></rect>
