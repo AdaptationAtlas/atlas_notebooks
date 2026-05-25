@@ -919,6 +919,20 @@ viewof paletteProduction = categoricalPaletteSelector({
 });
 ```
 
+```{ojs}
+// Byproducts toggle — gates the value-chain rollup. When ON and the
+// active variable is monetary, commodities are aggregated by
+// commodity_group (e.g. Cocoa = beans + butter + paste + powder) and
+// summed across (raw, processed) types. When OFF, only raw rows show
+// (mirrors v4 behaviour). The toggle stays interactive for all
+// variables but the data pipeline ignores it for non-monetary
+// variables — see the caveat line below the description block.
+viewof productionIncludeByproducts = Inputs.toggle({
+  label: "Include byproducts",
+  value: false,
+});
+```
+
 :::
 
 ::: {.controls-row}
@@ -994,6 +1008,26 @@ viewof commoditiesSelect = Inputs.checkbox(productionAvailableCommodities, {
 ```
 
 ```{ojs}
+// Caveat — surfaces only when the active variable is non-monetary AND
+// the byproducts toggle is on. The toggle stays interactive but the
+// data pipeline ignores it because physical quantities (tonnes, kg/ha,
+// head counts) don't combine across (raw, processed) transformation
+// states. The caveat tells the user to switch variable if they want
+// the rollup view.
+{
+  const isMonetary = productionMonetaryVars.has(productionVar.id);
+  if (isMonetary || !productionIncludeByproducts) return html`<span></span>`;
+  return html`<div style="font-style: italic; color: #666; font-size: 0.9em; margin: 0.5em 0 1em 0; padding: 0.4em 0.6em; border-left: 3px solid #ccc; background: #fafafa;">
+    Byproduct rollup is only valid for monetary variables — switch to
+    a Value of production, Export value, or Import value variable to
+    enable. Physical quantities (tonnes, kg/ha) can't be rolled up
+    because units don't combine across raw and processed forms
+    (1 t cocoa beans ≠ 1 t cocoa butter).
+  </div>`;
+}
+```
+
+```{ojs}
 loaderDiv("plotProductionTrends");
 ```
 
@@ -1001,7 +1035,8 @@ loaderDiv("plotProductionTrends");
 //| output: false
 {
   [admin0Iso3, productionVar, viewProductionTrends, paletteProduction,
-   productionTopN, productionYearStart, productionYearEnd, commoditiesSelect];
+   productionTopN, productionYearStart, productionYearEnd, commoditiesSelect,
+   productionIncludeByproducts];
   const div = document.getElementById("plotProductionTrends");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -4195,22 +4230,103 @@ productionTrends_raw = {
   return withAdminName(resp);
 }
 
-// All commodities present in the parquet for the selected admin0s.
-// Derived from the in-memory raw — no DB query.
+// Aggregation-safety set — must mirror the parquet's build_meta
+// $aggregation_rules metadata field. Monetary variables sum freely
+// across the (raw, processed) boundary because currency converts
+// cleanly between transformation states; physical quantities don't
+// (1 t cocoa beans + 1 t cocoa butter is physically meaningless).
+// The byproducts toggle is gated by this set.
+productionMonetaryVars = new Set([
+  "vop_intd15",
+  "vop_usd15",
+  "export_value",
+  "export_value_usd15",
+  "import_value",
+  "import_value_usd15",
+]);
+
+// The view downstream cells consume. Variable-gated rollup:
+//   - non-monetary OR toggle off → raw rows only, labelled by commodity
+//   - monetary AND toggle on    → grouped by commodity_group, summed
+//                                  across (raw, processed) types
+// The raw-only filter is a no-op for non-monetary variables (FAOSTAT
+// pipeline invariant I-2 guarantees production / yield / *_quantity
+// are raw-only) but is kept defensively. For monetary variables with
+// the toggle off, byproduct rows (e.g. cocoa butter) are hidden so
+// the default view matches v4 behaviour.
+productionTrends_filtered = {
+  if (productionTrends_raw.length === 0) return [];
+  const isMonetary = productionMonetaryVars.has(productionVar.id);
+
+  if (!isMonetary || !productionIncludeByproducts) {
+    return productionTrends_raw
+      .filter((d) => d.type === "raw")
+      .map((d) => ({
+        ...d,
+        displayLabel: d.commodity,
+        isRollup: false,
+      }));
+  }
+
+  // Rollup path: group by (iso3, commodity_group, year, variable).
+  // Unit is preserved from the first row in each group — for monetary
+  // variables it's always the same unit within a group ("1000 USD",
+  // "1000 Int$", or "Thousand US$ (constant 2014-2016)").
+  const key = (d) =>
+    `${d.iso3}|${d.commodity_group}|${d.year}|${d.variable}`;
+  const grouped = d3.group(productionTrends_raw, key);
+  const rolled = [];
+  for (const [k, rows] of grouped) {
+    const [iso3, group, year, variable] = k.split("|");
+    if (!group || group === "null" || group === "undefined") continue;
+    const rawSum = d3.sum(
+      rows.filter((r) => r.type === "raw"),
+      (r) => r.value,
+    );
+    const procSum = d3.sum(
+      rows.filter((r) => r.type === "processed"),
+      (r) => r.value,
+    );
+    rolled.push({
+      iso3,
+      adminName: rows[0].adminName,
+      commodity: group,
+      commodity_group: group,
+      displayLabel: group,
+      year: +year,
+      variable,
+      unit: rows[0].unit,
+      value: rawSum + procSum,
+      value_raw: rawSum,
+      value_processed: procSum,
+      hasByproducts: procSum > 0,
+      n_items: rows.length,
+      isRollup: true,
+    });
+  }
+  return rolled;
+}
+
+// All commodities (or commodity_groups when the rollup is active)
+// present in the filtered view. Drives the multi-select checkbox and
+// the top-N upper bound. Derived from the in-memory filtered view —
+// no DB query.
 productionAvailableCommodities = [
-  ...new Set(productionTrends_raw.map((d) => d.commodity)),
+  ...new Set(productionTrends_filtered.map((d) => d.displayLabel)),
 ].sort();
 
-// Top-N commodities by mean value of the currently-selected variable
-// over the currently-selected year window. Computed in JS from the
-// raw — no DB query. When yield is the active variable, the ranking
+// Top-N commodities (or commodity_groups when rollup is active) by
+// mean value of the currently-selected variable over the
+// currently-selected year window. Computed in JS from the filtered
+// view — no DB query. When yield is the active variable, the ranking
 // surfaces high-yield crops rather than high-value-of-production
-// crops (per Pete, 2026-05-14).
+// crops (per Pete, 2026-05-14). When the byproducts toggle is on and
+// the variable is monetary, the ranking ranks rolled-up groups.
 productionTopCommodities = {
   const yStart = Math.min(productionYearStart, productionYearEnd);
   const yEnd = Math.max(productionYearStart, productionYearEnd);
-  if (productionTrends_raw.length === 0) return [];
-  const filtered = productionTrends_raw.filter(
+  if (productionTrends_filtered.length === 0) return [];
+  const filtered = productionTrends_filtered.filter(
     (d) =>
       d.variable === productionVar.id &&
       d.year >= yStart &&
@@ -4219,19 +4335,24 @@ productionTopCommodities = {
   const means = d3.rollup(
     filtered,
     (v) => d3.mean(v, (r) => r.value),
-    (d) => d.commodity,
+    (d) => d.displayLabel,
   );
   return [...means.entries()]
     .sort((a, b) => (b[1] ?? -Infinity) - (a[1] ?? -Infinity))
     .slice(0, productionTopN)
-    .map(([commodity]) => commodity);
+    .map(([displayLabel]) => displayLabel);
 }
 
-// Filtered + display-formatted view of the raw. All filters in JS.
+// Filtered + display-formatted view of the rollup-aware filtered cell.
+// All filters in JS. When the byproducts toggle is on and the variable
+// is monetary, the rows here carry the rolled-up commodity_group
+// labels and value_raw / value_processed splits for tooltips. When
+// the toggle is off (or the variable is non-monetary), rows carry the
+// original commodity labels and isRollup=false.
 productionTrends_data = {
   const yStart = Math.min(productionYearStart, productionYearEnd);
   const yEnd = Math.max(productionYearStart, productionYearEnd);
-  if (productionTrends_raw.length === 0 || !commoditiesSelect.length) return [];
+  if (productionTrends_filtered.length === 0 || !commoditiesSelect.length) return [];
   const isValue =
     productionVar.id === "vop_intd15" ||
     productionVar.id === "vop_usd15" ||
@@ -4260,19 +4381,31 @@ productionTrends_data = {
       ? "tonnes"
       : "kg/ha";
   const commoditiesSet = new Set(commoditiesSelect);
-  return productionTrends_raw
+  return productionTrends_filtered
     .filter(
       (d) =>
         d.variable === productionVar.id &&
         d.year >= yStart &&
         d.year <= yEnd &&
-        commoditiesSet.has(d.commodity),
+        commoditiesSet.has(d.displayLabel),
     )
     .map((d) => ({
       iso3: d.iso3,
-      commodity: d.commodity,
+      commodity: d.displayLabel,
       year: d.year,
       value: isValue ? d.value * 1000 : d.value,
+      // Rollup-aware extras for tooltips + Phase-2 visual splits:
+      value_raw:
+        isValue && d.isRollup ? d.value_raw * 1000 : d.value_raw ?? null,
+      value_processed:
+        isValue && d.isRollup
+          ? d.value_processed * 1000
+          : d.value_processed ?? null,
+      isRollup: d.isRollup,
+      hasByproducts: d.hasByproducts ?? false,
+      n_items: d.n_items ?? 1,
+      item_code: d.item_code ?? null,
+      commodity_class: d.commodity_class ?? null,
       unit: displayUnit,
       adminName: d.adminName,
     }));
