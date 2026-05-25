@@ -4295,6 +4295,8 @@ productionTrends_filtered = {
         ...d,
         displayLabel: d.commodity,
         isRollup: false,
+        rawItems: [d.commodity],
+        processedItems: [],
       }));
   }
 
@@ -4309,14 +4311,10 @@ productionTrends_filtered = {
   for (const [k, rows] of grouped) {
     const [iso3, group, year, variable] = k.split("|");
     if (!group || group === "null" || group === "undefined") continue;
-    const rawSum = d3.sum(
-      rows.filter((r) => r.type === "raw"),
-      (r) => r.value,
-    );
-    const procSum = d3.sum(
-      rows.filter((r) => r.type === "processed"),
-      (r) => r.value,
-    );
+    const rawRows = rows.filter((r) => r.type === "raw");
+    const procRows = rows.filter((r) => r.type === "processed");
+    const rawSum = d3.sum(rawRows, (r) => r.value);
+    const procSum = d3.sum(procRows, (r) => r.value);
     rolled.push({
       iso3,
       adminName: rows[0].adminName,
@@ -4331,6 +4329,10 @@ productionTrends_filtered = {
       value_processed: procSum,
       hasByproducts: procSum > 0,
       n_items: rows.length,
+      // Item-name lists drive the tooltips so users can see exactly
+      // which FAOSTAT items are rolled into each group.
+      rawItems: rawRows.map((r) => r.commodity),
+      processedItems: procRows.map((r) => r.commodity),
       isRollup: true,
     });
   }
@@ -4434,6 +4436,8 @@ productionTrends_data = {
       isRollup: d.isRollup,
       hasByproducts: d.hasByproducts ?? false,
       n_items: d.n_items ?? 1,
+      rawItems: d.rawItems ?? [],
+      processedItems: d.processedItems ?? [],
       item_code: d.item_code ?? null,
       commodity_class: d.commodity_class ?? null,
       unit: displayUnit,
@@ -6205,6 +6209,34 @@ povBar_keyFacts = () => {
 ### Production Trends
 
 ```{ojs}
+// Byproducts-split legend explainer. Surfaces only when the visual
+// split is actually rendered (toggle on, monetary variable, processed
+// rows present). Function-valued cell so it doesn't auto-render on
+// its own — both chart_productionTrends and treemap_productionTrends
+// call it inline.
+productionByproductsLegend = () => {
+  const isMonetary = productionMonetaryVars.has(productionVar.id);
+  if (!productionIncludeByproducts || !isMonetary) return html`<span></span>`;
+  const hasProcessed = productionTrends_data.some(
+    (d) => (d.value_processed ?? 0) > 0,
+  );
+  if (!hasProcessed) return html`<span></span>`;
+  return html`<div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 0.85em; color: #555; margin: 0.4em 0 0.6em 0; padding: 0.35em 0.6em; background: #f6f6f6; border-radius: 3px; border-left: 3px solid #ccc;">
+    <strong style="color: #333; letter-spacing: 0.02em;">Byproducts split</strong>
+    <span style="display: inline-flex; align-items: center; gap: 5px;">
+      <span style="display: inline-block; width: 18px; height: 12px; background: #888; border: 0.5px solid #555;"></span>
+      raw commodity
+    </span>
+    <span style="display: inline-flex; align-items: center; gap: 5px;">
+      <span style="display: inline-block; width: 18px; height: 12px; background: #888; opacity: 0.55; border: 0.5px solid #555;"></span>
+      processed (byproducts)
+    </span>
+    <span style="color: #777; font-style: italic;">— per-commodity colour stays the same; opacity distinguishes the raw and processed strata.</span>
+  </div>`;
+}
+```
+
+```{ojs}
 // CR-063 Phase A — FAOSTAT production trends.
 // Two view types share a single chart function:
 //   "line"       → Togo SAT Figure 1 style; one line per commodity.
@@ -6277,6 +6309,7 @@ chart_productionTrends = () => {
           ...d,
           stackValue: d.value_raw ?? d.value,
           stackType: "raw",
+          stratumItems: d.rawItems ?? [],
         };
         if ((d.value_processed ?? 0) <= 0) return [rawPart];
         return [
@@ -6285,10 +6318,16 @@ chart_productionTrends = () => {
             ...d,
             stackValue: d.value_processed,
             stackType: "processed",
+            stratumItems: d.processedItems ?? [],
           },
         ];
       })
-    : _data.map((d) => ({ ...d, stackValue: d.value, stackType: "raw" }));
+    : _data.map((d) => ({
+        ...d,
+        stackValue: d.value,
+        stackType: "raw",
+        stratumItems: d.rawItems ?? [],
+      }));
 
   const rectOpts = {
     x: "year",
@@ -6309,7 +6348,30 @@ chart_productionTrends = () => {
           `${formatNumCompactShort()(d.stackValue)} ${d.unit ?? ""}`,
         label: "Value",
       },
-      ...(showSplit ? { Type: "stackType" } : {}),
+      ...(showSplit
+        ? {
+            Type: "stackType",
+            // Skip raw items when the only raw item is named the same
+            // as the rolled-up group (the common case — e.g. "Cocoa"
+            // group raw = just "Cocoa beans" wouldn't be useful, but
+            // listing all 3 cocoa-processed items is).
+            Items: {
+              value: (d) => {
+                const items = d.stratumItems ?? [];
+                if (items.length === 0) return null;
+                if (
+                  d.stackType === "raw" &&
+                  items.length === 1 &&
+                  items[0] === d.commodity
+                ) {
+                  return null;
+                }
+                return items.join(", ");
+              },
+              label: "Items",
+            },
+          }
+        : {}),
     },
     ...(showSplit
       ? { z: (d) => `${d.commodity}|${d.stackType}` }
@@ -6395,6 +6457,7 @@ chart_productionTrends = () => {
 
   return html`<div>
     ${plot}
+    ${productionByproductsLegend()}
     ${captionDetails(caption, undefined, downloadButton(productionTrends_data, "productionTrends"))}
   </div>`;
 };
@@ -6501,10 +6564,23 @@ treemap_productionTrends = () => {
         : 1;
       const procH = isSplit ? h * (1 - rawFrac) : 0;
       const rawH = h - procH;
+      // Tooltip — multi-line when the split is active so users can see
+      // exactly which FAOSTAT items are summed into raw + processed.
+      // Raw item list is suppressed when the single raw item is named
+      // the same as the rolled-up group (common case).
+      const rawItems = leaf.data.rawItems ?? [];
+      const procItems = leaf.data.processedItems ?? [];
+      const showRawList =
+        rawItems.length > 0 &&
+        !(rawItems.length === 1 && rawItems[0] === label);
       const tipText = isSplit
-        ? `${admin} — ${label} (${leaf.data.year}): ${valueText} ` +
-          `(raw ${fmtVal(leaf.data.value_raw)}, ` +
-          `processed ${fmtVal(leaf.data.value_processed)})`
+        ? [
+            `${admin} — ${label} (${leaf.data.year}): ${valueText}`,
+            `Raw: ${fmtVal(leaf.data.value_raw)}` +
+              (showRawList ? ` (${rawItems.join(", ")})` : ""),
+            `Byproducts: ${fmtVal(leaf.data.value_processed)}` +
+              (procItems.length > 0 ? ` (${procItems.join(", ")})` : ""),
+          ].join("\n")
         : `${admin} — ${label} (${leaf.data.year}): ${valueText}`;
       const textFill = treemapTextColor(fillColor);
       const haloFill = textFill === "#fff" ? "#000" : "#fff";
@@ -6607,7 +6683,8 @@ treemap_productionTrends = () => {
 
   const wrap = html`<div>
     <h2 style="font-size: 1.05rem; font-weight: 600; margin: 0 0 0.4rem;">${productionVar.label} — ${yEnd}</h2>
-    <div class="cr-treemap-tip" role="tooltip"></div>
+    ${productionByproductsLegend()}
+    <div class="cr-treemap-tip" role="tooltip" style="white-space: pre-line;"></div>
     <div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: ${gap}px;">
       ${admins.map(buildOne)}
     </div>
