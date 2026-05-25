@@ -3946,6 +3946,16 @@ adminNames = await FileAttachment("/data/shared/atlas_countries.json").json();
 iso3ToTranslation = Object.fromEntries(
   adminNames.map(({ iso3c, translation }) => [iso3c, translation]),
 );
+
+// iso3 → English admin0_name (e.g. "AGO" → "Angola"). Lets DuckDB
+// queries drop `admin0_name` from their SELECT lists — the value is a
+// small fixed per-iso3 string already shipped in atlas_countries.json,
+// so fetching it from a multi-MB parquet column chunk on every cold
+// query is wasted bandwidth. Consumers attach the name in JS after
+// the query returns.
+iso3ToAdmin0Name = new Map(
+  adminNames.map(({ iso3c, admin0_name }) => [iso3c, admin0_name]),
+);
 ```
 
 ```{ojs}
@@ -4581,10 +4591,19 @@ futureProjections_data = {
   // subsequent switches between HSH-max and PTOT.
   const requiredHazards = [...new Set([climateVarSelect.id, "HSH-max", "PTOT"])];
 
+  // When no admin1 is selected we only want the country aggregate
+  // (admin1_name IS NULL). The OR-IS-NULL form with an empty IN list
+  // (`admin1_name in ('')`) still forces DuckDB to evaluate the IN
+  // arm against candidate row groups — wasted work, no matches.
+  // Single-arm IS NULL is faster and lets the row-group skip fire on
+  // the admin1_name stats if they exist.
+  const admin1Predicate = admin1Names.length > 0
+    ? `AND (admin1_name in ${sqlList(admin1Names)} OR admin1_name IS NULL)`
+    : `AND admin1_name IS NULL`;
+
   const resp = await dbFutureHive.query(`
   SELECT
     iso3,
-    admin0_name,
     admin1_name,
     season,
     scenario,
@@ -4598,17 +4617,21 @@ futureProjections_data = {
   FROM futureProjections
     where 1=1
     AND iso3 in ${sqlList(admin0Iso3)}
-    AND (
-     admin1_name in ${sqlList(admin1Names)}
-     OR admin1_name IS NULL
-    )
+    ${admin1Predicate}
     ${sqlWhereNull({ field: "season", value: _season })}
     AND timeperiod = '${futurePeriodSelect}'
     AND scenario in ${sqlList(futureScenarioSelect.map((d) => d.toLowerCase()))}
     AND hazard in ${sqlList(requiredHazards)}
   `);
 
-  return withAdminName(resp);
+  // admin0_name is dropped from the SELECT (one fewer column-chunk
+  // fetch per cold query). Reattach from the iso3 lookup before
+  // returning — downstream consumers (extremeEvents, Quick Insights,
+  // narrative builders) read d.admin0_name as a stable English name.
+  return withAdminName(resp).map((r) => ({
+    ...r,
+    admin0_name: iso3ToAdmin0Name.get(r.iso3) ?? r.iso3,
+  }));
 }
 
 futureProjections_data;
