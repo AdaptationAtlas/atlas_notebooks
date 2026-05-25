@@ -352,7 +352,7 @@ htl.html`<div style="padding: 8px 12px; background: #f7f7f7; border-left: 3px so
       verdict = `Predicate pushdown PARTIAL — ${r23.toFixed(1)}× speedup. Row-group skipping is firing but moderately; possibly some iso3s are spread across many row groups.`;
       color = "#a60";
     } else {
-      verdict = `Predicate pushdown BLOCKED — ${r23.toFixed(1)}× speedup only. The parquet has one giant row group or NULL stats on iso3.`;
+      verdict = `Predicate pushdown INEFFECTIVE — ${r23.toFixed(1)}× speedup only. Row-group skipping doesn't fire meaningfully on this file — either it's too small for the overhead, or iso3 isn't well-clustered across groups. Pipeline-side STAGE D evidence shows a rebake (multi-row-group + stats) doesn't help here.`;
       color = "#b00";
     }
 
@@ -547,7 +547,7 @@ htl.html`<div style="padding: 8px 12px; background: #f7f7f7; border-left: 3px so
 
 ## Read the table (verbose diagnostics)
 
-- **L2 vs L3** — L2 is "no predicate" (full file scan, just projection); L3 adds `WHERE iso3 = '<one>'`. The ratio is the direct measurement of predicate pushdown. ≥5× = pushdown working; 2–5× = partial (likely iso3 spread across many row groups); <2× = blocked (one giant row group or NULL stats).
+- **L2 vs L3** — L2 is "no predicate" (full file scan, just projection); L3 adds `WHERE iso3 = '<one>'`. The ratio is the direct measurement of predicate pushdown. ≥5× = pushdown working; 2–5× = partial (likely iso3 spread across many row groups); <2× = ineffective on this file (file too small for row-group skipping to matter, or iso3 not well-clustered — STAGE D log shows rebaking doesn't help these files).
 - **L3 vs L7** — single-iso3 vs 5-iso3 IN-list. If L7 ≈ L3, DuckDB handles multi-value predicates efficiently. If L7 ≫ L3, row-group skipping degrades on IN-lists — relevant because production queries often select multiple countries.
 - **L4** is the cold-fetch floor (just the parquet footer). L3 cannot beat it. The L3→L4 ratio shows how much headroom is left from L3 to the file's minimum cost.
 - **L5** is the warm-cache reference — same SQL as L3 but reuses L3's URL so DuckDB's object cache hits. Production users get this on any query AFTER the first against a given file. L3→L5 = the warm speedup factor.

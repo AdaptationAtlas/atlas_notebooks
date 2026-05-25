@@ -4080,22 +4080,16 @@ periodsAdm1URL = observationalSources.base + observationalSources.periodsAdm1;
 // gaul0_code with the largest admin1 count reliably resolves to the
 // main country polygon. Consumed by the lifted observational data
 // fetch in the Recent Changes section.
+//
+// CR-089 fix: this was an L2-shape GROUP-BY query against the ~50 MB
+// adm1_obs.parquet at page load — 15-30 s of cold-start cost for a
+// 53-row result that never changes within a session. Now loaded from
+// a precomputed static JSON. Regenerate with
+// `scripts/precompute_mainGaul.sh` when the GAUL boundaries change.
 mainGaul = {
-  const resp = await db.query(`
-    WITH per_polygon AS (
-      SELECT iso3, gaul0_code, COUNT(DISTINCT admin1_name) AS n_admin1
-      FROM read_parquet('${monthlyAdm1URL}')
-      GROUP BY iso3, gaul0_code
-    ),
-    ranked AS (
-      SELECT iso3, gaul0_code,
-             ROW_NUMBER() OVER (PARTITION BY iso3 ORDER BY n_admin1 DESC) AS rn
-      FROM per_polygon
-    )
-    SELECT iso3, gaul0_code FROM ranked WHERE rn = 1
-  `);
+  const obj = await FileAttachment("/data/climateRationale/mainGaul.json").json();
   const map = new Map();
-  for (const row of resp) map.set(row.iso3, row.gaul0_code);
+  for (const [iso3, gaul0_code] of Object.entries(obj)) map.set(iso3, gaul0_code);
   return map;
 }
 
