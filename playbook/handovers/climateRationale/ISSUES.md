@@ -1873,7 +1873,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **discovered:** 2026-05-25 evening, during parquet-pushdown sandbox investigation.
 
-- **STATUS:** Open. Notebook-only fix if option 1.
+- **STATUS:** **PROMOTED — leading suspect 2026-05-25 evening** after CR-090 closed-as-rejected. Sandbox single-file L3 (cold projection + single-iso3 predicate) measures ~14 s for CMIP6 and ~10 s for adm0_obs — far below the production 70 s pain. The most likely remaining contributor is this lookup running at page load. Pick option 1 (precompute to JSON) for the cleanest fix; a future PR-group entry will fold this into the production notebook.
 
 - **before-string:** `mainGaul = {` at [notebook.qmd:4083](../../../notebooks/climateRationale/notebook.qmd#L4083).
 
@@ -1903,7 +1903,16 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **discovered:** 2026-05-25 evening. Predicted via inspection during parquet-pushdown sandbox investigation.
 
-- **STATUS:** Open. Sandbox L6 lever pending; production fix gated on its result.
+- **STATUS:** **CLOSED — hypothesis rejected 2026-05-25 evening.** The L6 lever in `notebooks/sandbox/parquet_pushdown_perf.qmd` ran the 4-file `parquet_scan` view with both predicate shapes against cache-busted URLs:
+
+  ```
+  Variant                              Query (ms)   Rows
+  L6a — WHERE period (raw)               11,794    176,472
+  L6b — WHERE timeperiod (aliased)       12,623    176,472
+  ratio (aliased / raw)                   1.07×
+  ```
+
+  DuckDB does push the predicate through the view alias on hive-partition columns. The 1.07× difference is well within S3 latency noise — runs of the same query vary 1.5–2× across re-runs. **No production fix needed for `dbFutureHive`.** The residual 70 s notebook pain is elsewhere; primary suspect is now CR-089 (`mainGaul` lookup at page load) plus possibly cumulative cold-fetch overhead across multiple page-load queries.
 
 - **before-string:** `CREATE VIEW futureProjections as` at [notebook.qmd:4125](../../../notebooks/climateRationale/notebook.qmd#L4125).
 
