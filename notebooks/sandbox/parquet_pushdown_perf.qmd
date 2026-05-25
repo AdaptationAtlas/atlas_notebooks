@@ -266,17 +266,14 @@ htl.html`<div style="padding: 8px 12px; background: #f7f7f7; border-left: 3px so
 
 ## Results — single-file matrix
 
+> **For byte counts, open Chrome devtools → Network → filter `digital-atlas`.** The Resource Timing API doesn't see DuckDB-WASM's worker-initiated fetches, so the sandbox can't surface bytes-downloaded inline. Wall-clock time is the source of truth here.
+
 ```{ojs}
 {
   if (streamRows.length === 0) {
     return htl.html`<p style="color: #888; font-style: italic;">Click "Run all" above to populate the table. Rows stream in as each lever finishes.</p>`;
   }
   const fmtMs = (v) => v == null ? "—" : v.toLocaleString();
-  const fmtBytes = (v) =>
-    v == null ? "—"
-    : v >= 1e6 ? `${(v / 1e6).toFixed(2)} MB`
-    : v >= 1e3 ? `${(v / 1e3).toFixed(1)} KB`
-    : `${v} B`;
   const fmtRows = (v) => v == null ? "—" : v.toLocaleString();
   return htl.html`<div style="overflow-x: auto;">
     <table style="border-collapse: collapse; width: 100%; font-size: 0.9rem;">
@@ -284,8 +281,6 @@ htl.html`<div style="padding: 8px 12px; background: #f7f7f7; border-left: 3px so
         <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Target</th>
         <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Lever</th>
         <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">Query (ms)</th>
-        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">HTTP reqs</th>
-        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">Bytes</th>
         <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">Rows</th>
         <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Error</th>
       </tr></thead>
@@ -293,8 +288,6 @@ htl.html`<div style="padding: 8px 12px; background: #f7f7f7; border-left: 3px so
         <td style="padding: 6px 8px; font-family: monospace; font-size: 0.78rem;">${r.target}</td>
         <td style="padding: 6px 8px;">${r.lever}</td>
         <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${fmtMs(r.query_ms)}</td>
-        <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${r.http_reqs}</td>
-        <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${fmtBytes(r.http_bytes)}</td>
         <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${fmtRows(r.rows_returned)}</td>
         <td style="padding: 6px 8px; color: #b00; font-size: 0.78rem;">${r.error ?? ""}</td>
       </tr>`)}</tbody>
@@ -525,7 +518,7 @@ htl.html`<div style="padding: 8px 12px; background: #f7f7f7; border-left: 3px so
 
 ## Read the table (verbose diagnostics)
 
-- **L1 vs L2 (Bytes column, if non-zero)** — if `Bytes` drops sharply, the parquet reader is fetching only the relevant column chunks (projection pushdown working). If it stays flat, the reader is pulling more than asked. With `Bytes` reading 0 in the table here, fall back to Chrome's Network panel for byte-level verification.
+- **L1 vs L2 (Query (ms))** — if L2 finishes faster than L1 by a wide margin AND the devtools Network panel shows L2 fetching fewer bytes, projection pushdown is working. If both are similar, the parquet reader pulls all column chunks regardless of SELECT list.
 - **L2 vs L3 (Query (ms))** — if L3 finishes much faster than L2, predicate pushdown is also working: row-group skipping is firing because the parquet has usable per-row-group `min/max` stats on `iso3`. If L3 ≈ L2, predicate pushdown is blocked — the parquet has one giant row group or NULL stats, and a rebake is the only remaining lever.
 - **L4** is the floor. L3 cannot beat L4. The `L3→L4` ratio in the verdict block tells you how much headroom is left at the file boundary.
 - **L5** is the warm-cache reference. Production users get warm-cache behaviour on any query AFTER the first one against a given file in a given session — so the cold-start pain is really an L1-vs-L4 gap, not an L1-vs-L5 gap.
