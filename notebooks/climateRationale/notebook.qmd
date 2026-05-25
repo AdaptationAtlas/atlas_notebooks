@@ -2348,6 +2348,19 @@ viewof mapPalette_obs = Inputs.select(
 );
 ```
 
+```{ojs}
+// Default OFF — discrete CHIRPS / CHIRTS-ERA5 cells render as
+// individual blocks, preserving the true ~5 km resolution of the
+// underlying raster. Toggle ON to enable browser bilinear/bicubic
+// interpolation between adjacent cells for a smoother presentation
+// look (does not change the underlying values). See nbText
+// sections.recentChanges.help.mapRendering for the help copy.
+viewof mapSmooth_obs = Inputs.toggle({
+  label: "Smooth map (interpolate between raster cells)",
+  value: false,
+});
+```
+
 :::
 
 ```{ojs}
@@ -2803,9 +2816,25 @@ recentChangesMap_obs = {
   display.style.display = "block";
   display.style.border = "1px solid #ddd";
   display.style.background = "#fafafa";
+  // Two-stage upsample fidelity. The canvas-internal upsample (offscreen
+  // sw×sh → display W×H) is governed by ctx.imageSmoothingEnabled below.
+  // BUT on retina / high-DPR displays the browser then does a SECOND
+  // upsample from CSS pixels to physical pixels (CSS 600 → physical
+  // ~1200 at DPR 2), and that one uses CSS `image-rendering` rather
+  // than the canvas setting. If we don't also pin image-rendering, the
+  // nearest-neighbour cells from stage 1 get re-blurred at stage 2 and
+  // the toggle appears to do nothing. `pixelated` matches the canvas
+  // setting for nearest-neighbour; `auto` lets the browser smooth.
+  display.style.imageRendering = mapSmooth_obs ? "auto" : "pixelated";
   const dctx = display.getContext("2d");
-  dctx.imageSmoothingEnabled = true;
-  dctx.imageSmoothingQuality = "high";
+  // Default: nearest-neighbour upsample so each native raster cell
+  // (CHIRPS / CHIRTS-ERA5 ≈ 0.05°, ~5 km) renders as a discrete
+  // block. Pete flagged 2026-05-25 that the previously-default
+  // "high"-quality smoothing made the map look artificially gradiented
+  // and did not reflect the true underlying raster. Toggle below lets
+  // the user opt back into the smoothed rendering for presentation.
+  dctx.imageSmoothingEnabled = mapSmooth_obs;
+  if (mapSmooth_obs) dctx.imageSmoothingQuality = "high";
 
   const tx = (lon) => (lon - actualRenderBbox.xmin) / (actualRenderBbox.xmax - actualRenderBbox.xmin) * W;
   const ty = (lat) => (actualRenderBbox.ymax - lat) / (actualRenderBbox.ymax - actualRenderBbox.ymin) * H;
@@ -2831,7 +2860,33 @@ recentChangesMap_obs = {
   renderFeatures.forEach((f) => combinedMask.addPath(buildPath2D(f)));
   dctx.save();
   dctx.clip(combinedMask, "evenodd");
-  dctx.drawImage(offscreen, 0, 0, W, H);
+  if (mapSmooth_obs) {
+    // Smoothed path: bilinear/bicubic upsample via drawImage.
+    dctx.drawImage(offscreen, 0, 0, W, H);
+  } else {
+    // Faithful raster path: paint each native cell as an explicit
+    // fillRect on the display canvas. Bypasses drawImage's upsample,
+    // ctx.imageSmoothingEnabled, and CSS image-rendering entirely —
+    // a browser cannot smooth explicit fillRect calls. (Setting
+    // imageSmoothingEnabled = false alone produced visually identical
+    // output on Pete's setup; the rectangle-paint path is the
+    // reliable way to guarantee discrete cells.)
+    const cellW = W / sw;
+    const cellH = H / sh;
+    for (let row = 0; row < sh; row++) {
+      const cy = row * cellH;
+      for (let col = 0; col < sw; col++) {
+        const v = data[(sy1 + row) * cw + (sx1 + col)];
+        if (isNoData(v)) continue;
+        const c = colorRamp_obs(v, activeStops);
+        if (!c) continue;
+        // Add a small +0.5 px overlap on adjacent cells so rounding
+        // doesn't leave thin background-coloured seams between cells.
+        dctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${c[3] / 255})`;
+        dctx.fillRect(col * cellW, cy, cellW + 0.5, cellH + 0.5);
+      }
+    }
+  }
   dctx.restore();
 
   // SVG overlay: thin admin1 lines + bold selected-admin1 accents.
@@ -2923,7 +2978,7 @@ recentChangesMap_obs = {
   const statLabel = mapStat_obs === "mean" ? "1991-2020 mean" : `1991-2020 ${mapStat_obs}`;
   const fetchSec = (countryRaster_obs.fetchMs / 1000).toFixed(1);
   const rangeStr = nValid > 0 ? `data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "no valid pixels";
-  setStatus(`${climateVarSelect.id} ${seasonSelect.season} (${statLabel}) for ${renderLabel} · country fetch ${fetchSec}s · sub-window ${sw}×${sh} → ${W}×${H} · ${rangeStr} · ramp: ${rampLabel}`);
+  setStatus(`${climateVarSelect.id} ${seasonSelect.season} (${statLabel}) for ${renderLabel} · country fetch ${fetchSec}s · sub-window ${sw}×${sh} → ${W}×${H} · ${rangeStr} · ramp: ${rampLabel} · ${mapSmooth_obs ? "smoothed" : "raster cells"}`);
 
   // Issues #4 + #5: download button moves below the map, styled
   // identically to the chart's split-button via chartDownloadMenu.
