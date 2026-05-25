@@ -2865,25 +2865,32 @@ recentChangesMap_obs = {
     dctx.drawImage(offscreen, 0, 0, W, H);
   } else {
     // Faithful raster path: paint each native cell as an explicit
-    // fillRect on the display canvas. Bypasses drawImage's upsample,
-    // ctx.imageSmoothingEnabled, and CSS image-rendering entirely —
-    // a browser cannot smooth explicit fillRect calls. (Setting
-    // imageSmoothingEnabled = false alone produced visually identical
-    // output on Pete's setup; the rectangle-paint path is the
-    // reliable way to guarantee discrete cells.)
+    // fillRect with INTEGER pixel boundaries. Browsers antialias
+    // fillRect when its coordinates land between pixels, so the
+    // earlier `col * cellW` (float) version was still visibly soft
+    // at cell edges. Pre-computing per-row / per-col integer pixel
+    // ranges via Math.round means adjacent cells tile exactly —
+    // no overlap, no gaps, no subpixel edge rendering.
     const cellW = W / sw;
     const cellH = H / sh;
+    // Per-column / per-row pixel boundaries, computed once.
+    const colX = new Int32Array(sw + 1);
+    for (let i = 0; i <= sw; i++) colX[i] = Math.round(i * cellW);
+    const rowY = new Int32Array(sh + 1);
+    for (let i = 0; i <= sh; i++) rowY[i] = Math.round(i * cellH);
     for (let row = 0; row < sh; row++) {
-      const cy = row * cellH;
+      const y0 = rowY[row];
+      const rh = rowY[row + 1] - y0;
+      const rowBase = (sy1 + row) * cw;
       for (let col = 0; col < sw; col++) {
-        const v = data[(sy1 + row) * cw + (sx1 + col)];
+        const v = data[rowBase + sx1 + col];
         if (isNoData(v)) continue;
         const c = colorRamp_obs(v, activeStops);
         if (!c) continue;
-        // Add a small +0.5 px overlap on adjacent cells so rounding
-        // doesn't leave thin background-coloured seams between cells.
+        const x0 = colX[col];
+        const rw = colX[col + 1] - x0;
         dctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${c[3] / 255})`;
-        dctx.fillRect(col * cellW, cy, cellW + 0.5, cellH + 0.5);
+        dctx.fillRect(x0, y0, rw, rh);
       }
     }
   }
