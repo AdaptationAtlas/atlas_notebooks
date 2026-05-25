@@ -75,8 +75,8 @@ perfLevers = [
     cacheBust: true,
     pragmas: ["SET enable_object_cache = true", "SET enable_http_metadata_cache = true"],
     hypothesis: "Baseline: no projection, no predicate. DuckDB has to fetch column chunks for every column.",
-    sqlTemplate: "SELECT * FROM read_parquet('<url>') LIMIT 1000000",
-    query: (t, url) => `SELECT * FROM read_parquet('${url}') LIMIT 1000000`
+    sqlTemplate: "SELECT * FROM read_parquet('<url>') LIMIT 10000",
+    query: (t, url) => `SELECT * FROM read_parquet('${url}') LIMIT 10000`
   },
   {
     key: "L2_cold_select_cols",
@@ -216,9 +216,11 @@ mutable streamStatus = "Idle — click 'Run all' to populate the table.";
 ```
 
 ```{ojs}
-// Async runner. Writes to mutables as each lever completes so the table
-// and verdict cells re-render incrementally instead of waiting ~3 min
-// for the whole matrix.
+// Async runner. Uses a LOCAL `acc` array as the source of truth and
+// publishes snapshots via `mutable streamRows = acc`. Critically does NOT
+// read `streamRows` inside this cell — Observable would treat that as a
+// dependency and re-execute the cell on every mutable write, causing a
+// runaway loop (and the visible "page flashing" symptom).
 streamRunner = {
   const nonce = runNonce;
   if (!nonce) {
@@ -226,7 +228,8 @@ streamRunner = {
     mutable streamStatus = "Idle — click 'Run all' to populate the table.";
     return null;
   }
-  mutable streamRows = [];
+  let acc = [];
+  mutable streamRows = acc;
   let i = 0;
   const total = perfTargets.length * perfLevers.length;
   for (const target of perfTargets) {
@@ -235,9 +238,10 @@ streamRunner = {
       mutable streamStatus = `Running ${i}/${total} — ${target.key} • ${lever.label}…`;
       try {
         const r = await runOne(sandboxDb, target, lever, nonce);
-        mutable streamRows = [...streamRows, r];
+        acc = [...acc, r];
+        mutable streamRows = acc;
       } catch (e) {
-        mutable streamRows = [...streamRows, {
+        acc = [...acc, {
           target: target.key,
           lever: lever.label,
           leverKey: lever.key,
@@ -247,11 +251,12 @@ streamRunner = {
           rows_returned: null,
           error: String(e)
         }];
+        mutable streamRows = acc;
       }
     }
   }
   mutable streamStatus = `Done — ${total} runs completed at ${new Date().toLocaleTimeString()}.`;
-  return streamRows;
+  return acc;
 }
 ```
 
