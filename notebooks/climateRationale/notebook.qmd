@@ -4569,6 +4569,18 @@ recentChanges_plotData = recentChanges_data.filter((d) => d.hazard === climateVa
 futureProjections_data = {
   const _season = seasonSelect.season;
 
+  // Hazards we actually need: the user-selected one (for the main chart
+  // + table + downloads) plus HSH-max (temperature paragraph) and PTOT
+  // (precipitation paragraph) which the Quick Insights builder at
+  // `climateProjectionInsight` always renders regardless of selection.
+  // Deduped because the selected hazard is often HSH-max or PTOT.
+  // Narrowing from all 9 hazards to 2-3 cuts cold-fetch bytes ~3-4×.
+  // Trade-off: switching the selected hazard now triggers a refetch
+  // instead of just a JS filter — accepted since hazard switches are
+  // uncommon during initial exploration, and the warm cache catches
+  // subsequent switches between HSH-max and PTOT.
+  const requiredHazards = [...new Set([climateVarSelect.id, "HSH-max", "PTOT"])];
+
   const resp = await dbFutureHive.query(`
   SELECT
     iso3,
@@ -4593,6 +4605,7 @@ futureProjections_data = {
     ${sqlWhereNull({ field: "season", value: _season })}
     AND timeperiod = '${futurePeriodSelect}'
     AND scenario in ${sqlList(futureScenarioSelect.map((d) => d.toLowerCase()))}
+    AND hazard in ${sqlList(requiredHazards)}
   `);
 
   return withAdminName(resp);
