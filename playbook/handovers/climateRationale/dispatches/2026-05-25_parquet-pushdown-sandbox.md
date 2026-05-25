@@ -184,3 +184,26 @@ It would be tempting to skip the staging step and just write `.fixed.parquet` si
 - Existing observational COG sandbox (loose precedent for the qmd structure): `notebooks/sandbox/obs_qaqc.qmd`.
 - DuckDB-WASM HTTP range-request reference: https://duckdb.org/docs/extensions/httpfs.html — although DuckDB-WASM's behaviour is the subject of the test, not the spec.
 - Convention memory: `feedback-parquet-authoring-for-duckdb-wasm`.
+
+---
+
+## STATUS UPDATE — 2026-05-25 (end of day)
+
+Pipeline side (hazards_prototype, `develop`): ✅ done through STAGE D.
+
+- STAGE A + B: dry-run clean across all 15 targets.
+- STAGE B2: canonical-only baseline confirmed CLI fetches ~1.5-2.0 s each (not the 30-70 s the parent dispatch quoted — that was a DuckDB-WASM-in-browser measurement).
+- STAGE C: real rebake + upload to `s3://digital-atlas/sandbox/parquet-pushdown/<canonical-path>` — all 15 targets `uploaded`. Required two follow-up fixes: (a) hazards_prototype `ad7448f` adding `ACL = "public-read"` to the s3fs upload (without it anonymous HTTPS reads returned HTTP 0); (b) an in-place `aws s3 cp --acl public-read --metadata-directive REPLACE` to fix the ACL on the already-uploaded files. Both done; sandbox URLs now return rows.
+- STAGE D (CLI A/B): all 9 queries show `rows_match: ok` (correctness gate ✓). **CLI speedup is 0.4x–1.1x — i.e. no meaningful gain, and the big-file targets (`hazard_exposure_multi`, `cmip6_2021_2040`, `exposure_crop_livestock`) are 25-160 % SLOWER in the sandbox.** Cause: those files grew (+37 % to +257 %) under DuckDB's PLAIN-string-column encoding vs the original arrow dictionary path, and the CLI's HTTP range fetcher was already efficient on canonical — so the size penalty dominates. Logged at `hazards_prototype/logs/Dpush_speedup_20260525_121356.log`.
+
+Notebook side (atlas_notebooks, `dev/climateRationale`):
+
+- **The STAGE E sandbox notebook (`notebooks/sandbox/parquet_pushdown_perf.qmd`) is being built in a separate work instance**. This dispatch is the spec it should follow. When that lands, this dispatch's validation matrix step 4 ("Open the sandbox notebook locally...") becomes the next gate.
+
+Pending gate decisions (after STAGE E lands):
+
+1. **Promote all 15** if browser A/B shows ≥ 5x speedup on the obs + faostat targets and ≥ 2x elsewhere.
+2. **Promote a subset** if browser shows the smaller files win clearly but `hazard_exposure_multi` / `exposure_crop_livestock` don't beat the size penalty. In that case, leave those two on canonical and revert the corresponding entries from the rebake's TARGETS list.
+3. **Promote none** if browser-side speedup is also negligible. That'd mean the dispatch's "69 s" measurement was either stale or specific to a now-fixed DuckDB-WASM bug. Document the finding, delete the sandbox prefix, walk away with the lesson.
+
+The sandbox-prefix S3 layout means option (3) is `aws s3 rm --recursive s3://digital-atlas/sandbox/parquet-pushdown/` — one command, zero impact on production.

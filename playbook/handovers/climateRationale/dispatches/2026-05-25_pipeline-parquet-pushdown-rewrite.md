@@ -376,3 +376,23 @@ The quick-fix rebake script handles these on S3 directly. To prevent regression,
 - Diagnosis: `atlas_notebooks/playbook/handovers/climateRationale/dispatches/2026-05-22_recent-changes-followups.md` Follow-up 1.
 - DuckDB metadata reference: https://duckdb.org/docs/data/parquet/metadata.html — `parquet_metadata(file)` is the canonical verification surface.
 - arrow R reference: https://arrow.apache.org/docs/r/reference/write_parquet.html — `chunk_size` is the row-group sizing parameter, `write_statistics` defaults to TRUE in recent arrow versions but we pass it explicitly to be defensive against version drift.
+
+---
+
+## STATUS UPDATE — 2026-05-25 (end of day)
+
+Producer-side work landed in hazards_prototype `f365fe5` (six of seven scripts migrated to the shared `write_parquet_pushdown()` helper at `R/_helpers.R`; `3_freq_x_exposure.R` deferred until the in-flight issue-#9 rebake completes — it has thousands of small per-group writes and the helper's verify step needs row-group tuning before it goes in cleanly).
+
+Several iteration learnings worth flagging here so the next person doesn't repeat them:
+
+1. **`arrow::write_parquet(..., write_statistics = TRUE)` does NOT actually populate column stats on string columns** when `use_dictionary = TRUE` (the arrow default for character cols) — stats are written against the dictionary indices and DuckDB's `parquet_metadata()` returns NULL stats_min/max. Setting `use_dictionary = FALSE` is necessary but not sufficient (R factor columns still write dict-encoded). The `column_encoding = list(<col> = "PLAIN")` kwarg would solve it but **isn't available in older arrow R versions** (the one on CGlabs jovyan errors with `unused argument`).
+
+2. **Switching the actual write to DuckDB's `COPY TO PARQUET`** is the reliable path on a heterogeneous fleet. DuckDB writes strings as VARCHAR with populated stats, and the helper is already calling DuckDB for the post-write verification step so the dependency is already in place. The producer-side helper at `R/_helpers.R::write_parquet_pushdown` now uses this path (commits `b754f74`, `7dae8e8`).
+
+3. **`COMPRESSION_LEVEL 9` is required** in the DuckDB COPY clause — its default zstd level is ~3 (vs the original arrow path's level 9) and big files grow ~40 % without the override. Requires DuckDB ≥ 0.10.
+
+4. **`a0_gdp`, `a0_landuse`, `poverty` are small enough (< 1500 rows)** that they naturally end up in a single row group and the "≥ 2 row groups" verify check fails. Helper now treats < 50K rows as "pushdown N/A, single group is fine" (commit `4f164cd`).
+
+5. **DuckDB CLI was already fast on canonical** (1.5-2 s) — see the sandbox dispatch's STATUS UPDATE for details. CLI A/B does not surface a meaningful speedup; the rebake's gate is the in-browser sandbox notebook (separate dispatch).
+
+Companion dispatch: `2026-05-25_parquet-pushdown-sandbox.md` — describes the S3 staging area + browser-side sandbox notebook that supersedes this dispatch's "manual-swap on `.fixed.parquet` sidecars" workflow. Rebakes now upload to `s3://digital-atlas/sandbox/parquet-pushdown/<canonical-path>` and only promote to canonical after the sandbox notebook's browser A/B passes.
