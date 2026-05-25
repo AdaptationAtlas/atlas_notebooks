@@ -5,20 +5,136 @@ date-created: "2026-05-25"
 
 # Parquet pushdown — in-browser perf sandbox
 
-A focused A/B testbed for cold-start fetch performance against the canonical
-S3 parquets via DuckDB-WASM. Goal: identify wins available **without**
-re-baking the parquets — projection pushdown, predicate pushdown, metadata-only
-queries, and httpfs cache effects. If the floor is "fetch the whole file
-regardless", that's the diagnostic that justifies the rebake-and-promote path
-from `2026-05-25_parquet-pushdown-sandbox.md`.
+A focused A/B testbed for cold-start fetch performance against the canonical S3 parquets via DuckDB-WASM. We measure wall-clock time across a small matrix of {target, lever} so the wins (and losses) are direct and comparable. Every cold-lever run cache-busts its URL so the parquet has to be re-fetched.
 
-Two slow-loading datasets from the climateRationale notebook:
+## Why this exists
 
-- `adm0_obs_periods` — CHIRPS+CHIRTS-ERA5 observational decadal stats (admin0).
-  Dispatch flagged as ~69 s in browser; the historical pain point.
-- `cmip6_2021-2040` — NEX-GDDP-CMIP6 ensemble season timeseries, one period
-  parquet. Representative of the multi-file `parquet_scan([...])` pattern
-  used in `dbFutureHive`.
+The dispatch series (`2026-05-25_parquet-pushdown-sandbox.md`) tracked a ~70 s cold-start fetch in the production Climate Rationale notebook. Two competing hypotheses:
+
+- **H1 — parquet shape.** Canonical parquets ship with one giant row group + NULL filter-column stats → DuckDB-WASM can't skip work and pulls the whole file.
+- **H2 — query shape.** The notebook's query is shaped in a way that defeats pushdown (no predicate, wrong column name, aliasing through views) even though the parquet itself is fine.
+
+The pipeline-side STAGE D log + the single-file matrix below reject H1: predicate pushdown works on the canonical files. This sandbox is now repurposed to isolate **which query shapes win vs lose**, so we can fix production without a rebake. The CR-090 multi-file alias test at the bottom is the next probe.
+
+## How to use it
+
+1. **Optional**: open Chrome devtools → Network tab → filter `digital-atlas`, tick "Disable cache" + "Preserve log".
+2. Click **Run all** under "Runner — single-file matrix". Each query writes a row to the table as it completes — rows stream in over ~3 min on a normal connection.
+3. Read the **Verdict** block (auto-computed once all 10 queries finish).
+4. Click **Run alias test** under "Multi-file alias test (CR-090)" to check whether `WHERE timeperiod = ...` (aliased) is slower than `WHERE period = ...` (raw partition column) on a 4-file `parquet_scan(...)` view — the leading hypothesis for the residual notebook pain.
+
+Wall-clock times jitter 1.5–2× between re-runs because of S3 latency. Compare ratios, not absolute timings.
+
+## The two datasets we test
+
+```{ojs}
+perfTargets = [
+  {
+    key: "adm0_obs_periods",
+    url: "s3://digital-atlas/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet",
+    cols: ["iso3", "variable", "period", "value_mean", "value_sd"],
+    isoCol: "iso3",
+    sampleIso: "AGO",
+    notes: "CHIRPS+CHIRTS-ERA5 admin0 decadal stats. ~5 MB compressed. Dispatch's original 70 s pain point."
+  },
+  {
+    key: "cmip6_2021-2040",
+    url: "s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2021-2040/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
+    cols: ["iso3", "scenario", "season", "year", "mean"],
+    isoCol: "iso3",
+    sampleIso: "AGO",
+    notes: "NEX-GDDP-CMIP6 ensemble timeseries, one period parquet. ~5 MB compressed. Production reads this via a 4-file UNION view (`dbFutureHive`)."
+  }
+];
+```
+
+```{ojs}
+htl.html`<table style="border-collapse: collapse; width: 100%; font-size: 0.85rem; margin-top: 0.5em;">
+  <thead><tr style="background: #f3f3f3; text-align: left;">
+    <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Key</th>
+    <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Columns projected</th>
+    <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Predicate</th>
+    <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Notes</th>
+  </tr></thead>
+  <tbody>${perfTargets.map(t => htl.html`<tr style="border-bottom: 1px solid #eee;">
+    <td style="padding: 6px 8px; font-family: monospace;">${t.key}</td>
+    <td style="padding: 6px 8px; font-family: monospace; font-size: 0.78rem;">${t.cols.join(", ")}</td>
+    <td style="padding: 6px 8px; font-family: monospace;">${t.isoCol} = '${t.sampleIso}'</td>
+    <td style="padding: 6px 8px; color: #555;">${t.notes}</td>
+  </tr>`)}</tbody>
+</table>`
+```
+
+## The five levers we run per target
+
+```{ojs}
+perfLevers = [
+  {
+    key: "L1_cold_select_all",
+    label: "Cold • SELECT *",
+    cacheBust: true,
+    pragmas: ["SET enable_object_cache = true", "SET enable_http_metadata_cache = true"],
+    hypothesis: "Baseline: no projection, no predicate. DuckDB has to fetch column chunks for every column.",
+    sqlTemplate: "SELECT * FROM read_parquet('<url>') LIMIT 1000000",
+    query: (t, url) => `SELECT * FROM read_parquet('${url}') LIMIT 1000000`
+  },
+  {
+    key: "L2_cold_select_cols",
+    label: "Cold • projection",
+    cacheBust: true,
+    pragmas: ["SET enable_object_cache = true", "SET enable_http_metadata_cache = true"],
+    hypothesis: "Projection pushdown: should fetch only the listed columns' chunks.",
+    sqlTemplate: "SELECT <cols> FROM read_parquet('<url>')",
+    query: (t, url) => `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}')`
+  },
+  {
+    key: "L3_cold_cols_predicate",
+    label: "Cold • projection + predicate",
+    cacheBust: true,
+    pragmas: ["SET enable_object_cache = true", "SET enable_http_metadata_cache = true"],
+    hypothesis: "Predicate pushdown on top of projection: should skip row groups that don't contain the iso3.",
+    sqlTemplate: "SELECT <cols> FROM read_parquet('<url>') WHERE <isoCol> = '<sampleIso>'",
+    query: (t, url) =>
+      `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}') WHERE ${t.isoCol} = '${t.sampleIso}'`
+  },
+  {
+    key: "L4_cold_metadata_only",
+    label: "Cold • parquet_metadata()",
+    cacheBust: true,
+    pragmas: ["SET enable_object_cache = true", "SET enable_http_metadata_cache = true"],
+    hypothesis: "Cold-fetch floor: just the parquet footer. L3 cannot beat this.",
+    sqlTemplate: "SELECT COUNT(*) FROM parquet_metadata('<url>')",
+    query: (t, url) => `SELECT COUNT(*) AS row_groups FROM parquet_metadata('${url}')`
+  },
+  {
+    key: "L5_warm_cols_predicate",
+    label: "Warm • projection + predicate",
+    cacheBust: false,
+    pragmas: ["SET enable_object_cache = true", "SET enable_http_metadata_cache = true"],
+    hypothesis: "Warm reference: same as L3 but reuses the URL (no cache-bust) so the object cache hits.",
+    sqlTemplate: "SELECT <cols> FROM read_parquet('<url>') WHERE <isoCol> = '<sampleIso>'",
+    query: (t, url) =>
+      `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}') WHERE ${t.isoCol} = '${t.sampleIso}'`
+  }
+];
+```
+
+```{ojs}
+htl.html`<table style="border-collapse: collapse; width: 100%; font-size: 0.85rem; margin-top: 0.5em;">
+  <thead><tr style="background: #f3f3f3; text-align: left;">
+    <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Key</th>
+    <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Label</th>
+    <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Cache-bust?</th>
+    <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">What it tests</th>
+  </tr></thead>
+  <tbody>${perfLevers.map(l => htl.html`<tr style="border-bottom: 1px solid #eee;">
+    <td style="padding: 6px 8px; font-family: monospace; font-size: 0.78rem;">${l.key}</td>
+    <td style="padding: 6px 8px;">${l.label}</td>
+    <td style="padding: 6px 8px; text-align: center;">${l.cacheBust ? "yes" : "no"}</td>
+    <td style="padding: 6px 8px; color: #555;">${l.hypothesis}</td>
+  </tr>`)}</tbody>
+</table>`
+```
 
 ## Setup
 
@@ -27,236 +143,397 @@ import { patchWindowsCache } from "/helpers/data.js";
 ```
 
 ```{ojs}
-// Two canonical S3 parquets to test. Add more by appending to this array.
-perfTargets = [
-  {
-    key: "adm0_obs_periods",
-    url: "s3://digital-atlas/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet",
-    cols: ["iso3", "variable", "period", "value"],
-    isoCol: "iso3",
-    sampleIso: "AGO"
-  },
-  {
-    key: "cmip6_2021-2040",
-    url: "s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2021-2040/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
-    cols: ["iso3", "scenario", "season", "year", "mean"],
-    isoCol: "iso3",
-    sampleIso: "AGO"
-  }
-];
-```
-
-```{ojs}
-// Levers to compare. Each entry yields one row per target in the results
-// table. `cacheBust: true` forces a unique URL so DuckDB's object cache
-// can't serve a warm hit — this is how we get a real cold measurement.
-// `pragmas` are SET statements run before the query.
-perfLevers = [
-  {
-    key: "L1_cold_select_all",
-    label: "Cold • SELECT *",
-    cacheBust: true,
-    pragmas: [
-      "SET enable_object_cache = true",
-      "SET enable_http_metadata_cache = true"
-    ],
-    query: (t, url) => `SELECT * FROM read_parquet('${url}') LIMIT 1000000`
-  },
-  {
-    key: "L2_cold_select_cols",
-    label: "Cold • projection pushdown",
-    cacheBust: true,
-    pragmas: [
-      "SET enable_object_cache = true",
-      "SET enable_http_metadata_cache = true"
-    ],
-    query: (t, url) =>
-      `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}')`
-  },
-  {
-    key: "L3_cold_cols_predicate",
-    label: "Cold • projection + predicate",
-    cacheBust: true,
-    pragmas: [
-      "SET enable_object_cache = true",
-      "SET enable_http_metadata_cache = true"
-    ],
-    query: (t, url) =>
-      `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}') WHERE ${t.isoCol} = '${t.sampleIso}'`
-  },
-  {
-    key: "L4_cold_metadata_only",
-    label: "Cold • parquet_metadata()",
-    cacheBust: true,
-    pragmas: [
-      "SET enable_object_cache = true",
-      "SET enable_http_metadata_cache = true"
-    ],
-    query: (t, url) => `SELECT COUNT(*) AS row_groups FROM parquet_metadata('${url}')`
-  },
-  {
-    key: "L5_warm_cols_predicate",
-    label: "Warm • projection + predicate",
-    cacheBust: false,
-    pragmas: [
-      "SET enable_object_cache = true",
-      "SET enable_http_metadata_cache = true"
-    ],
-    query: (t, url) =>
-      `SELECT ${t.cols.join(", ")} FROM read_parquet('${url}') WHERE ${t.isoCol} = '${t.sampleIso}'`
-  }
-];
-```
-
-```{ojs}
-// One DuckDBClient for the whole sandbox session. Levers that need cold
-// behaviour cache-bust the URL instead of recreating the client — recreating
-// would also pay the WASM init cost, which isn't what we're measuring.
 sandboxDb = await DuckDBClient.of();
 ```
 
-## Runner
+```{ojs}
+// Single-row runner — re-used by both the single-file matrix and L6.
+// Snapshots resource-timing entries around the query so http_reqs /
+// http_bytes get attributed when the browser exposes them (it doesn't
+// always — DuckDB-WASM worker fetches can bypass window.performance).
+async function runOne(db, target, lever, runNonce) {
+  const cb = lever.cacheBust ? `?cb=${runNonce}_${lever.key}` : "";
+  const url = patchWindowsCache(target.url) + cb;
+
+  for (const p of lever.pragmas) {
+    await db.query(p);
+  }
+
+  const sql = lever.query(target, url);
+
+  const beforeEntries = performance.getEntriesByType("resource");
+  const beforeCount = beforeEntries.length;
+  const t0 = performance.now();
+  let rowsReturned = null;
+  let errored = null;
+  try {
+    const resp = await db.query(sql);
+    rowsReturned = (resp && typeof resp.length === "number")
+      ? resp.length
+      : (resp && resp.numRows) ?? null;
+  } catch (e) {
+    errored = String(e && e.message || e);
+  }
+  const t1 = performance.now();
+
+  const entries = performance.getEntriesByType("resource").slice(beforeCount);
+  const targetHost = "digital-atlas.s3.amazonaws.com";
+  const matched = entries.filter((e) => e.name.includes(targetHost));
+  const bytes = matched.reduce(
+    (a, e) => a + (e.transferSize || e.encodedBodySize || 0),
+    0
+  );
+
+  return {
+    target: target.key,
+    lever: lever.label,
+    leverKey: lever.key,
+    query_ms: errored == null ? Math.round(t1 - t0) : null,
+    http_reqs: matched.length,
+    http_bytes: bytes,
+    rows_returned: rowsReturned,
+    error: errored
+  };
+}
+```
+
+## Runner — single-file matrix
 
 ```{ojs}
 viewof runNonce = Inputs.button([
   ["Run all", () => Date.now()],
-  ["Re-run (new cache-bust)", () => Date.now()]
-], { value: Date.now(), label: "Action" })
+  ["Re-run (new cache-bust)", () => Date.now()],
+  ["Clear results", () => 0]
+], { value: 0, label: "Action" })
 ```
 
 ```{ojs}
-perfResults = {
-  // Re-runs when the button is clicked.
-  runNonce;
+mutable streamRows = [];
+```
 
-  const rows = [];
+```{ojs}
+mutable streamStatus = "Idle — click 'Run all' to populate the table.";
+```
+
+```{ojs}
+// Async runner. Writes to mutables as each lever completes so the table
+// and verdict cells re-render incrementally instead of waiting ~3 min
+// for the whole matrix.
+streamRunner = {
+  const nonce = runNonce;
+  if (!nonce) {
+    mutable streamRows = [];
+    mutable streamStatus = "Idle — click 'Run all' to populate the table.";
+    return null;
+  }
+  mutable streamRows = [];
+  let i = 0;
+  const total = perfTargets.length * perfLevers.length;
   for (const target of perfTargets) {
     for (const lever of perfLevers) {
-      const cb = lever.cacheBust ? `?cb=${runNonce}_${lever.key}` : "";
-      const url = patchWindowsCache(target.url) + cb;
-
-      // Apply pragmas (cheap; safe to repeat per lever).
-      for (const p of lever.pragmas) {
-        await sandboxDb.query(p);
-      }
-
-      const sql = lever.query(target, url);
-
-      // Resource-timing snapshot before / after. Browsers route DuckDB-WASM's
-      // httpfs through window.fetch, so resource-timing captures every range
-      // request. We attribute any entry whose URL starts with the target URL
-      // (sans cache-bust) to this query.
-      const matchPrefix = target.url.replace(/^s3:\/\//, "https://").replace(
-        /^https:\/\/digital-atlas\/?/,
-        "https://digital-atlas.s3.amazonaws.com/"
-      );
-      const beforeCount = performance.getEntriesByType("resource").length;
-
-      const t0 = performance.now();
-      let rowsReturned = null;
-      let errored = null;
+      i++;
+      mutable streamStatus = `Running ${i}/${total} — ${target.key} • ${lever.label}…`;
       try {
-        const resp = await sandboxDb.query(sql);
-        // resp can be an Arrow table or array depending on DuckDBClient version.
-        rowsReturned = (resp && typeof resp.length === "number")
-          ? resp.length
-          : (resp && resp.numRows) ?? null;
+        const r = await runOne(sandboxDb, target, lever, nonce);
+        mutable streamRows = [...streamRows, r];
       } catch (e) {
-        errored = String(e && e.message || e);
+        mutable streamRows = [...streamRows, {
+          target: target.key,
+          lever: lever.label,
+          leverKey: lever.key,
+          query_ms: null,
+          http_reqs: 0,
+          http_bytes: 0,
+          rows_returned: null,
+          error: String(e)
+        }];
       }
-      const t1 = performance.now();
-
-      const entries = performance.getEntriesByType("resource").slice(beforeCount);
-      const matched = entries.filter(
-        (e) => e.name.includes(target.url.split("/").slice(-2).join("/").replace(/^variable=/, ""))
-              || e.name.startsWith(matchPrefix)
-      );
-      const bytes = matched.reduce(
-        (a, e) => a + (e.transferSize || e.encodedBodySize || 0),
-        0
-      );
-
-      rows.push({
-        target: target.key,
-        lever: lever.label,
-        leverKey: lever.key,
-        query_ms: Math.round(t1 - t0),
-        http_reqs: matched.length,
-        http_bytes: bytes,
-        rows_returned: rowsReturned,
-        error: errored
-      });
     }
   }
-  return rows;
+  mutable streamStatus = `Done — ${total} runs completed at ${new Date().toLocaleTimeString()}.`;
+  return streamRows;
 }
 ```
 
-## Results
+```{ojs}
+htl.html`<div style="padding: 8px 12px; background: #f7f7f7; border-left: 3px solid #888; font-family: monospace; font-size: 0.85rem; margin: 8px 0;">${streamStatus} <span style="color: #666;">(${streamRows.length}/${perfTargets.length * perfLevers.length} rows)</span></div>`
+```
+
+## Results — single-file matrix
 
 ```{ojs}
-Inputs.table(perfResults, {
-  columns: ["target", "lever", "query_ms", "http_reqs", "http_bytes", "rows_returned", "error"],
-  header: {
-    target: "Target",
-    lever: "Lever",
-    query_ms: "Query (ms)",
-    http_reqs: "HTTP reqs",
-    http_bytes: "Bytes downloaded",
-    rows_returned: "Rows",
-    error: "Error"
-  },
-  format: {
-    query_ms: (v) => v == null ? "—" : v.toLocaleString(),
-    http_bytes: (v) => v == null ? "—" :
-      v >= 1e6 ? `${(v / 1e6).toFixed(2)} MB`
-        : v >= 1e3 ? `${(v / 1e3).toFixed(1)} KB`
-        : `${v} B`,
-    rows_returned: (v) => v == null ? "—" : v.toLocaleString()
-  },
-  width: { lever: 240, error: 220 }
-})
+{
+  if (streamRows.length === 0) {
+    return htl.html`<p style="color: #888; font-style: italic;">Click "Run all" above to populate the table. Rows stream in as each lever finishes.</p>`;
+  }
+  const fmtMs = (v) => v == null ? "—" : v.toLocaleString();
+  const fmtBytes = (v) =>
+    v == null ? "—"
+    : v >= 1e6 ? `${(v / 1e6).toFixed(2)} MB`
+    : v >= 1e3 ? `${(v / 1e3).toFixed(1)} KB`
+    : `${v} B`;
+  const fmtRows = (v) => v == null ? "—" : v.toLocaleString();
+  return htl.html`<div style="overflow-x: auto;">
+    <table style="border-collapse: collapse; width: 100%; font-size: 0.9rem;">
+      <thead><tr style="background: #f3f3f3; text-align: left;">
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Target</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Lever</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">Query (ms)</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">HTTP reqs</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">Bytes</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">Rows</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Error</th>
+      </tr></thead>
+      <tbody>${streamRows.map(r => htl.html`<tr style="border-bottom: 1px solid #eee;">
+        <td style="padding: 6px 8px; font-family: monospace; font-size: 0.78rem;">${r.target}</td>
+        <td style="padding: 6px 8px;">${r.lever}</td>
+        <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${fmtMs(r.query_ms)}</td>
+        <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${r.http_reqs}</td>
+        <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${fmtBytes(r.http_bytes)}</td>
+        <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${fmtRows(r.rows_returned)}</td>
+        <td style="padding: 6px 8px; color: #b00; font-size: 0.78rem;">${r.error ?? ""}</td>
+      </tr>`)}</tbody>
+    </table>
+  </div>`;
+}
 ```
 
-## Read the table
+## Verdict — single-file pushdown (auto-computed)
 
-- **L1 vs L2** — if `Bytes downloaded` drops sharply, projection pushdown
-  is working; the parquet reader is fetching only the relevant column chunks.
-  If it doesn't drop, DuckDB-WASM is fetching the whole file regardless and
-  no SELECT-list tweak in the production notebook will help.
-- **L2 vs L3** — if L3 fetches dramatically less than L2 (or completes faster),
-  predicate pushdown is also working. This is the rare best-case path:
-  pushdown alone solves the cold-start problem and the rebake isn't needed.
-  If L3 ≈ L2, predicate pushdown is blocked — most likely cause is that the
-  canonical parquet has one giant row group (no `min/max` stats per row group
-  for the parquet reader to skip on), which is exactly what the rebake fixes.
-- **L4** is the floor — what cold-start would cost if only metadata were
-  fetched. Treat as a target for L3.
-- **L5** is the warm second-touch reference. Shows how cheap repeat queries
-  are once the object cache is populated. Production users get this on
-  *anything but the first query*, so the cold-start pain is really an
-  L1-vs-L4 gap.
+```{ojs}
+{
+  const total = perfTargets.length * perfLevers.length;
+  if (streamRows.length < total) {
+    return htl.html`<p style="color: #888; font-style: italic;">Verdict will appear once all ${total} levers complete.</p>`;
+  }
 
-## Verdict (hand-rolled)
+  // Bucket by target.
+  const byTarget = new Map();
+  for (const r of streamRows) {
+    if (!byTarget.has(r.target)) byTarget.set(r.target, {});
+    byTarget.get(r.target)[r.leverKey] = r;
+  }
 
-Once the table is filled in, paste the cold L3/L1 ratio per target back into
-the dispatch:
+  const verdicts = [];
+  for (const [targetKey, levers] of byTarget) {
+    const l1 = levers.L1_cold_select_all;
+    const l2 = levers.L2_cold_select_cols;
+    const l3 = levers.L3_cold_cols_predicate;
+    const l4 = levers.L4_cold_metadata_only;
+    const l5 = levers.L5_warm_cols_predicate;
+    const r12 = l1 && l2 && l1.query_ms && l2.query_ms ? (l1.query_ms / l2.query_ms) : null;
+    const r23 = l2 && l3 && l2.query_ms && l3.query_ms ? (l2.query_ms / l3.query_ms) : null;
+    const r13 = l1 && l3 && l1.query_ms && l3.query_ms ? (l1.query_ms / l3.query_ms) : null;
+    const r34 = l3 && l4 && l3.query_ms && l4.query_ms ? (l3.query_ms / l4.query_ms) : null;
 
+    let verdict;
+    let color;
+    if (r13 == null) {
+      verdict = "errored — see the table";
+      color = "#b00";
+    } else if (r13 >= 5) {
+      verdict = `Pushdown WORKING — ${r13.toFixed(1)}× speedup. No rebake needed; production fix is query-shape.`;
+      color = "#080";
+    } else if (r13 >= 2) {
+      verdict = `Pushdown PARTIAL — ${r13.toFixed(1)}× speedup. Wins are real but moderate; investigate per-target.`;
+      color = "#a60";
+    } else {
+      verdict = `Pushdown BLOCKED — ${r13.toFixed(1)}× speedup only. Either the parquet has unusable stats or the query shape defeats pushdown.`;
+      color = "#b00";
+    }
+
+    verdicts.push(htl.html`<div style="margin: 0 0 12px 0; padding: 10px 14px; background: #fafafa; border-left: 4px solid ${color}; font-size: 0.9rem;">
+      <div style="font-weight: 600; font-family: monospace;">${targetKey}</div>
+      <div style="margin-top: 4px;"><strong style="color: ${color};">${verdict}</strong></div>
+      <div style="margin-top: 6px; color: #555; font-family: monospace; font-size: 0.82rem;">
+        L1=${l1?.query_ms ?? "—"}ms · L2=${l2?.query_ms ?? "—"}ms · L3=${l3?.query_ms ?? "—"}ms · L4=${l4?.query_ms ?? "—"}ms · L5=${l5?.query_ms ?? "—"}ms
+      </div>
+      <div style="margin-top: 4px; color: #555; font-family: monospace; font-size: 0.82rem;">
+        L1→L2 = ${r12 ? r12.toFixed(1) + "×" : "—"} (projection) ·
+        L2→L3 = ${r23 ? r23.toFixed(1) + "×" : "—"} (predicate) ·
+        L1→L3 = ${r13 ? r13.toFixed(1) + "×" : "—"} (combined) ·
+        L3→L4 = ${r34 ? r34.toFixed(1) + "×" : "—"} (headroom to floor)
+      </div>
+    </div>`);
+  }
+
+  return htl.html`<div>${verdicts}</div>`;
+}
 ```
-adm0_obs_periods : L1 = ___ms / ___MB   |  L3 = ___ms / ___KB   →  ___× speedup
-cmip6_2021-2040  : L1 = ___ms / ___MB   |  L3 = ___ms / ___KB   →  ___× speedup
+
+## Multi-file alias test (CR-090 hypothesis)
+
+The production `dbFutureHive` cell creates a view aliasing `period → timeperiod` over a 4-file `parquet_scan(..., hive_partitioning=1)`:
+
+```sql
+CREATE VIEW futureProjections AS
+  SELECT *, period AS timeperiod
+  FROM parquet_scan([4 paths], hive_partitioning = 1)
 ```
 
-If L3 ≥ 5× faster than L1 on both, we can ship optimisation as a
-notebook-side query-shape change and defer the rebake. If L3 < 2× faster
-than L1, the rebake is the only remaining lever and STAGE C of the parent
-dispatch becomes the path forward.
+Consumer queries then filter `WHERE timeperiod = '2021-2040'`. If hive-partition pruning needs the raw column name `period` (not the alias) to do file-list elimination, the view scans all 4 files per query — a ~4× slowdown on top of the per-file L3 cost.
 
-## Out of scope (this sandbox)
+This test runs the same query twice with different cache-bust salts so both runs are cold:
 
-- Canonical-vs-rebake A/B against `s3://digital-atlas/sandbox/parquet-pushdown/`.
-  Skipped until the pipeline-side STAGE C upload lands.
+- **L6a**: `WHERE period = '2021-2040'` (raw partition column)
+- **L6b**: `WHERE timeperiod = '2021-2040'` (aliased via view)
+
+If L6b is ≥3× slower than L6a, the alias is the bug and the production fix is to drop the alias from the view definition.
+
+```{ojs}
+cmip6Periods = [
+  "s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2021-2040/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
+  "s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2041-2060/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
+  "s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2061-2080/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
+  "s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2081-2100/baseline=1995-2014/variable=ensemble_season_timeseries.parquet"
+];
+```
+
+```{ojs}
+viewof aliasRunNonce = Inputs.button([
+  ["Run alias test", () => Date.now()],
+  ["Clear", () => 0]
+], { value: 0, label: "Action" })
+```
+
+```{ojs}
+mutable aliasResults = null;
+```
+
+```{ojs}
+mutable aliasStatus = "Idle — click 'Run alias test' to begin.";
+```
+
+```{ojs}
+aliasRunner = {
+  const nonce = aliasRunNonce;
+  if (!nonce) {
+    mutable aliasResults = null;
+    mutable aliasStatus = "Idle — click 'Run alias test' to begin.";
+    return null;
+  }
+  mutable aliasResults = null;
+  await sandboxDb.query(`SET enable_object_cache = true`);
+  await sandboxDb.query(`SET enable_http_metadata_cache = true`);
+
+  const out = {};
+
+  // L6a: raw partition column
+  mutable aliasStatus = "L6a — WHERE period = '2021-2040' (raw column)…";
+  const urlsA = cmip6Periods.map((u, i) => `'${patchWindowsCache(u)}?cb=${nonce}_alias_raw_${i}'`).join(", ");
+  await sandboxDb.query(`DROP VIEW IF EXISTS futureProj_raw`);
+  await sandboxDb.query(`CREATE VIEW futureProj_raw AS SELECT * FROM parquet_scan([${urlsA}], hive_partitioning = 1)`);
+  const t0a = performance.now();
+  let respA = null;
+  let errA = null;
+  try {
+    respA = await sandboxDb.query(
+      `SELECT iso3, scenario, season, year, mean FROM futureProj_raw WHERE iso3 = 'AGO' AND period = '2021-2040'`
+    );
+  } catch (e) {
+    errA = String(e && e.message || e);
+  }
+  const t1a = performance.now();
+  out.raw = {
+    label: "L6a — WHERE period (raw)",
+    ms: Math.round(t1a - t0a),
+    rows: respA?.length ?? null,
+    error: errA
+  };
+  mutable aliasResults = { ...out };
+
+  // L6b: aliased
+  mutable aliasStatus = "L6b — WHERE timeperiod = '2021-2040' (aliased)…";
+  const urlsB = cmip6Periods.map((u, i) => `'${patchWindowsCache(u)}?cb=${nonce}_alias_aliased_${i}'`).join(", ");
+  await sandboxDb.query(`DROP VIEW IF EXISTS futureProj_aliased`);
+  await sandboxDb.query(`CREATE VIEW futureProj_aliased AS SELECT *, period AS timeperiod FROM parquet_scan([${urlsB}], hive_partitioning = 1)`);
+  const t0b = performance.now();
+  let respB = null;
+  let errB = null;
+  try {
+    respB = await sandboxDb.query(
+      `SELECT iso3, scenario, season, year, mean FROM futureProj_aliased WHERE iso3 = 'AGO' AND timeperiod = '2021-2040'`
+    );
+  } catch (e) {
+    errB = String(e && e.message || e);
+  }
+  const t1b = performance.now();
+  out.aliased = {
+    label: "L6b — WHERE timeperiod (aliased)",
+    ms: Math.round(t1b - t0b),
+    rows: respB?.length ?? null,
+    error: errB
+  };
+  mutable aliasResults = { ...out };
+  mutable aliasStatus = `Done — completed at ${new Date().toLocaleTimeString()}.`;
+  return out;
+}
+```
+
+```{ojs}
+htl.html`<div style="padding: 8px 12px; background: #f7f7f7; border-left: 3px solid #888; font-family: monospace; font-size: 0.85rem; margin: 8px 0;">${aliasStatus}</div>`
+```
+
+```{ojs}
+{
+  if (!aliasResults || (!aliasResults.raw && !aliasResults.aliased)) {
+    return htl.html`<p style="color: #888; font-style: italic;">Click "Run alias test" to populate.</p>`;
+  }
+  const rows = [aliasResults.raw, aliasResults.aliased].filter(Boolean);
+  let verdict = null;
+  if (aliasResults.raw && aliasResults.aliased && aliasResults.raw.ms && aliasResults.aliased.ms) {
+    const ratio = aliasResults.aliased.ms / aliasResults.raw.ms;
+    let color, msg;
+    if (ratio >= 3) {
+      color = "#b00";
+      msg = `ALIAS BREAKS PUSHDOWN — aliased query is ${ratio.toFixed(1)}× slower. Fix: drop the alias in the view, or filter on raw 'period' in the consumer.`;
+    } else if (ratio >= 1.5) {
+      color = "#a60";
+      msg = `Alias somewhat slower (${ratio.toFixed(1)}×). Likely some pushdown loss; worth fixing but not the primary 70 s contributor.`;
+    } else {
+      color = "#080";
+      msg = `Alias is fine (${ratio.toFixed(1)}×). The 70 s notebook pain must be elsewhere (multi-iso3 IN-list, mainGaul lookup, or session warm-up cost).`;
+    }
+    verdict = htl.html`<div style="margin: 10px 0; padding: 10px 14px; background: #fafafa; border-left: 4px solid ${color}; font-size: 0.9rem;">
+      <strong style="color: ${color};">${msg}</strong>
+    </div>`;
+  }
+  return htl.html`<div>
+    <table style="border-collapse: collapse; width: 100%; font-size: 0.9rem; margin-top: 8px;">
+      <thead><tr style="background: #f3f3f3; text-align: left;">
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Variant</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">Query (ms)</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: right;">Rows</th>
+        <th style="padding: 6px 8px; border-bottom: 1px solid #ccc;">Error</th>
+      </tr></thead>
+      <tbody>${rows.map(r => htl.html`<tr style="border-bottom: 1px solid #eee;">
+        <td style="padding: 6px 8px;">${r.label}</td>
+        <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${r.ms?.toLocaleString() ?? "—"}</td>
+        <td style="padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums;">${r.rows?.toLocaleString() ?? "—"}</td>
+        <td style="padding: 6px 8px; color: #b00; font-size: 0.78rem;">${r.error ?? ""}</td>
+      </tr>`)}</tbody>
+    </table>
+    ${verdict ?? ""}
+  </div>`;
+}
+```
+
+## Read the table (verbose diagnostics)
+
+- **L1 vs L2 (Bytes column, if non-zero)** — if `Bytes` drops sharply, the parquet reader is fetching only the relevant column chunks (projection pushdown working). If it stays flat, the reader is pulling more than asked. With `Bytes` reading 0 in the table here, fall back to Chrome's Network panel for byte-level verification.
+- **L2 vs L3 (Query (ms))** — if L3 finishes much faster than L2, predicate pushdown is also working: row-group skipping is firing because the parquet has usable per-row-group `min/max` stats on `iso3`. If L3 ≈ L2, predicate pushdown is blocked — the parquet has one giant row group or NULL stats, and a rebake is the only remaining lever.
+- **L4** is the floor. L3 cannot beat L4. The `L3→L4` ratio in the verdict block tells you how much headroom is left at the file boundary.
+- **L5** is the warm-cache reference. Production users get warm-cache behaviour on any query AFTER the first one against a given file in a given session — so the cold-start pain is really an L1-vs-L4 gap, not an L1-vs-L5 gap.
+
+## Known limitations
+
+- **`Bytes downloaded` reads 0 in this host** — DuckDB-WASM routes parquet fetches through a worker that doesn't surface to `window.performance.getEntriesByType("resource")`. Use Chrome devtools → Network → filter `digital-atlas` for ground-truth byte counts. Query time is the source of truth here.
+- **Re-runs jitter 1.5–2×** because of S3 latency variance. The L1→L3 ratio per re-run is reliable; the absolute ms numbers are not.
+- **L5 warm column shows ~300 ms on both targets** — partly real (object_cache hit) and partly DuckDB's internal result cache. Don't read too much into it; it's a sanity floor for "warm".
+
+## Out of scope
+
+- Canonical-vs-rebake A/B against `s3://digital-atlas/sandbox/parquet-pushdown/...`. Pipeline-side STAGE D verdict (`hazards_prototype/logs/Dpush_speedup_20260525_121356.log`) already ruled the rebake out — 0/9 targets at ≥3× speedup. The sandbox-prefix files are kept for now (negligible cost) but won't be promoted.
 - Promotion commands (STAGE F). See parent dispatch.
-- Multi-file `parquet_scan([...])` A/B. We test one period file from CMIP6;
-  the UNION pattern in `dbFutureHive` would be a follow-up if pushdown works
-  on the single file.
+- Multi-iso3 IN-list pushdown stress test (`WHERE iso3 IN ('AGO', 'BFA', ...)`). May be a follow-up if the alias test (L6) doesn't account for the residual pain.
+- `mainGaul` lookup investigation (CR-089) — that's a separate notebook-side fix, not a pushdown question.

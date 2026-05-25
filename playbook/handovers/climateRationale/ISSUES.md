@@ -1695,7 +1695,11 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **discovered:** 2026-05-22 by Pete during live preview of the integrated Recent Changes section. Fetch-time status header (added in commit `01ed3ff` for exactly this kind of diagnostic) made the slowness measurable.
 
-- **STATUS:** Open. Pipeline-side. Notebook is functional but unusably slow on cold-start until this lands. Highest priority among the remaining follow-ups.
+- **STATUS:** **CLOSED — diagnosis revised 2026-05-25 evening.** The single-row-group / NULL-stats hypothesis was tested with pipeline-side STAGE D (DuckDB CLI A/B against rebaked sandbox) AND browser-side sandbox A/B (DuckDB-WASM, see `notebooks/sandbox/parquet_pushdown_perf.qmd`). Both reject the hypothesis:
+  - **STAGE D**: 0/9 targets show ≥3× speedup from rebake. Canonical and rebaked both ~1.5–2.0 s. `hazard_exposure_multi` is 2.4× SLOWER on the rebake. Log: `hazards_prototype/logs/Dpush_speedup_20260525_121356.log`.
+  - **Browser sandbox**: predicate pushdown works on canonical. `WHERE iso3='AGO'` drops CMIP6 from 101 s (projection-only) to 13 s (projection + predicate) — an 8× win that can only happen if per-row-group `iso3` stats exist.
+
+  The earlier `parquet_metadata()` reading of NULL stats either pre-dated a silent pipeline rebake, or was misread. Either way, the canonical parquets now pushdown correctly. **Rebake produces no benefit; pipeline-side rewrite (`2026-05-25_pipeline-parquet-pushdown-rewrite.md`) is deprioritised.** Notebook-side investigation continues — see CR-089 (mainGaul) and CR-090 (futureProjections alias).
 
 - **before-string:** n/a (publish-layer fix).
 
@@ -1828,6 +1832,80 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 - **discovered:** 2026-05-25 during live-preview review of the byproducts visual split.
 
 - **STATUS:** Open — dispatch drafted; investigation pending. Cross-references CR-064 items (a), (b), (d) which overlap.
+
+---
+
+### CR-089 — `mainGaul` lookup at page load: full-file scan of `adm1_obs.parquet` [NEW 2026-05-25]
+
+- **id:** CR-089
+- **title:** The `mainGaul` lookup cell ([notebook.qmd:4083](../../../notebooks/climateRationale/notebook.qmd#L4083)) reads `adm1_obs.parquet` (monthly admin1 observational, the biggest obs file at ~50 MB compressed) **with no WHERE clause** at page load to build a per-iso3 GAUL-code map. Returns ~50 rows but causes a full-file fetch.
+- **type:** notebook (query shape)
+- **severity:** medium (cold-start performance — runs once per page load, no user feedback during the fetch)
+
+- **where:** [notebook.qmd:4083](../../../notebooks/climateRationale/notebook.qmd#L4083), helpers section between `observationalSources` declaration and the `db` cell.
+
+- **why-this-matters:** Identified during the parquet-pushdown investigation (see `dispatches/2026-05-25_parquet-pushdown-sandbox.md` OUTCOME section). With the rebake-hypothesis rejected (CR-082 closed), the actual 70 s cold-start pain must come from notebook-side query shapes. This lookup is L2-shape (projection only, no predicate) — exactly the lever that the browser sandbox showed delivers only 2× speedup vs `SELECT *`, while L3 (projection + predicate) delivers 10×. Currently:
+
+  ```sql
+  WITH per_polygon AS (
+    SELECT iso3, gaul0_code, COUNT(DISTINCT admin1_name) AS n_admin1
+    FROM read_parquet('${monthlyAdm1URL}')         -- no WHERE
+    GROUP BY iso3, gaul0_code
+  ),
+  ranked AS (
+    SELECT iso3, gaul0_code,
+           ROW_NUMBER() OVER (PARTITION BY iso3 ORDER BY n_admin1 DESC) AS rn
+    FROM per_polygon
+  )
+  SELECT iso3, gaul0_code FROM ranked WHERE rn = 1
+  ```
+
+  The result is a tiny per-iso3 lookup — the file scan is purely incidental.
+
+- **proposed-change:** Three options, pick whichever fits:
+  1. **Precompute** the lookup once offline and ship as `/data/climateRationale/mainGaul.json` (~50 rows × 2 cols = a few KB). The cell becomes a `FileAttachment` read — zero parquet fetch. Cheapest and most reliable; data only changes when the GAUL boundaries get re-baked.
+  2. **Add `WHERE gaul0_code IS NOT NULL`** + projection narrowing — predicate alone may halve the work but doesn't address the "we scan to GROUP BY" problem; only worth it if option 1 is infeasible.
+  3. **Lift the lookup into the parquet itself** — bake a side parquet `adm0_mainGaul.parquet` with one row per iso3, served alongside `adm0_obs.parquet`. Pipeline-side change.
+
+  Option 1 is the obvious win.
+
+- **dependencies:** None notebook-side. If option 1, build a one-shot script (R or Python) that reads the parquet, derives the mapping, writes the JSON to `data/climateRationale/`.
+
+- **discovered:** 2026-05-25 evening, during parquet-pushdown sandbox investigation.
+
+- **STATUS:** Open. Notebook-only fix if option 1.
+
+- **before-string:** `mainGaul = {` at [notebook.qmd:4083](../../../notebooks/climateRationale/notebook.qmd#L4083).
+
+---
+
+### CR-090 — `futureProjections` view alias likely defeats hive-partition pushdown [NEW 2026-05-25]
+
+- **id:** CR-090
+- **title:** `dbFutureHive` aliases `period → timeperiod` inside a `CREATE VIEW` over a `parquet_scan([4 files], hive_partitioning=1)` ([notebook.qmd:4125](../../../notebooks/climateRationale/notebook.qmd#L4125)). Consumer queries filter on `WHERE timeperiod = '...'` ([notebook.qmd:4592](../../../notebooks/climateRationale/notebook.qmd#L4592)) — the alias, not the raw partition key. **Hypothesis**: DuckDB's hive-partition pruning needs the raw column name `period` in the WHERE clause to do file-list pruning. If the alias breaks pushdown, all 4 CMIP6 period parquets get scanned for every query that should only need one — a ~4× slowdown stacked on the single-file L3 baseline.
+- **type:** notebook (query shape)
+- **severity:** medium-high (this is the leading hypothesis for the residual 70 s cold-start pain after CR-082 closed)
+
+- **where:** View definition at [notebook.qmd:4125](../../../notebooks/climateRationale/notebook.qmd#L4125); consumer at [notebook.qmd:4592](../../../notebooks/climateRationale/notebook.qmd#L4592).
+
+- **why-this-matters:** Sandbox L3 lever (single CMIP6 period parquet, `WHERE iso3='AGO'`) measures 13 s. Production query reads via a 4-file UNION view + alias filter. If pushdown is broken at the alias boundary, expected production time is 13 s × 4 = ~52 s, matching the dispatch's ~70 s observation (extra 18 s for the multi-iso3 / multi-scenario IN-lists).
+
+  To confirm: add an **L6 multi-file lever** to the sandbox testing the alias-vs-raw-column path. Run `parquet_scan([4 paths], hive_partitioning=1)` with `WHERE timeperiod = '2021-2040'` (alias) vs `WHERE period = '2021-2040'` (raw column). If raw-column is ≥3× faster, the alias is the bug.
+
+- **proposed-change:** If L6 confirms the hypothesis, three fixes in increasing invasiveness:
+  1. **Drop the alias** in the view definition: `CREATE VIEW futureProjections AS SELECT * FROM parquet_scan(...)`. Update consumer to use `period` directly.
+  2. **Move the alias** to consumer queries: `SELECT ..., period AS timeperiod FROM futureProjections WHERE period = '...'` — alias on output only, predicate on raw column.
+  3. **Replace the view** with per-period explicit reads dispatched by the consumer (it knows which `timeperiod` it's after, so it can `read_parquet(matching_url)` directly). Bigger refactor but most predictable performance.
+
+  Option 1 is the cheapest one-line fix.
+
+- **dependencies:** L6 sandbox lever must run first to confirm. Don't touch production until evidence in hand.
+
+- **discovered:** 2026-05-25 evening. Predicted via inspection during parquet-pushdown sandbox investigation.
+
+- **STATUS:** Open. Sandbox L6 lever pending; production fix gated on its result.
+
+- **before-string:** `CREATE VIEW futureProjections as` at [notebook.qmd:4125](../../../notebooks/climateRationale/notebook.qmd#L4125).
 
 ---
 

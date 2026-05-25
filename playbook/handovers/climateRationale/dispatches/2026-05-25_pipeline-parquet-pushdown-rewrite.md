@@ -7,6 +7,26 @@
 
 ---
 
+## STATUS (updated 2026-05-25 evening): DEPRIORITISED
+
+**Premise no longer load-bearing.** This dispatch was scoped on the assumption that the rebake produces a measurable speedup, so producer scripts should write parquets that way going forward. The companion dispatch `2026-05-25_parquet-pushdown-sandbox.md` ran STAGE C + STAGE D + the browser sandbox and found:
+
+- STAGE D (DuckDB CLI A/B): 0/9 targets show ≥3× speedup. Some are slower on the rebake (`hazard_exposure_multi` 2.4× slower).
+- Browser sandbox (DuckDB-WASM): predicate pushdown already works on the canonical, un-rebaked parquets. L1→L3 = 3-10× speedup purely from `WHERE iso3 = '<one>'`.
+
+**Why this dispatch is no longer urgent**:
+
+The "one row group, NULL stats" diagnosis was apparently wrong — measurement against the canonical files shows functional row-group statistics for predicate pushdown. Either the parquet files were re-baked at some earlier point (without us updating these dispatches), or the original diagnosis mis-attributed the cause of the 70 s pain.
+
+**What to do**:
+
+- **Do not run** the producer-side rewrites described below — they're a no-op gain at best, and they add a `write_parquet_pushdown()` wrapper plus per-script edits that aren't paying for themselves.
+- The `write_parquet_pushdown()` helper in `hazards_prototype/R/_helpers.R` is harmless; leave it for use **when** a producer is being touched for other reasons. It's now defensive, not corrective.
+- The memory `feedback-parquet-authoring-for-duckdb-wasm` retains the convention as best-practice for new producers, but is no longer "fix existing producers".
+- The actual cold-start pain investigation continues notebook-side. See `2026-05-25_parquet-pushdown-sandbox.md` OUTCOME section for the live suspects (`mainGaul` lookup, `futureProjections` view alias).
+
+---
+
 ## Why
 
 Pete observed a 69 s cold-start fetch for a 45-row national query against `adm0_obs.parquet` in the Climate Rationale notebook. Diagnosis (full write-up: `2026-05-22_recent-changes-followups.md` Follow-up 1):

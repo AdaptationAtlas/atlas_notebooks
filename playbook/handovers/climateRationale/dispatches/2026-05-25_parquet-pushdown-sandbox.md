@@ -9,6 +9,48 @@
 
 ---
 
+## OUTCOME (added 2026-05-25 after execution)
+
+**Verdict: do not promote. The rebake produces no benefit.**
+
+Both lines of evidence agree:
+
+**Pipeline-side STAGE D** (`hazards_prototype/logs/Dpush_speedup_20260525_121356.log`):
+
+```
+target                      canonical_s    sandbox_s  speedup
+adm0_obs_monthly                   1.48         1.34     1.1x
+adm1_obs_monthly                   1.63         1.64     1.0x
+adm0_obs_periods                   1.41         1.51     0.9x
+adm1_obs_periods                   1.79         1.75     1.0x
+cmip6_historical                   1.59         1.95     0.8x
+cmip6_2021_2040                    1.97         2.97     0.7x
+hazard_exposure_multi              1.86         4.46     0.4x
+exposure_crop_livestock            1.64         2.35     0.7x
+adm0_faostat                       1.65         1.72     1.0x
+Pushdown firing (>=3x speedup) on 0/9 queries.
+```
+
+**Browser-side sandbox** (`notebooks/sandbox/parquet_pushdown_perf.qmd`):
+
+```
+Target            L1 SELECT*   L2 projection   L3 +predicate   L4 metadata   L1→L3
+adm0_obs_periods    22.9 s        11.0 s          6.6 s          0.8 s        3.5×
+cmip6_2021-2040    131.0 s       101.0 s         12.9 s          1.3 s       10.2×
+```
+
+Predicate pushdown works on the **canonical** parquets — L3 (projection + `WHERE iso3 = '<one>'`) is 3-10× faster than L1 (`SELECT *`) without any rebake. L2→L3 alone is 8× on CMIP6, which can only happen if the canonical parquet has functional per-row-group min/max stats on `iso3`. The dispatch's "one giant row group, NULL stats" hypothesis is wrong.
+
+**Decisions**:
+
+1. **Skip STAGE F (promotion)**. Sandbox prefix `s3://digital-atlas/sandbox/parquet-pushdown/` keeps its uploads (< $0.02/month storage); delete eventually with `aws s3 rm --recursive` when there's no further use for them.
+2. **Deprioritise** the producer-side rewrite (`2026-05-25_pipeline-parquet-pushdown-rewrite.md`) — its load-bearing premise (rebake helps, so producers should write that way) is undermined. See that dispatch's status banner.
+3. **The 70 s notebook pain is real but elsewhere**. The canonical parquets pushdown fine on isolated single-file queries. Two notebook-side suspects identified:
+   - **`mainGaul` lookup** ([notebook.qmd:4083](../../../../notebooks/climateRationale/notebook.qmd#L4083)): L2-shape (no WHERE) full scan of `adm1_obs.parquet` once per page load. Cold-start contributor.
+   - **`futureProjections` view alias** ([notebook.qmd:4125](../../../../notebooks/climateRationale/notebook.qmd#L4125) + [notebook.qmd:4592](../../../../notebooks/climateRationale/notebook.qmd#L4592)): `CREATE VIEW ... SELECT *, period as timeperiod ...` then consumer filters `WHERE timeperiod = '...'`. Hypothesis: the alias breaks hive-partition pruning, scanning all 4 CMIP6 files instead of one — ~4× slowdown stacked on the per-file cost. Sandbox L6 lever to be added to confirm.
+
+---
+
 ## Why this dispatch exists
 
 Pete ran the rebake workflow's STAGE A and STAGE B (commit `7e74ade` series). 15 of 15 targets dry-ran cleanly; the rebaked parquets have multi-row-group layout, populated column stats, and 5-25 % size growth for the big files (CMIP6 timeseries, hazard exposure).
