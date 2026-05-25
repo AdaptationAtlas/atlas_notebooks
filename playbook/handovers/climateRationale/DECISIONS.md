@@ -689,3 +689,57 @@ Two new feedback memories planned (writing alongside this DECISIONS update):
 3. **Push the FAOSTAT v5 commits** to `origin/dev/climateRationale` when Pete is ready. 23 commits including the 3 CR-082 R-script commits.
 4. **Re-probe CR-082 parquet status.** If the re-bake landed, the observational Recent Changes section should now cold-start in 3-8 s instead of 70 s — verify and close out CR-082 if so.
 5. **Consider CR-085 (commodity focus) as the next feature** if there's appetite — single-commodity small-multiples view; depends only on the v5 schema that just landed; ~150 LOC; storyline-friendly for GCF audience.
+
+---
+
+## Session state — 2026-05-25, session 13 (sandbox removal + two new dispatches committed + map raster fidelity)
+
+Short session continuing directly from session 12. Five commits total on `dev/climateRationale`; tree ends clean apart from `scripts/rebake_parquets_for_pushdown.py` (untracked, intentional — referenced by the parquet-pushdown dispatch) and the usual `.DS_Store` / `.Rhistory` noise.
+
+### What landed (chronological)
+
+- `911dcc6` — **Removed `notebooks/sandbox/`**. The observational sandbox served its purpose (Section E lifted into production in `5c730e2`, session 11); no production-runtime references remained. Updated the header comment in `helpers/trend.ojs` to point at the production caller. 14 files deleted (~2,390 lines including 9 reference PNGs + 5 ramp txt files + 2 qmds).
+- `15dba60` — **Committed two new dispatches** Pete dropped in:
+  - `2026-05-25_map-raster-fidelity-toggle.md` — flip default to nearest-neighbour, expose toggle.
+  - `2026-05-25_pipeline-parquet-pushdown-rewrite.md` — long-term hazards_prototype-side fix so every Atlas parquet writes with row-group stats; companion to the in-repo Python rebake script.
+- `c7169f6` — **Map raster fidelity (first attempt + per-cell fillRect path).** Implemented dispatch steps 1-4 (sandbox mirror step moot now). Bound `ctx.imageSmoothingEnabled` to `mapSmooth_obs`, added `viewof mapSmooth_obs` toggle, status header tail, nbText help entries. When the simple `imageSmoothingEnabled = false` toggle produced visually identical output on Pete's setup (status header changed, image didn't), pivoted to a per-cell `fillRect` loop that bypasses `drawImage` upsample entirely.
+- `5720740` — **Integer pixel-boundary refinement.** First fillRect pass still antialiased at cell edges because `col * cellW` lands at non-integer pixel coords; browsers antialias non-integer fillRect. Pre-compute `Int32Array` of integer boundaries per row / col so adjacent cells tile exactly. Verified live on Eswatini (29×34 → 600×703) — clean discrete blocks.
+
+### Pattern decisions captured this session
+
+- **Canvas `imageSmoothingEnabled = false` is necessary but not sufficient on retina + non-integer upsample.** The canvas may still antialias depending on DPR and the scale factor. The reliable way to guarantee discrete cells is to bypass `drawImage` and paint each source pixel as an explicit `fillRect`. See new memory [[canvas-fillrect-integer-pixel-boundaries]].
+- **`fillRect` at non-integer pixel coordinates IS antialiased** by every major browser. The fix is to round source-pixel-grid boundaries via `Math.round(i * cellW)` and store them once per axis. Adjacent cells share the boundary pixel exactly — no overlap (which causes alpha blending) and no gaps (which leaks the canvas background through).
+- **Diagnose-by-instrumentation when a flag-flip "does nothing."** When Pete reported the smoothing toggle had no effect despite the status header text changing, I instrumented with (a) a `console.log`, (b) an unmistakable red `fillRect(0, 0, W, H)` before the cell loop, (c) `· path=fillRect / drawImage` in the status header. The red was fully covered by cells (confirming the loop ran), the status showed the right path, and the visible pixelation appeared once Pete zoomed in. Without the diagnostic, we'd have kept guessing at the wrong layer.
+
+### Memory updates this session
+
+One new feedback memory saved alongside this DECISIONS update:
+
+- `feedback_canvas-fillrect-integer-pixel-boundaries.md` — when painting rasters to canvas via per-cell `fillRect`, pre-compute integer pixel boundaries via `Math.round(i * cellW)` so adjacent cells tile exactly. Non-integer coords trigger browser antialiasing on every rectangle edge.
+
+### ISSUES.md updates this session
+
+- None — no tickets closed; no new tickets logged. Map raster fidelity was scope-defined by its own dispatch.
+
+### In flight / uncommitted
+
+- `dev/climateRationale` is **~30 commits ahead** of `origin/dev/climateRationale` at end-of-session. Not pushed this session.
+- `scripts/rebake_parquets_for_pushdown.py` (21KB) is **untracked** — referenced by the parquet-pushdown dispatch as "the quick-fix companion". Intentional kept un-committed for now; could be tracked in a future session if Pete confirms.
+- Same dispatch backlog as session 12: CR-088 cowork audit answers, CR-087 stack-order verify, CR-082 parquet re-bake landing check, parquet-pushdown pipeline-side work (new this session, lives in `hazards_prototype`).
+
+### Open questions for next session
+
+- Same as session 12 (`/loop` carry-over):
+  - CR-088 cowork answers (F-1 to F-4b).
+  - CR-087 stack-order on a fresh preview.
+  - CR-082 parquet re-bake landed?
+- New for this session:
+  - **Should `scripts/rebake_parquets_for_pushdown.py` be committed?** The parquet-pushdown dispatch references it by atlas_notebooks path. If yes, commit + add to `.gitignore` rules for `.DS_Store` / `.Rhistory` at the same time so the next session's `git status` doesn't surface noise.
+  - **Wire the new nbText `mapRendering` help into a `<details class="alert alert-info help-callout">` near the map controls?** Currently the entry exists but isn't rendered. The in-control toggle label is self-explanatory so this is low priority.
+
+### Suggested next step
+
+1. Push the 30 commits to `origin/dev/climateRationale` when Pete is ready.
+2. Resume CR-088 cowork investigation (notebook side is staged; pipeline-side answers gate the From Year default decision).
+3. If parquet-pushdown pipeline work has started, verify with a probe before any notebook-side work that depends on faster cold-starts.
+4. CR-085 (commodity focus) remains the most additive next feature; CR-086 (price shocks) waits for CR-085.
