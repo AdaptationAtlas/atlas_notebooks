@@ -610,3 +610,82 @@ Two new feedback memories saved:
 3. If parquet re-baked → tackle CR-083 legend-in-export per approach (a). Native-SVG legend renderer from the same `legendItems` array; stitch below chart SVG at export time; `pngOverride` calls into it.
 4. If parquet NOT yet re-baked → defer CR-083 + CR-084; sweep CR-078 production migration of chartDownloadMenu across the other 17 figure cells. The Recent Changes integration is the validated reference implementation; mostly mechanical from here.
 5. Push when Pete asks (none pushed since session-10; ~20 commits ahead of `origin/dev/climateRationale`).
+
+---
+
+## Session state — 2026-05-25, session 12 (FAOSTAT v5 byproducts dispatch + Pete's review iterations)
+
+Single long session executing the `2026-05-21_faostat-v5-byproducts-toggle.md` dispatch end-to-end, then iterating through Pete's live-preview feedback (visual split, legend, tooltips, visibility-gating, fold). 17 FAOSTAT-related commits on `dev/climateRationale`, all landed. Working tree ends clean.
+
+### What landed (chronological — FAOSTAT v5 chain only; the 3 scripts/rebake_parquets_for_pushdown commits this session are separate CR-082 work)
+
+**Dispatch core — 5 commits per the dispatch + 1 extra for the new selector entries:**
+
+- `efaf1e0` — **Load v5 columns** into DuckDB SELECT. Extend `productionTrends_raw` from 5-col v4 shape to 11-col v5 shape (`item_code`, `commodity_group`, `type`, `parent_raw`, `parent_raw_item_code`, `commodity_class`). ORDER BY adds `commodity_group`. New columns sit unused until commit 3.
+- `8d2352c` — **Expose 4 new variables in selector**: `export_value_usd15`, `import_quantity`, `import_value`, `import_value_usd15`. Wired into the three downstream unit/scale sites (`productionTrends_data` `isValue` + `displayUnit`; `chart_productionTrends` yUnit; treemap yUnit).
+- `a383e12` — **Side-fix:** default View Type = stacked bar (was line); hide stacked / treemap for `yield` (ratio variable, doesn't stack meaningfully). Pete request.
+- `da8deb1` — **Byproducts toggle + rollup pipeline.** New `viewof productionIncludeByproducts` Inputs.toggle widget. New `productionMonetaryVars` Set (6 IDs). New `productionTrends_filtered` cell — variable-gated rollup: non-monetary OR toggle off → raw rows only; monetary AND toggle on → group by commodity_group with rawSum + procSum split. Downstream consumers (`productionAvailableCommodities`, `productionTopCommodities`, `productionTrends_data`) rewired to consume the filtered view. Loader dep array gains `productionIncludeByproducts`.
+- `fdfd96b` — **Rename** `productionAvailableCommodities` → `productionAvailableEntities`, `productionTopCommodities` → `productionTopEntities`. 7 sites. Pure mechanical.
+
+**Visual split + UX polish — Pete's review additions, 6 commits:**
+
+- `a3396b1` — **Visual raw / processed split.** Stacked bar splits each commodity bar into raw (full opacity) + processed (55%) strata using Plot's `z` channel and `fillOpacity`. Treemap leaves split horizontally — bottom (raw, full opacity) + top (processed, 55%) with a dashed-white boundary line. Empty-state caveat block for the 3 failure cases.
+- `a8ee3b7` — **Loader-stuck fix.** Two regressions from `a3396b1`: (1) `Plot.rectY` received `Type: undefined` in `channels` and `z: undefined` at top level when `showSplit` was false — Plot iterates these and chokes; rebuild opts conditionally with spread. (2) Treemap leaf's multi-element SVG substitution had 3 sibling roots (2 rects + a dashed line) — htl's `svg` tag accepts a single root. Wrapped in `<g>`.
+- `911cec6` — **Legend explainer + item-name tooltips.** `productionByproductsLegend()` helper renders inline raw/processed swatches when the split is firing. `productionTrends_filtered` retains `rawItems` + `processedItems` per group; stack rows carry `stratumItems` for the active stratum; chart tip gains an "Items" channel listing FAOSTAT item names (raw item suppressed when it equals the group name). Treemap custom DOM tip switches to multi-line with raw + byproducts breakdown.
+- `ee9bd4f` — **Tooltip truncation fix.** Plot tip `lineWidth: 20em` default was clipping long byproduct lists; bumped to `40em`. Treemap `.cr-treemap-tip` class still ships `white-space: nowrap`; added inline `max-width: 360px` + `word-wrap: break-word` to make the multi-line tip wrap legibly.
+- `4384036` — **Variable-selector I-1 tooltip suffix.** Append one sentence to each `productionVar` option's `description` documenting whether the byproducts toggle applies. Three groups: monetary trade (toggle is useful — describes what it rolls up), monetary VoP (toggle exists but no-op — pipeline raw-only), physical (toggle never applies — units don't compose).
+- `ab76e34` — **Visibility-gating** replaces the warning. New `productionByproductsCapableVars` Set (4 trade-monetary IDs only). Style-controller cell mutates `viewof productionIncludeByproducts.style.display` reactively on `productionVar` change — toggle state survives variable switches between capable variables. Caveat block deleted entirely. Description suffixes updated to not reference a now-hidden toggle.
+- `2877a2e` — **`//| output: false` directive placement fix.** The visibility controller cell had its comment block ABOVE the directive — Quarto cell directives must be the first content line, so Quarto ignored the directive and rendered the cell's `undefined` return as literal text below the variable selector. Moved directive up.
+
+**Docs + dispatch + tickets + descriptions polish — final 5 commits:**
+
+- `5bc6507` — **Dispatch: FAOSTAT trade-data audit.** `dispatches/2026-05-25_faostat-trade-data-audit.md`. Captures three concrete data-quality findings from Pete's review (F-1 AGO palm oil pre-2017, F-2 ZAF wine missing + parent_raw gaps, F-3 n.e.c. structural undercount) + From Year default decision (F-4) for cowork investigation. Cross-references CR-064 items (a)/(b)/(d) which overlap.
+- `ad269ab` — **ISSUES.md tickets** CR-085 (commodity-focus view), CR-086 (price-shock overlay), CR-087 (stack-order verification), CR-088 (trade-data audit cross-ref to dispatch).
+- `221d0eb` — **Caption + nbText + nbData refresh.** Closes dispatch's docs scope (sections 5, 7, 8). `nbData` description rewritten with v5 schema details. `nbText` intro gains a byproducts sentence; methods text expanded with a byproducts paragraph (EN + FR). Both chart and treemap captions gain a dynamic rollup-state line that adapts based on (rollupActive, isMonetaryTrade).
+- `75c764a` — **Collapsible full-width descriptions** + year-coverage caveat + dispatch F-4b. CSS drops the 880px max-width on `.climate-var-description`; all 3 sites (productionVar, climateVar Recent Changes, climateVarDescriptionCell) split text on `". "` and wrap in `<details>` with "▸ more" / "▾ less" affordance. Intro text now clarifies trade variables have shorter year coverage. New F-4b section in the trade-data audit dispatch: open questions for cowork on WHY only export/import has byproducts.
+- `264b283` — **Trade-data caveat under chart + Methods snippet.** Slimmed scope of dispatch's commit 7 (the From Year default decision is deferred until cowork answers F-4). Lands: `productionTradeVars` Set (6 IDs); `productionTradeDataCaveat()` helper renders mustard / wheat inline caveat under the chart when active variable is a trade variable; Methods text gains a "Trade-data quality (under audit)" paragraph (EN + FR) citing the dispatch.
+
+### Pattern decisions captured this session
+
+- **Quarto cell directives must be the FIRST line after the cell opener.** `//| output: false` placed AFTER comments inside the cell body is silently ignored — Quarto renders the cell's return value (often `undefined`) as literal text. Always put `//|` directives on line 1, no exceptions. (Caught after Pete reported "undefined" rendered below the variable selector.)
+- **`htl` `svg`...`` template literals require a single root element.** Templates with multiple sibling top-level elements (e.g. `<rect/><rect/><line/>` for a 3-piece overlay) fail silently and halt `renderToDiv`, leaving the spinner stuck. Wrap in a `<g>` (or `<svg>` for HTML contexts). Same constraint applies to `html`...`` — multi-root templates need a wrapper. (Caught after the visual-split landed and Pete reported a stuck loader.)
+- **Plot's `tip` option accepts options.** Default `tip: true` uses 20em lineWidth which truncates mid-word for long channel values. Use `tip: { lineWidth: 40 }` (or higher) for tooltips that include list-valued channels like FAOSTAT item names. Plot also accepts other tip options (`format`, `pointer`, etc.) via this pattern.
+- **Plot channel options with `undefined` value cause runtime errors.** `channels: { Foo: someCond ? "field" : undefined }` and `z: someCond ? fn : undefined` both fail (Plot iterates the channels object and tries to materialise `undefined`). Use conditional spread instead: `...(someCond ? { Foo: "field" } : {})` and conditionally include `z` at the top level.
+- **Conditional visibility on `viewof` widgets — mutate display style from a separate cell.** Re-creating the widget on every dependency change loses state (toggle ON/OFF resets). Instead: define the widget once unconditionally; in a separate `//| output: false` cell, read `viewof X` (the DOM element) and mutate `style.display` reactively. State persists across the dependency changes. Pattern lives at the production-trends byproducts toggle.
+- **FAOSTAT data-domain truth.** QV / QCL = farm-gate, raw-only by FAOSTAT convention (not a pipeline filter decision). TM = both raw and processed because once goods leave the farm they can be processed and re-exported. The byproducts toggle therefore only ever has work to do for trade variables; the I-2 pipeline invariant additionally locks physical variables (production / yield / *_quantity) to raw-only. This is documented in the Methods text in commit `221d0eb`.
+- **First-sentence-split for `<details>`-folded text.** `descText.indexOf(". ")` is the cheap heuristic for splitting into summary + body. False positives at "e.g.", "Int$.", abbreviations are tolerable since the user can always expand. Edge case: short descriptions with no `. ` fall through to the un-folded `<p>` form. Pattern lives at all 3 `.climate-var-description` sites.
+
+### Memory updates this session
+
+Two new feedback memories planned (writing alongside this DECISIONS update):
+
+- `feedback_quarto-cell-directives-first-line.md` — `//| output: false` and other Quarto cell directives must be on line 1 immediately after the cell opener; comments above them mask them silently.
+- `feedback_htl-svg-template-single-root.md` — `htl` `svg`...`` and `html`...`` templates accept exactly one root element; multi-element substitutions must be wrapped in a `<g>` / `<div>` / `<svg>`.
+
+### ISSUES.md updates this session
+
+- + Added **CR-085** — Commodity-focus view (pick one commodity, see all variables side-by-side as small-multiples).
+- + Added **CR-086** — Price-shock overlay (FAOSTAT producer prices + WB import-price index).
+- + Added **CR-087** — Stack-order verification (confirm raw on bottom / processed on top in Plot.rectY; visual-polish only).
+- + Added **CR-088** — Cross-reference to the trade-data audit dispatch. Subsumes earlier CR-064 items (a) cattle-meat aliases, (b) banana export under-aggregation, (d) production-anchored 0.25 % filter dropping trade items — all overlap.
+- **CR-063** Phase B / D **landed via this session's v5 dispatch chain.** Trade variables now exposed (Phase D scope), byproducts toggle + rollup added (Phase B beyond scope of the original Phase A landing); Quick Insights for production trends still pending (original Phase B narrow scope). Phase C (CR-062 observational view in production trends section) remains unblocked but unstarted.
+
+### In flight / uncommitted
+
+- `dev/climateRationale` is **~23 commits ahead** of `origin/dev/climateRationale` at end-of-session (FAOSTAT v5 chain + 3 separate CR-082 scripts commits). Not pushed in this session. Working tree clean apart from `.DS_Store` noise.
+- One open dispatch awaiting cowork action: `2026-05-25_faostat-trade-data-audit.md` — F-1 / F-2 / F-3 investigation; F-4 From Year default decision; F-4b byproducts asymmetry confirmation.
+
+### Open questions for next session
+
+- **CR-088 cowork answers** — F-1 (AGO palm oil real or pipeline bug?); F-2a (Wine — pipeline filter or upstream gap?); F-2b (Apple-/Orange-/Grape-juice parent_raw curation gaps); F-3 (n.e.c. handling decision); F-4 (From Year default 2010 vs 2015 vs 2019 vs per-variable); F-4b (byproducts asymmetry confirmation for Methods text).
+- **CR-087 stack-order** — has the visual split's stack order been confirmed? Raw at the bottom, processed on top? Pete to verify on the next review.
+- **CR-082 parquet row-group** — three commits this session (`682911c` `113b63f` `eca5173`) moved an R rebake script out of atlas_notebooks into hazards_prototype. Status of the actual re-bake + S3 publish unclear from this session's context. Probe with: `duckdb -c "INSTALL httpfs; LOAD httpfs; SELECT COUNT(DISTINCT row_group_id) AS n_groups FROM parquet_metadata('https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet')"`.
+- **Push** — 23 commits ahead. Pete to call when ready.
+
+### Suggested next step
+
+1. **Resolve CR-088 in cowork.** Walk through F-1 to F-4b with Pete; lock the answers; update the trade-data audit dispatch's "What to investigate" → "Decisions" section accordingly. Once answers in, land the From Year default change (notebook-side commit) and queue any pipeline-side curation fixes for hazards_prototype.
+2. **Verify CR-087 stack-order on a fresh preview.** If wrong, flip via `Plot.stackY({order: ...}, ...)` or sort the stackedData array — 1-2 LOC fix.
+3. **Push the FAOSTAT v5 commits** to `origin/dev/climateRationale` when Pete is ready. 23 commits including the 3 CR-082 R-script commits.
+4. **Re-probe CR-082 parquet status.** If the re-bake landed, the observational Recent Changes section should now cold-start in 3-8 s instead of 70 s — verify and close out CR-082 if so.
+5. **Consider CR-085 (commodity focus) as the next feature** if there's appetite — single-commodity small-multiples view; depends only on the v5 schema that just landed; ~150 LOC; storyline-friendly for GCF audience.
