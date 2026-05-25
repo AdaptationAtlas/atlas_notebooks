@@ -59,6 +59,26 @@ The pipeline excludes most FAOSTAT n.e.c. (not-elsewhere-classified) categories 
 
 Pete's instinct (Q-1 of the review): a country exports apple juice but it ends up in "Juice of fruits n.e.c." and can't be split by commodity. **Action**: document this caveat in the notebook's Methods + tooltip when the active variable is a trade variable.
 
+### F-4b — Why are byproducts only present in trade variables?
+
+**Observed:** The "Include byproducts" toggle in the notebook visibly fires only for monetary trade variables (Export value × current / constant USD; Import value × current / constant USD). It is hidden for vop_usd15 / vop_intd15 / production / yield / export_quantity / import_quantity. The notebook currently explains this with a Methods paragraph + per-variable description suffix asserting "FAOSTAT QV records farm-gate output only by design" and "physical quantities don't combine across raw and processed forms (1 t cocoa beans ≠ 1 t cocoa butter)".
+
+**Open questions to confirm in cowork:**
+
+1. **Is this 100 % a property of FAOSTAT's data, or is it partly a pipeline filter decision?**
+   - QV (Value of Production) elements: 152 (vop_usd15), 154 (vop_intd15). Does FAOSTAT publish these for any processed items (e.g. wheat flour vop)? Or are they strictly farm-gate? Confirm by inspecting raw FAOSTAT QV downloads in `R/0.4.5_create_faostat_long.R` before the pipeline's filter.
+   - QCL (Production / Yield): definitely farm-gate by FAOSTAT's data-model convention; no processed entries in the source. Confirm.
+   - TM (Trade): we've already confirmed processed rows exist for export_value*, import_value*, export_quantity, import_quantity.
+2. **Could byproducts be ADDED to QV in principle?** For example: "wheat flour" as a synthetic raw + processed VoP row constructed from QV's raw "wheat" + the processed share inferred from trade or a deflated processor-margin assumption. Probably not worth pursuing — opens a methodological can of worms — but worth a 30-minute discussion to lock the answer for the Methods section.
+3. **Why is the toggle hidden for export_quantity / import_quantity even though processed rows exist?** Because physical units don't compose (the I-1 invariant). User-facing explanation already in Methods; verify Pete + co-workers are aligned.
+
+**Outcomes needed:**
+
+- Lock the answer with a short paragraph in `data/climateRationale/nbText.json` Methods (the v5 byproducts paragraph that landed in commit 221d0eb already says this — confirm the wording is correct after cowork).
+- If FAOSTAT QV turns out to have processable byproduct entries we are dropping, add a CR-088b sub-issue.
+
+---
+
 ### F-4 — Year window proposal
 
 Pete's earlier observation: the implausible AGO palm oil pre-2017, plus the general FAOSTAT TM data quality decline as you go back, suggests a soft default of **2019 onwards** for export/import variables would protect users from misleading pre-2017 readings. Current notebook default: `Math.max(productionAvailableYears.min, 2010)` for the From Year slider — applies uniformly to ALL variables.
