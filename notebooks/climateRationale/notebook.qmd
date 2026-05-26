@@ -1295,6 +1295,41 @@ viewof anomaly_obs = {
 ::: {.controls-row .cols-3}
 
 ```{ojs}
+// Baseline period for the observed-record anomaly framing. WMO's
+// standard climatological normal is 1991-2020, used everywhere by
+// default. The Atlas's CMIP6 future-projection products are calibrated
+// against 1995-2014, however, so a "matches Future Projections"
+// option is offered for users who want a like-for-like comparison
+// between observed anomalies and projected anomalies. Hidden for SPEI
+// — the SPEI values in the parquet are already standardised against
+// their own internal reference window, so an external baseline-period
+// choice doesn't apply.
+viewof baselinePeriod_obs = {
+  const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
+  const select = Inputs.select(["1991-2020", "1995-2014"], {
+    label: "Baseline period (anomalies)",
+    value: "1991-2020",
+  });
+  setTimeout(() => {
+    const cell = select.closest('.cell');
+    if (cell) cell.style.display = isSPEI ? 'none' : '';
+  }, 0);
+  return select;
+}
+```
+
+```{ojs}
+//| output: false
+// Parse the selected baseline period string ("YYYY-YYYY") into a
+// {start, end} year range used by baselines_obs filter + all dynamic
+// "(period)" labels in the chart, table, and caption.
+baselineYears_obs = {
+  const [start, end] = baselinePeriod_obs.split("-").map(Number);
+  return { start, end };
+}
+```
+
+```{ojs}
 // Monthly view checkbox. Only meaningful when the selected season is
 // "annual" (otherwise the season's 3-month window already specifies a
 // fixed month range, and "monthly" is redundant). SPEI also disables
@@ -1572,13 +1607,17 @@ observed_obs_raw = {
   };
 }
 
-// Per-admin baseline {mean, sd, n} keyed by adminName. The 1991-2020
-// WMO normal is computed independently per admin1 so each facet's
-// hazard bands + z-scores reference the right baseline.
+// Per-admin baseline {mean, sd, n} keyed by adminName. The window is
+// user-selectable via viewof baselinePeriod_obs (defaults to the WMO
+// 1991-2020 standard normal; 1995-2014 also offered to match the
+// Atlas's CMIP6 future-projection products). Computed independently
+// per admin1 so each facet's hazard bands + z-scores reference the
+// right baseline.
 baselines_obs = {
   const byAdmin = new Map();
+  const { start, end } = baselineYears_obs;
   for (const row of observed_obs_raw.rows) {
-    if (row.year < 1991 || row.year > 2020) continue;
+    if (row.year < start || row.year > end) continue;
     if (!byAdmin.has(row.adminName)) byAdmin.set(row.adminName, []);
     byAdmin.get(row.adminName).push(row.value_mean);
   }
@@ -1659,7 +1698,7 @@ recentChanges_obs = {
           month:       "Month",
           value_mean:  "Value",
           value_plot:  useAnomaly_obs ? "Anomaly" : "Value (plotted)",
-          z:           "z (σ vs 1991-2020 baseline)",
+          z:           `z (σ vs ${baselinePeriod_obs} baseline)`,
           cls:         "Classification",
         },
         columns: ["year", "month", "value_mean", "value_plot", "z", "cls"],
@@ -2207,7 +2246,7 @@ recentChanges_obs = {
     });
   }
   if (showsBaselineRule) {
-    legendItems.push({ kind: "rule", color: "#4682b4", dasharray: "3 2", label: "1991-2020 baseline mean" });
+    legendItems.push({ kind: "rule", color: "#4682b4", dasharray: "3 2", label: `${baselinePeriod_obs} baseline mean` });
   }
   if (isSPEI_obs) {
     legendItems.push({ kind: "rule", color: "#e15759", dasharray: "2 3", label: "WMO SPEI reference lines (±1, ±1.5, ±2)" });
@@ -2304,7 +2343,7 @@ recentChanges_obs = {
   // For SPEI, an extra section explains why several controls disappear
   // and what to expect of the trend line + zone shading.
   const plotCaptionParas = [
-    html`Values are shown as <strong>anomalies</strong> relative to the WMO 1991–2020 climatological normal. The zero line represents the 1991–2020 average for the selected season and variable. Values above zero indicate years wetter / warmer than the 1991–2020 average; values below zero indicate the opposite. Anomaly framing makes change easier to read across regions with very different baseline climates.`,
+    html`Values are shown as <strong>anomalies</strong> relative to the <strong>${baselinePeriod_obs.replace("-", "–")}</strong> baseline (${baselinePeriod_obs === "1991-2020" ? "WMO standard climatological normal" : "matches the Atlas's CMIP6 future-projection calibration window"}). The zero line represents the ${baselinePeriod_obs.replace("-", "–")} average for the selected season and variable. Values above zero indicate years wetter / warmer than the baseline; values below zero indicate the opposite. Use the <em>Baseline period</em> selector above the chart to switch between the two windows — the Atlas-convention 1995–2014 is useful when comparing observed anomalies directly against Future Projections, which are calibrated against the same window.`,
     html`The optional <strong>trend layer</strong> overlays a Mann-Kendall significance test + Theil-Sen slope estimator (Sen-slope) on the annual series. TFPW (trend-free pre-whitening) is applied automatically when the residual series shows positive autocorrelation, to avoid inflating the test against AR(1) noise.`,
   ];
   if (isSPEI_obs) {
@@ -2339,8 +2378,8 @@ recentChanges_obs_caption = {
   if (adminNames_obs.length === 1) {
     const b = baselines_obs.get(adminNames_obs[0]);
     baselineCopy = (b && b.n > 0)
-      ? `Baseline (1991-2020): μ = ${b.mean.toFixed(2)}, σ = ${b.sd.toFixed(2)}, n = ${b.n} years.`
-      : `Baseline (1991-2020): insufficient data.`;
+      ? `Baseline (${baselinePeriod_obs}): μ = ${b.mean.toFixed(2)}, σ = ${b.sd.toFixed(2)}, n = ${b.n} years.`
+      : `Baseline (${baselinePeriod_obs}): insufficient data.`;
   } else {
     const lines = adminNames_obs.map((name) => {
       const b = baselines_obs.get(name);
@@ -2348,7 +2387,7 @@ recentChanges_obs_caption = {
         ? `**${name}**: μ = ${b.mean.toFixed(2)}, σ = ${b.sd.toFixed(2)}, n = ${b.n}`
         : `**${name}**: insufficient data`;
     });
-    baselineCopy = `Per-admin baselines (1991-2020): ${lines.join(" · ")}.`;
+    baselineCopy = `Per-admin baselines (${baselinePeriod_obs}): ${lines.join(" · ")}.`;
   }
   const speiCopy = isSPEI_obs
     ? `SPEI is the ${variable.replace("SPEI-","").replace(/^0+/, "")}-month accumulation ending in month ${speiMonth}. Reference lines: ±1 moderate, ±1.5 severe, ±2 extreme (WMO).`
