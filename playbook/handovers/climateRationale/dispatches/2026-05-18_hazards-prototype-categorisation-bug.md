@@ -1,5 +1,12 @@
 # Dispatch — Debug historic-vs-future hazard categorisation in `hazard_exposure` parquet
 
+> **Update 2026-05-26 — partial progress, dispatch STILL OPEN.**
+> The `hazard_exposure` parquet was re-baked on 2026-05-26 12:21 UTC (replacing the 2026-01-21 22:18 UTC bake referenced below) to apply the *issue-#9 mass-conserving resample fix* at the five sites in `R/0.4.1_create_livestock_exposure.R`, `R/0.4.4_process_exposure.R`, and `R/3_freq_x_exposure.R` (`hazards_prototype` commits `a3d009a` + `8af46c5` + `f50e869`). Mass-conservation invariant now PASSES (D_validate_9 log `hazards_prototype/logs/D_validate_9_20260526_103030.log` [a], 0/1442 breaches in AGO/NGA/CIV).
+>
+> **All three CR-068 findings in this dispatch remain present** — they are upstream of the resample sites (steps 1-2 of the pipeline; the broken historic NDWS source this dispatch was designed to debug) and were explicitly out of scope for the 2026-05-25 rebake. The 2026-05-26 D_validate_9 [d] log confirms heat / wet / heat+wet still report 0 historic mass for AGO, and [b] confirms AGO sugarcane SSP370 2041+ still 0. The next pass that touches this dispatch should pick up at **Stage 1 — inspect classified rasters** below; no remediation has been attempted against the historic NDWS source yet.
+>
+> Sibling finding surfaced during the rebake's publish step: producer drift between the current `R/0.4.4_process_exposure.R` output and the canonical `crop-livestock_all.parquet`. See `dispatches/2026-05-26_exposure-producer-drift.md` for Brayden's triage queue.
+
 Hand off to: a Claude Code / engineer working in
 [`AdaptationAtlas/hazards_prototype`](https://github.com/AdaptationAtlas/hazards_prototype)
 on branch **`develop`**.
