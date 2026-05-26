@@ -2016,6 +2016,11 @@ These are explicitly out of scope for this round per Pete's "focus on immediate 
 - Admin-2 level data (Majambo feedback).
 - Multi-region project geometries / polygons of arbitrary shape (Majambo feedback).
 - Performance work generally (slow first paint; covered in planning .docx Section D).
+- **Loading bars in chart containers** (replace the current `loaderDiv()` spinner with a more informative indicator). Surfaced 2026-05-26 after the spinner + error-suppression work landed (`9278599`). Three levels of effort, increasing fidelity:
+  - *Level 1 — indeterminate bar + stage text* (~30 min). Animated CSS bar in place of the spinner, with a label that flips between "Fetching data…" / "Querying…" / "Rendering…" at known points in the heavy data cells. No byte tracking. Single CSS change in `helpers/uiComponents.ojs` + a few `setStage()` calls per cell. Lowest risk, decent UX bump.
+  - *Level 2 — determinate % bar* (~2–3 h). Install a `window.fetch` wrapper that intercepts S3 range requests, sums bytes against the `Content-Length` per cell's parquet URL, renders "Loading 2.4 MB / 4.8 MB (50%)". Will be most accurate after [[CR-rebake]] / `scripts/rebake_parquets_for_pushdown.py` lands (smaller, sorted row groups → fewer, better-bounded range requests). Caveat: DuckDB-WASM issues multiple range requests per query, so the byte→% mapping is approximate.
+  - *Level 3 — combined (stage text + byte-tracked % during the fetch stage)* (~3–4 h). Best UX. Union of L1 + L2.
+  - Picks up Pete's priority #4 ("Improved performance and loading feedback — at minimum, loading spinners so plots don't look broken while data is fetching") at the next level above the bare spinner that already exists.
 
 **Overview / framing — surfaced 2026-05-13 from Pete's Q5 answer:**
 - **CR-NEW-cacc1-overview** — Ask CACC1 (Cesare Scartozzi's programme) to produce dedicated Overview content: guidance on how to write a climate rationale, framing for GCF audiences, links to worked examples. **Pete to surface to Cesare.** When delivered, it replaces / extends the single GCF link in CR-026.
