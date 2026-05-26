@@ -134,39 +134,42 @@ TARGETS: list[Target] = [
         notes="Producer: hazards_prototype/R/observational/4_aggregate_obs_admin_periods.R",
     ),
     # --- NEX-GDDP-CMIP6 ensemble timeseries (historical + 4 future periods) ---
+    # Filter column in the parquets is `hazard` (PTOT / TAVG / HSH-max / NDWS / …)
+    # — NOT `variable` as the S3 directory path might suggest. The notebook's
+    # SQL filter is `AND hazard in (...)`.
     Target(
         key="cmip6_historical",
         s3_key="domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=1995-2014/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
-        sort_by=("iso3", "admin1_name", "variable", "season", "year"),
-        verify_stats_on=("iso3", "variable", "season"),
+        sort_by=("iso3", "admin1_name", "hazard", "season", "year"),
+        verify_stats_on=("iso3", "hazard", "season"),
         notes="Producer: hazards_prototype/R/1.x_*_timeseries.R (exact line not yet pinpointed)",
     ),
     Target(
         key="cmip6_2021_2040",
         s3_key="domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2021-2040/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
-        sort_by=("iso3", "admin1_name", "variable", "season", "scenario", "year"),
-        verify_stats_on=("iso3", "variable", "season", "scenario"),
+        sort_by=("iso3", "admin1_name", "hazard", "season", "scenario", "year"),
+        verify_stats_on=("iso3", "hazard", "season", "scenario"),
         notes="Producer: hazards_prototype/R/1.x_*_timeseries.R",
     ),
     Target(
         key="cmip6_2041_2060",
         s3_key="domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2041-2060/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
-        sort_by=("iso3", "admin1_name", "variable", "season", "scenario", "year"),
-        verify_stats_on=("iso3", "variable", "season", "scenario"),
+        sort_by=("iso3", "admin1_name", "hazard", "season", "scenario", "year"),
+        verify_stats_on=("iso3", "hazard", "season", "scenario"),
         notes="Producer: hazards_prototype/R/1.x_*_timeseries.R",
     ),
     Target(
         key="cmip6_2061_2080",
         s3_key="domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2061-2080/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
-        sort_by=("iso3", "admin1_name", "variable", "season", "scenario", "year"),
-        verify_stats_on=("iso3", "variable", "season", "scenario"),
+        sort_by=("iso3", "admin1_name", "hazard", "season", "scenario", "year"),
+        verify_stats_on=("iso3", "hazard", "season", "scenario"),
         notes="Producer: hazards_prototype/R/1.x_*_timeseries.R",
     ),
     Target(
         key="cmip6_2081_2100",
         s3_key="domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period=2081-2100/baseline=1995-2014/variable=ensemble_season_timeseries.parquet",
-        sort_by=("iso3", "admin1_name", "variable", "season", "scenario", "year"),
-        verify_stats_on=("iso3", "variable", "season", "scenario"),
+        sort_by=("iso3", "admin1_name", "hazard", "season", "scenario", "year"),
+        verify_stats_on=("iso3", "hazard", "season", "scenario"),
         notes="Producer: hazards_prototype/R/1.x_*_timeseries.R",
     ),
     # --- hazard exposure & exposure ---
