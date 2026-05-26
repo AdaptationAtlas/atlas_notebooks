@@ -4576,7 +4576,14 @@ recentChanges_plotData = recentChanges_data.filter((d) => d.hazard === climateVa
 #### data - futureProjections
 
 ```{ojs}
-futureProjections_data = {
+// Pulls all 4 future timeperiods for the selected country in ONE
+// query (no timeperiod predicate). Switching the timeperiod in the UI
+// becomes a JS-only filter against this in-memory result — no
+// re-fetch, instant switches. Cold-fetch cost is ~3-4× a single-
+// timeperiod fetch (we touch 4 hive-partitioned files instead of 1)
+// but it happens once per (country / scenarios / hazards / season /
+// admin1) combo and amortises over the rest of the session.
+futureProjections_dataAll = {
   const _season = seasonSelect.season;
 
   // Hazards we actually need: the user-selected one (for the main chart
@@ -4584,11 +4591,6 @@ futureProjections_data = {
   // (precipitation paragraph) which the Quick Insights builder at
   // `climateProjectionInsight` always renders regardless of selection.
   // Deduped because the selected hazard is often HSH-max or PTOT.
-  // Narrowing from all 9 hazards to 2-3 cuts cold-fetch bytes ~3-4×.
-  // Trade-off: switching the selected hazard now triggers a refetch
-  // instead of just a JS filter — accepted since hazard switches are
-  // uncommon during initial exploration, and the warm cache catches
-  // subsequent switches between HSH-max and PTOT.
   const requiredHazards = [...new Set([climateVarSelect.id, "HSH-max", "PTOT"])];
 
   // When no admin1 is selected we only want the country aggregate
@@ -4619,7 +4621,6 @@ futureProjections_data = {
     AND iso3 in ${sqlList(admin0Iso3)}
     ${admin1Predicate}
     ${sqlWhereNull({ field: "season", value: _season })}
-    AND timeperiod = '${futurePeriodSelect}'
     AND scenario in ${sqlList(futureScenarioSelect.map((d) => d.toLowerCase()))}
     AND hazard in ${sqlList(requiredHazards)}
   `);
@@ -4633,6 +4634,14 @@ futureProjections_data = {
     admin0_name: iso3ToAdmin0Name.get(r.iso3) ?? r.iso3,
   }));
 }
+
+// JS-only filter on the timeperiod the user selected. Updates
+// instantly because all 4 timeperiods are already in memory.
+// Consumers (climateProjectionInsight, futureProjections_plotData,
+// extremeEvents_plotData, downloads) read this unchanged.
+futureProjections_data = futureProjections_dataAll.filter(
+  (d) => d.timeperiod === futurePeriodSelect,
+)
 
 futureProjections_data;
 
@@ -4759,7 +4768,20 @@ extremeEvents_plotData = {
 #### data - hazardExposure
 
 ```{ojs}
-hazardExposure_plotData = {
+// Pulls historical + all 4 future timeframes for the selected
+// country in ONE query (no timeframe predicate against the user's
+// selection). Switching the future timeperiod becomes a JS-only
+// filter against this in-memory result — no re-fetch, instant
+// switches. Cost: ~2-3× a single-timeframe fetch (5 timeframes
+// instead of 2) but amortised over the rest of the session.
+// admin1 + scenario + hazard_vars + exposure_unit + crop filters
+// stay at SQL level so the row-group skip on iso3 still fires
+// against a focused result set.
+hazardExposure_dataAll = {
+  const admin1Predicate = admin1Names.length > 0
+    ? `AND (admin1_name in ${sqlList(admin1Names)} OR admin1_name IS NULL)`
+    : `AND admin1_name IS NULL`;
+
   const resp = await db.query(`
   SELECT
     iso3,
@@ -4777,22 +4799,20 @@ hazardExposure_plotData = {
     AND exposure_unit = 'nominal-usd-2021'
     AND crop != 'generic-crop'
     AND iso3 in ${sqlList(admin0Iso3)}
-    AND (
-     admin1_name in ${sqlList(admin1Names)}
-     OR admin1_name IS NULL
-    )
-    AND timeframe in ('1995-2014', '${futurePeriodSelect}')
+    ${admin1Predicate}
+    AND timeframe in ('1995-2014', '2021-2040', '2041-2060', '2061-2080', '2081-2100')
     AND scenario in ${sqlList(['historic', ...futureScenarioSelect.map((d) => d.toLowerCase())])}
   `);
 
-  // Add in total production not exposed
-  // const merged = data.map(d => ({
-  //   ...d,
-  //   total_value: exposureMap.get(`${d.iso3}|${d.admin1_name}|${d.crop}`) ?? null
-  // }));
-  // return merged
   return withAdminName(resp)
 }
+
+// JS-only filter: historical baseline + the user-selected future
+// timeframe. Consumers (chart, table, downloads) read this name
+// unchanged.
+hazardExposure_plotData = hazardExposure_dataAll.filter(
+  (d) => d.timeframe === '1995-2014' || d.timeframe === futurePeriodSelect,
+)
 
 hazardExposure_plotData;
 ```
