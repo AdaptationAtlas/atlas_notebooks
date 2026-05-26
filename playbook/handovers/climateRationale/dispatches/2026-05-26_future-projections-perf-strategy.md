@@ -106,11 +106,25 @@ Defer until A + B are landed and measured.
 
 These changes are out of scope for this dispatch but enumerated here so the next pipeline dispatch can pick them up. Each is independent. **All require browser-side verification via the sandbox notebook (`notebooks/sandbox/parquet_pushdown_perf.qmd`) before promotion** — CLI A/B is not a faithful proxy for DuckDB-WASM behaviour.
 
+### Sandbox verification protocol (applies to every P-X below)
+
+1. Pipeline-side: produce the rebaked / re-sharded parquet(s), upload to `s3://digital-atlas/sandbox/parquet-pushdown/<canonical-path>` (same prefix the existing STAGE C uploads use; cheap to keep, easy to delete).
+2. Notebook-side: append a new entry to `perfTargets` in `notebooks/sandbox/parquet_pushdown_perf.qmd` for the sandbox-prefix URL — same `cols`, `isoCol`, `sampleIso` as the canonical entry so the lever sweep is apples-to-apples.
+3. Click **Run all**. The auto-verdict block reports `L2→L3` (predicate pushdown effectiveness) and `L3→L7` (multi-iso3 cost) ratios per target. Compare canonical vs sandbox rows in the table.
+4. **Promote only if** the pass criteria for that P-X are met. Otherwise the sandbox uploads stay quarantined; revert the pipeline change.
+
+Each P-X below names its sandbox target spec, the lever to compare on, and the numeric pass criterion.
+
 ### P-1. Sort row groups by iso3 (CMIP6 + hazard_exposure)
 
 Currently row groups have iso3s interleaved. Sorting by iso3 within each file means AGO data lives in a contiguous range of row groups, so predicate pushdown on `iso3 = 'AGO'` can skip many more groups. Expected impact: **2–5× cold-fetch byte reduction**, varies by country.
 
-Sandbox plan: re-bake CMIP6 + hazard_exposure with `ORDER BY iso3` pre-write, upload to the existing `s3://digital-atlas/sandbox/parquet-pushdown/` prefix, A/B in the browser sandbox (this is exactly what STAGE C did before but the sort key wasn't iso3-priority).
+**Sandbox test request**:
+
+- Add a target named `cmip6_2021-2040_iso3sorted` pointing at the sandbox-prefix URL of the iso3-sorted rebake (same cols and `sampleIso='AGO'` as the canonical entry).
+- Compare the **L3** row (single-iso3 predicate) and the **L7** row (multi-iso3 IN-list) on canonical vs sandbox.
+- **Pass criteria**: sandbox L3 ≥ 2× faster than canonical L3, AND L3→L7 cost ratio on sandbox ≤ 2× (i.e., the IN-list problem visibly improves).
+- If pass: promote the sorted file to canonical with the STAGE F MV pattern. If fail: revert.
 
 ### P-2. Drop the `models` column (CMIP6)
 
@@ -119,6 +133,13 @@ The CMIP6 parquet carries a single-string column holding the 18-GCM ensemble nam
 Move the model list to parquet **file metadata** (key-value pairs), or a separate ~1KB JSON sidecar served via FileAttachment. The notebook doesn't display the full list per-row; it shows it once in the Methods section.
 
 Expected impact: ~5–10% column-chunk reduction. Small but free.
+
+**Sandbox test request**:
+
+- Add a target named `cmip6_2021-2040_nomodels` pointing at the sandbox-prefix URL of the rebake with `models` removed (same cols and `sampleIso='AGO'`).
+- Compare the **L2** row (projection only, no predicate — the lever most sensitive to whole-file size) on canonical vs sandbox.
+- **Pass criteria**: sandbox L2 ≥ 1.1× faster than canonical L2 (modest, this is a file-size lever not a pushdown lever). Also confirm rows match.
+- Often best stacked with P-3 in a single rebake so the savings combine.
 
 ### P-3. Drop hive-derivable constant columns (CMIP6 + hazard_exposure)
 
@@ -137,11 +158,26 @@ Eight redundant columns. With hive partitioning enabled in the consumer query, t
 
 Expected impact: ~10–15% column-chunk reduction. Combined with P-2 and tighter projection, the per-query column bytes drop ~25%.
 
+**Sandbox test request**:
+
+- Add a target named `cmip6_2021-2040_nohivecols` pointing at the sandbox-prefix rebake (or `cmip6_2021-2040_nomodels_nohivecols` if P-2 + P-3 are bundled, which is recommended).
+- The notebook's `dbFutureHive` view already runs with `hive_partitioning = 1`, so the rebake just needs the columns *physically removed* from the row data — the view layer reconstructs them from the path automatically. Important: the sandbox target's `cols` list must still include columns the production query reads (e.g., `iso3`, `scenario`, `season`, `mean`, etc.). It just won't include the hive-derived ones, which the production query doesn't `SELECT` anyway.
+- Compare **L2** + **L3** rows on canonical vs sandbox.
+- **Pass criteria**: sandbox L2 ≥ 1.1× faster, sandbox L3 unchanged or marginally faster, rows match.
+
 ### P-4. Drop unused statistical columns (CMIP6)
 
 `min`, `max`, `min_anomaly`, `max_anomaly` are present in the CMIP6 parquet but **not used by the notebook** (only `mean`, `mean_anomaly`, `sd`, `sd_anomaly` are read). If no other consumer needs them, drop or move to a sidecar.
 
 Expected impact: ~15% column-chunk reduction.
+
+**Sandbox test request**:
+
+- Since these columns are never `SELECT`ed by the sandbox levers (the existing `cols` list doesn't include them), removing them doesn't change L2/L3/L7 timings — projection pushdown is already excluding them in the canonical query. The win is **file size only**: faster `dbFutureHive` view setup (smaller footers to scan) and smaller TOTAL bytes that S3 has to keep around.
+- Therefore: no new sandbox lever needed. Verify by:
+  1. Confirm the canonical and sandbox sandbox L2/L3/L7 rows agree (correctness gate).
+  2. Confirm `parquet_metadata(<canonical>)` returns more `num_columns` than `parquet_metadata(<sandbox>)` — sanity check the columns were actually removed.
+- Best bundled with P-2 + P-3 in a single rebake — they're all file-size-only levers.
 
 ### P-5. Per-iso3 sharding (the big one) — see [CR-058 / U-5](../ISSUES.md)
 
@@ -151,6 +187,15 @@ Trade-off: more S3 objects (55 iso3 × 4 periods = 220 files for CMIP6, similar 
 
 This is the single highest-impact pipeline lever but the biggest pipeline-side cost. Worth its own dispatch.
 
+**Sandbox test request**:
+
+- Add a target named `cmip6_2021-2040_AGO_only` pointing at the per-iso3 sandbox-prefix URL (e.g. `s3://digital-atlas/sandbox/parquet-pushdown/.../period=2021-2040/iso3=AGO/...parquet`). Set `cols` to exclude `iso3` (now constant per file) and **set `isoCol` to `iso3` with `sampleIso='AGO'`** so the existing L3 lever still constructs a valid SQL — DuckDB will short-circuit `WHERE iso3='AGO'` on a single-iso3 file.
+- Compare:
+  - Per-iso3 **L2** (projection only) vs canonical **L3** (single-iso3 predicate) — this is the apples-to-apples "per-iso3 file with no WHERE" vs "multi-iso3 file with WHERE".
+  - Per-iso3 **L7** (multi-iso3 IN-list) — would still be slow on a single-iso3 file unless the consumer query is rewritten to dispatch parallel single-file reads. **Don't expect L7 to improve on the per-iso3 file by itself**; that's the consumer-side work this unlocks.
+- **Pass criteria**: per-iso3 L2 ≥ 5× faster than canonical L3 (this is the major architectural win; bigger threshold reflects the bigger pipeline cost).
+- Promotion side: this isn't a simple MV — the canonical layout changes shape. Promotion is a `nbData.json` update to switch `s3_path` → `s3_paths` (a list of per-iso3 URLs constructed at query time per the user's `admin0Iso3`). Notebook-side: the `db` and `dbFutureHive` views need to be re-issued whenever `admin0Iso3` changes (since the file list does). Worth its own follow-up dispatch.
+
 ### P-6. Hazard_exposure parquet design review
 
 `hazard_exposure_multi-hazard.parquet` is 60M rows and currently a single file. The pipeline shape may need re-thinking entirely:
@@ -158,6 +203,13 @@ This is the single highest-impact pipeline lever but the biggest pipeline-side c
 - 60M rows × N filter dimensions is a lot to scan for any single iso3.
 - The notebook query filters by iso3 + admin2_name IS NULL + crop != 'generic-crop' + 2 hazard_vars + 1 exposure_unit + 2 timeframes + N scenarios. Lots of post-fetch filtering.
 - Per-iso3 sharding (as in P-5) would be a clean win. Worth investigating whether the entire file structure should be flattened or de-normalised differently for the notebook's consumption pattern.
+
+**Sandbox test request** (do this FIRST, before any rebake):
+
+- Add a target named `hazard_exposure_canonical` pointing at the **existing canonical** URL (`s3://digital-atlas/domain=hazard_exposure/.../int=multi-hazard.parquet`), with cols `["iso3", "admin1_name", "crop", "hazard", "timeframe", "scenario", "value"]` and `sampleIso='AGO'`.
+- Run the matrix to get a **baseline** L2 / L3 / L7 / L4 measurement on the current 60M-row layout. We don't have this yet; the sandbox to date has only tested CMIP6 + adm0_obs.
+- Once the baseline numbers are known, decide which design experiments to bake (iso3 sort, iso3 shard, drop unused cols, narrower exposure-unit filtering pushed into the file structure, etc.) and follow the same P-1 to P-5 pattern.
+- **Pass criteria for any rebake**: ≥ 5× faster L3 vs the canonical baseline. The hazard_exposure file is the biggest contributor to the timeperiod-change wait, so the bar is higher.
 
 ---
 
