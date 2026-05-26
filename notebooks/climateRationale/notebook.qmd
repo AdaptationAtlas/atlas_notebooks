@@ -1259,7 +1259,17 @@ Inputs.bind(
 // 1991-2020 WMO baseline (per Pete's 2026-05-21 review — absolute
 // values cram inter-annual variation against a non-zero baseline). SPEI
 // ignores this toggle (it's already a standardised z-score).
-viewof anomaly_obs = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: true });
+viewof anomaly_obs = {
+  // Hide the toggle when SPEI is selected — SPEI is already a
+  // standardised z-score against its own baseline, so "show as anomaly"
+  // has no meaning. The toggle's value is still consumed downstream as
+  // `useAnomaly_obs = anomaly_obs && !isSPEI_obs` so the chart code
+  // path is unaffected.
+  const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
+  const toggle = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: true });
+  if (isSPEI) toggle.style.display = 'none';
+  return toggle;
+}
 ```
 
 :::
@@ -1277,15 +1287,19 @@ viewof monthly_obs = {
   const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
   const season = seasonSelect.season;
   const enabled = season === "annual" && !isSPEI;
-  return Inputs.toggle({
+  const toggle = Inputs.toggle({
     label: enabled
       ? "Show monthly resolution (within annual)"
-      : (isSPEI
-          ? "Monthly view (N/A — SPEI is one value per year)"
-          : "Monthly view (only available when season = Annual)"),
+      : "Monthly view (only available when season = Annual)",
     value: false,
     disabled: !enabled,
   });
+  // SPEI pins to a single month per year (the season's last month), so a
+  // "monthly resolution" toggle has no meaning. Hide the toggle rather
+  // than disabling it — disabled controls labelled "N/A" still consume
+  // grid real-estate and add visual noise.
+  if (isSPEI) toggle.style.display = 'none';
+  return toggle;
 }
 ```
 
@@ -1868,8 +1882,16 @@ recentChanges_obs = {
   if (isSPEI_obs) {
     bgMarks = [hazardBandMark, speiRuleMark].filter((m) => m != null);
     dataLayerMarks = [
-      Plot.barY(observed_obs_aug, {
-        x: xField, y: "value_plot",
+      // Use Plot.rect with explicit x1/x2 + y1: 0 / y2: value — matches
+      // the non-SPEI barMark pattern. Plot.barY with quantitative x
+      // (year as integer) renders zero-width bars in Plot 0.6.13+
+      // because the auto bandwidth calc collapses to the data step.
+      // Explicit rect bounds avoid the issue entirely.
+      Plot.rect(observed_obs_aug, {
+        x1: (d) => d[xField] - stripeWidth * 0.4,
+        x2: (d) => d[xField] + stripeWidth * 0.4,
+        y1: 0,
+        y2: "value_plot",
         fill: (d) => extremeColour_obs[d.cls],
         stroke: (d) => extremeColour_obs[d.cls],
         fx: isFaceted ? "_fx" : undefined,
@@ -3120,7 +3142,7 @@ Inputs.bind(
 
 ```{ojs}
 Inputs.bind(
-  Inputs.select(hazards_obj, {
+  Inputs.select(futureHazards, {
     format: (d) => _lang(d.name),
     label: _lang(general_translations.climateVar),
   }),
@@ -3301,7 +3323,7 @@ Inputs.bind(
 
 ```{ojs}
 Inputs.bind(
-  Inputs.select(hazards_obj, {
+  Inputs.select(futureHazards, {
     format: (d) => _lang(d.name),
     label: _lang(general_translations.climateVar),
   }),
@@ -4936,17 +4958,29 @@ viewof climateVarSelect = Inputs.select(hazards_obj, {
 ```
 
 ```{ojs}
+//| output: false
+// Future Projections + Extreme Events use the CMIP6 ensemble, which
+// does NOT carry the SPEI drought indices (SPEI is a derived
+// precipitation-evapotranspiration index produced from observed
+// CHIRPS / CHIRTS-ERA5 and is not part of the projection pipeline).
+// Filter SPEI out of the variables offered in the Future / Extreme
+// selectors. Recent Changes keeps its full obsHazards list which
+// includes SPEI-03 / SPEI-12.
+futureHazards = hazards_obj.filter((h) => !h.id.startsWith("SPEI"));
+```
+
+```{ojs}
 // Independent climate-variable state for the Future Projections and
 // Extreme Events sections. Recent Changes uses observational data
-// (CHIRPS / CHIRTS-ERA5) and only supports the 6 observational vars;
-// Future + Extreme use CMIP6 projections and support all 12 (incl. heat
-// indices). Keeping the two selectors disconnected lets a user explore
-// e.g. observed PTOT in Recent and a heat index (HSH-max) in Future
-// without one selection clobbering the other. Lives in its own cell
-// because Observable cells allow only one top-level binding.
-viewof climateVarSelectFuture = Inputs.select(hazards_obj, {
+// (CHIRPS / CHIRTS-ERA5) and supports the 6 observational vars
+// including SPEI; Future + Extreme use CMIP6 projections and support
+// the 10 non-SPEI hazards (incl. heat indices). Keeping the two
+// selectors disconnected lets a user explore e.g. observed PTOT in
+// Recent and a heat index (HSH-max) in Future without one selection
+// clobbering the other.
+viewof climateVarSelectFuture = Inputs.select(futureHazards, {
   format: (d) => d.id,
-  value: hazards_obj.find((d) => d.id === "PTOT") ?? hazards_obj[0],
+  value: futureHazards.find((d) => d.id === "PTOT") ?? futureHazards[0],
 });
 ```
 
