@@ -36,6 +36,7 @@ Both have working predicate pushdown on iso3. Neither benefits from a STAGE-D-st
 | `fdbda11` | Filter `hazard IN (selected, HSH-max, PTOT)` in `futureProjections_data` instead of "fetch all 9, filter in JS" | ~3–4× column-chunk bytes on the CMIP6 query |
 | `eecff9b` | Drop `admin0_name` from SELECT (reattach via iso3 lookup), conditional admin1 predicate (skip empty-IN OR when no admin1 selected) | ~10–15% extra on CMIP6 |
 | `62ad870` | Cosmetic: whyTwoDatasets heading fix (drop `{#…}` literal, demote to h2) | n/a |
+| `1f3def4` | Section A (partial): IntersectionObserver gate on `futureProjections_dataAll` + `hazardExposure_dataAll`. **Bulk row-group reads for selected timeperiod ARE deferred** until scroll (~19 byte-range fetches). **Footer fetches still fire on init** (see verification appendix below). | ~real but smaller than headline; full deferral pending Path B |
 
 Combined effect on initial cold load is significant. Combined effect on **timeperiod-change** wait is small — the file refetches are still serialised and dominated by the parquet scan cost.
 
@@ -237,3 +238,74 @@ This is the single highest-impact pipeline lever but the biggest pipeline-side c
 - Parent dispatch (sandbox + S3 staging): `2026-05-25_parquet-pushdown-sandbox.md`
 - Pipeline rewrite (DEPRIORITISED): `2026-05-25_pipeline-parquet-pushdown-rewrite.md`
 - Related: [[CR-058]] (Option 3, per-iso3 sharding), [[CR-082]] (rebake hypothesis, CLOSED), [[CR-089]] (mainGaul, LANDED), [[CR-090]] (futureProjections alias, CLOSED-rejected)
+
+---
+
+## Verification appendix (2026-05-26 evening) — Section A landed partial; Path B follow-up
+
+Commit `1f3def4` (originally `ca6cade`, amended) landed Section A above. Verified locally via playwright + chromium-headless driving the freshly-rendered `_site/notebooks/climateRationale/notebook.html` with full network capture across initial-load → scroll-to-FP-anchor → scroll-to-HE-anchor. Capture artifacts retained at `/tmp/pw-verify/` (network log, three section screenshots, JSON summary).
+
+### Confirmed behaviour
+
+| Phase | Future Projections (period=2021-2040) | Hazard Exposure | Note |
+|---|---|---|---|
+| Initial load (15s after navigate, no scroll) | **5 fetches** (footer + partition metadata across all 4 future periods + historical baseline) | **6 fetches** (footer + initial column-chunks) | Page-top sections (Recent Changes, Key Facts, Production Trends) render correctly during this window |
+| After scroll to `#futureProjections-anchor` | **+19 fetches** for the selected timeperiod (row-group reads for the chart query) | 0 new | This is the **deferred bulk-data win** — these are the bytes the gate actually holds back |
+| After scroll to `#hazardExposure-anchor` | 0 new | 0 new | Hazard exposure was fully fetched during init (no row-group reads remaining to defer); see "Why" below |
+
+### What works (Section A is real, just narrower than the original commit message claimed)
+
+The IntersectionObserver pattern fires correctly:
+- Gate cell `sectionVisible(anchorId)` yields `false` on creation, observes the anchor, flips to `true` once on first intersection, stays `true` for the session.
+- Consumer cells `futureProjections_dataAll` and `hazardExposure_dataAll` return `[]` while the gate is `false`, so their downstream chart cells render an empty-or-loading state without firing the DuckDB query.
+- On scroll, the gate flips, the query fires once, and the chart populates.
+- **Fail-open path** (anchor element missing → return `true` immediately) is in place per code-read; not exercised in the test run because anchors were always present in the rendered HTML.
+- **Net win**: the ~19 byte-range fetches for the user-selected timeperiod's chart data are deferred until the user actually scrolls toward Future Projections.
+
+### What doesn't work (the gap between Section A and "no S3 work on init")
+
+The footer + partition-metadata fetches for the gated parquets fire on initial paint regardless of the gate, because two **un-gated** cells sit upstream of the gate in the OJS dependency graph:
+
+- `db` cell at [notebook.qmd:4110](../../../../../notebooks/climateRationale/notebook.qmd#L4110) — calls `generateDB(...)` on every non-future parquet, including `hazard_exposure_multi-hazard.parquet`. DuckDB-WASM registers each parquet by reading its footer + column-chunks needed for view setup, generating 6 fetches against hazard_exposure on init.
+- `dbFutureHive` cell at [notebook.qmd:4159](../../../../../notebooks/climateRationale/notebook.qmd#L4159) — does `CREATE VIEW futureProjections AS SELECT ... FROM parquet_scan([...4 future parquets + 1 hist...], hive_partitioning=1)`. The `hive_partitioning=1` flag forces DuckDB-WASM to read **each** file's footer at view-creation time to discover the partition columns. That generates 5 footer fetches on init.
+
+Neither cell depends on `futureProjectionsVisible` or `hazardExposureVisible`. The gate only wraps the **query** cells, not the **registration** cells.
+
+### Why hazard exposure shows zero new fetches after its scroll
+
+Three possibilities, ordered by likelihood:
+1. **Initial-load fetches were sufficient.** The 6 fetches during init were the footer + column-chunks needed for hazard_exposure's query. After scrolling, the cached DuckDB view answers `hazardExposure_dataAll`'s query from already-fetched data — no new bytes needed. This would mean the gate provides ~zero deferred bytes for hazard_exposure (its work happened on init regardless).
+2. **Upstream cell didn't fire.** The test environment had 98 OJS console errors during bootstrap (most cascading from transient FileAttachment errors that resolved). It's possible `hazardExposure_dataAll`'s upstream consumers never reached the state where the query needs to fire, masking what would have been observable behaviour in production.
+3. **The gate works but the cell is also throttled by some other gate** (e.g. waiting on `admin0Iso3` settling).
+
+Disambiguating would need either (a) instrumenting the cell to log execution, or (b) testing against a deployed build with clean bootstrap. Production deployment doesn't yet have the climateRationale notebook (the URL 404s), so a clean baseline isn't available without first pushing this branch to a preview env.
+
+### Path B — extend the gate to view-registration (tracked follow-up)
+
+To actually defer the footer + metadata fetches on init, the registration cells themselves need to be gated. Two changes, both surgical but non-trivial:
+
+**B-1. Gate `dbFutureHive` on `futureProjectionsVisible`.**
+
+Cleanest pattern: keep `dbFutureHive` as a promise-returning cell that resolves to a `DuckDBClient` only after the gate flips. While the gate is `false`, return a sentinel (`null` or a no-op `db.query → []`). All consumers of `dbFutureHive` (mainly `futureProjections_dataAll` and the timeperiod prefetcher cell from `db0b1d7`) need to handle the sentinel by returning `[]` themselves — which they already do via the `futureProjectionsVisible` check, so the change is mostly a single-cell rewrite.
+
+Risk: timeperiod prefetcher logic. The `db0b1d7` perf commit prefetches **other timeperiods** in the background after the user selects one. With `dbFutureHive` gated, the prefetcher can't start warming until the user scrolls. Net effect is probably neutral — prefetcher already waits for selected timeperiod to land before starting — but worth checking.
+
+**B-2. Split hazard_exposure registration out of `db`.**
+
+`db` (line 4110) calls `generateDB(_cleaned.filter((d) => !d.sections.includes("futureProjections")))`. Pulling hazard_exposure out of that filter and registering it in a separate `dbHazardExposure` cell gated on `hazardExposureVisible` is straightforward. The query in `hazardExposure_dataAll` would then call `dbHazardExposure.query(...)` instead of `db.query(...)`.
+
+Risk: cross-cell consumer audit. Need to grep for every cell that queries the `hazard_exposure` view through `db` and re-point them at `dbHazardExposure`. Search for `FROM hazard_exposure` and `db.query.*hazard_exposure`. Likely <5 cells.
+
+**Sandbox test request before Path B lands**: capture the same playwright trace against the canonical build (post-B-1, post-B-2) and confirm:
+- Zero S3 requests for `hazard_exposure` parquet on initial paint
+- Zero S3 requests for `ensemble_season_timeseries` parquets on initial paint (all 5 future periods)
+- Both fire correctly after scrolling
+- No regressions on the top-of-page sections (Recent Changes / Key Facts / Production Trends should still paint without delay)
+
+### Open question (revised)
+
+The original open question #1 above — *"Intersection Observer for OJS cells — what's the cleanest pattern for gating a Quarto/OJS cell's `await db.query(…)` on a DOM-visibility event without breaking reactivity?"* — is partially answered by `sectionVisible()`. The remaining piece is: **what's the cleanest pattern for gating a view-registration cell (with multiple downstream consumers) without forcing every consumer to handle a "view doesn't exist yet" sentinel?** Likely `Generators.observe` returning a promise that the consumers `await`, but worth a small prototype before committing the pattern across the notebook.
+
+### Verifier skill
+
+Built a project-level `.claude/skills/verifier-quarto-notebook/` skill capturing the verification protocol used above (serve `_site/` locally, drive chromium-headless via playwright, capture full network log + console + screenshots across phases, diff against a fixture of allowed/forbidden URLs per phase). Future verify-skill runs against this notebook will get a much faster cold-start and a structured report — see the skill body for invocation.
