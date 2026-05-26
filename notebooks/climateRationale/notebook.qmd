@@ -1264,10 +1264,15 @@ viewof anomaly_obs = {
   // standardised z-score against its own baseline, so "show as anomaly"
   // has no meaning. The toggle's value is still consumed downstream as
   // `useAnomaly_obs = anomaly_obs && !isSPEI_obs` so the chart code
-  // path is unaffected.
+  // path is unaffected. We hide the entire Quarto cell wrapper (not
+  // just the toggle) so the cols-3 grid reflows and the remaining
+  // controls fill the row, rather than leaving an empty slot.
   const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
   const toggle = Inputs.toggle({ label: "Show as anomaly (vs 1991-2020)", value: true });
-  if (isSPEI) toggle.style.display = 'none';
+  queueMicrotask(() => {
+    const cell = toggle.closest('.cell, .ojs-auto-generated');
+    if (cell) cell.style.display = isSPEI ? 'none' : '';
+  });
   return toggle;
 }
 ```
@@ -1295,10 +1300,13 @@ viewof monthly_obs = {
     disabled: !enabled,
   });
   // SPEI pins to a single month per year (the season's last month), so a
-  // "monthly resolution" toggle has no meaning. Hide the toggle rather
-  // than disabling it — disabled controls labelled "N/A" still consume
-  // grid real-estate and add visual noise.
-  if (isSPEI) toggle.style.display = 'none';
+  // "monthly resolution" toggle has no meaning. Hide the entire Quarto
+  // cell wrapper (not just the toggle) so the cols-3 grid reflows and
+  // the remaining controls fill the row.
+  queueMicrotask(() => {
+    const cell = toggle.closest('.cell, .ojs-auto-generated');
+    if (cell) cell.style.display = isSPEI ? 'none' : '';
+  });
   return toggle;
 }
 ```
@@ -1916,8 +1924,12 @@ recentChanges_obs = {
 
   // Per-admin trend stats (issue #1). One mannKendall per admin so
   // each facet's trend overlay + badge uses the right slope.
+  // SPEI included: although SPEI is already a standardised z-score, a
+  // monotonic trend in drought severity is still meaningful (e.g.
+  // increasing dry / decreasing wet decades) and the Theil-Sen line
+  // makes that direction visible at a glance.
   const trendStatsByAdmin = new Map();
-  if (showTrend_obs && !isSPEI_obs) {
+  if (showTrend_obs) {
     for (const adminName of adminNames_obs) {
       const adminData = observed_obs.filter((d) => d.adminName === adminName);
       const ts = mannKendall(adminData.map((d) => d.value_plot), {
@@ -1934,8 +1946,8 @@ recentChanges_obs = {
   // (PTOT blue, others red), which read as jarring when switching
   // variables. Dark grey now, same regardless of variable.
   const trendStroke = "#333";
-  const trendMarks = (showTrend_obs && !isSPEI_obs && trendStats && !trendStats.error &&
-                      (plotType_obs === "line" || plotType_obs === "line+stripes" || plotType_obs === "bars"))
+  const trendMarks = (showTrend_obs && trendStats && !trendStats.error &&
+                      (isSPEI_obs || plotType_obs === "line" || plotType_obs === "line+stripes" || plotType_obs === "bars"))
     ? trendOverlayMarks(observed_obs_aug, {
         xField: "year",
         yField: "value_plot",
@@ -3258,6 +3270,12 @@ loaderDiv("plotFutureProjections");
 //| output: false
 {
   renderToDiv("plotFutureProjections", () => {
+    // While section-gated (user hasn't scrolled near Future Projections
+    // yet), futureProjections_dataAll returns []. Without this guard,
+    // the chart cells fall through to noDataPlaceholder() — which reads
+    // to the user as "the data is empty" rather than "still loading".
+    // Keep showing the loader spinner until the gate flips.
+    if (!futureProjectionsVisible) return loaderContent();
     if (viewFutureChanges === "plot") return timeseries_futureProjections();
     if (viewFutureChanges === "summary") return summary_futureProjections();
     return html`<div>
@@ -3380,6 +3398,10 @@ loaderDiv("plotExtremeEvents");
 //| output: false
 {
   renderToDiv("plotExtremeEvents", () => {
+    // Extreme Events derives from futureProjections_data, which is
+    // gated on futureProjectionsVisible. Same loader-vs-no-data
+    // disambiguation as the Future Projections renderToDiv above.
+    if (!futureProjectionsVisible) return loaderContent();
     if (viewExtremeEvents === "plot") return bars_extremeEvents();
     return html`<div>
       ${dataTable(extremeEvents_plotData)}
@@ -3481,6 +3503,10 @@ loaderDiv("plotHazardExposure");
 //| output: false
 {
   renderToDiv("plotHazardExposure", () => {
+    // While section-gated (user hasn't scrolled near Hazard Exposure
+    // yet), hazardExposure_dataAll returns []. Show the loader spinner
+    // rather than fall through to "No data available" downstream.
+    if (!hazardExposureVisible) return loaderContent();
     if (viewHazardExposure === "table") {
       return html`<div>
         ${dataTable(hazardExposure_plotData)}
