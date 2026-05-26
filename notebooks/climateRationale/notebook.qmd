@@ -3080,6 +3080,8 @@ ${_lang(nbText.sections.whyTwoDatasets.help.body)}
 </details>`;
 ```
 
+<a id="futureProjections-anchor"></a>
+
 # `{ojs} heading4` {#futureProjections}
 
 <p class="below-h1-methods-link"><a href="#methods-climate-data">→ Methods and data sources for this section</a></p>
@@ -3384,6 +3386,8 @@ html`<div id="insightExtremeClimate"></div>`;
 //| output: false
 renderToDiv("insightExtremeClimate", () => createCountryInsights([extremeEventsInsight]));
 ```
+
+<a id="hazardExposure-anchor"></a>
 
 # `{ojs} heading6` {#hazardExposure}
 
@@ -4116,6 +4120,42 @@ db ={
 ```
 
 ```{ojs}
+// Section-gate heavy data fetches. Each gate is a Generators.observe
+// cell that yields `false` until the section's anchor enters the
+// viewport (with 200px lead time), then yields `true` once and stays
+// true for the rest of the session. Heavy data cells reference these
+// gates as a dep, so their cold S3 fetch doesn't fire until the user
+// actually scrolls toward the section. Initial-paint time for sections
+// above (Recent Changes, Production Trends, Key Facts) is no longer
+// blocked by Future Projections + Hazard Exposure data work.
+//
+// Anchors: <a id="futureProjections-anchor"></a> and
+// <a id="hazardExposure-anchor"></a> are placed immediately before
+// each section heading. If a heading's anchor element is missing
+// (e.g. headless renders), the helper fails open and returns true so
+// the cell still fires.
+sectionVisible = (anchorId) => Generators.observe((notify) => {
+  notify(false);
+  const el = document.getElementById(anchorId);
+  if (!el) {
+    notify(true);
+    return;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) {
+      notify(true);
+      observer.disconnect();
+    }
+  }, { rootMargin: "200px" });
+  observer.observe(el);
+  return () => observer.disconnect();
+});
+
+futureProjectionsVisible = sectionVisible("futureProjections-anchor");
+hazardExposureVisible = sectionVisible("hazardExposure-anchor");
+```
+
+```{ojs}
 dbFutureHive = {
     const fut = data_obj.filter((d) => d.sections.includes("futureProjections"));
     const _db = await DuckDBClient.of();
@@ -4584,6 +4624,12 @@ recentChanges_plotData = recentChanges_data.filter((d) => d.hazard === climateVa
 // but it happens once per (country / scenarios / hazards / season /
 // admin1) combo and amortises over the rest of the session.
 futureProjections_dataAll = {
+  // Section-gate: don't fire the cold S3 fetch until the user scrolls
+  // near the Future Projections section. Returns an empty array
+  // initially so downstream cells render gracefully (the chart shows
+  // empty/loading state until visibility flips).
+  if (!futureProjectionsVisible) return [];
+
   const _season = seasonSelect.season;
 
   // Hazards we actually need: the user-selected one (for the main chart
@@ -4778,6 +4824,12 @@ extremeEvents_plotData = {
 // stay at SQL level so the row-group skip on iso3 still fires
 // against a focused result set.
 hazardExposure_dataAll = {
+  // Section-gate: don't fire the cold S3 fetch until the user scrolls
+  // near the Hazard Exposure section. The hazard_exposure parquet is
+  // the biggest single file in the notebook (~60M rows), so gating
+  // it off-screen is the highest-leverage section-gate.
+  if (!hazardExposureVisible) return [];
+
   const admin1Predicate = admin1Names.length > 0
     ? `AND (admin1_name in ${sqlList(admin1Names)} OR admin1_name IS NULL)`
     : `AND admin1_name IS NULL`;
