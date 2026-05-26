@@ -477,3 +477,76 @@ function chartDownloadMenu(chartElement, opts) {
 
   return wrapper;
 }
+
+/**
+ * Like chartDownloadMenu but returns ONLY the split-button element,
+ * for inclusion in a captionDetails `plot-footer-row` alongside the
+ * "About this plot" disclosure. The chartElement arg is used only to
+ * find the SVG for PNG/SVG export — it's NOT wrapped or inserted into
+ * the DOM. The caller is responsible for placing the returned button
+ * wherever it wants (typically as the `downloadBtn` argument to
+ * captionDetails).
+ *
+ * Same options as chartDownloadMenu: filename, data, csvColumns,
+ * pngOverride, disableSvg.
+ *
+ * @returns {HTMLElement} The split-button group element.
+ */
+function chartDownloadButton(chartElement, opts) {
+  const o = opts || {};
+  const baseName = o.filename || ("chart_" + Date.now());
+  const data = o.data;
+  const csvColumns = o.csvColumns;
+  const hasData = Array.isArray(data) && data.length > 0;
+  const pngOverride = o.pngOverride;
+  const disableSvg = !!o.disableSvg;
+
+  const svg = _chartDownloadMenu_findSvg(chartElement);
+  const pngAvailable = !!svg || typeof pngOverride === "function";
+  const svgAvailable = !!svg && !disableSvg;
+
+  const onPng = async () => {
+    try {
+      const blob = pngOverride
+        ? await pngOverride()
+        : await _chartDownloadMenu_svgToPng(svg, 2);
+      _chartDownloadMenu_triggerDownload(blob, baseName + ".png");
+    } catch (e) {
+      console.error("chartDownloadButton PNG export failed", e);
+    }
+  };
+  const onSvg = () => {
+    const svgString = _chartDownloadMenu_serializeSvg(svg);
+    const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    _chartDownloadMenu_triggerDownload(blob, baseName + ".svg");
+  };
+  const onCsv = () => {
+    const csv = _chartDownloadMenu_toCsv(data, csvColumns);
+    const blob = new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" });
+    _chartDownloadMenu_triggerDownload(blob, baseName + ".csv");
+  };
+
+  _chartDownloadMenu_ensureStyle();
+  const sb = _chartDownloadMenu_buildSplitButton({
+    onPng, onSvg, onCsv,
+    pngAvailable,
+    svgAvailable,
+    csvAvailable: hasData,
+  });
+
+  // Click-outside scoped to the button group itself. Cleanup when the
+  // button is detached from the DOM (e.g. on OJS cell re-eval).
+  const onDocClick = (e) => {
+    if (!sb.group.contains(e.target)) sb.hide();
+  };
+  document.addEventListener("click", onDocClick);
+  const mo = new MutationObserver(() => {
+    if (!document.body.contains(sb.group)) {
+      document.removeEventListener("click", onDocClick);
+      mo.disconnect();
+    }
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+
+  return sb.group;
+}
