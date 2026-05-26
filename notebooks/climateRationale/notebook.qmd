@@ -4318,10 +4318,12 @@ dbFutureHive = {
     })
     await _db.query(`
       CREATE VIEW futureProjections as
-        SELECT *, period as timeperiod
+        SELECT
+          *,
+          regexp_extract(filename, 'period=(\\\d{4}-\\\d{4})', 1) as timeperiod
         FROM parquet_scan([
           ${paths.join(", ")}
-        ],filename=true, hive_partitioning = 1)
+        ], filename=true)
     `)
   return _db
 }
@@ -4800,6 +4802,20 @@ futureProjections_dataAll = {
     ? `AND (admin1_name in ${sqlList(admin1Names)} OR admin1_name IS NULL)`
     : `AND admin1_name IS NULL`;
 
+  // Test 2 (2026-05-26): IN-with-single-value seems to defeat parquet
+  // row-group pruning in DuckDB-WASM. Use `=` for single-value cases
+  // to give the optimizer a fighting chance.
+  const iso3Predicate = admin0Iso3.length === 1
+    ? `AND iso3 = '${admin0Iso3[0]}'`
+    : `AND iso3 in ${sqlList(admin0Iso3)}`;
+  const scenarioList = futureScenarioSelect.map((d) => d.toLowerCase());
+  const scenarioPredicate = scenarioList.length === 1
+    ? `AND scenario = '${scenarioList[0]}'`
+    : `AND scenario in ${sqlList(scenarioList)}`;
+  const hazardPredicate = requiredHazards.length === 1
+    ? `AND hazard = '${requiredHazards[0]}'`
+    : `AND hazard in ${sqlList(requiredHazards)}`;
+
   const resp = await dbFutureHive.query(`
   SELECT
     iso3,
@@ -4815,11 +4831,11 @@ futureProjections_dataAll = {
     sd_anomaly
   FROM futureProjections
     where 1=1
-    AND iso3 in ${sqlList(admin0Iso3)}
+    ${iso3Predicate}
     ${admin1Predicate}
     ${sqlWhereNull({ field: "season", value: _season })}
-    AND scenario in ${sqlList(futureScenarioSelect.map((d) => d.toLowerCase()))}
-    AND hazard in ${sqlList(requiredHazards)}
+    ${scenarioPredicate}
+    ${hazardPredicate}
   `);
 
   // admin0_name is dropped from the SELECT (one fewer column-chunk
