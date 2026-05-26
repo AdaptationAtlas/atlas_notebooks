@@ -1216,37 +1216,6 @@ ${_lang(nbText.sections.recentChanges.help.framing)}
 </details>`;
 ```
 
-```{ojs}
-md`<details class="alert alert-info help-callout" role="note">
-<summary>${_lang(nbText.sections.recentChanges.help.anomalyTitle)}</summary>
-
-${_lang(nbText.sections.recentChanges.help.anomaly)}
-
-</details>`;
-```
-
-```{ojs}
-// SPEI-specific note: explains the controls that disappear and what
-// the map shows. Only renders when the active Recent Changes variable
-// is SPEI-03 or SPEI-12; for the other 4 observational vars (TAVG,
-// TMAX, TMIN, PTOT) this returns an empty md fragment.
-{
-  const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
-  if (!isSPEI) return md``;
-  return md`<details class="alert alert-info help-callout" role="note" open>
-<summary>About SPEI in this section</summary>
-
-SPEI is the **Standardised Precipitation–Evapotranspiration Index** — already a z-score against its own 1991–2020 reference window. That means several of the controls and views in this section don't apply:
-
-- **Show as anomaly** is hidden — SPEI values *are* anomalies by construction (a value of -1.5 already means 1.5 standard deviations drier than the 1991–2020 norm).
-- **Monthly view** is hidden — SPEI is a rolling-window accumulation pinned to a single month per year (for SPEI-03, the season's last month), so there's nothing finer to show.
-- **Observational uncertainty band** is hidden — the band shown for raw climate variables reflects CHIRPS / CHIRTS-ERA5 sampling spread; SPEI is a derived index where the uncertainty is dominated by the calibration window, not the source dataset.
-- The **map below** shows SPEI's *interannual variability* (the standard deviation over 1991–2020 in z-score units) rather than the mean, because the mean is ~0 everywhere by construction. Darker reds mark regions where SPEI swings more widely across years (i.e. more variable drought conditions).
-
-</details>`;
-}
-```
-
 ::: {.controls-row .cols-3}
 
 ```{ojs}
@@ -2307,7 +2276,26 @@ recentChanges_obs = {
   // trend badges + IPCC qualifier render UNDERNEATH the chart. The
   // per-admin baseline numbers live in the recentChanges_obs_caption
   // cell that renders directly below this output.
-  return html`<div>${status}${chartAndLegendWithDownload}${trendBadge}${ipccQualifier}</div>`;
+
+  // "About this plot" disclosure — methods and reading guidance moved
+  // from the static callouts that used to live above the controls.
+  // For SPEI, an extra section explains why several controls disappear
+  // and what to expect of the trend line + zone shading.
+  const plotCaptionParas = [
+    html`Values are shown as <strong>anomalies</strong> relative to the WMO 1991–2020 climatological normal. The zero line represents the 1991–2020 average for the selected season and variable. Values above zero indicate years wetter / warmer than the 1991–2020 average; values below zero indicate the opposite. Anomaly framing makes change easier to read across regions with very different baseline climates.`,
+    html`The optional <strong>trend layer</strong> overlays a Mann-Kendall significance test + Theil-Sen slope estimator (Sen-slope) on the annual series. TFPW (trend-free pre-whitening) is applied automatically when the residual series shows positive autocorrelation, to avoid inflating the test against AR(1) noise.`,
+  ];
+  if (isSPEI_obs) {
+    plotCaptionParas.push(
+      html`<strong>About SPEI in this section.</strong> SPEI is the Standardised Precipitation–Evapotranspiration Index — already a z-score against its own 1991–2020 reference window. That means several of the standard controls don't apply: <em>Show as anomaly</em> is hidden (SPEI values <em>are</em> anomalies by construction), <em>Monthly view</em> is hidden (SPEI is a rolling-window accumulation pinned to a single month per year), and the <em>Observational uncertainty band</em> is hidden (calibration-window choice dominates SPEI's uncertainty, not source-dataset sampling). The shaded ±1, ±1.5, ±2 reference lines mark the WMO drought / wet categories.`,
+    );
+  }
+  plotCaptionParas.push(
+    html`Source: <a href="#methods-climate-data">Methods → Climate data sources</a> and <a href="#methods-trend-estimation">Methods → Trend estimation</a> for the underlying products, baselines, and statistical caveats.`,
+  );
+  const plotCaption = multiLineText(plotCaptionParas, "atlasFigCaption");
+
+  return html`<div>${status}${chartAndLegendWithDownload}${trendBadge}${ipccQualifier}${captionDetails(plotCaption, undefined)}</div>`;
 }
 
 recentChanges_obs_caption = {
@@ -2381,12 +2369,6 @@ recentChanges_obs_caption = {
 The map shows the **average value over 1991–2020** of the selected variable, season by season — for example, "mean annual rainfall" or "mean January–March maximum temperature" — across the country. Where you've selected one or more admin1 regions in the sidebar, those regions are outlined; the rest of the country still renders for context.
 
 The colour ramp adapts to the values actually present in the visible area, so the contrast is maximised for the region you're looking at. Flip the **"Lock map ramp to global limits"** toggle if you want a fixed scale that lets you compare across countries or seasons. The **"Map palette"** dropdown lets you swap colour schemes.
-
-::: {.callout-note collapse="true"}
-## Methods notes (click to expand)
-
-Source data: **CHIRPS v3** for precipitation and **CHIRTS-ERA5** for temperature, downsampled to a Cloud-Optimized GeoTIFF (COG) of the 1991–2020 mean per (variable × season). For SPEI the map shows the *standard deviation* over 1991–2020 (the SPEI mean is ~0 by construction, since SPEI is standardised against its own reference window). Boundary polygons are GAUL 2024 admin1 simplified to a vector tile-friendly resolution. See **[Methods → Climate data sources](#methods-climate-data)** and **[Methods → Observational uncertainty](#methods-observational-uncertainty)** for product details and known caveats.
-:::
 
 Map controls (affect this map only):
 
@@ -3098,7 +3080,22 @@ recentChangesMap_obs = {
     disableSvg: true,
   });
 
-  return html`<div>${status}${withDownload}</div>`;
+  // "About this plot" — methods notes that used to live in a static
+  // callout above the map. Same format as the chart captions elsewhere
+  // in the notebook (multiLineText + captionDetails). SPEI gets an
+  // extra paragraph explaining the SD-not-mean choice.
+  const mapCaptionParas = [
+    html`Source data: <strong>CHIRPS v3</strong> for precipitation and <strong>CHIRTS-ERA5</strong> for temperature, downsampled to a Cloud-Optimized GeoTIFF (COG) of the 1991–2020 mean per (variable × season). Boundary polygons are GAUL 2024 admin1 simplified to a vector tile-friendly resolution.`,
+    html`See <a href="#methods-climate-data">Methods → Climate data sources</a> and <a href="#methods-observational-uncertainty">Methods → Observational uncertainty</a> for product details and known caveats.`,
+  ];
+  if (isSPEI_obs) {
+    mapCaptionParas.unshift(
+      html`For SPEI the map shows the <em>standard deviation</em> of the annual SPEI series over 1991–2020 (the SPEI mean is ~0 by construction, since SPEI is standardised against its own reference window). Darker reds mark regions where SPEI swings more widely across years — i.e. more variable drought conditions.`,
+    );
+  }
+  const mapCaption = multiLineText(mapCaptionParas, "atlasFigCaption");
+
+  return html`<div>${status}${withDownload}${captionDetails(mapCaption, undefined)}</div>`;
 }
 ```
 
