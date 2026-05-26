@@ -4316,14 +4316,20 @@ dbFutureHive = {
       const raw = (d.s3_paths && d.s3_paths.length) ? d.s3_paths : [d.s3_path];
       return raw.filter(Boolean).map((p) => `'${patchWindowsCache(p)}'`);
     })
+    // Keep hive_partitioning=1 — every attempt to replace it crashed
+    // DuckDB-WASM with `[object WebAssembly.Exception]` even with SQL
+    // that ran fine in standalone DuckDB (regexp_extract, split_part
+    // on filename, UNION ALL with literal timeperiod). Appears to be
+    // a DuckDB-WASM-specific limitation on multi-file parquet_scan
+    // without hive_partitioning. The row-group pushdown win we saw
+    // in Option-C testing came predominantly from the IN→= predicate
+    // change in futureProjections_dataAll, not from removing hive.
     await _db.query(`
       CREATE VIEW futureProjections as
-        SELECT
-          *,
-          regexp_extract(filename, 'period=(\\\d{4}-\\\d{4})', 1) as timeperiod
+        SELECT *, period as timeperiod
         FROM parquet_scan([
           ${paths.join(", ")}
-        ], filename=true)
+        ], filename=true, hive_partitioning = 1)
     `)
   return _db
 }
