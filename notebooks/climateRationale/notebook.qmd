@@ -1225,6 +1225,28 @@ ${_lang(nbText.sections.recentChanges.help.anomaly)}
 </details>`;
 ```
 
+```{ojs}
+// SPEI-specific note: explains the controls that disappear and what
+// the map shows. Only renders when the active Recent Changes variable
+// is SPEI-03 or SPEI-12; for the other 4 observational vars (TAVG,
+// TMAX, TMIN, PTOT) this returns an empty md fragment.
+{
+  const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
+  if (!isSPEI) return md``;
+  return md`<details class="alert alert-info help-callout" role="note" open>
+<summary>About SPEI in this section</summary>
+
+SPEI is the **Standardised Precipitation–Evapotranspiration Index** — already a z-score against its own 1991–2020 reference window. That means several of the controls and views in this section don't apply:
+
+- **Show as anomaly** is hidden — SPEI values *are* anomalies by construction (a value of -1.5 already means 1.5 standard deviations drier than the 1991–2020 norm).
+- **Monthly view** is hidden — SPEI is a rolling-window accumulation pinned to a single month per year (for SPEI-03, the season's last month), so there's nothing finer to show.
+- **Observational uncertainty band** is hidden — the band shown for raw climate variables reflects CHIRPS / CHIRTS-ERA5 sampling spread; SPEI is a derived index where the uncertainty is dominated by the calibration window, not the source dataset.
+- The **map below** shows SPEI's *interannual variability* (the standard deviation over 1991–2020 in z-score units) rather than the mean, because the mean is ~0 everywhere by construction. Darker reds mark regions where SPEI swings more widely across years (i.e. more variable drought conditions).
+
+</details>`;
+}
+```
+
 ::: {.controls-row .cols-3}
 
 ```{ojs}
@@ -1370,7 +1392,20 @@ viewof showTrend_obs = Inputs.toggle({ label: "Show trend layer (Mann-Kendall + 
 // users don't read it as a statistical CI. Suppressed for SPEI
 // regardless of toggle. See helpers/observationalUncertainty.ojs
 // for the per-variable defaults and citation anchors.
-viewof showObsUncertainty_obs = Inputs.toggle({ label: "Show observational uncertainty band (indicative)", value: false });
+viewof showObsUncertainty_obs = {
+  // Hide for SPEI — the uncertainty band reflects CHIRPS / CHIRTS-ERA5
+  // sampling spread on raw variables; SPEI is a derived index where
+  // calibration-window choice dominates the uncertainty story, not
+  // source-dataset sampling. See the "About SPEI in this section"
+  // callout for the user-facing explanation.
+  const isSPEI = (climateVarSelect.id || "").startsWith("SPEI");
+  const toggle = Inputs.toggle({ label: "Show observational uncertainty band (indicative)", value: false });
+  setTimeout(() => {
+    const cell = toggle.closest('.cell');
+    if (cell) cell.style.display = isSPEI ? 'none' : '';
+  }, 0);
+  return toggle;
+}
 ```
 
 :::
@@ -2680,7 +2715,9 @@ buildLegend_obs = (stops, variable, stat) => {
   }).join("");
 
   const unit = variable === "PTOT" ? "mm" : variable.startsWith("SPEI") ? (stat === "sd" ? "σ (z)" : "z") : "°C";
-  const titleText = `${variable} (${stat}) — ${unit}`;
+  const titleText = variable.startsWith("SPEI") && stat === "sd"
+    ? `${variable} — interannual variability (σ across 1991–2020, z-score units)`
+    : `${variable} (${stat}) — ${unit}`;
 
   const svgMarkup = `
     <svg width="${W}" height="${totalH}" style="display:block; margin-top: 6px;" xmlns="http://www.w3.org/2000/svg">
@@ -3016,7 +3053,11 @@ recentChangesMap_obs = {
   mapStack.appendChild(display);
   mapStack.appendChild(svgOverlay);
 
-  const statLabel = mapStat_obs === "mean" ? "1991-2020 mean" : `1991-2020 ${mapStat_obs}`;
+  const statLabel = mapStat_obs === "mean"
+    ? "1991-2020 mean"
+    : mapStat_obs === "sd"
+      ? "1991-2020 interannual variability"
+      : `1991-2020 ${mapStat_obs}`;
   const fetchSec = (countryRaster_obs.fetchMs / 1000).toFixed(1);
   const rangeStr = nValid > 0 ? `data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "no valid pixels";
   setStatus(`${climateVarSelect.id} ${seasonSelect.season} (${statLabel}) for ${renderLabel} · country fetch ${fetchSec}s · sub-window ${sw}×${sh} → ${W}×${H} · ${rangeStr} · ramp: ${rampLabel} · ${mapSmooth_obs ? "smoothed" : "raster cells"}`);
