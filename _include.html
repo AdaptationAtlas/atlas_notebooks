@@ -1,2 +1,65 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans&display=swap" rel="stylesheet">
 
+<script>
+  // Suppress OJS bootstrap errors and show a spinner in their place while
+  // the page is still settling. The OJS dependency graph evaluates cells
+  // eagerly — consumer cells fire before their helper imports resolve and
+  // render as "X is not defined" errors. They clear once the imports land
+  // and the cells re-evaluate.
+  //
+  // Reveal heuristic: hide errors until the error count has been at its
+  // observed minimum for 3 seconds AND has decreased from the initial
+  // sample. This distinguishes the "initial plateau before helpers land"
+  // (count stable but no progress yet) from the "settled final state"
+  // (count stable AFTER bootstrap progress). If the count never decreases,
+  // the 60-second hard cap reveals everything so a stuck error becomes
+  // visible. If the count reaches zero, we reveal immediately.
+  // See styles.css `body.ojs-suppress-errors` rules for the spinner overlay.
+  (function () {
+    const STABILITY_MS = 5000;
+    const MAX_WAIT_MS = 60000;
+    const POLL_MS = 250;
+    const SAMPLE_DELAY_MS = 1000;
+
+    function start() {
+      document.body.classList.add('ojs-suppress-errors');
+      const startedAt = Date.now();
+      let initialCount = -1;
+      let minSoFar = Infinity;
+      let atMinSince = startedAt;
+
+      function reveal() {
+        document.body.classList.remove('ojs-suppress-errors');
+      }
+
+      function tick() {
+        const count = document.querySelectorAll('.observablehq .callout-important').length;
+        const now = Date.now();
+
+        if (initialCount < 0) initialCount = count;
+
+        if (count === 0) { reveal(); return; }
+
+        if (count < minSoFar) {
+          minSoFar = count;
+          atMinSince = now;
+        }
+
+        const decreased = minSoFar < initialCount;
+        const stableAtMin = count === minSoFar && now - atMinSince >= STABILITY_MS;
+        if (decreased && stableAtMin) { reveal(); return; }
+        if (now - startedAt >= MAX_WAIT_MS) { reveal(); return; }
+
+        setTimeout(tick, POLL_MS);
+      }
+      setTimeout(tick, SAMPLE_DELAY_MS);
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', start);
+    } else {
+      start();
+    }
+  })();
+</script>
+
