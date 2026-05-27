@@ -212,6 +212,14 @@ This means **the WASM browser smoke test remains the only authoritative verdict*
 
 - **Dropping the `models` array column from R/1.2 outputs (dispatch ask #6)** also deferred — schema change, needs blast-radius check.
 
+### 2026-05-27 evening — R/2.1 producer migration + publisher confirmation (commit `64d3cfa`)
+
+Misattribution found in the original dispatch (and the rebake script's TARGETS notes): the producer of `ensemble_season_timeseries.parquet` is `R/2.1_create_monthly_haz_tables.R` section 3.3 (line 652), **not** any of the `R/1.x_*_timeseries.R` scripts as previously stated. R/1.2 produces a different set of `*_adm_mean_*.parquet` files. The earlier dispatch's "R/1.x" annotation traced to the rebake-script TARGETS list — fixed in commit `cbf3e0e`.
+
+All 9 raw `arrow::write_parquet` sites in R/2.1 (lines 204, 318, 441, 520, 652, 708, 833, 915, 950) migrated to `write_parquet_pushdown` in commit `64d3cfa`. Schemas in section 2/2.5/3.1 produce per-(folder, hazard) tiles smaller than 100K rows, so the helper got a `small_table` escape (rows < 2 × row_group_size means single row group is acceptable, no error).
+
+**Publisher behaviour confirmed**: `AtlasDataManageR::s3_upload` (at `AdaptationAtlas/data-management/R/AtlasDataManageR/R/fn_s3-uploaders.r`) is a pure byte-stream upload — `s3$put_object(Body = local_path, ...)` or chunked `readBin(... "raw")` for files >5 MB. **No parquet parse/re-encode.** The `name_fn` only transforms the S3 key string. So the producer-side row-group + sort layout from R/2.1 reaches canonical S3 verbatim. **No publisher-side change required.** Next R/2.1 pipeline run will land canonical files with the rg=50000 pushdown layout, replacing the current pyarrow-default ~1M-row-group canonical state without need for a manual rebake intervention.
+
 ### Pointers
 
 - Parameter sweep scripts (not committed; ephemeral): `/tmp/parquet-pushdown-experiment/01_synth.py` → `06_query_timing.py`
