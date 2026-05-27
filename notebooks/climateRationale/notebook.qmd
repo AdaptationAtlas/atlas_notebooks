@@ -4273,26 +4273,32 @@ db ={
     s3_path: patchWindowsCache(item.s3_path)
   }));
   return await generateDB(
-    // Future projections + hazard exposure data are big, so split into
-    // separate databases (dbFutureHive + dbHazardExposure) that gate
-    // their view-registration on IntersectionObserver visibility.
+    // Future projections (gated via dbFutureHive) and the big
+    // hazard_exposure parquet (gated via dbHazardExposure below) are
+    // pulled out so their view-registration can defer until the user
+    // scrolls toward their sections. We filter the hazard_exposure
+    // dataset by KEY rather than section membership because the
+    // sibling `exposure` parquet (crop+livestock VoP) is in BOTH the
+    // keyFacts and hazardExposure sections — Key Facts needs it on
+    // first paint, so it must stay in `db`.
     _cleaned.filter((d) =>
       !d.sections.includes("futureProjections") &&
-      !d.sections.includes("hazardExposure")
+      d.key !== "hazard_exposure"
     ),
   );
 }
 
 dbHazardExposure = {
-  // Path B-2: gate hazard_exposure parquet registration on the section's
-  // visibility. The hazard_exposure parquet is the largest single file
-  // in the notebook (~60 M rows); its footer + initial column-chunks
-  // accounted for ~6 fetches on initial paint before this gate. The
-  // sole consumer (hazardExposure_dataAll) already returns [] while
-  // !hazardExposureVisible, so the sentinel is belt-and-braces.
+  // Path B-2: gate the hazard_exposure parquet registration on the
+  // section's visibility. The hazard_exposure parquet is the largest
+  // single file in the notebook (~60 M rows); its footer + initial
+  // column-chunks accounted for ~6 fetches on initial paint before
+  // this gate. The sole consumer (hazardExposure_dataAll) already
+  // returns [] while !hazardExposureVisible, so the sentinel is
+  // belt-and-braces.
   if (!hazardExposureVisible) return { query: async () => [] };
   const _cleaned = data_obj
-    .filter((d) => d.sections.includes("hazardExposure"))
+    .filter((d) => d.key === "hazard_exposure")
     .map((item) => ({ ...item, s3_path: patchWindowsCache(item.s3_path) }));
   return await generateDB(_cleaned);
 }
