@@ -912,6 +912,25 @@ After the perf work landed, picked up the F-2 follow-ups from `dispatches/2026-0
 - **Decision: keep `mean ± sd` ribbon, don't swap to min/max.** Earlier session-1 decision (DECISIONS.md line 163) was to use `mean ± 1σ` as a Gaussian-assumed proxy for the IPCC AR6 "likely" range, pending proper percentile bounds from the pipeline ([[CR-060]]). The new `min` / `max` columns are NOT what CR-060 asked for — they're raw extremes dominated by outlier GCMs, no AR6 mapping. Swap would *visually* widen the ribbon (`min` / `max` ≈ `mean ± 2σ` empirically) without making it more methodologically aligned.
 - **Pipeline ask refreshed.** New dispatch [`dispatches/2026-05-27_cmip6-ensemble-percentiles-followup.md`](dispatches/2026-05-27_cmip6-ensemble-percentiles-followup.md) gives the pipeline owner a single-block edit at `hazards_prototype/R/2.1_create_monthly_haz_tables.R:619-626` adding `q05` / `q17` / `q50` / `q83` / `q95` (+ anomaly variants + `n_models`). CR-060 + CR-061 STATUS lines updated to reference the dispatch.
 
+### Final additions to session 17 (close-out)
+
+- **`db` reference sanity sweep** (`9570f77`). After the per-section DB refactor removed the `db` cell entirely, did a `grep -rn "\bdb\b"` across notebook + helpers + components. Zero code references — all consumers are correctly on `dbPov` / `dbGdp` / `dbLanduse` / `dbExposure` / `dbRecentChanges` / `dbProductionTrends` / `dbObservational` / `dbFutureHive` / `dbHazardExposure`, with `components/_adminSelectors*` on its own `adminDB`. One stale comment in `observationalSources` refreshed to mention `dbObservational` instead of the removed `db`.
+- **Future Projections y-axis fix** (`6cfab48`). Pete spotted: with "Show as anomaly" ON and "Highlight unusual/extreme" OFF, the y-axis stayed at ±40 regardless of the data range — Mean Temperature anomaly values near 0 °C appeared as a flat line. Root cause: `maxStd2` padding at [notebook.qmd:7325](notebook.qmd#L7325) fired on `_showAnomaly` alone, ignoring whether the threshold lines were actually drawn. Now properly gated on `showThresholds = _showAnomaly && highlightExtremesFuture`. Added `nice: true` for round tick marks. Verified via unit test of the extracted logic — couldn't browser-verify because the Future Projections cold-fetch still runs ~10 min against the current canonical parquets (CR-060 / producer-side rewrite pending).
+- **Latent follow-up filed**: when threshold expansion DOES fire, `maxStd2` uses whichever hazard Recent Changes is showing — Recent Changes and Future Projections have separate selectors since `bb18ba2`, so threshold span can be wrong for the displayed hazard (e.g. PTOT's mm-scale std stretching a TAVG chart). Documented in ISSUES.md session-17 block. Defer until visibly flagged.
+
+### Pattern decisions captured this session (final list)
+
+- **Per-plot DuckDBClient** is the cold-start unlock for queries on independent parquets. Saved as memory.
+- **Filter parquet ownership by `d.key`, not `d.sections.includes(...)`**. Sections is multi-valued content categorisation. Saved as memory.
+- **IN→= rewrite applies broadly** — every parquet with NULL row-group stats benefits, not just futureProjections.
+- **For axis-domain logic**: gate threshold-line padding on the toggle that actually draws the lines, not just the framing toggle. Otherwise the axis stays expanded for invisible reference lines, making the data look squished.
+- **CMIP6 ribbon: keep `mean ± sd` until percentile columns land.** New `min` / `max` columns from the 2026-05-26 rebake are NOT the swap (raw ensemble extremes, no AR6 mapping, dominated by outliers).
+
+### Memory updates this session (final list)
+
+- `feedback_duckdb-wasm-per-plot-clients.md` (new) — single-connection serialisation pattern + `singleDB(key)` helper.
+- `feedback_parquet-ownership-filter-by-key.md` (new) — filter by key, not section, when splitting parquets across `db*` cells.
+
 ### In flight / uncommitted
 
 - Working tree clean. Branch `dev/climateRationale` in sync with `origin/dev/climateRationale` at `636d00c` (plus the playbook updates being committed now).
