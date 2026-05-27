@@ -66,8 +66,8 @@ So the actual fix has to come from the producer pipeline. Concretely:
 
 The notebook can't get out of this hole on its own. Either:
 
-- Workaround A: rebake using **DuckDB's own parquet writer** (via `COPY ... TO 'file.parquet' (FORMAT PARQUET, ...)`). Worth trying as a one-off rescue. But it's a tactical fix that needs re-running every time the source data updates.
-- Workaround B (better): **change the producer pipeline** (`hazards_prototype/R/...`) to write parquets that DuckDB-WASM can actually leverage. Then we delete `scripts/rebake_parquets_for_pushdown.py` and the notebook automatically benefits whenever data refreshes.
+- Workaround A: rebake using **DuckDB's own parquet writer** (via `COPY ... TO 'file.parquet' (FORMAT PARQUET, ...)`). **Tested 2026-05-27 (commit `08c1662`). Result: it AVOIDS the WASM crash but DOESN'T deliver the perf win.** Cold-load against DuckDB-native sidecars: 87 requests / ~1.6 GB transferred over ~85 s — nothing like the 49 MB target we measured against pyarrow-rebake during Option-C testing. Byte-overlap analysis showed DuckDB-WASM is making ~19 MB per range request against the DuckDB-native files (vs ~220 KB per range with pyarrow output). DuckDB-native packs columns differently — pyarrow's denser column-chunk layout is what let WASM do fine-grained reads. So the rebake script can pick one failure mode (WASM crash with pyarrow output) or the other (no perf win with DuckDB-native output) but not avoid both.
+- Workaround B (now the ONLY viable path): **change the producer pipeline** (`hazards_prototype/R/...`) to write parquets that DuckDB-WASM can actually leverage. Need both: (i) DuckDB-native-compatible byte format (because pyarrow output crashes WASM in this view shape), AND (ii) pyarrow-style dense column-chunk packing (because DuckDB-native's default packing produces coarse-grained reads). The likely path is `duckdb` Python (or duckdb-R via DBI) writer with a careful set of options that produces files passing both criteria — needs experimentation upstream.
 
 This dispatch is asking for Workaround B.
 
@@ -158,9 +158,9 @@ For each rewritten parquet, BEFORE pushing to canonical S3:
 
 ---
 
-## Open question (back to Pete)
+## Open question (back to Pete) — RESOLVED 2026-05-27 evening
 
-There's a `scripts/rebake_parquets_for_pushdown.py` tactical rescue path: rewrite it to use DuckDB's own writer (via the `duckdb` Python package's `COPY ... TO ... (FORMAT PARQUET, ...)`) instead of pyarrow. That would let us validate the recipe works under WASM *before* the pipeline catches up. Worth doing? My read: only if the pipeline ETA is >1 month and Pete wants the win sooner. If the pipeline fix is days away, skip the tactical work.
+There WAS a `scripts/rebake_parquets_for_pushdown.py` tactical rescue idea: rewrite it to use DuckDB's own writer. Done in `08c1662`. Result above: avoids the crash but doesn't deliver the perf win. So the script remains a working prototype for "what the producer needs to do" — but isn't itself a fix path the notebook can ride on. Producer-side work is the only remaining lever.
 
 ---
 
