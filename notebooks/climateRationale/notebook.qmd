@@ -4267,23 +4267,49 @@ mainGaul = {
   return map;
 }
 
+// Per-key DuckDBClient factory. generateDB() creates one DuckDBClient
+// with a CREATE VIEW for every entry passed in; passing a single-entry
+// array gives that parquet its own dedicated client (and its own
+// connection — DuckDB-WASM serialises queries within a connection, so
+// per-plot clients let Key Facts queries fire in parallel instead of
+// queueing behind the slow exposure scan).
+singleDB = (key) => {
+  const entry = data_obj.find((d) => d.key === key);
+  if (!entry) return null;
+  return generateDB([{ ...entry, s3_path: patchWindowsCache(entry.s3_path) }]);
+};
+
+// Key Facts: one client per parquet so the four plots (Pov, Gdp,
+// Landuse, Exposure) don't serialise behind each other. Before this
+// split, the Key Facts paints were all queued behind crop-livestock_all
+// (the exposure parquet, ~85 s to drain on cold start due to absent
+// row-group stats — same upstream issue as futureProjections per
+// dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md).
+dbPov      = singleDB("poverty");
+dbGdp      = singleDB("a0_gdp");
+dbLanduse  = singleDB("a0_landuse");
+dbExposure = singleDB("exposure");
+
 db ={
   const _cleaned = data_obj.map(item => ({
     ...item,
     s3_path: patchWindowsCache(item.s3_path)
   }));
   return await generateDB(
-    // Future projections (gated via dbFutureHive) and the big
-    // hazard_exposure parquet (gated via dbHazardExposure below) are
-    // pulled out so their view-registration can defer until the user
-    // scrolls toward their sections. We filter the hazard_exposure
-    // dataset by KEY rather than section membership because the
-    // sibling `exposure` parquet (crop+livestock VoP) is in BOTH the
-    // keyFacts and hazardExposure sections — Key Facts needs it on
-    // first paint, so it must stay in `db`.
+    // Slim db down to just the parquets that don't have their own
+    // dedicated client. Excluded:
+    //   - futureProjections section parquets (own client: dbFutureHive)
+    //   - hazard_exposure                    (own client: dbHazardExposure)
+    //   - Key Facts parquets above           (own client: dbPov/Gdp/Landuse/Exposure)
+    // What's left in db: historic_climate_timeseries (Recent Changes)
+    // and adm0_faostat (Production Trends).
     _cleaned.filter((d) =>
       !d.sections.includes("futureProjections") &&
-      d.key !== "hazard_exposure"
+      d.key !== "hazard_exposure" &&
+      d.key !== "poverty" &&
+      d.key !== "a0_gdp" &&
+      d.key !== "a0_landuse" &&
+      d.key !== "exposure"
     ),
   );
 }
@@ -4385,7 +4411,7 @@ dbFutureHive = {
 
 ```{ojs}
 gdp_plotData = {
-  const resp = await db.query(`
+  const resp = await dbGdp.query(`
     SELECT iso3,
       sector,
       year,
@@ -4398,7 +4424,7 @@ gdp_plotData = {
         ) * 100 AS pct_of_total,
         'USD-constant-2015' AS unit
     FROM a0_gdp
-    WHERE iso3 in ${sqlList(admin0Iso3)}
+    WHERE ${admin0Iso3.length === 1 ? `iso3 = '${admin0Iso3[0]}'` : `iso3 in ${sqlList(admin0Iso3)}`}
     AND sector != 'total'
     AND year = 2022
   `)
@@ -4406,7 +4432,7 @@ gdp_plotData = {
 }
 
 landuse_plotData = {
-  const resp = await db.query(`
+  const resp = await dbLanduse.query(`
     SELECT iso3,
       sub_group,
       "group",
@@ -4418,7 +4444,7 @@ landuse_plotData = {
         ) * 100 as ha_pct,
        'hectares' AS unit
     FROM a0_landuse
-    WHERE iso3 in ${sqlList(admin0Iso3)}
+    WHERE ${admin0Iso3.length === 1 ? `iso3 = '${admin0Iso3[0]}'` : `iso3 in ${sqlList(admin0Iso3)}`}
     AND year = 2021
   `)
   return resp
@@ -4427,14 +4453,14 @@ landuse_plotData = {
 
 ```{ojs}
 pov_plotData = {
-  const resp = await db.query(`
-    SELECT 
+  const resp = await dbPov.query(`
+    SELECT
       p.iso3,
       p.admin0_name,
       p.admin1_name,
       g.group_name AS group,
       ROUND(
-        CASE 
+        CASE
           WHEN g.group_name = 'in_poverty' THEN p.poor420_ln * 100
           ELSE 100 - p.poor420_ln * 100
         END,
@@ -4444,12 +4470,12 @@ pov_plotData = {
       2023 AS value_year
     FROM poverty p
     CROSS JOIN (
-      VALUES 
+      VALUES
         ('in_poverty'),
         ('not_poverty')
     ) AS g(group_name)
     WHERE 1=1
-    AND iso3 in ${sqlList(admin0Iso3)}
+    AND ${admin0Iso3.length === 1 ? `iso3 = '${admin0Iso3[0]}'` : `iso3 in ${sqlList(admin0Iso3)}`}
     AND (
      admin1_name in ${sqlList(admin1NamesClean)}
      OR admin1_name IS NULL
@@ -4462,7 +4488,7 @@ pov_plotData = {
 
 ```{ojs}
 exposure_plotData = {
-  const resp = await db.query(`
+  const resp = await dbExposure.query(`
   SELECT
     iso3,
     admin1_name,
@@ -4472,7 +4498,7 @@ exposure_plotData = {
     2020 AS value_year
   FROM exposure
     WHERE 1=1
-    AND iso3 in ${sqlList(admin0Iso3)}
+    AND ${admin0Iso3.length === 1 ? `iso3 = '${admin0Iso3[0]}'` : `iso3 in ${sqlList(admin0Iso3)}`}
     AND (
      admin1_name in ${sqlList(admin1NamesClean)}
      OR admin1_name IS NULL
