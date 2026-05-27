@@ -124,6 +124,35 @@ Parallel pipeline workstream to the notebook sprint above. All commits in `hazar
 
 ---
 
+## Decisions applied — 2026-05-27 (session 17: loading bars + Path B + per-section DBs)
+
+Picked up the suggested-next-step list from the session 16 block. F-2a/F-2b had already landed pipeline-side. Headline beats:
+
+- **Loading bars L1 shipped.** `04c6295` — `loaderContent(stage)` upgraded from spinner to animated indeterminate bar + italic stage label. Section-gated plots (Future Projections, Extreme Events, Hazard Exposure) initially read "Waiting for scroll…", then transition to "Loading data…" the moment their IntersectionObserver gate flips. New `setLoaderStage(id, stage)` export. **L2 (byte-tracked % bar) and L3 (combined) remain deferred** — L2 will be more accurate after the producer-side parquet rewrite lands (smaller, sorted row groups → fewer, better-bounded range requests).
+- **Path B section-gate shipped — defers parquet footer fetches too.** `0829fac` extends Section A (consumer-cell gating from `1f3def4`) to the view-registration cells themselves. `dbFutureHive` returns a `{ query: async () => [] }` sentinel while `!futureProjectionsVisible`, then creates the real client + view on gate-flip. New `dbHazardExposure` cell does the same for the big hazard_exposure parquet. Verified: zero init fetches for hazard_exposure or any of the 4 future-projection parquets; both fire on scroll.
+- **One regression caught + fixed.** `11be818` — my Path B filter wrongly used `d.sections.includes("hazardExposure")` to identify the parquet to gate. The sibling `exposure` parquet (crop+livestock VoP) is in BOTH `keyFacts` and `hazardExposure` sections; the filter dropped it from `db`, leaving Key Facts stuck on "Loading data…" forever. **Filter parquet ownership by `d.key`, not by section membership.** Saved as memory.
+- **Per-section DuckDB clients — the cold-start unlock.** `cc0da9a` + `b2603d8`. Diagnosed via the verifier protocol: all 6 first-paint plots painted at the SAME moment (~93 s after navigation), even though their parquets are independent. Root cause: DuckDB-WASM serialises queries on a single connection per `DuckDBClient`, and every consumer was queueing behind `crop-livestock_all.parquet` (the slow exposure scan). Split each consumer onto its own dedicated client via a new `singleDB(key)` helper: `dbPov`, `dbGdp`, `dbLanduse`, `dbExposure`, `dbRecentChanges`, `dbProductionTrends`, plus a bare `dbObservational` for the lifted Recent Changes `read_parquet(URL)` queries. `db` cell removed entirely. IN→= predicate rewrite (same trick from `9bbe16a`) applied to all single-iso3 fast paths across Key Facts + Recent Changes + Production Trends queries.
+  Measured paint times (playwright-headless, ms from page navigation):
+
+  | Plot | Before | After | Speedup |
+  |---|---|---|---|
+  | plotPov | 93 036 | 6 107 | 15.2× |
+  | plotGdp | 93 036 | 6 107 | 15.2× |
+  | plotLanduse | 93 036 | 6 107 | 15.2× |
+  | plotExposure | 93 036 | 11 147 | 8.3× |
+  | plotProductionTrends | 82 984 | 13 162 | 6.3× |
+  | recent-changes-plot | 82 984 | 9 637 | 8.6× |
+
+  All parquets now start fetching at the same moment (~4 s after page load, post-DuckDB-WASM init) and run in parallel.
+
+### Deferred → General updates
+
+- **Loading bars L1: shipped (`04c6295`).** L2 + L3 still deferred — see entry text below; pair them with the producer-side parquet rewrite landing so the byte-tracked % bar gets accurate range bounds.
+- **Path B section-gate: shipped (`0829fac` + `11be818`).** Now removed from deferred.
+- New note: **any newly-added query against a DuckDB-WASM client inherits whatever else queues on that client.** If a new plot adds latency to existing plots that share its client, reach for `singleDB(key)` or `DuckDBClient.of()` directly — pattern established this session in `cc0da9a` / `b2603d8`. Pattern memory: `[[duckdb-wasm-per-plot-clients]]`.
+
+---
+
 ## Issues
 
 ### CR-001 — Future Projections quick-insight reports physically impossible warming
@@ -2071,10 +2100,10 @@ These are explicitly out of scope for this round per Pete's "focus on immediate 
 - **1995–2014 climatology COG for the Recent Changes map** (so the map matches the Atlas's CMIP6 future-projection baseline window). Surfaced 2026-05-26 after the Recent Changes baseline-period selector landed (`de0bf0f`). The chart side is now dynamic — user can flip between WMO 1991–2020 (default) and the Atlas 1995–2014 window — but the map's COG URL is hardcoded `clim=wmo_1991-2020/stat=mean/...` (server-side product, not computable client-side). To make the map flex on the same selector we need a sibling pipeline output: `clim=atlas_1995-2014/stat=mean/...` (and the SPEI `stat=sd` counterpart) for each (variable × season), published to the same S3 prefix. Pipeline side this is a regeneration of `hazards_prototype/R/observational/5_climatology_to_cog.R` over the alternate window — small change, but it has to wait its turn behind whatever the observational pipeline is doing next. Notebook side it's then a one-line tweak to `cogURL_for_obs` to pick the prefix based on `baselinePeriod_obs`. Until the COG exists the map stays on 1991–2020 regardless of the chart selector; consider adding a one-line note in the map's "About this plot" disclosure pointing this out so the inconsistency isn't surprising.
   - **Context for why we're going *this* direction, not the other.** NEX-GDDP-CMIP6 doesn't expose a 1991–2020 historical hindcast slice (2015+ already lives in the future-scenario files), so harmonising the *future* side onto 1991–2020 would mean waiting for CMIP7. Adding 1995–2014 to the *observed* side is the path of less resistance.
 - **Loading bars in chart containers** (replace the current `loaderDiv()` spinner with a more informative indicator). Surfaced 2026-05-26 after the spinner + error-suppression work landed (`9278599`). Three levels of effort, increasing fidelity:
-  - *Level 1 — indeterminate bar + stage text* (~30 min). Animated CSS bar in place of the spinner, with a label that flips between "Fetching data…" / "Querying…" / "Rendering…" at known points in the heavy data cells. No byte tracking. Single CSS change in `helpers/uiComponents.ojs` + a few `setStage()` calls per cell. Lowest risk, decent UX bump.
+  - *Level 1 — indeterminate bar + stage text* (~30 min). **SHIPPED 2026-05-27 in `04c6295`.** Animated indeterminate bar replacing the spinner; stage label "Loading data…" by default; section-gated plots show "Waiting for scroll…" before their gate flips and transition to "Loading data…" the moment it does. `setLoaderStage(id, stage)` exported for future stage transitions.
   - *Level 2 — determinate % bar* (~2–3 h). Install a `window.fetch` wrapper that intercepts S3 range requests, sums bytes against the `Content-Length` per cell's parquet URL, renders "Loading 2.4 MB / 4.8 MB (50%)". Will be most accurate after [[CR-rebake]] / `scripts/rebake_parquets_for_pushdown.py` lands (smaller, sorted row groups → fewer, better-bounded range requests). Caveat: DuckDB-WASM issues multiple range requests per query, so the byte→% mapping is approximate.
   - *Level 3 — combined (stage text + byte-tracked % during the fetch stage)* (~3–4 h). Best UX. Union of L1 + L2.
-  - Picks up Pete's priority #4 ("Improved performance and loading feedback — at minimum, loading spinners so plots don't look broken while data is fetching") at the next level above the bare spinner that already exists.
+  - Picks up Pete's priority #4 ("Improved performance and loading feedback — at minimum, loading spinners so plots don't look broken while data is fetching"). L1 lands the visible UX improvement; L2/L3 are the next polish step.
 
 **Overview / framing — surfaced 2026-05-13 from Pete's Q5 answer:**
 - **CR-NEW-cacc1-overview** — Ask CACC1 (Cesare Scartozzi's programme) to produce dedicated Overview content: guidance on how to write a climate rationale, framing for GCF audiences, links to worked examples. **Pete to surface to Cesare.** When delivered, it replaces / extends the single GCF link in CR-026.

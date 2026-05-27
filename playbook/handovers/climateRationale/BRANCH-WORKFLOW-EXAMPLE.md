@@ -62,8 +62,13 @@ That's it. The rest of this doc is the worked example.
 | `2e45e08` | dispatch | **Pipeline-side asks**: parquet pushdown rewrite per-parquet asks, verification checklist, lessons-from-failed-experiment |
 | `08c1662` | chore | Rebake script switched to DuckDB-native writer (`COPY ... TO ... (FORMAT PARQUET, ...)`). Avoids the WASM crash but doesn't deliver the perf win either — coarse column packing. |
 | `f16b888` | dispatch | Close-loop on tactical-rescue question — DuckDB-native rebake doesn't help either; producer-side rewrite is the only viable path |
+| `04c6295` | feat | **Loading bars L1** — animated indeterminate bar + stage label; section-gated plots show "Waiting for scroll…" → "Loading data…" |
+| `0829fac` | perf | **Path B section-gate** — defer view-registration too (B-1: `dbFutureHive` sentinel + B-2: new `dbHazardExposure`); zero init footer fetches for hazard_exposure or the 4 future-projection parquets |
+| `11be818` | fix | Path B regression — section-based filter dropped the shared `exposure` parquet from `db`; switched to `key !== "hazard_exposure"` |
+| `cc0da9a` | perf | **Key Facts per-plot DBs + IN→= rewrite** — 93 s → 6 s on cold start. New `singleDB(key)` helper; 4 dedicated DuckDBClients so the queries don't serialise behind exposure |
+| `b2603d8` | perf | **Per-section DBs for Recent Changes + Production Trends** — every section paints in <14 s. `db` cell removed entirely after the split |
 
-(plus three interleaved Pete-authored commits not driven by this branch's main work: `4812f39` exposure-producer-drift dispatch, `ff0a54a` hazard_exposure rebake outcomes, `502b541` CR-068 root cause).
+(plus three interleaved Pete-authored commits not driven by this branch's main work: `4812f39` exposure-producer-drift dispatch, `ff0a54a` hazard_exposure rebake outcomes, `502b541` CR-068 root cause.)
 
 Four categories — every category has its own pattern:
 

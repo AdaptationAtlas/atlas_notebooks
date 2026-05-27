@@ -848,3 +848,72 @@ In rough leverage order:
 2. **Hand the parquet-pushdown pipeline dispatch to the upstream owner** (Pete is solo on this stack — so basically schedule it on the pipeline side).
 3. **Path B section-gate** when in a polishing mood.
 4. **Loading bars** when in a polishing mood.
+
+---
+
+## Session state — 2026-05-27, session 17 (loading bars + Path B + per-section DBs — every section paints in <14 s)
+
+Picked the deferred items in roughly the order suggested at the end of session 16. FAOSTAT F-2a/F-2b had already landed (Pete's commits `d64e847` / `e5ed3b7` on the pipeline side earlier today), so the queue resolved to: **loading bars L1 → Path B section-gate → diagnose Key Facts slowness → split everything onto per-section DuckDB clients**. The Key Facts question (initiated by Pete's "the info in the keyfacts is tiny how can it take 85s to load?") is what turned the polish-pass into the biggest perf win of the branch — 15× on the Key Facts plots, 6-9× on Production Trends + Recent Changes.
+
+### What landed (chronological)
+
+**Loading bars L1**
+
+- `04c6295` — **`loaderContent(stage)` upgraded** from spinner to indeterminate animated bar + italic stage label below it; default stage is "Loading data…". New `setLoaderStage(id, stage)` export. Section-gated plots (Future Projections, Extreme Events, Hazard Exposure) read "Waiting for scroll…" before their IntersectionObserver gate flips, then transition to "Loading data…" when the gate fires (visibility flag bundled into each loader-reset cell's dep array, so the loader updates the moment the gate trips). Verified via the verifier-quarto-notebook protocol: all 9 loader containers carry `.atlas-loader-bar`; the three gated sections start at "Waiting for scroll…" and flip to "Loading data…" within 3 s of scrolling toward their anchors. Closes Deferred item "Loading bars in chart containers" (L1 only; L2 byte-tracked % bar and L3 combined remain deferred).
+
+**Path B section-gate (with one regression caught + fixed)**
+
+- `0829fac` — **Path B-1 + B-2 landed**. `dbFutureHive` now returns a `{ query: async () => [] }` sentinel while `!futureProjectionsVisible`, then creates the real DuckDBClient + view the moment the gate flips. New `dbHazardExposure` cell does the same for the hazard_exposure parquet (`!hazardExposureVisible` sentinel). `hazardExposure_dataAll` re-pointed from `db.query` → `dbHazardExposure.query`. Both gates verified: zero init fetches for hazard_exposure or any of the 4 future-projection parquets; both fire correctly on scroll.
+- `11be818` — **Regression fix**: my Path B-2 filter in `0829fac` used `d.sections.includes("hazardExposure")` to identify the parquet to gate. The sibling `exposure` parquet (crop+livestock VoP) has `sections: ["keyFacts", "hazardExposure"]` — Key Facts needed it on first paint, but my filter dropped it from `db`. Symptom: every Key Facts plot stuck on "Loading data…" forever, plus cascading `RuntimeError: generateDB is not defined` from downstream cell failures. **Lesson: identify parquet ownership by `key`, not by section membership.** Switched to `d.key !== "hazard_exposure"` (and `dbHazardExposure` picks via `d.key === "hazard_exposure"`). Saved as memory.
+
+**The Key Facts perf rabbit hole**
+
+Pete pushed back on the cold-fetch time after the Path B fix landed — "the info in the keyfacts is tiny how can it take 85s to load?" — which prompted the timing measurement that surfaced the real bottleneck.
+
+- **Diagnosis via fine-grained timing** (playwright + per-request timestamps + per-plot loader→chart transition polling): all 6 first-paint plots painted at the SAME moment, ~93 s after navigation. The GDP/Landuse/Poverty parquets are tiny (<1 MB each, queries finish in <1 s), but they were queued behind `crop-livestock_all.parquet` (~85 s to drain — same DuckDB-WASM stats-pushdown issue as the futureProjections parquets). DuckDB-WASM uses a single connection per `DuckDBClient`, and `db` was that single connection.
+
+- `cc0da9a` — **Key Facts per-plot DuckDB instances + IN→= rewrite**. New `singleDB(key)` factory creates an independent DuckDBClient with one parquet registered (calls `generateDB([entry])` with a one-element array). Four new cells `dbPov` / `dbGdp` / `dbLanduse` / `dbExposure` replace `db` for the Key Facts queries, so they run in parallel rather than queueing. Also applied the IN→= predicate rewrite (same as `9bbe16a` for futureProjections) to all four Key Facts queries — single-iso3 fast path bypasses DuckDB-WASM's broken IN-clause row-group skipping. Measured: plotPov / Gdp / Landuse paint in 5.9 s (was 93 s, 15.6×), plotExposure paints in 10.5 s (was 93 s, 8.9×). The exposure parquet fetch dropped from 26 requests over 84 s to 10 over 3.5 s.
+
+- `b2603d8` — **Extended pattern to Recent Changes + Production Trends + lifted observational queries**. Three more clients: `dbRecentChanges` (historic_climate_timeseries view), `dbProductionTrends` (production_timeseries table), `dbObservational` (a bare `DuckDBClient.of()` for the Recent Changes lifted `FROM read_parquet(URL)` queries — no view to register, just an isolated executor so it doesn't queue behind `dbRecentChanges`). IN→= rewrite extended to `recentChanges_data` and `productionTrends_raw` iso3 predicates. With every consumer on its own client, the original `db` cell has no parquets left to register and is removed entirely. Measured: plotProductionTrends 13.2 s (was 82 s, 6.3×), recent-changes-plot 9.6 s (was 82 s, 8.6×).
+
+### Pattern decisions captured this session
+
+- **DuckDB-WASM serialises queries on a single connection.** A single `DuckDBClient` is a single connection; every query against it queues. For a "tiny" view like Key Facts GDP to feel tiny, it needs its own DuckDBClient — otherwise it inherits the latency of whatever big query is already in flight against the same connection. **The fix is per-plot (or per-section) `DuckDBClient` instances**, each registering only the parquet that plot reads. New `singleDB(key)` helper in the notebook makes this a one-liner. Worth saving as a memory (added below).
+- **Filter parquet ownership by `key`, not `sections`.** `nbData.json` `sections` is a content-categorisation field — entries can be in multiple sections (the `exposure` parquet is in both `keyFacts` and `hazardExposure`). Using `d.sections.includes(...)` as the *filter* identity is a category error; use the dataset KEY. Caught the hard way in `11be818`. Memory entry added.
+- **IN→= rewrite applies broadly, not just to futureProjections.** Every parquet with NULL row-group stats benefits (which is currently all of them — the producer-side dispatch covers the fix). The single-iso3 fast path is two extra lines per query (`admin0Iso3.length === 1 ? `key = 'X'` : `key in (...)``) and meaningfully shifts cold-fetch time even before the producer-side rewrite lands. Worth applying to *any* new query that filters on a stats-bearing column. Already noted in the existing `feedback_duckdb-wasm-parquet-pushdown` memory — extended scope in this session.
+- **Headless-playwright capture catches behaviour real-browser smoke tests miss.** Per-paint timing (loader-bar → svg transition timestamps, S3 first/last by parquet) was what surfaced the single-connection serialisation. A simple "is the page loading?" check wouldn't have caught it. The verifier-quarto-notebook skill earned its keep again — used three times this session (loader L1 stages → Path B gate fetches → Key Facts paint timing).
+
+### Memory updates this session
+
+Two new feedback memories saved:
+
+- **`feedback_duckdb-wasm-per-plot-clients.md`** (new) — DuckDB-WASM single-connection serialisation pattern; when a tiny query is queued behind a slow one, give it its own `DuckDBClient`. Includes the `singleDB(key)` helper shape, the broader applicability note (any per-parquet query that needs to paint independently), and the trade-offs (WASM init is shared across clients so it's cheap-ish; per-client memory overhead exists but is small).
+- **`feedback_parquet-ownership-filter-by-key.md`** (new) — when filtering `data_obj` to assign a parquet to a particular `db*` cell, filter by `d.key`, not `d.sections.includes(...)`. The `sections` field is content-categorisation; entries can appear in multiple sections. The bug I caught (`exposure` in both `keyFacts` and `hazardExposure`, wrongly excluded from `db`) wasted ~30 minutes to diagnose.
+
+### ISSUES.md updates this session
+
+- **Loading bars** Deferred entry annotated: L1 shipped (`04c6295`); L2 + L3 remain deferred. The 3-level effort sketch stays in place because L2/L3 are still tractable.
+- **Path B section-gate** removed from the deferred list (shipped — `0829fac` + `11be818`).
+- New Deferred entry **per-section DB pattern reverse-applies to non-first-paint sections** — useful note for whoever adds new sections: by default any new `db.query()` call inherits the (now-removed) single-connection bottleneck. Reach for `singleDB(key)` or a dedicated `DuckDBClient.of()` from the start.
+
+### In flight / uncommitted
+
+- Working tree clean. Branch `dev/climateRationale` in sync with `origin/dev/climateRationale` at `b2603d8` (push hit a benign lock race but the commits all landed — `git fetch && git status` confirmed sync).
+- `scripts/rebake_parquets_for_pushdown.py` still in repo as a producer-side reference. Same status as end of session 16.
+
+### Open questions for next session
+
+- **Producer-side parquet rewrite ETA** — unchanged from session 16. Highest-leverage outstanding work. With the per-section DB split landed, the remaining cold-fetch time is bounded by the slowest single parquet's stats-pushdown deficit. Once producer-side stats land, every section drops further.
+- **Future Projections cold-fetch** — `dbFutureHive` is now isolated to its own client (was already a separate cell), but the parquet still lacks stats. Cold-fetch on first scroll to FP is still ~10 minutes against current canonical files. Same pipeline-side dispatch covers the fix.
+- **Loading bars L2/L3** — byte-tracked % bar + combined stage-text view. L2 will be most accurate after the producer-side rewrite lands (better-bounded range requests). Worth pairing the two work items.
+- **1995-2014 climatology COG** — unchanged from session 16. Pipeline regeneration of `R/observational/5_climatology_to_cog.R`.
+- **`db` cell removed — any latent references?** Worth a `grep -rn "\\bdb\\b"` pass on the next read-through. The verifier didn't flag anything, but the search is cheap insurance.
+
+### Suggested next step
+
+In rough leverage order:
+
+1. **Producer-side parquet rewrite landing** — every other notebook-side perf lever is downstream of this. When it ships, the per-section DBs from this session compound nicely (paint times should drop further as the fetches themselves get faster).
+2. **Loading bars L2** when the rebaked parquets land (the byte-tracked % bar's accuracy improves with smaller, sorted row groups).
+3. **1995-2014 climatology COG** for the Recent Changes map.
+4. Anything user-facing Pete wants — the branch is in a good state to absorb new feature work.

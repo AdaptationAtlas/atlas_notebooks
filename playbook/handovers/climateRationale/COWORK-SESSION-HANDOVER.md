@@ -3,7 +3,7 @@
 **Audience:** a fresh chat-mode Claude session (Cowork or web/desktop chat)
 picking up the Climate Rationale notebook work. Read this first.
 
-**Last updated:** 2026-05-27 (end of session 16) by Pete + Claude Code.
+**Last updated:** 2026-05-27 (end of session 17) by Pete + Claude Code.
 
 ---
 
@@ -134,39 +134,52 @@ changes in VS Code's Source Control panel.
 
 ---
 
-## Current state (2026-05-27, end of session 16 — Future-perf + SPEI + parquet-pushdown sprint)
+## Current state (2026-05-27, end of session 17 — loading bars + Path B + per-section DB perf)
 
 ### Where the branch is
 
-- `dev/climateRationale` — local matches `origin/dev/climateRationale`. ~30 commits added across sessions 14-16.
-- `hazards_prototype/develop` — no changes from this branch's main work; Pete's parallel commits on `hazards_prototype` continued (CR-068 issue-#9 fix landed; FAOSTAT F-2a/F-2b still pending Pete-side apply; producer-side parquet rewrite is the big new ask).
+- `dev/climateRationale` — local matches `origin/dev/climateRationale` at `b2603d8`. 5 commits added in this session on top of session 16's ~30.
+- `hazards_prototype/develop` — F-2a/F-2b landed pipeline-side earlier today (`d64e847` + `e5ed3b7`, recorded in ISSUES.md "Decisions applied — 2026-05-27 (pipeline-side: CR-068 + CR-088 ships)" block). CR-068 AC re-bake still in flight. Producer-side parquet rewrite per the pipeline-ask dispatch still the biggest outstanding upstream item.
 
-### What's landed this session (the headline beats — full chronological table in [[BRANCH-WORKFLOW-EXAMPLE.md]])
+### What's landed this session (full chronological table in [[BRANCH-WORKFLOW-EXAMPLE.md]])
 
-- **Section-gate for Future Projections + Hazard Exposure** (`1f3def4`, was `ca6cade` amended after verification revealed the original message overclaimed). Defers bulk row-group reads for the selected timeperiod chart query. Path B (gate the view-registration cells too) tracked.
-- **Verifier-quarto-notebook skill** built at `.claude/skills/verifier-quarto-notebook/`. Used throughout the session — playwright + chromium-headless drives the rendered `_site/`, captures network + console + per-phase screenshots.
-- **OJS bootstrap-error suppression** with spinner overlay. No more wall of red error boxes during page load.
-- **Climate-variable selector disconnected** between Recent Changes and Future/Extreme. SPEI dropped from the Future selector (CMIP6 doesn't carry SPEI).
-- **SPEI got a thorough cleanup**: bar rendering fixed (`Plot.barY` → `Plot.rect`), trend overlay enabled, irrelevant toggles hidden with grid reflow, map labels rewritten ("interannual variability" not "sd"), new "About SPEI" disclosure.
-- **"About this plot" disclosure pattern** adopted for Recent Changes plot + map (matches keyFacts). `chartDownloadButton` helper added so `[Download ▼]    ▸ About this plot` renders on a single row.
-- **Baseline period selector** for Recent Changes (1991-2020 vs 1995-2014). Dynamic labels throughout. Map stays on 1991-2020 — 1995-2014 climatology COG follow-up filed.
-- **FAOSTAT trade audit findings dispatched** (`35e923f`): F-2a wine drop + F-2b juice linkage bugs identified with exact 3-line R fix + CSV row corrections. Pete needs to apply pipeline-side.
-- **Parquet-pushdown deep dive** (multi-evening): diagnosed the `iso3 IN (single-value)` clause defeating DuckDB-WASM's row-group pushdown. Pyarrow rebake works perfectly in standalone DuckDB, crashes WASM with `[object WebAssembly.Exception]` in the hive-on view shape; DuckDB-native rebake doesn't crash but produces coarse column packing. Producer-side rewrite is the only viable path. Full asks in `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md`.
+- **Loading bars L1** (`04c6295`). `loaderContent(stage)` upgraded from spinner to animated indeterminate bar + italic stage label. Section-gated plots read "Waiting for scroll…" before the gate flips, "Loading data…" after. New `setLoaderStage(id, stage)` helper exported. Verified via the verifier-quarto-notebook protocol.
+- **Path B section-gate landed — defers parquet footer fetches too** (`0829fac`). `dbFutureHive` gated on `futureProjectionsVisible` with `{ query: async () => [] }` sentinel while gated; new `dbHazardExposure` cell does the same for the hazard_exposure parquet. Zero init fetches for hazard_exposure or the 4 future-projection parquets; both fire correctly on scroll.
+- **Path B regression caught + fixed** (`11be818`). Section-based filter dropped the `exposure` parquet (in both `keyFacts` and `hazardExposure` sections) from `db`, leaving Key Facts stuck. Switched to key-based filter (`d.key !== "hazard_exposure"`). Saved as memory `[[parquet-ownership-filter-by-key]]`.
+- **Per-section DuckDB clients — the cold-start unlock** (`cc0da9a` + `b2603d8`). Diagnosed via fine-grained timing capture: all 6 first-paint plots painted at the SAME moment (~93 s after navigation) — they were queueing behind `crop-livestock_all.parquet`'s slow scan on `db`'s single connection. Split each consumer onto its own dedicated `DuckDBClient`: `dbPov`/`dbGdp`/`dbLanduse`/`dbExposure`/`dbRecentChanges`/`dbProductionTrends` + a bare `dbObservational` for lifted `read_parquet(URL)` queries. New `singleDB(key)` helper. IN→= predicate rewrite extended to every single-iso3 fast path across Key Facts + Recent Changes + Production Trends. `db` cell removed entirely (no parquets left to register). Measured:
+
+  | Plot | Before | After | Speedup |
+  |---|---|---|---|
+  | plotPov / Gdp / Landuse | 93 036 ms | 6 107 ms | 15.2× |
+  | plotExposure | 93 036 ms | 11 147 ms | 8.3× |
+  | plotProductionTrends | 82 984 ms | 13 162 ms | 6.3× |
+  | recent-changes-plot | 82 984 ms | 9 637 ms | 8.6× |
 
 ### Deferred to next session (rough leverage order)
 
-1. **FAOSTAT F-2a + F-2b apply** — smallest concrete win; Pete already authored the fix.
-2. **Producer-side parquet rewrite** per `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md` — the actual fix for Pete's 10-min Future-Projections cold-fetch. Pipeline-side.
-3. **Path B section-gate** — gate the view-registration cells themselves (footer fetches still fire on init even with the consumer-cell gate). ~1-2 hours notebook-side. Documented in the future-projections perf strategy verification appendix.
-4. **1995-2014 climatology COG** for the Recent Changes map — pipeline regeneration of `R/observational/5_climatology_to_cog.R` over the alternate window so the baseline selector flexes the map too.
-5. **Loading bars** (`ISSUES.md` deferred) — 3-level effort sketch; Level 1 is ~30 min and ships an immediately-visible UX improvement.
+1. **Producer-side parquet rewrite** per `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md` — unchanged from session 16. With the per-section DB split in place, this is what unlocks further per-section speedup. Pipeline-side, awaiting upstream owner.
+2. **Future Projections cold-fetch** — `dbFutureHive` is now isolated, but the parquet still lacks stats so first scroll → FP still costs ~10 minutes. Same producer-side dispatch covers the fix.
+3. **Loading bars L2 (byte-tracked %) / L3 (combined)** — pair with the producer-side rewrite landing so the byte → % mapping is well-bounded.
+4. **1995-2014 climatology COG** for the Recent Changes map — pipeline regeneration of `R/observational/5_climatology_to_cog.R`.
 
 ### Memories updated this session
 
-- New: `feedback_no-composite-group-standalones.md` (FAOSTAT margarine / n.e.c. rule).
-- New: `feedback_duckdb-wasm-parquet-pushdown.md` (IN-clause defeats pushdown; pyarrow vs DuckDB-native writer trade-offs; standalone DuckDB ≠ DuckDB-WASM smoke test).
+- New: `feedback_duckdb-wasm-per-plot-clients.md` — DuckDB-WASM single-connection serialisation pattern. When a tiny query is queued behind a slow one, give it its own `DuckDBClient`. Includes the `singleDB(key)` helper shape.
+- New: `feedback_parquet-ownership-filter-by-key.md` — filter `data_obj` parquet entries by `d.key`, not by `d.sections.includes(...)`. The sections field is content categorisation; entries can be in multiple sections.
 
-### What landed before this session (retained for orientation)
+### What landed in session 16 (retained for orientation)
+
+- Section-gate for Future Projections + Hazard Exposure (Section A, consumer-cell level): `1f3def4`. Path B was deferred — now shipped this session.
+- Verifier-quarto-notebook skill at `.claude/skills/verifier-quarto-notebook/`.
+- OJS bootstrap-error suppression with spinner overlay (`9278599`).
+- Climate-variable selector disconnected between Recent and Future/Extreme.
+- SPEI cleanup wave (Plot.rect bars, hidden toggles, trend overlay, map labels).
+- "About this plot" disclosure pattern adopted across Recent Changes plot + map.
+- Baseline period selector for Recent Changes (1991-2020 vs 1995-2014).
+- FAOSTAT trade audit dispatched (F-2a/F-2b — applied pipeline-side earlier today, see ISSUES.md `2026-05-27` blocks).
+- Parquet-pushdown deep dive — IN→= rewrite shipped (`9bbe16a`); producer-side rewrite ask filed in `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md`.
+
+### What landed before session 16 (retained for orientation)
 
 ## Old current state (2026-05-20, mid-session 8)
 
