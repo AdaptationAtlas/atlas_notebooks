@@ -22,7 +22,7 @@ That's it. The rest of this doc is the worked example.
 
 ## What this branch produced
 
-16 commits, scoped to four kinds of work. Read top-to-bottom to follow the chronology.
+~40 commits, scoped to four kinds of work. Read top-to-bottom to follow the chronology.
 
 | SHA | Kind | One-line intent |
 |---|---|---|
@@ -42,6 +42,28 @@ That's it. The rest of this doc is the worked example.
 | `7a08edc` | tool | `.claude/skills/verifier-quarto-notebook/` — codified the verification protocol |
 | `9278599` | ux | OJS bootstrap-error suppression with spinner overlay (`_include.html` + `styles.css`) |
 | `bb18ba2` | feat | Disconnect the climate-var selector between Recent Changes and Future/Extreme sections |
+| `be38bf5` | doc | This file — `BRANCH-WORKFLOW-EXAMPLE.md` worked-example for future branches |
+| `9373c13` | doc | Loading-bars follow-up filed in ISSUES.md Deferred → General (3 effort levels) |
+| `f5c333b` | fix | Split `viewof climateVarSelectFuture` into its own `{ojs}` cell |
+| `fbec0b6` | fix | SPEI bar rendering — `Plot.barY` → `Plot.rect` (zero-width bug in Plot 0.6.13+) + hide SPEI-irrelevant controls + drop SPEI from Future selector |
+| `64fa5bd` | fix | SPEI trend overlay enabled + grid reflow on cell hide + loader vs no-data for gated sections |
+| `1d9201b` | fix | Drop stray `HTMLParagraphElement {}` (duplicate caption reference) + `setTimeout(0)` for DOM-insertion timing of the cell-hide pattern |
+| `c2f358b` | fix | SPEI map labelling ("interannual variability" not "sd") + new "About SPEI in this section" disclosure + hide obs-uncertainty toggle |
+| `a24bf70` | fix | Methods callouts moved from above-the-plot into `captionDetails` blocks beneath plot/map (matches keyFacts pattern) |
+| `9a06c83` | fix | Wrap "About this plot" body text + position it directly beneath the plot |
+| `b642eee` | fix | Flex shrink — force `.plot-caption-details` to take available row width with `min-width: 0` so body text wraps |
+| `9c2be95` | fix | New `chartDownloadButton(...)` helper — inline `[Download ▼]    ▸ About this plot` on a single row, like keyFacts |
+| `de0bf0f` | feat | Baseline period selector for Recent Changes (WMO 1991-2020 vs Atlas 1995-2014); hidden for SPEI |
+| `c936738` | fix | Dynamic anomaly-toggle label "vs YYYY-YYYY" + 1995-2014 climatology COG follow-up filed in ISSUES.md |
+| `11a040a` | fix | Rebake-script CMIP6 targets — column is `hazard` not `variable` |
+| `a39728a` | chore | gitignore python venvs (after `.venv-rebake` almost slipped into `git status`) |
+| `9bbe16a` | perf | **(partially reverted)** Drop `hive_partitioning=1` from `dbFutureHive` + `IN (single-value)` → `= 'value'` rewrite. Measured 25× byte reduction against pyarrow rebake. |
+| `7a9ef36` | revert | Restore `hive_partitioning=1` — pyarrow-rebake + hive=on crashes DuckDB-WASM (the IN→= half stays) |
+| `2e45e08` | dispatch | **Pipeline-side asks**: parquet pushdown rewrite per-parquet asks, verification checklist, lessons-from-failed-experiment |
+| `08c1662` | chore | Rebake script switched to DuckDB-native writer (`COPY ... TO ... (FORMAT PARQUET, ...)`). Avoids the WASM crash but doesn't deliver the perf win either — coarse column packing. |
+| `f16b888` | dispatch | Close-loop on tactical-rescue question — DuckDB-native rebake doesn't help either; producer-side rewrite is the only viable path |
+
+(plus three interleaved Pete-authored commits not driven by this branch's main work: `4812f39` exposure-producer-drift dispatch, `ff0a54a` hazard_exposure rebake outcomes, `502b541` CR-068 root cause).
 
 Four categories — every category has its own pattern:
 
@@ -133,6 +155,41 @@ How a future branch uses it:
 - Output: `report.json` + per-phase screenshots in `/tmp/pw-verify/`
 
 Don't reinvent the playwright wiring per change. Extend the skill if a new pattern emerges (e.g. selection-driven verifications, geographic-state-change verifications).
+
+---
+
+## Anchor pattern 4 — DuckDB-WASM smoke test before promoting any rebake
+
+Added 2026-05-27 after a multi-evening misadventure with `scripts/rebake_parquets_for_pushdown.py`.
+
+**The trap.** Standalone Python DuckDB happily reads pyarrow-rebaked parquets. It also reads DuckDB-native-rebaked parquets. So "verify locally before promoting to canonical S3" felt sufficient. It wasn't.
+
+**What actually happened** (commits `9bbe16a` → `7a9ef36` → `2e45e08` → `08c1662` → `f16b888`):
+
+1. Rebake-script run via pyarrow writer → 5 future-projection sidecars uploaded → measured 25× byte reduction in a sidecar-only A/B → promoted to canonical via `aws s3 mv` → `dbFutureHive` crashed with `Error: Invalid Error: [object WebAssembly.Exception]`. Standalone Python DuckDB loaded the exact same files fine.
+2. Rolled back via the `.preFix.bak` safety files. Deleted the bad sidecars.
+3. Switched the rebake script to DuckDB's native writer (`COPY ... TO ... (FORMAT PARQUET, ROW_GROUP_SIZE 100000, COMPRESSION ZSTD)`). Different output, no WASM crash this time — but **also no perf win**, because DuckDB-native writes coarse column-chunk byte ranges that DuckDB-WASM fetches in ~19 MB chunks (vs pyarrow's ~220 KB).
+4. Settled the loop: pyarrow output crashes WASM with the hive-on view; DuckDB-native output doesn't deliver the perf gain. Producer-side rewrite is the only path. The `scripts/rebake_parquets_for_pushdown.py` script is now a documented prototype, not a deployment path.
+
+**The rule the branch settled on.** For any S3 promotion that affects DuckDB-WASM consumption:
+
+```
+Standalone DuckDB success is necessary but not sufficient.
+Always smoke-test in the real browser (Chrome) or via the
+verifier-quarto-notebook skill against `_site/` before
+running `aws s3 mv canonical canonical.preFix.bak`.
+```
+
+**Concrete checklist** (now baked into `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md` as the producer-side verification step too):
+
+1. Stats populated: `pq.read_metadata(...).row_group(0).column(<col>).statistics.has_min_max` is `True`.
+2. Row groups > 1.
+3. **DuckDB-WASM smoke test**: load the notebook with the rebaked file pointed at by `nbData.json` (sidecar OR temporarily-promoted), in a real browser, watch the OJS console. The cell that consumes the parquet must NOT throw `[object WebAssembly.Exception]`.
+4. HAR-diff: post-promotion byte transfer for a `WHERE iso3='X'` query should be ~2–5% of the file size (vs ~100% on the un-rebaked version).
+
+**Why standalone DuckDB isn't enough.** The WASM build has its own parquet parser that's byte-format-sensitive in ways the native build isn't. Pyarrow's `write_table` produces a valid pq file that native DuckDB reads cleanly but WASM rejects in some view shapes (notably `parquet_scan([...], hive_partitioning=1)`). The reverse — DuckDB-native output — is fine on WASM but doesn't have pyarrow's denser column packing.
+
+**Generalises beyond rebakes.** Same rule applies to any change that swaps a canonical S3 path the WASM client reads: validate it loads in the browser before promoting.
 
 ---
 

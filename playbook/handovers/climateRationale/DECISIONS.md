@@ -743,3 +743,108 @@ One new feedback memory saved alongside this DECISIONS update:
 2. Resume CR-088 cowork investigation (notebook side is staged; pipeline-side answers gate the From Year default decision).
 3. If parquet-pushdown pipeline work has started, verify with a probe before any notebook-side work that depends on faster cold-starts.
 4. CR-085 (commodity focus) remains the most additive next feature; CR-086 (price shocks) waits for CR-085.
+
+---
+
+## Session state — 2026-05-26 → 2026-05-27, sessions 14-16 (Future-perf + SPEI + parquet-pushdown sprint)
+
+Multi-day marathon. Started post-system-crash on 2026-05-26; recovered + verified survived state; spent ~3 evenings split across section-gate verification, SPEI cleanup, baseline-period selector, About-this-plot polish, and a deep parquet-pushdown investigation that ate the final evening. ~30 commits added on `dev/climateRationale` (pushed mid-session at one point — branch is currently in sync with origin).
+
+### What landed (chronological, by theme)
+
+**Recovery + section-gate verification**
+
+- `1f3def4` (was `ca6cade`, amended) — **section-gate for Future Projections + Hazard Exposure**. IntersectionObserver gate via `sectionVisible(anchorId)` defers bulk row-group reads for the selected timeperiod chart query (~19 byte-range fetches) until the user scrolls toward the section. Does NOT defer parquet footer fetches because `db` + `dbFutureHive` cells are upstream of the gate. Path B (gate the view-registration cells) tracked as follow-up in `dispatches/2026-05-26_future-projections-perf-strategy.md` verification appendix.
+- `bdeba79` — **verification appendix appended** to the perf strategy dispatch documenting what the section-gate actually delivers vs the original headline claim. Original commit message overclaimed; amended after running the verifier protocol.
+- `7a08edc` — **verifier-quarto-notebook skill** at `.claude/skills/verifier-quarto-notebook/`. Codifies the playwright + chromium-headless protocol that captured the section-gate gap. Used throughout this session.
+- `9278599` — **OJS bootstrap-error suppression** with spinner overlay. Replaces the wall of red `Error evaluating OJS cell` boxes during page load with a single spinner per cell. Reveal heuristic: hide until error count has been at observed minimum for 5s AND has decreased from initial (catches the bootstrap settle without unmasking real errors). 60s hard cap.
+
+**FAOSTAT trade audit + rebake-script prototype**
+
+- `35e923f` — **FAOSTAT trade audit dispatch** (~770 line append to `2026-05-25_faostat-trade-data-audit.md`). F-2a confirmed: ZAF wine drops are an explicit `^Wine$` regex exclusion at `R/0.4.5_create_faostat_long.R:74`, NOT the 0.25% production-anchored filter. Fix is 3 lines moving Wine + Beer into a new `non_trade_processed_excludes` mask gated by `!(variable %in% trade_vars)`. F-2b: 2 real CSV bugs in `faostat_processed_to_raw.csv` (grape juice parented at grapefruit juice instead of grapes; grapefruit juice self-references), plus 4 concentrate-juice link-ups per Pete directive. Margarine decision locked: stays permanently excluded (no honest single raw parent — Pete's no-composite-group-standalones rule, saved as memory).
+- `d1f0311` — **`scripts/rebake_parquets_for_pushdown.py`** committed. Standalone one-off tool for rewriting Atlas parquets with row-group stats. 16 targets covering CHIRPS/CHIRTS obs, NEX-GDDP-CMIP6 timeseries, hazard_exposure, FAOSTAT, GDP/poverty/landuse.
+
+**Climate-var selector split + SPEI cleanup wave**
+
+- `bb18ba2` — **climate-variable selector disconnected** between Recent Changes and Future/Extreme. Recent uses `viewof climateVarSelect` (bound to `obsHazards`, 6 vars); Future + Extreme use `viewof climateVarSelectFuture` (`futureHazards`, 10 vars — SPEI dropped). User's selection in one section no longer clobbers the other. Confirmed independent via playwright.
+- `f5c333b` — split `viewof climateVarSelectFuture` into its own `{ojs}` cell. Two viewof bindings in the same Quarto OJS cell was the original cell-structure issue.
+- `fbec0b6` — **SPEI bar fix**. `Plot.barY` with numeric `x` was rendering zero-width bars in Plot 0.6.13+; switched to `Plot.rect` with explicit `x1`/`x2`/`y1: 0`/`y2: "value_plot"` matching the non-SPEI bar path. Same commit: hide Show-as-anomaly + Monthly view toggles for SPEI; drop SPEI from the Future selector entirely (CMIP6 ensemble doesn't carry SPEI).
+- `64fa5bd` — **SPEI trend overlay enabled** (removed `!isSPEI_obs` guards on `showTrend_obs` check + `showsTrendOverlay` legend-eligibility). Also: grid reflow on cell hide via `.closest('.cell')` + `setTimeout(0)` so the hidden controls' grid slots collapse rather than leave a gap. Also: spinner instead of "No Data Available" while gated sections wait for scroll (`renderToDiv` callback checks the visibility gate before falling through to the chart functions).
+- `1d9201b` — drop stray `HTMLParagraphElement {}` rendering under the SPEI plot (was a duplicate `recentChanges_obs_caption` reference cell that hit Observable's inspector path because the element was already in the DOM). Also fixed `closest('.cell')` timing — needed `setTimeout(0)` past Observable's DOM insertion rather than `queueMicrotask`.
+- `c2f358b` — **clearer SPEI map labelling**. "1991-2020 sd" → "1991-2020 interannual variability"; legend "SPEI-03 (sd) — σ (z)" → "SPEI-03 — interannual variability (σ across 1991–2020, z-score units)". New "About SPEI in this section" disclosure callout (open by default) explains the hidden controls + the SD-not-mean map choice. Obs-uncertainty toggle hidden for SPEI (same setTimeout pattern).
+
+**"About this plot" disclosure pattern**
+
+- `a24bf70` — moved technical detail from above-the-chart static callouts into `captionDetails(caption, summary, downloadBtn)` blocks beneath each chart/map, matching the keyFacts pattern. SPEI-specific paragraphs conditionally appear.
+- `9a06c83` — wrap "About this plot" text + position it directly beneath the plot (was rendering at the very end of the chart cell's return, after trend stats). Added `.plot-caption-body .atlasFigCaption` block override.
+- `b642eee` — force flex shrink (`flex: 1 1 auto; min-width: 0`) on `.plot-footer-row > .plot-caption-details` so the body wraps to page-content width rather than expanding the row beyond the viewport.
+- `9c2be95` — **`chartDownloadButton` helper added** to `helpers/chartDownloadMenu.ojs` — returns just the split-button (PNG / SVG / CSV) without wrapping a chart. Recent Changes plot + map now render `[Download ▼]    ▸ About this plot` on a single row, matching keyFacts.
+
+**Baseline period selector**
+
+- `de0bf0f` — **`viewof baselinePeriod_obs`** added to Recent Changes controls (1991-2020 WMO standard vs 1995-2014 Atlas/Future-Projections-aligned). Hidden for SPEI. All dependent labels (legend, caption, table header, baseline summary, "About this plot" disclosure) read from it dynamically.
+- `c936738` — **dynamic anomaly toggle label** ("Show as anomaly (vs YYYY-YYYY)"). Same commit: filed the 1995-2014 climatology COG follow-up in ISSUES.md Deferred → General (the map's COG path is hardcoded to `clim=wmo_1991-2020/stat=mean/...` and needs a sibling product before the map can flex on the same baseline selector).
+
+**`BRANCH-WORKFLOW-EXAMPLE.md`**
+
+- `be38bf5` — added a worked example of the change → dispatch → verify → amend-if-needed rhythm this branch settled into. Reference doc for future `dev/<topic>` branches.
+- `9373c13` — loading-bars follow-up filed in ISSUES.md (3 effort levels: indeterminate bar + stage text → byte-tracked % bar → both).
+
+**Parquet-pushdown deep dive** (the big multi-evening rabbit hole)
+
+- `11a040a` — rebake-script TARGETS bugfix: CMIP6 parquets use `hazard` column, not `variable` (the S3 directory's `variable=ensemble_season_timeseries` is a partition-segment label, not a data column). Verified via `pyarrow.read_metadata`.
+- `9bbe16a` — **Option C diagnosis landed** as `perf(climateRationale): drop hive_partitioning + use = for single-value predicates`. Two changes:
+  1. Drop `hive_partitioning=1` from `dbFutureHive`, derive `timeperiod` via `regexp_extract(filename, 'period=...', 1)`.
+  2. Rewrite `iso3 IN (single-value)` predicates as `iso3 = 'value'` (same for `scenario` and `hazard`).
+  Combination measured against pyarrow rebake: ~1.4 GB → **~49 MB** total fetches across 5 future parquets (25× less). Diagnosed via byte-range capture cross-referenced against pyarrow row-group offsets.
+- **Tactical-rescue experiment** (failed both directions):
+  - **Pyarrow rebake + canonical promotion** crashed DuckDB-WASM with `[object WebAssembly.Exception]` in the hive-on view shape. Same files work in standalone DuckDB. Rolled back.
+  - `7a9ef36` — **revert** the hive_partitioning removal from `9bbe16a`. The IN→= half stayed; the hive-removal half was forced back to ON. Comment in `dbFutureHive` documents why.
+  - `08c1662` — switched rebake script to **DuckDB-native writer** (`COPY ... TO ... (FORMAT PARQUET, ROW_GROUP_SIZE 100000, COMPRESSION ZSTD)`). Doesn't crash WASM but produces coarse column-chunk packing — DuckDB-WASM does ~19 MB per range request (vs pyarrow's ~220 KB), so the perf win didn't materialise (87 requests / 1.6 GB transferred — worse than canonical).
+- `2e45e08` — **pipeline-side asks dispatch** filed at `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md`. Per-parquet asks (future_climate_timeseries, hazard_exposure, adm0_obs, adm0_faostat, crop-livestock_all) with sort keys, row-group size, writer choice, and 4-step verification checklist including the DuckDB-WASM smoke test (standalone DuckDB is NOT sufficient — the trap I fell into).
+- `f16b888` — close-loop on the dispatch: marks the DuckDB-native rescue as known-dead. Producer-side rewrite is the only viable path. Sharpened the producer ask: needs to produce parquets satisfying BOTH (i) DuckDB-WASM-compatible byte format AND (ii) pyarrow-style dense column-chunk packing.
+- `a39728a` — gitignore python venvs (caught after a one-off `.venv-rebake` almost slipped into `git status`).
+
+### Pattern decisions captured this session
+
+- **DuckDB-WASM is byte-format-sensitive in ways that standalone DuckDB isn't.** Pyarrow-written parquets crash WASM with `[object WebAssembly.Exception]` in a hive-partitioned multi-file `parquet_scan(...)` view; DuckDB-native-written parquets don't crash but produce different (coarser) column-chunk byte layouts. Standalone Python DuckDB happily reads both. Saved as memory `feedback_duckdb-wasm-parquet-pushdown` (next section).
+- **`iso3 IN ('AGO')` defeats row-group pushdown in DuckDB-WASM.** `iso3 = 'AGO'` (or a per-value rewrite for single-value cases) is what activates row-group stats skipping. This is independent of the file's structure. Saved as memory `feedback_duckdb-wasm-parquet-pushdown`.
+- **`Plot.barY` with numeric `x` and no `interval` renders zero-width bars in Plot 0.6.13+.** Use `Plot.rect` with explicit `x1`/`x2`/`y1`/`y2` derived from `stripeWidth` for time-series bars. The non-SPEI bar path was already doing this; SPEI was the holdout. Worth flagging in a future memory if it bites again.
+- **Quarto `_site/` resources don't refresh when only `data/` JSON changes** — only the qmd is the trigger. If you edit `data/climateRationale/nbData.json`, also `cp ... _site/...` to make the preview server actually serve it. Otherwise stale JSON content keeps loading. Worth saving as a memory.
+- **Don't promote rebake-script output without a real-browser smoke test.** Standalone DuckDB ≠ DuckDB-WASM. I fell into this exactly once; reverted via `aws s3 mv canonical.preFix.bak → canonical`. The pipeline-side dispatch's verification checklist now ends with a DuckDB-WASM smoke step explicitly because of this.
+
+### Memory updates this session
+
+Three new feedback memories were saved earlier in the session — adding one more as part of this tidy-up:
+
+- `feedback_no-composite-group-standalones.md` (saved earlier) — FAOSTAT rule: items with no honest single raw-species parent (margarine, n.e.c. catchalls) stay in always-on `exclude_patterns`. Never propose them as standalone commodity groups.
+- `feedback_duckdb-wasm-parquet-pushdown.md` (saved as part of this tidy-up) — DuckDB-WASM-specific behaviours that gate parquet-pushdown work: byte-format sensitivity, IN-clause defeats stats, standalone DuckDB is not a sufficient smoke test.
+
+### ISSUES.md updates this session
+
+Already integrated above (the "Decisions applied — 2026-05-26 → 2026-05-27" block added to ISSUES.md as part of this tidy-up). Also new Deferred → General entries from earlier in the session:
+
+- **1995–2014 climatology COG** for the Recent Changes map (so the new `baselinePeriod_obs` selector can flex the map too, not just the chart).
+- **Loading bars in chart containers** (3-level effort sketch — indeterminate bar + stage text → byte-tracked % → combined).
+- **Producer-side parquet rewrite for DuckDB-WASM pushdown** — pipeline ask blocking the Future-Projections 10-min cold-fetch fix; full asks in `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md`.
+
+### In flight / uncommitted
+
+- Working tree clean apart from the usual `.DS_Store` / `.Rhistory` noise. Branch is currently in sync with `origin/dev/climateRationale` (the user pushed mid-session).
+- `scripts/rebake_parquets_for_pushdown.py` now uses DuckDB-native writer (commit `08c1662`); script is committed and lives in the repo as a "what the producer needs to do" prototype + sort-key reference. Can be deleted once the producer-side parquet rewrite lands.
+
+### Open questions for next session
+
+- **Producer-side parquet rewrite ETA.** Highest-leverage outstanding work. Until it lands, Future Projections stays at ~10-min cold-fetch. `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md` has the asks; needs upstream owner to pick up.
+- **FAOSTAT F-2a + F-2b fixes** — Pete authored, ready to apply pipeline-side. 3-line R edit + a few CSV row corrections. Smallest "concrete win" sitting on the desk.
+- **Path B section-gate** (gate the view-registration cells themselves) — notebook-side ~1-2 hours. Documented in the future-projections perf strategy verification appendix.
+- **1995-2014 climatology COG** for the Recent Changes map — pipeline regeneration of `R/observational/5_climatology_to_cog.R` over the alternate window.
+
+### Suggested next step
+
+In rough leverage order:
+
+1. **FAOSTAT F-2a + F-2b apply.** Smallest, ships a user-visible improvement (ZAF wine appears in the parquet; grape juice rolls up correctly).
+2. **Hand the parquet-pushdown pipeline dispatch to the upstream owner** (Pete is solo on this stack — so basically schedule it on the pipeline side).
+3. **Path B section-gate** when in a polishing mood.
+4. **Loading bars** when in a polishing mood.

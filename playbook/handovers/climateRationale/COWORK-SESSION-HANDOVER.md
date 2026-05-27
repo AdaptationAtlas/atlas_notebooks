@@ -3,7 +3,7 @@
 **Audience:** a fresh chat-mode Claude session (Cowork or web/desktop chat)
 picking up the Climate Rationale notebook work. Read this first.
 
-**Last updated:** 2026-05-20 (session 8) by Pete + Claude Code.
+**Last updated:** 2026-05-27 (end of session 16) by Pete + Claude Code.
 
 ---
 
@@ -134,28 +134,41 @@ changes in VS Code's Source Control panel.
 
 ---
 
-## Current state (2026-05-20, mid-session 8)
+## Current state (2026-05-27, end of session 16 — Future-perf + SPEI + parquet-pushdown sprint)
 
 ### Where the branch is
 
-- `dev/climateRationale` — local matches `origin/dev/climateRationale`. This session's docs (DECISIONS / ISSUES / new v5 dispatch file) are about to land in one wrap-up commit.
-- `hazards_prototype/develop` — pushed up to `bb04869` (v5 mapping CSV + generator). 9 FAOSTAT v4 commits + 1 v5 commit on `origin`. The v5 0.4.5 refactor is deferred to a fresh session.
+- `dev/climateRationale` — local matches `origin/dev/climateRationale`. ~30 commits added across sessions 14-16.
+- `hazards_prototype/develop` — no changes from this branch's main work; Pete's parallel commits on `hazards_prototype` continued (CR-068 issue-#9 fix landed; FAOSTAT F-2a/F-2b still pending Pete-side apply; producer-side parquet rewrite is the big new ask).
 
-### What's landed this session
+### What's landed this session (the headline beats — full chronological table in [[BRANCH-WORKFLOW-EXAMPLE.md]])
 
-- **FAOSTAT v4 dispatch complete** ([[dispatches/2026-05-19_faostat-filter-and-schema-rework.md]]): union-of-3 filter, parent-mapping gate, type / parent_raw / commodity_class columns, Other aggregation, deflation, sanity + integrity checks. 845 k rows × 10 variables × 206 commodities. **Not yet republished to S3** — gating on v5 refactor.
-- **FAOSTAT v5 dispatch partial** ([[dispatches/2026-05-20_faostat-v5-mapping-cleanup.md]]): generator + Item-Code-keyed mapping CSV in `bb04869`. **Build script 0.4.5 still references OLD schema — don't run it.**
-- **Observational pipeline** scripts 3, 4, 5 verified on CGlabs through script 5's `--full` run. Script 6 not yet run.
+- **Section-gate for Future Projections + Hazard Exposure** (`1f3def4`, was `ca6cade` amended after verification revealed the original message overclaimed). Defers bulk row-group reads for the selected timeperiod chart query. Path B (gate the view-registration cells too) tracked.
+- **Verifier-quarto-notebook skill** built at `.claude/skills/verifier-quarto-notebook/`. Used throughout the session — playwright + chromium-headless drives the rendered `_site/`, captures network + console + per-phase screenshots.
+- **OJS bootstrap-error suppression** with spinner overlay. No more wall of red error boxes during page load.
+- **Climate-variable selector disconnected** between Recent Changes and Future/Extreme. SPEI dropped from the Future selector (CMIP6 doesn't carry SPEI).
+- **SPEI got a thorough cleanup**: bar rendering fixed (`Plot.barY` → `Plot.rect`), trend overlay enabled, irrelevant toggles hidden with grid reflow, map labels rewritten ("interannual variability" not "sd"), new "About SPEI" disclosure.
+- **"About this plot" disclosure pattern** adopted for Recent Changes plot + map (matches keyFacts). `chartDownloadButton` helper added so `[Download ▼]    ▸ About this plot` renders on a single row.
+- **Baseline period selector** for Recent Changes (1991-2020 vs 1995-2014). Dynamic labels throughout. Map stays on 1991-2020 — 1995-2014 climatology COG follow-up filed.
+- **FAOSTAT trade audit findings dispatched** (`35e923f`): F-2a wine drop + F-2b juice linkage bugs identified with exact 3-line R fix + CSV row corrections. Pete needs to apply pipeline-side.
+- **Parquet-pushdown deep dive** (multi-evening): diagnosed the `iso3 IN (single-value)` clause defeating DuckDB-WASM's row-group pushdown. Pyarrow rebake works perfectly in standalone DuckDB, crashes WASM with `[object WebAssembly.Exception]` in the hive-on view shape; DuckDB-native rebake doesn't crash but produces coarse column packing. Producer-side rewrite is the only viable path. Full asks in `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md`.
 
-### Deferred to next session
+### Deferred to next session (rough leverage order)
 
-- v5 0.4.5 refactor (item_code lookups + rollup excludes + reason column + production/yield invariant + schema v5 + S3 mapping upload). Picking-up prompt in [[dispatches/2026-05-20_faostat-v5-mapping-cleanup.md]] under "Implementation status".
-- Three small observational-pipeline polish items (cgroup-sentinel fix in `_helpers.R`; `furrr_options(stdout = FALSE)` in scripts 3 + 5; `flush.console()` after script 5's final log line). Non-blocking.
-- Script 6 (S3 publish) once Pete confirms the 1,404 COG count from script 5.
+1. **FAOSTAT F-2a + F-2b apply** — smallest concrete win; Pete already authored the fix.
+2. **Producer-side parquet rewrite** per `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md` — the actual fix for Pete's 10-min Future-Projections cold-fetch. Pipeline-side.
+3. **Path B section-gate** — gate the view-registration cells themselves (footer fetches still fire on init even with the consumer-cell gate). ~1-2 hours notebook-side. Documented in the future-projections perf strategy verification appendix.
+4. **1995-2014 climatology COG** for the Recent Changes map — pipeline regeneration of `R/observational/5_climatology_to_cog.R` over the alternate window so the baseline selector flexes the map too.
+5. **Loading bars** (`ISSUES.md` deferred) — 3-level effort sketch; Level 1 is ~30 min and ships an immediately-visible UX improvement.
+
+### Memories updated this session
+
+- New: `feedback_no-composite-group-standalones.md` (FAOSTAT margarine / n.e.c. rule).
+- New: `feedback_duckdb-wasm-parquet-pushdown.md` (IN-clause defeats pushdown; pyarrow vs DuckDB-native writer trade-offs; standalone DuckDB ≠ DuckDB-WASM smoke test).
 
 ### What landed before this session (retained for orientation)
 
-## Old current state (2026-05-18, end of session 7)
+## Old current state (2026-05-20, mid-session 8)
 
 ### Where the branch is
 

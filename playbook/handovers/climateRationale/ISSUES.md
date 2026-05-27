@@ -80,6 +80,33 @@ Full decision text + reasoning is in `DECISIONS.md`. Anything still marked `TBC`
 
 ---
 
+## Decisions applied — 2026-05-26 → 2026-05-27 (Future-perf + SPEI + parquet-pushdown sprint)
+
+Marathon evening + overnight session. Headline outcomes:
+
+- **Section-gate landed but partially-effective.** `1f3def4` defers bulk row-group reads for the selected Future Projections timeperiod chart query (`~19 byte-range fetches` deferred until scroll). Does NOT defer parquet footer fetches because `db` + `dbFutureHive` cells sit upstream of the gate — they run unconditionally. Path B (gate the view-registration cells themselves) tracked as a follow-up in the verification appendix of `dispatches/2026-05-26_future-projections-perf-strategy.md`. Original commit was `ca6cade` with overclaiming message; amended to `1f3def4` after the playwright-based verification showed the gap.
+- **Climate-variable selector disconnected between Recent Changes and Future Projections.** `bb18ba2`. Recent uses `viewof climateVarSelect` bound to `obsHazards` (6 vars); Future + Extreme use `viewof climateVarSelectFuture` bound to `futureHazards` (10 vars, SPEI dropped — the CMIP6 ensemble doesn't carry SPEI). Pete's UX call after observing one selection clobbering the other. Confirmed independent via playwright.
+- **SPEI in the Recent Changes section got a thorough cleanup.** `Plot.barY` with numeric `x` was rendering zero-width bars in Plot 0.6.13+; switched to `Plot.rect` with explicit `x1`/`x2`/`y1: 0`/`y2: "value_plot"` matching the non-SPEI bar path (`fbec0b6`). Toggles that don't apply for SPEI (Show as anomaly, Monthly view, Observational uncertainty band) now hide the entire grid cell via `.closest('.cell').style.display = 'none'` and `setTimeout(0)` for DOM-insertion timing (`64fa5bd` + `1d9201b`). Trend line / Theil-Sen overlay now also fires for SPEI (`64fa5bd`). Map labels rewritten for SPEI: "1991-2020 sd" → "1991-2020 interannual variability"; legend title "SPEI-03 (sd) — σ (z)" → "SPEI-03 — interannual variability (σ across 1991–2020, z-score units)" (`c2f358b`). New "About SPEI in this section" disclosure under the chart explains the hidden controls (`c2f358b` → moved into the captionDetails pattern by `a24bf70`).
+- **"About this plot" disclosure pattern adopted for Recent Changes plot + map.** Methods notes moved from above-the-plot static callouts into a `captionDetails(caption, summary, downloadBtn)` block beneath each chart, matching the keyFacts charts (`a24bf70` → `9a06c83` text-wrap fix → `b642eee` flex shrink fix → `9c2be95` inline-Download split-button via new `chartDownloadButton` helper). Consistent footer across every chart in the notebook now.
+- **Baseline period selector added to Recent Changes** (`de0bf0f` + `c936738`). Users can flip between WMO 1991–2020 (default) and the Atlas-convention 1995–2014 baseline (which matches the Future Projections calibration window). Hidden for SPEI (intrinsically standardised). Anomaly-toggle label, table column header, legend entry, baseline-summary caption all read from `baselinePeriod_obs` and update on switch. Map stays on 1991–2020 (server-side COG; see follow-up below).
+- **OJS bootstrap-error suppression** (`9278599`). Replaced the wall of red `Error evaluating OJS cell` boxes during page load with a fixed-style spinner. Reveal heuristic: hide errors until the error count has been at its observed minimum for 5 seconds AND has decreased from initial (catches the bootstrap settle without unmasking legitimately-stuck errors). 60s hard cap. Scoped CSS hides the callout body but keeps a centered spinner via `::after`.
+- **Verifier skill built** (`7a08edc`). `.claude/skills/verifier-quarto-notebook/` codifies the playwright-against-`_site` protocol with full network + console + per-phase screenshots. Used throughout this session — the SPEI bar diagnosis, the Future-Projections cold-fetch HAR analysis, and the parquet-rebake A/B all came out of it.
+- **`BRANCH-WORKFLOW-EXAMPLE.md` added** (`be38bf5`). Worked example of the change → dispatch → verify → amend-if-needed rhythm this branch settled into. Reference doc for future `dev/<topic>` branches.
+
+### Parquet-pushdown deep dive (the big multi-evening rabbit hole)
+
+- **Diagnosis** (Option C analysis via byte-range capture against pyarrow rebake): DuckDB-WASM was full-scanning every row group × every column despite the rebake's correctly-populated stats. Two simultaneous blockers identified:
+  1. `iso3 IN ('AGO')` (single-value IN clause) defeats DuckDB-WASM's row-group stats pushdown — needs `iso3 = 'AGO'`.
+  2. `hive_partitioning=1` in the view contributes to the issue (modest — dropping it dropped per-file byte transfer ~50%).
+- **Best result measured** (pyarrow rebake + hive off + IN→=): 222 requests / **49 MB** total across 5 future parquets (~25× less than canonical baseline).
+- **Notebook-side change that survived** (`9bbe16a` + revert `7a9ef36`): `iso3 IN (single-value)` → `iso3 = 'value'` rewrite in `futureProjections_dataAll`. Necessary but not sufficient until producer-side stats land. Hive_partitioning kept ON.
+- **Two failed rescue attempts via the rebake script:**
+  - **Pyarrow-rebake → promote to canonical** (initial attempt, rolled back): crashes DuckDB-WASM with `[object WebAssembly.Exception]` in the hive-on view shape. Same files load fine in standalone DuckDB.
+  - **DuckDB-native-rebake** (commits `08c1662` + `f16b888`): doesn't crash but produces coarse column packing — DuckDB-WASM does ~19 MB per range request (vs pyarrow's ~220 KB), so the perf win doesn't materialise. 87 requests / **1.6 GB** transferred (worse than canonical).
+- **Outcome**: producer-side rewrite is the only path to the actual win. Full per-parquet asks in `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md`. Notebook is in best-effort state (`IN→=` rewrite) ready to benefit the moment producer-side stats land.
+
+---
+
 ## Issues
 
 ### CR-001 — Future Projections quick-insight reports physically impossible warming
