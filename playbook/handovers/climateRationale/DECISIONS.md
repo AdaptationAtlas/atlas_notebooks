@@ -896,17 +896,29 @@ Two new feedback memories saved:
 - **Path B section-gate** removed from the deferred list (shipped — `0829fac` + `11be818`).
 - New Deferred entry **per-section DB pattern reverse-applies to non-first-paint sections** — useful note for whoever adds new sections: by default any new `db.query()` call inherits the (now-removed) single-connection bottleneck. Reach for `singleDB(key)` or a dedicated `DuckDBClient.of()` from the start.
 
+### Post-F-2 FAOSTAT integration (also session 17)
+
+After the perf work landed, picked up the F-2 follow-ups from `dispatches/2026-05-25_faostat-trade-data-audit.md`:
+
+- **`636d00c`** — F-3.1 (Methods caveat (iv) refreshed: wine + concentrated juices now linked) + caveat-callout text update (same wording change to the yellow `productionTradeDataCaveat` above the chart) + F-4 (variable-aware From Year default — 2015 for trade vars, 2010 otherwise). F-3.3 collapsed into the existing callout (no new cell needed).
+- **F-6 probed** — Pete's "tea + coffee VoP may be auction-inflated" hypothesis confirmed for **Kenya specifically** (KEN coffee 4,098 USD15/t and KEN tea 2,542 USD15/t both sit in the auction-price range). For the other 6 countries (ETH/RWA/UGA/TZA/BDI/MWI) the implied prices are *below* even smallholder farm-gate ranges → under-reporting, not auction inflation. TZA + UGA have zero vop_usd15 rows for coffee or tea. Full breakdown appended to the audit dispatch §"F-6 probe results — 2026-05-27". A draft Methods caveat is pending — the per-country variance means the caveat needs a 3-class framing (auction-inflated / under-reported / missing), not a uniform "all African tea/coffee VoP may be inflated" message.
+- **"Why no byproducts in VoP" clarification documented.** Pete asked. Answer: FAOSTAT QV is computed at the farm gate (`production_tonnes × producer_price`) — processed forms come after the farm and aren't FAO QV by design. Parquet confirms: vop_intd15 + vop_usd15 have zero `type='processed'` rows. The toggle's hidden gating for VoP is intentional, not a bug. Aside written into the audit dispatch for future readers.
+- **One investigation cul-de-sac documented.** Hit a false-alarm regression when sanity-checking the parquet schema via DuckDB CLI httpfs — it returned `type='production'` for all rows, but downloading the parquet locally and re-querying showed correct `type='raw'` / `'processed'` values. The browser's DuckDB-WASM reads correctly via range-fetch; only the CLI httpfs path is buggy. ~20 minutes lost; now noted in ISSUES.md so future investigations grab a local copy before trusting CLI httpfs output.
+
 ### In flight / uncommitted
 
-- Working tree clean. Branch `dev/climateRationale` in sync with `origin/dev/climateRationale` at `b2603d8` (push hit a benign lock race but the commits all landed — `git fetch && git status` confirmed sync).
+- Working tree clean. Branch `dev/climateRationale` in sync with `origin/dev/climateRationale` at `636d00c` (plus the playbook updates being committed now).
 - `scripts/rebake_parquets_for_pushdown.py` still in repo as a producer-side reference. Same status as end of session 16.
 
 ### Open questions for next session
 
+- **F-6 Methods caveat text** — pending draft. The 3-class framing (auction-inflated KEN / under-reported BDI-MWI-RWA-ETH / missing TZA-UGA) needs Pete sign-off before drafting. Also consider whether to rename Methods → "Trade-data quality" to "Data-quality caveats" since F-6 concerns VoP not trade.
 - **Producer-side parquet rewrite ETA** — unchanged from session 16. Highest-leverage outstanding work. With the per-section DB split landed, the remaining cold-fetch time is bounded by the slowest single parquet's stats-pushdown deficit. Once producer-side stats land, every section drops further.
 - **Future Projections cold-fetch** — `dbFutureHive` is now isolated to its own client (was already a separate cell), but the parquet still lacks stats. Cold-fetch on first scroll to FP is still ~10 minutes against current canonical files. Same pipeline-side dispatch covers the fix.
 - **Loading bars L2/L3** — byte-tracked % bar + combined stage-text view. L2 will be most accurate after the producer-side rewrite lands (better-bounded range requests). Worth pairing the two work items.
 - **1995-2014 climatology COG** — unchanged from session 16. Pipeline regeneration of `R/observational/5_climatology_to_cog.R`.
+- **F-2c sibling audit** — pipeline-side, tier-2 audit of niche unlinked items.
+- **F-1 AGO palm oil probe** — pipeline-side, blocking F-3.2.
 - **`db` cell removed — any latent references?** Worth a `grep -rn "\\bdb\\b"` pass on the next read-through. The verifier didn't flag anything, but the search is cheap insurance.
 
 ### Suggested next step

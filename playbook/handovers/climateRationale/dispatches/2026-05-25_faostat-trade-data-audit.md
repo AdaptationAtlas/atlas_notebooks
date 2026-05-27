@@ -672,6 +672,55 @@ Independent of the probe outcome, two actions:
 
 This becomes a **new finding F-6** in the audit dispatch; pipeline-side action is bundled into the F-4b Path-3 PR.
 
+#### F-6 probe results — 2026-05-27 (post F-2 republish)
+
+Probe ran against the current canonical parquet (`adm0_faostat.parquet` republished 2026-05-27 07:39 UTC). Implied producer price = `1000 × vop_usd15 / production_tonnes`, averaged 2018-2022, restricted to `commodity ∈ ('Coffee', 'Tea')` and `iso3 ∈ ('ETH','RWA','UGA','KEN','TZA','BDI','MWI')`.
+
+| Country | Commodity | Implied (USD15/t) | Auction range¹ | Farm-gate range¹ | Read |
+|---|---|---|---|---|---|
+| **KEN** | **Coffee (arabica)** | **4,098** | 3,250-5,100 | 1,400-2,300 | **🔴 In auction range — F-6 hypothesis CONFIRMED** |
+| **KEN** | **Tea** | **2,542** | 1,860-3,260 | 750-1,400 | **🔴 In auction range — F-6 hypothesis CONFIRMED** |
+| ETH | Coffee (arabica) | 1,219 | 3,250-5,100 | 1,400-2,300 | Below farm-gate range — likely under-reported, NOT inflated |
+| RWA | Coffee (arabica) | 972 | 3,250-5,100 | 1,400-2,300 | Below farm-gate range — likely under-reported, NOT inflated |
+| BDI | Coffee (robusta) | 297 | 1,675-2,600 | 750-1,400 | Way below farm-gate — likely bad NSO data |
+| ETH | Tea | 1,246 | 1,860-3,260 | 750-1,400 | At top of farm-gate range — looks reasonable |
+| BDI / MWI / RWA | Tea | 180 / 219 / 182 | 1,860-3,260 | 750-1,400 | Way below — likely bad NSO data (3-5× too low) |
+| TZA / UGA | Coffee + Tea | **0 (missing)** | — | — | **No vop_usd15 rows at all** — different coverage issue |
+
+¹ Auction + farm-gate benchmarks from this dispatch's table (line 650), adjusted ~7% downward to put on a constant-2014-2016 USD basis (the basis of `vop_usd15`).
+
+**Interpretation:**
+
+1. **F-6 confirmed for Kenya specifically.** KEN coffee and KEN tea both sit squarely in the auction-price range, ~1.7-2.0× the smallholder farm-gate range. Pete's instinct was right for the KEN-via-Mombasa-Auction case.
+
+2. **Opposite problem for most other countries.** BDI/MWI/RWA/ETH-coffee/RWA-coffee implied prices are *below* even the smallholder farm-gate range — often by a factor of 3-5×. This is a *different* data-quality issue: producer prices that look stale, mis-deflated, or under-reported, not auction-inflated. A single uniform F-6 caveat would mislead users about these countries.
+
+3. **TZA + UGA lack vop_usd15 entirely.** No rows for either commodity in the 2018-2022 window. Falls under the existing coverage caveat (i) but worth a specific mention because TZA + UGA are major coffee/tea producers — readers expecting national VoP for these commodities will see empty bars.
+
+**Recommended action (revised from the pre-probe Path 1/2/3 menu):**
+
+- **(1)** Methods caveat scope changes: instead of "all African tea/coffee VoP may be inflated" (the pre-probe framing), the caveat should distinguish three different problem classes: (i) **auction-inflated** (KEN only, in this slice), (ii) **likely under-reported / stale producer prices** (BDI/MWI/RWA/ETH), (iii) **missing data entirely** (TZA/UGA for coffee + tea). Each gets one sentence in a new "Producer-price quality for tea + coffee" caveat block under Methods → Trade-data quality (or move both into a renamed "Data-quality caveats" block since this concerns VoP).
+- **(2)** Per-country flags in the chart UI are now feasible — KEN coffee/tea bars could carry a small marker indicating "likely inflated". Defer until the Methods caveat ships and Pete confirms the flag-marker shape.
+- **(3)** Pipeline-side adjustment coefficient stays off the table — the per-country variance is too wide for a uniform coefficient, and KEN is the only clear inflation case in this slice.
+
+**Open follow-ups from this probe:**
+
+- **Probe scope.** Restricted to 2018-2022 + 7 countries. A full 1961-2024 sweep would let us see whether the KEN auction-inflation pattern is new (post-Mombasa-Auction-formalisation) or always present, and would surface other outliers across the full SSA set. Worth running once the Methods caveat lands.
+- **Re-probe after F-2c sibling audit lands.** F-2c may add more rows that change the implied-price calculation if they affect the production_tonnes denominator. Re-run the probe at that point.
+- **Cross-check against ICO + IFAD smallholder-price data** for KEN to confirm the auction interpretation. The probe's auction/farm-gate benchmarks in the table above are rough sanity ranges from public reporting, not formal sources.
+
+#### Aside — why no byproducts in VoP
+
+Surfaced separately during the F-6 investigation (Pete asked why "Include byproducts" is hidden for VoP variables). Answer documented here for future readers.
+
+VoP variables (`vop_intd15`, `vop_usd15`) have ZERO `type='processed'` rows in the parquet — 90,677 rows for vop_intd15 and 63,517 for vop_usd15, all `type='raw'`. This is intentional FAOSTAT methodology, not a pipeline omission:
+
+- FAOSTAT QV (Value of Production) = `production_tonnes × producer_price`, where production is the raw primary commodity (cocoa beans, grapes, sugar cane) and the producer price is what farmers receive at the farm gate.
+- Processed forms (cocoa butter, raisins, sugar) come *after* the farm — they're outputs of processors and mills, not farms. FAO doesn't track VoP for them because (a) it's not "agricultural production" in FAO's sense (the processor isn't the farmer), (b) adding processed value on top of raw would double-count (the cocoa butter's $ already embeds the cocoa beans' $ plus processing margin), and (c) farm-gate value is what's relevant for measuring agricultural sector size.
+- Trade variables track processed forms because the wine / raisins / cocoa butter that physically cross a border are recorded as their own commodity rows, not folded into grapes / cocoa beans.
+
+So the byproducts toggle's hidden gating for VoP is intentional and correct — there's nothing to roll up.
+
 ---
 
 ### F-7 — Re-exports: are they in the pipeline output? (was F-1.4 of the original dispatch)

@@ -145,11 +145,21 @@ Picked up the suggested-next-step list from the session 16 block. F-2a/F-2b had 
 
   All parquets now start fetching at the same moment (~4 s after page load, post-DuckDB-WASM init) and run in parallel.
 
+### Post-F-2 FAOSTAT integration follow-ups (also session 17)
+
+- **F-3.1 + caveat refresh + F-4 shipped (`636d00c`).** Tightened Methods caveat (iv) under "Trade-data quality" — wine and concentrated juices are now linked to raw parents (canonical parquet republished 2026-05-27 07:39 UTC); same wording update applied to the yellow `productionTradeDataCaveat` callout above the chart. F-4 made `productionYearStart` default variable-aware: 2015 for `export_*`/`import_*` (FAOSTAT deflator reference start; sidesteps pre-2015 reporter-country anomalies), 2010 for everything else.
+- **F-3.3 collapsed into existing callout.** The dispatch envisioned a new inline italic caveat under the chart; the existing yellow `productionTradeDataCaveat` callout already covers it, so the F-3.3 ask folded into tightening that one (no new cell).
+- **F-3.2 deferred** pending F-1 pipeline probe (AGO palm oil — pipeline-side).
+- **F-6 probed and partially resolved.** Pete's "tea + coffee VoP may be auction-inflated" hypothesis was right *for Kenya specifically* — KEN coffee implied price 4,098 USD15/t and KEN tea 2,542 USD15/t, both squarely in the auction-price range. But for the other 6 countries probed (ETH/RWA/UGA/TZA/BDI/MWI) the implied prices are *below* even the smallholder farm-gate range (likely under-reporting, NOT auction inflation) — and TZA/UGA have no vop_usd15 rows at all for either commodity. Full per-country breakdown + interpretation in [`dispatches/2026-05-25_faostat-trade-data-audit.md`](dispatches/2026-05-25_faostat-trade-data-audit.md) §F-6 probe results (2026-05-27). Methods caveat text NOT yet drafted — the per-country picture is more nuanced than a uniform "tea/coffee may be inflated" message would suggest; pick a 3-class framing (auction-inflated / under-reported / missing) when drafting.
+- **Open clarification: byproducts not surfaced for VoP — this is intentional, not a bug.** Pete asked. FAOSTAT QV (Value of Production) is computed as `production_tonnes × producer_price` at the farm gate; processed forms (cocoa butter, raisins, wine) come *after* the farm and aren't tracked in FAO's QV by design. The parquet confirms: vop_intd15 + vop_usd15 have zero `type='processed'` rows. The byproducts toggle's hidden gating for VoP is correct — there's nothing to roll up. Documented in [`dispatches/2026-05-25_faostat-trade-data-audit.md`](dispatches/2026-05-25_faostat-trade-data-audit.md) "Aside — why no byproducts in VoP" for future readers.
+
 ### Deferred → General updates
 
 - **Loading bars L1: shipped (`04c6295`).** L2 + L3 still deferred — see entry text below; pair them with the producer-side parquet rewrite landing so the byte-tracked % bar gets accurate range bounds.
 - **Path B section-gate: shipped (`0829fac` + `11be818`).** Now removed from deferred.
+- **F-6 tea/coffee VoP caveat** — still to draft (3-class framing per probe results, see audit dispatch). Will go into Methods → Data-quality caveats (renaming "Trade-data quality" to "Data-quality caveats" since this concerns VoP not trade).
 - New note: **any newly-added query against a DuckDB-WASM client inherits whatever else queues on that client.** If a new plot adds latency to existing plots that share its client, reach for `singleDB(key)` or `DuckDBClient.of()` directly — pattern established this session in `cc0da9a` / `b2603d8`. Pattern memory: `[[duckdb-wasm-per-plot-clients]]`.
+- **DuckDB CLI httpfs reads of the FAOSTAT parquet return WRONG values for the `type` column** (got "production" for all rows; downloading the file locally + querying gives correct "raw" / "processed"). Hit during F-6 investigation; cost ~20 minutes chasing a false-alarm regression. Pattern: when sanity-checking a parquet's schema, prefer `curl -o /tmp/file.parquet … && duckdb -c "… read_parquet('/tmp/file.parquet')…"` over `read_parquet('https://…')` directly. The browser's DuckDB-WASM reads correctly via range-fetch; the CLI httpfs path has some projection bug.
 
 ---
 
