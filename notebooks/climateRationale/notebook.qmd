@@ -4273,9 +4273,28 @@ db ={
     s3_path: patchWindowsCache(item.s3_path)
   }));
   return await generateDB(
-    // Future projection data is big, so split into different database
-    _cleaned.filter((d) => !d.sections.includes("futureProjections")),
+    // Future projections + hazard exposure data are big, so split into
+    // separate databases (dbFutureHive + dbHazardExposure) that gate
+    // their view-registration on IntersectionObserver visibility.
+    _cleaned.filter((d) =>
+      !d.sections.includes("futureProjections") &&
+      !d.sections.includes("hazardExposure")
+    ),
   );
+}
+
+dbHazardExposure = {
+  // Path B-2: gate hazard_exposure parquet registration on the section's
+  // visibility. The hazard_exposure parquet is the largest single file
+  // in the notebook (~60 M rows); its footer + initial column-chunks
+  // accounted for ~6 fetches on initial paint before this gate. The
+  // sole consumer (hazardExposure_dataAll) already returns [] while
+  // !hazardExposureVisible, so the sentinel is belt-and-braces.
+  if (!hazardExposureVisible) return { query: async () => [] };
+  const _cleaned = data_obj
+    .filter((d) => d.sections.includes("hazardExposure"))
+    .map((item) => ({ ...item, s3_path: patchWindowsCache(item.s3_path) }));
+  return await generateDB(_cleaned);
 }
 ```
 
@@ -4317,6 +4336,16 @@ hazardExposureVisible = sectionVisible("hazardExposure-anchor");
 
 ```{ojs}
 dbFutureHive = {
+    // Path B-1: gate the view-registration itself on the section's
+    // visibility. Without this, DuckDB-WASM fetches the parquet footer
+    // for every file in `parquet_scan([...])` at view-creation time
+    // (5 footer fetches on init for the 5 future parquets). With the
+    // gate, the view isn't created until the user scrolls toward
+    // Future Projections. The sole consumer (futureProjections_dataAll)
+    // already returns [] while !futureProjectionsVisible, so the
+    // sentinel here is belt-and-braces in case a future caller forgets
+    // to gate itself.
+    if (!futureProjectionsVisible) return { query: async () => [] };
     const fut = data_obj.filter((d) => d.sections.includes("futureProjections"));
     const _db = await DuckDBClient.of();
     await _db.query(`SET enable_object_cache = true;`)
@@ -5016,7 +5045,7 @@ hazardExposure_dataAll = {
     ? `AND (admin1_name in ${sqlList(admin1Names)} OR admin1_name IS NULL)`
     : `AND admin1_name IS NULL`;
 
-  const resp = await db.query(`
+  const resp = await dbHazardExposure.query(`
   SELECT
     iso3,
     admin0_name,
