@@ -21,7 +21,12 @@ overwrite the canonical path — that swap is a manual step you do
 once you've A/B tested cold-start performance and confirmed the
 notebook still works against the rebaked files.
 
-Author: written 2026-05-25 in collaboration with Claude.
+Author: written 2026-05-25 in collaboration with Claude. Switched
+from pyarrow's parquet writer to DuckDB's COPY ... TO ... (FORMAT
+PARQUET) on 2026-05-27 after the pyarrow output crashed DuckDB-WASM
+with `[object WebAssembly.Exception]` despite producing files that
+loaded fine in standalone DuckDB. The WASM build is byte-format-
+sensitive in ways DuckDB-native output avoids.
 Convention reference: see memory `feedback-parquet-authoring-for-duckdb-wasm`.
 
 Usage
@@ -337,34 +342,52 @@ def rebake_one(
     t0 = time.perf_counter()
     data = s3_download(client, target.s3_key)
     print(f"    downloaded in {time.perf_counter() - t0:.2f}s")
+    in_local = os.path.join(tmpdir, f"{target.key}.canonical.parquet")
+    with open(in_local, "wb") as fh:
+        fh.write(data)
 
-    # 3. Read full table into memory.
-    t0 = time.perf_counter()
-    table = pq.read_table(io.BytesIO(data))
-    print(f"    read into pyarrow: {table.num_rows:,} rows, {table.num_columns} cols, {time.perf_counter() - t0:.2f}s")
+    # 3. Inspect canonical metadata for the before/after diff.
+    src_md = pq.read_metadata(in_local)
+    print(f"    BEFORE: {src_md.num_row_groups} row group(s), {src_md.num_rows:,} rows, cols={src_md.schema.names[:6]}…")
 
-    # 4. Inspect existing metadata for the before/after diff.
-    src_md = pq.read_metadata(io.BytesIO(data))
-    print(f"    BEFORE: {src_md.num_row_groups} row group(s), {src_md.num_rows:,} rows")
-
-    # 5. Sort.
-    t0 = time.perf_counter()
-    table_sorted = reorder_table(table, target.sort_by)
-    print(f"    sorted by {list(target.sort_by)} in {time.perf_counter() - t0:.2f}s")
-
-    # 6. Write to a local tmp file with the desired row group size + stats.
+    # 4. Rebake via DuckDB-native writer (NOT pyarrow). Pyarrow's
+    # output crashed DuckDB-WASM with `[object WebAssembly.Exception]`
+    # in our 2026-05-26 experiment — same SQL worked in standalone
+    # DuckDB but the WASM build is byte-format-sensitive in ways the
+    # pyarrow writer trips. DuckDB-native output (via COPY ... TO ...)
+    # avoids that incompatibility because the WASM build uses the
+    # same parquet reader. Sort happens inside the COPY's SELECT.
+    schema_names = set(src_md.schema.names)
+    sort_cols = [c for c in target.sort_by if c in schema_names]
+    missing = [c for c in target.sort_by if c not in schema_names]
+    if missing:
+        print(f"    warn: sort columns not in schema, skipping: {missing}")
+    order_clause = f"ORDER BY {', '.join(sort_cols)}" if sort_cols else ""
     out_local = os.path.join(tmpdir, f"{target.key}.fixed.parquet")
+    if os.path.exists(out_local):
+        os.remove(out_local)
+    import duckdb  # local import — keeps the helper available even if
+                  # duckdb isn't installed in environments that only run --dry-run with pyarrow.
+
     t0 = time.perf_counter()
-    pq.write_table(
-        table_sorted,
-        out_local,
-        row_group_size=row_group_size,
-        compression="zstd",
-        compression_level=9,
-        write_statistics=True,
-        use_dictionary=True,
+    con = duckdb.connect()
+    # COPY accepts an inline query; sort + project happen on the fly.
+    # ROW_GROUP_SIZE controls the row-group boundary; ZSTD compression
+    # at the default level (which DuckDB picks compatibly with its own
+    # WASM reader). write_statistics defaults to ON.
+    con.execute(
+        f"""
+        COPY (
+            SELECT * FROM read_parquet('{in_local}')
+            {order_clause}
+        ) TO '{out_local}'
+        (FORMAT PARQUET, ROW_GROUP_SIZE {row_group_size}, COMPRESSION ZSTD)
+        """
     )
-    print(f"    wrote local rebake in {time.perf_counter() - t0:.2f}s → {out_local}")
+    con.close()
+    print(f"    sorted + wrote via DuckDB-native in {time.perf_counter() - t0:.2f}s → {out_local}")
+    if sort_cols:
+        print(f"    sort order: {sort_cols}")
 
     # 7. Verify.
     v = verify_stats(out_local, target.verify_stats_on)
