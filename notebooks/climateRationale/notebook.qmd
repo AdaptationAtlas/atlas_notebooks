@@ -7326,6 +7326,20 @@ timeseries_futureProjections = () => {
 
   const yDataMin = d3.min(_data, ribbonLower);
   const yDataMax = d3.max(_data, ribbonUpper);
+  // In absolute mode, expand the y-domain to include the 1995–2014 baseline
+  // dot + bar (mean ± interannual σ) so the marker is never clipped — it's
+  // drawn at year = yearMin - 1 with y in [mean - sd, mean + sd].
+  let yBaseMin = +Infinity;
+  let yBaseMax = -Infinity;
+  if (!_showAnomaly) {
+    for (const a of new Set(_data.map((d) => d.adminName))) {
+      const m = baselineMeanByAdmin.get(a);
+      const s = baselineStdByAdmin.get(a);
+      if (m == null) continue;
+      yBaseMin = Math.min(yBaseMin, m - (s ?? 0));
+      yBaseMax = Math.max(yBaseMax, m + (s ?? 0));
+    }
+  }
   // Only expand the y-axis to include the ±1σ / ±2σ threshold lines when
   // those lines are actually drawn (anomaly mode AND highlight toggle on).
   // Earlier code inflated the domain on _showAnomaly alone, which left the
@@ -7343,6 +7357,10 @@ timeseries_futureProjections = () => {
     // is entirely above or below zero (e.g. consistent warming).
     yMin = Math.min(yMin, 0);
     yMax = Math.max(yMax, 0);
+  } else if (isFinite(yBaseMin)) {
+    // Absolute mode: include the baseline dot+bar bounds.
+    yMin = Math.min(yMin, yBaseMin);
+    yMax = Math.max(yMax, yBaseMax);
   }
   if (showThresholds) {
     yMin = Math.min(yMin, -maxStd2 * 1.05);
@@ -7381,6 +7399,27 @@ timeseries_futureProjections = () => {
     const thresholdLabels = rowThresholds.filter(
       (t) => t.adminName === lastAdmin,
     );
+    // Baseline marker: 1995–2014 mean ± interannual σ, rendered as a dot +
+    // vertical error bar per admin at the left edge of the projection x-axis
+    // (only in absolute mode — in anomaly mode the baseline is zero by
+    // definition and the existing zero ruleY conveys that already).
+    // Placed at year = yearMin - 1 so it sits visually just outside the
+    // projection cone and reads as "where the recent past sat" without
+    // overlapping the first projection point.
+    const yearMin = d3.min(rowData, (d) => d.year);
+    const baselineX = yearMin != null ? yearMin - 1 : null;
+    const baselineMarkers = !_showAnomaly && baselineX != null
+      ? rowAdmins
+          .map((a) => {
+            const m = baselineMeanByAdmin.get(a);
+            const s = baselineStdByAdmin.get(a);
+            if (m == null) return null;
+            return { adminName: a, x: baselineX, y: m, y1: m - (s ?? 0), y2: m + (s ?? 0) };
+          })
+          .filter((d) => d != null)
+      : [];
+    const baselineLabels = baselineMarkers
+      .filter((d) => d.adminName === lastAdmin);
     return Plot.plot({
       width,
       height: 380,
@@ -7420,25 +7459,43 @@ timeseries_futureProjections = () => {
       },
       marks: [
         Plot.ruleY(_showAnomaly ? [0] : [], { strokeDasharray: [5] }),
-        // 1995–2014 baseline mean per admin — only when showing absolute
-        // values. Gives the reader a visual anchor for "where the recent
-        // past sat" so the future projections have a comparable reference.
-        // In anomaly mode the baseline is implicitly zero (the dashed zero
-        // line above), so this rule isn't needed.
-        Plot.ruleY(
-          !_showAnomaly
-            ? rowAdmins
-                .map((a) => ({ adminName: a, y: baselineMeanByAdmin.get(a) }))
-                .filter((d) => d.y != null)
-            : [],
-          {
-            fx: "adminName",
-            y: "y",
-            stroke: "#444",
-            strokeDasharray: [5, 5],
-            strokeWidth: 0.9,
-          },
-        ),
+        // 1995–2014 baseline marker — dot at the mean + vertical bar at
+        // ±1 interannual σ, drawn one year to the left of the projection
+        // start so the reader can compare the future trajectory to the
+        // recent past at a glance. Only rendered in absolute mode; in
+        // anomaly mode the baseline is implicitly zero (the dashed zero
+        // line above) and the threshold ±1σ/±2σ lines (when Highlight is
+        // ON) already encode the same information.
+        Plot.ruleX(baselineMarkers, {
+          fx: "adminName",
+          x: "x",
+          y1: "y1",
+          y2: "y2",
+          stroke: "#444",
+          strokeWidth: 1.4,
+        }),
+        Plot.dot(baselineMarkers, {
+          fx: "adminName",
+          x: "x",
+          y: "y",
+          fill: "#444",
+          stroke: "white",
+          strokeWidth: 1,
+          r: 3.5,
+          symbol: "circle",
+        }),
+        Plot.text(baselineLabels, {
+          fx: "adminName",
+          x: "x",
+          y: "y2",
+          text: () => "1995–2014",
+          textAnchor: "start",
+          fontSize: 9,
+          fontWeight: 600,
+          fill: "#444",
+          dx: 6,
+          dy: -4,
+        }),
         Plot.ruleY(rowThresholds, {
           fx: "adminName",
           y: "y",
