@@ -164,6 +164,63 @@ There WAS a `scripts/rebake_parquets_for_pushdown.py` tactical rescue idea: rewr
 
 ---
 
+## 2026-05-27 follow-up — producer-side helper tuned, awaiting WASM smoke test
+
+**Pipeline-side parameter sweep landed.** A controlled experiment at `/tmp/parquet-pushdown-experiment/` (synthetic 6.9M-row CMIP6-shape dataset; sweep over `ROW_GROUP_SIZE` from 5000 to 100000 plus pyarrow comparison) measured per-config:
+
+- file size
+- row-group count + footer size
+- avg / max compressed column-chunk size
+- predicted AGO-only fetch bytes (chunk-level)
+
+**Findings**:
+
+1. **DuckDB 1.5 exposes no `DATA_PAGE_SIZE` / `WRITE_PAGE_INDEX` / `DICTIONARY_PAGE_SIZE_LIMIT` option.** Probed all candidate names; only `ROW_GROUP_SIZE`, `ROW_GROUP_SIZE_BYTES`, `ROW_GROUPS_PER_FILE`, `COMPRESSION`, `COMPRESSION_LEVEL`, `PARQUET_VERSION`, and the file-/partition-level knobs are recognised.
+
+2. **Neither writer emits a parquet PageIndex by default** (verified via `column_index_offset` / `offset_index_offset` introspection on both pyarrow and DuckDB outputs). So WASM's "per-fetch unit" is the **column chunk**, not the page — the dispatch's "~220 KB per range" is column-chunk size, not page size.
+
+3. **`ROW_GROUP_SIZE = 50000` is the sweet spot for DuckDB-native.** Halves avg compressed chunk size (148 KB → 76 KB) vs `100000`; further reductions (20K, 10K, 5K) balloon footer overhead (122 KB → 305 KB → 609 KB → 1000 KB) and the predicted AGO fetch starts to GROW again as boundary row groups dominate.
+
+| Config | File MB | RGs | AGO fetch | Avg chunk KB | Footer KB |
+|---|---|---|---|---|---|
+| DuckDB rg=100000 (old default) | 101 | 70 | 1.45 MB | 148 | 64 |
+| **DuckDB rg=50000 (new default)** | **102** | **136** | **1.19 MB** | **76** | **123** |
+| DuckDB rg=20000 | 103 | 339 | 1.30 MB | 31 | 305 |
+| pyarrow rg=100000 (reference) | 154 | 70 | 2.25 MB | 225 | 92 |
+
+4. **DuckDB at rg=50000 is predicted ~3× tighter than pyarrow on per-chunk bytes** (76 KB vs 225 KB), and the AGO-fetch estimate is roughly half (1.2 MB vs 2.3 MB). If WASM range-fetch behaviour is faithfully driven by column-chunk size, this should beat pyarrow's perf — not just match DuckDB-native's previous shape.
+
+5. **But the synthetic doesn't reproduce the dispatch's 19 MB-per-range observation.** My predicted DuckDB-native AGO fetch is 1.5 MB; the dispatch saw 1.6 GB / 87 requests ≈ 18 MB per request. Plausible explanations:
+   - WASM HTTP range coalescing (batches adjacent column chunks into single ranges)
+   - hive_partitioning=1 + multi-file UNION forces full row-group reads regardless of stats
+   - Production data has higher per-row entropy in the float columns than my synthetic random noise
+   - The original `models` array column wasn't actually represented in my synthetic the way it appears in production
+
+This means **the WASM browser smoke test remains the only authoritative verdict** — the parameter sweep tells us what's *available* in DuckDB-native, not whether `rg=50000` is *enough*.
+
+### What landed
+
+- **`hazards_prototype/R/_helpers.R`** (`develop`): `write_parquet_pushdown()` default `row_group_size` 100000 → 50000; added `max_avg_chunk_kb = 200` post-write check; richer message output (row groups, chunks, avg chunk size). Existing call sites need no change — the param has a default.
+
+- **`hazards_prototype/scripts/2026-05-27_pushdown_rebake.sh.txt`**: 8-stage runbook covering R/1.2 re-run → local verify → S3 sandbox upload → DuckDB CLI A/B → **WASM browser smoke test (STAGE 5 = the real gate)** → promotion → post-promote verify → rollback.
+
+### What still needs deciding
+
+- **Run STAGE 5 once a rebake lands.** If HAR shows byte transfer drops to ~2-5% of file size + chart paints under 60 s, promote and close out. If not, STAGE 5 numbers tell us which hypothesis (coalescing vs hive vs data-shape) is load-bearing and the next experiment is properly targeted.
+
+- **R/3_freq_x_exposure.R migration (the 60M-row hazard_exposure file)** is NOT in this change. 5 remaining `arrow::write_parquet` sites at lines 552, 692, 857, 1314, 1380. Should land as a separate commit before the next CR-068 AC re-bake so hazard_exposure also gets the new layout.
+
+- **Dropping the `models` array column from R/1.2 outputs (dispatch ask #6)** also deferred — schema change, needs blast-radius check.
+
+### Pointers
+
+- Parameter sweep scripts (not committed; ephemeral): `/tmp/parquet-pushdown-experiment/01_synth.py` → `06_query_timing.py`
+- Helper change: `hazards_prototype/R/_helpers.R` `write_parquet_pushdown()`
+- Runbook: `hazards_prototype/scripts/2026-05-27_pushdown_rebake.sh.txt`
+- Updated project memory: `feedback-parquet-authoring-for-duckdb-wasm` (open-question section)
+
+---
+
 ## Pointers
 
 - Failed-experiment trail: `git log --oneline 9bbe16a 7a9ef36` + this dispatch
