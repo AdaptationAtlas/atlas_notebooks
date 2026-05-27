@@ -1585,7 +1585,7 @@ observed_obs_raw = {
 
   // Primary query — adm1 when 1+ admin1s selected, else national.
   const t0 = performance.now();
-  const rows = Array.from(await db.query(buildQuery(useAdm1 ? "adm1" : "adm0")));
+  const rows = Array.from(await dbObservational.query(buildQuery(useAdm1 ? "adm1" : "adm0")));
   let nQueries = 1;
 
   // National-overlay query (issue #1 Pete's 2026-05-21 review). When
@@ -1594,7 +1594,7 @@ observed_obs_raw = {
   // append it as one extra facet labelled with the country name.
   // (When admin1Names is empty, the primary query is already national.)
   if (useAdm1 && includeAdmin0) {
-    const nationalRows = Array.from(await db.query(buildQuery("adm0")));
+    const nationalRows = Array.from(await dbObservational.query(buildQuery("adm0")));
     rows.push(...nationalRows);
     nQueries++;
   }
@@ -4279,40 +4279,27 @@ singleDB = (key) => {
   return generateDB([{ ...entry, s3_path: patchWindowsCache(entry.s3_path) }]);
 };
 
-// Key Facts: one client per parquet so the four plots (Pov, Gdp,
-// Landuse, Exposure) don't serialise behind each other. Before this
-// split, the Key Facts paints were all queued behind crop-livestock_all
-// (the exposure parquet, ~85 s to drain on cold start due to absent
-// row-group stats — same upstream issue as futureProjections per
-// dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md).
-dbPov      = singleDB("poverty");
-dbGdp      = singleDB("a0_gdp");
-dbLanduse  = singleDB("a0_landuse");
-dbExposure = singleDB("exposure");
+// One client per parquet so the queries don't serialise behind each
+// other on a single DuckDB-WASM connection. Before this split, every
+// first-paint query queued behind crop-livestock_all (the exposure
+// parquet, ~85 s to drain on cold start due to absent row-group stats
+// — same upstream issue as futureProjections per
+// dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md). Recent
+// Changes + Production Trends were similarly stuck behind the climate
+// timeseries fetch.
+dbPov              = singleDB("poverty");
+dbGdp              = singleDB("a0_gdp");
+dbLanduse          = singleDB("a0_landuse");
+dbExposure         = singleDB("exposure");
+dbRecentChanges    = singleDB("historic_climate_timeseries");
+dbProductionTrends = singleDB("production_timeseries");
 
-db ={
-  const _cleaned = data_obj.map(item => ({
-    ...item,
-    s3_path: patchWindowsCache(item.s3_path)
-  }));
-  return await generateDB(
-    // Slim db down to just the parquets that don't have their own
-    // dedicated client. Excluded:
-    //   - futureProjections section parquets (own client: dbFutureHive)
-    //   - hazard_exposure                    (own client: dbHazardExposure)
-    //   - Key Facts parquets above           (own client: dbPov/Gdp/Landuse/Exposure)
-    // What's left in db: historic_climate_timeseries (Recent Changes)
-    // and adm0_faostat (Production Trends).
-    _cleaned.filter((d) =>
-      !d.sections.includes("futureProjections") &&
-      d.key !== "hazard_exposure" &&
-      d.key !== "poverty" &&
-      d.key !== "a0_gdp" &&
-      d.key !== "a0_landuse" &&
-      d.key !== "exposure"
-    ),
-  );
-}
+// Dedicated client for the lifted Recent Changes observational query
+// (adm0_obs / adm1_obs / monthly variants). These cells use
+// `FROM read_parquet('<URL>')` directly so there's no view to register
+// — we just need an isolated DuckDBClient so the query doesn't queue
+// behind dbRecentChanges' historic_climate_timeseries scan.
+dbObservational = DuckDBClient.of();
 
 dbHazardExposure = {
   // Path B-2: gate the hazard_exposure parquet registration on the
@@ -4559,7 +4546,7 @@ cropCategoryMap = new Map(
 
 // Year range available in the parquet — slider min/max derive from this.
 productionYearBounds = {
-  const resp = await db.query(`
+  const resp = await dbProductionTrends.query(`
     SELECT MIN(year) AS min_year, MAX(year) AS max_year
     FROM production_timeseries
   `);
@@ -4610,12 +4597,12 @@ productionAvailableYears = {
 // variables.
 productionTrends_raw = {
   if (!admin0Iso3.length) return [];
-  const resp = await db.query(`
+  const resp = await dbProductionTrends.query(`
     SELECT iso3, item_code, commodity, commodity_group, type,
            parent_raw, parent_raw_item_code, commodity_class,
            variable, year, value
     FROM production_timeseries
-    WHERE iso3 IN ${sqlList(admin0Iso3)}
+    WHERE ${admin0Iso3.length === 1 ? `iso3 = '${admin0Iso3[0]}'` : `iso3 IN ${sqlList(admin0Iso3)}`}
       AND value IS NOT NULL
     ORDER BY iso3, commodity_group, commodity, variable, year
   `);
@@ -4813,9 +4800,8 @@ productionTrends_data = {
 ```{ojs}
 recentChanges_data = {
   const _season = seasonSelect.season;
-  // const _variable = climateVarSelect.id;
 
-  const resp = await db.query(`
+  const resp = await dbRecentChanges.query(`
     SELECT
       iso3,
       admin0_name,
@@ -4829,7 +4815,7 @@ recentChanges_data = {
       sd_anomaly
       FROM historic_climate_timeseries
       WHERE 1=1
-      AND iso3 in ${sqlList(admin0Iso3)}
+      AND ${admin0Iso3.length === 1 ? `iso3 = '${admin0Iso3[0]}'` : `iso3 in ${sqlList(admin0Iso3)}`}
       AND (
        admin1_name in ${sqlList(admin1Names)}
        OR admin1_name IS NULL
