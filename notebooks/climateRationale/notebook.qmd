@@ -7321,14 +7321,32 @@ timeseries_futureProjections = () => {
 
   const yDataMin = d3.min(_data, ribbonLower);
   const yDataMax = d3.max(_data, ribbonUpper);
-  // Expand to include ±2σ threshold lines (anomaly framing).
-  const maxStd2 = _showAnomaly
+  // Only expand the y-axis to include the ±1σ / ±2σ threshold lines when
+  // those lines are actually drawn (anomaly mode AND highlight toggle on).
+  // Earlier code inflated the domain on _showAnomaly alone, which left the
+  // axis at ±maxStd2 even with the threshold lines hidden — making the
+  // data look flat-line near zero because the visible range was 10–100×
+  // wider than the data range.
+  const showThresholds = _showAnomaly && highlightExtremesFuture;
+  const maxStd2 = showThresholds
     ? 2 * (d3.max([...baselineStdByAdmin.values()]) ?? 0)
     : 0;
-  const yExtent = [
-    _showAnomaly ? Math.min(yDataMin, -maxStd2 * 1.05) : yDataMin,
-    Math.max(yDataMax, maxStd2 * 1.05),
-  ];
+  let yMin = yDataMin;
+  let yMax = yDataMax;
+  if (_showAnomaly) {
+    // Keep the zero baseline line visible in anomaly mode even if the data
+    // is entirely above or below zero (e.g. consistent warming).
+    yMin = Math.min(yMin, 0);
+    yMax = Math.max(yMax, 0);
+  }
+  if (showThresholds) {
+    yMin = Math.min(yMin, -maxStd2 * 1.05);
+    yMax = Math.max(yMax, maxStd2 * 1.05);
+  }
+  // 5 % padding for breathing room around the data; floor to avoid a zero
+  // pad when min==max (single-point edge case).
+  const yPad = Math.max((yMax - yMin) * 0.05, 0.01);
+  const yExtent = [yMin - yPad, yMax + yPad];
 
   const { chunks, cols } = adminGridSplit(_data, facetCols);
 
@@ -7376,6 +7394,7 @@ timeseries_futureProjections = () => {
         label: _variableAxis,
         tickSize: 0,
         domain: yExtent,
+        nice: true,
         tickFormat: yTickWithUnit,
       },
       fx: {
