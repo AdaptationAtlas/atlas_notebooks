@@ -2110,6 +2110,42 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+### CR-093 — `R/2.2` outputs unused by climateRationale notebook — confirm other Atlas consumers before any cleanup [NEW 2026-05-28]
+
+- **id:** CR-093
+- **title:** None of `hazards_prototype/R/2.2_haz_change.R`'s 8 parquet outputs are consumed by the climateRationale notebook; confirm whether other Atlas surfaces need them before considering whether R/2.2 is still required for the climateRationale workflow
+- **type:** pipeline (housekeeping)
+- **severity:** low (no current functionality at stake; pure cleanup-investigation)
+
+- **where:** [`hazards_prototype/R/2.2_haz_change.R`](https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/2.2_haz_change.R).
+
+- **what:** R/2.2 writes (via plain `arrow::write_parquet`, not `write_parquet_pushdown`):
+  - `ptot_change_by_model.parquet`, `ptot_change_ensemble.parquet`, `ptot_diff_by_model.parquet`, `ptot_diff_ensemble.parquet` (% precip area change/diff)
+  - `thi_perc_area_by_model.parquet`, `thi_perc_area_ensemble.parquet` (% livestock area heat-stressed)
+  - `ntx_perc_area_by_model.parquet`, `ntx_perc_area_ensemble.parquet` (% crop area heat-stressed)
+  - `haz_freq.parquet`, `haz_freq_ensemble.parquet` (haz frequency stats)
+  Plus 2 COG rasters (`ptot_perc_change.tif`, `ptot_perc_diff.tif`).
+
+  Cross-reference against [`data/climateRationale/nbData.json`](../../../data/climateRationale/nbData.json) confirms: **none** of these S3 paths are read by the climateRationale notebook.
+
+- **what-NOT-to-touch:** R/2.1's outputs ARE used — section 3.3's `_ensemble_seasons.parquet` is the canonical `ensemble_season_timeseries.parquet` driving Future Projections + the historic NEX-GDDP-CMIP6 baseline for those anomalies. **The NEX-GDDP historic 1995–2014 bake CANNOT be dropped** — see [[nexgddp-baseline-not-substitutable]] memory. R/2.1 stays as-is.
+
+- **proposed-investigation (before any change):**
+  1. Search the broader Atlas codebase (map UI, other notebooks, dashboards) for consumers of `ptot_*` / `thi_perc_area_*` / `ntx_perc_area_*` / `haz_freq*` parquets or the `ptot_perc_change.tif` COG.
+  2. Check `push_to_s3.R` upload destinations and whether they're listed in any other notebook's data registry.
+  3. If consumers exist: R/2.2 stays; no action.
+  4. If no consumers (or only legacy ones being deprecated): consider whether R/2.2 should be skipped during the AC re-bake to save compute. R/2.2 is not in any active code dependency chain in `hazards_prototype` itself (R/3 does not read R/2.2 outputs — verified by grep + reading R/3's prerequisites in its header).
+
+- **acceptance:** A short note (in this CR or a follow-up dispatch) listing every confirmed consumer of R/2.2 outputs, with either a decision to keep R/2.2 in the AC re-bake plan or to skip it. No code changes required.
+
+- **why-this-matters:** Each R/2.2 compute pass costs pipeline time during the AC re-bake. If R/2.2 is no longer needed (or only needed occasionally), it's a cheap saving on every future bake cycle. But the answer depends on consumers we don't know about from inside this repo.
+
+- **dependencies:** None. Investigation-only.
+
+- **STATUS (2026-05-28):** Open. Pete to confirm whether non-climateRationale Atlas surfaces still consume R/2.2 outputs.
+
+---
+
 ## Proposed PR groupings
 
 Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.
