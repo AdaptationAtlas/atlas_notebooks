@@ -2110,39 +2110,42 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
-### CR-093 — `R/2.2` outputs unused by climateRationale notebook — confirm other Atlas consumers before any cleanup [NEW 2026-05-28]
+### CR-093 — R/2.2 outputs not currently consumed by notebook — but capture inter-model ensemble-change info worth surfacing [NEW 2026-05-28]
 
 - **id:** CR-093
-- **title:** None of `hazards_prototype/R/2.2_haz_change.R`'s 8 parquet outputs are consumed by the climateRationale notebook; confirm whether other Atlas surfaces need them before considering whether R/2.2 is still required for the climateRationale workflow
-- **type:** pipeline (housekeeping)
-- **severity:** low (no current functionality at stake; pure cleanup-investigation)
+- **title:** `hazards_prototype/R/2.2_haz_change.R` produces 8 parquets the climateRationale notebook doesn't consume, but those outputs capture **whole-period delta + inter-model spread** info that R/2.1 doesn't pre-aggregate — making them candidates for new notebook features rather than for cleanup
+- **type:** pipeline (audit) + notebook (potential new features)
+- **severity:** low (no current bug); medium-high (unrealised analytical value)
 
 - **where:** [`hazards_prototype/R/2.2_haz_change.R`](https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/2.2_haz_change.R).
 
-- **what:** R/2.2 writes (via plain `arrow::write_parquet`, not `write_parquet_pushdown`):
-  - `ptot_change_by_model.parquet`, `ptot_change_ensemble.parquet`, `ptot_diff_by_model.parquet`, `ptot_diff_ensemble.parquet` (% precip area change/diff)
-  - `thi_perc_area_by_model.parquet`, `thi_perc_area_ensemble.parquet` (% livestock area heat-stressed)
-  - `ntx_perc_area_by_model.parquet`, `ntx_perc_area_ensemble.parquet` (% crop area heat-stressed)
-  - `haz_freq.parquet`, `haz_freq_ensemble.parquet` (haz frequency stats)
-  Plus 2 COG rasters (`ptot_perc_change.tif`, `ptot_perc_diff.tif`).
+- **what R/2.2 actually computes:** Whole-period (20-year) change statistics for the NEX-GDDP-CMIP6 ensemble, per (admin × scenario × timeframe), with inter-model spread:
+  - Section 1 — PTOT (precipitation): per-pixel `change = 100 × (future − historic) / historic` and `diff = future − historic`, then per admin: % of area with significant (>±5 %) change. Ensembled across raw GCMs: mean / min / max / **sd** → `ptot_change_*.parquet`, `ptot_diff_*.parquet` + COG rasters.
+  - Section 2.1 — THI_max (livestock heat): % of admin area exceeding severe (>78) / extreme (>89) thresholds, highland vs tropical split. Ensembled → `thi_perc_area_*.parquet`.
+  - Section 2.2 — NTx35 / NTx40 (crop heat): % of admin area exceeding severe / extreme day-count thresholds. Ensembled → `ntx_perc_area_*.parquet`.
+  - Section 3 — NDWS (drought) / NDWL0 (wet): per-admin mean frequency + count-of-severe-event-years per period. Ensembled → `haz_freq.parquet`, `haz_freq_ensemble.parquet`.
 
-  Cross-reference against [`data/climateRationale/nbData.json`](../../../data/climateRationale/nbData.json) confirms: **none** of these S3 paths are read by the climateRationale notebook.
+  **NOT** trend computation in the per-year sense — no Mann-Kendall, no Sen's slope. (Those live in R/2.1 section 3.4, which the notebook doesn't currently surface either.) R/2.2 computes whole-period DELTAS with inter-model spread.
 
-- **what-NOT-to-touch:** R/2.1's outputs ARE used — section 3.3's `_ensemble_seasons.parquet` is the canonical `ensemble_season_timeseries.parquet` driving Future Projections + the historic NEX-GDDP-CMIP6 baseline for those anomalies. **The NEX-GDDP historic 1995–2014 bake CANNOT be dropped** — see [[nexgddp-baseline-not-substitutable]] memory. R/2.1 stays as-is.
+- **why this is unique:** R/2.1's `ensemble_season_timeseries.parquet` has per-year ensemble mean/sd, but R/2.2 captures inter-model agreement on **whole-period change** at the admin / national level (e.g. "% of country area showing robust drying" or "GCMs strongly agree on extreme heat increase by 2041-2060"). Recomputing from R/2.1's per-year data is possible but lossy — the per-period aggregation collapses information the per-year tables don't pre-aggregate.
 
-- **proposed-investigation (before any change):**
-  1. Search the broader Atlas codebase (map UI, other notebooks, dashboards) for consumers of `ptot_*` / `thi_perc_area_*` / `ntx_perc_area_*` / `haz_freq*` parquets or the `ptot_perc_change.tif` COG.
-  2. Check `push_to_s3.R` upload destinations and whether they're listed in any other notebook's data registry.
-  3. If consumers exist: R/2.2 stays; no action.
-  4. If no consumers (or only legacy ones being deprecated): consider whether R/2.2 should be skipped during the AC re-bake to save compute. R/2.2 is not in any active code dependency chain in `hazards_prototype` itself (R/3 does not read R/2.2 outputs — verified by grep + reading R/3's prerequisites in its header).
+- **what R/2.2's outputs could plug into in the notebook:**
+  1. **% area-exposed summary view** (national-level) using `thi_perc_area_ensemble.parquet` / `ntx_perc_area_ensemble.parquet`. Complements the VoP-weighted Crop & Livestock Exposure stacked bars by answering "what fraction of the country area is affected" rather than "what fraction of production value".
+  2. **Inter-model agreement badge / overlay** on Future Projections using the `sd` columns. Per (scenario × period × hazard), flag "GCMs strongly agree on direction" vs "GCMs disagree on sign" — would close a long-running gap around model-agreement signalling (related to [[CR-060]], [[CR-061]]).
+  3. **Drought / wet event-count overlay** using `haz_freq.parquet`'s `frequency_n` ("count of severe drought years per 20-year period") — a more digestible framing than per-pixel frequency rasters.
 
-- **acceptance:** A short note (in this CR or a follow-up dispatch) listing every confirmed consumer of R/2.2 outputs, with either a decision to keep R/2.2 in the AC re-bake plan or to skip it. No code changes required.
+- **what NOT to touch:** R/2.1's outputs are required — section 3.3's `_ensemble_seasons.parquet` is the canonical `ensemble_season_timeseries.parquet` driving Future Projections, AND the historic NEX-GDDP-CMIP6 baseline against which Future Projections anomalies are computed. **The NEX-GDDP historic 1995–2014 bake CANNOT be dropped** — see [[nexgddp-baseline-not-substitutable]] memory. R/2.1 stays as-is.
 
-- **why-this-matters:** Each R/2.2 compute pass costs pipeline time during the AC re-bake. If R/2.2 is no longer needed (or only needed occasionally), it's a cheap saving on every future bake cycle. But the answer depends on consumers we don't know about from inside this repo.
+- **proposed investigation / action:**
+  1. **First** — confirm whether any other Atlas surface (map UI, other notebooks, dashboards) consumes the existing R/2.2 outputs. If yes, R/2.2 stays in the AC re-bake plan as-is.
+  2. **Second** — decide whether R/2.2's outputs should be surfaced in the climateRationale notebook (one or more of the three feature directions above). If yes, the AC re-bake plan needs to publish R/2.2's outputs to S3 at climateRationale-accessible paths (currently they go to `s3://digital-atlas/risk_prototype/data/...` via `push_to_s3.R`).
+  3. **Third** — if no consumers AND no notebook plans, then (and only then) consider whether R/2.2 is droppable from the AC re-bake to save compute.
 
-- **dependencies:** None. Investigation-only.
+- **acceptance:** A short note (in this CR or a follow-up dispatch) covering: (a) confirmed consumers of R/2.2 outputs outside climateRationale, (b) decision on whether to surface any of the three notebook feature directions, (c) decision on R/2.2's role in the AC re-bake plan.
 
-- **STATUS (2026-05-28):** Open. Pete to confirm whether non-climateRationale Atlas surfaces still consume R/2.2 outputs.
+- **dependencies:** None. Investigation + design choice; no code changes proposed yet.
+
+- **STATUS (2026-05-28):** Open. Pete's nudge ("may have been calculating trends and ensembling them") prompted re-reading R/2.2; confirmed it's whole-period delta + inter-model spread (not per-year trends), and these are not currently surfaced in the notebook but could be — particularly the model-agreement signalling via the `sd` columns.
 
 ---
 
