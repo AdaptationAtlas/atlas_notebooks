@@ -2149,6 +2149,85 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+### CR-094 — Add Yue-2002 TFPW pre-whitening to R/2.1 sec 3.4 to align future-projection trends with observational trend methodology [NEW 2026-05-28]
+
+- **id:** CR-094
+- **title:** `hazards_prototype/R/2.1_create_monthly_haz_tables.R` section 3.4 computes per-GCM Theil-Sen + Mann-Kendall trends but lacks the **trend-free pre-whitening (TFPW)** step that the notebook's observational trend code (`/helpers/trend.ojs`) applies — add TFPW so model-projected trends are methodologically aligned with observed trends
+- **type:** pipeline (methodology alignment)
+- **severity:** medium (affects scientific validity of future-projection trend significance reporting)
+
+- **where:** [`hazards_prototype/R/2.1_create_monthly_haz_tables.R`](https://github.com/AdaptationAtlas/hazards_prototype/blob/develop/R/2.1_create_monthly_haz_tables.R) section 3.4, lines 786-1040. Specifically the `sens.slope(value)` / `mk.test(value)$p.value` block at lines 810 / 824.
+
+- **what's there now (correct):**
+  - **Theil-Sen slope** per GCM via `trend::sens.slope()`
+  - **Mann-Kendall p-value** per GCM via `trend::mk.test()`
+  - **95% CI** from `ts$conf.int` (rank-based / Hollander-Wolfe equivalent)
+  - **Per-GCM computation** — slope + p-value computed on each model's raw timeseries; ensembling happens LAST at lines 931-943 (mean/min/max/sd across GCMs). Methodology principle: ensembling is always done LAST — see [[ensembling-is-always-last]] memory.
+
+- **what's missing (the gap):**
+  - **Yue et al. (2002) trend-free pre-whitening** when lag-1 autocorrelation of the detrended residuals exceeds 0.1. Without TFPW, autocorrelated GCM output inflates Mann-Kendall significance → false-positive trend detections. The observational pipeline applies TFPW via [`/helpers/trend.ojs`](../../../helpers/trend.ojs) at line 121 (`mannKendall(values, opts)` function); the model-side pipeline does not.
+
+- **why this matters:** The notebook's [Methods → trend estimation](../../../data/climateRationale/nbText.json#L382) text explicitly states the observational pipeline uses TFPW. If we surface NEX-GDDP-CMIP6 trend stats in Future Projections (see [[CR-095]]) without applying the same pre-whitening, the two trend reports are methodologically inconsistent — readers would see "high confidence" significance flags on the model side that wouldn't survive the observational treatment.
+
+- **implementation:**
+  1. **Pick an R TFPW implementation** that matches the JS helper's behavior. Candidates:
+     - `trend::bbsmk()` — block bootstrap variant (different algorithm; likely NOT a numerical match)
+     - `modifiedmk::tfpwmk()` — Yue TFPW (most likely candidate for numerical match)
+     - Custom R port of the JS helper's algorithm (line-by-line from `helpers/trend.ojs:121-...`)
+  2. **Validate numerically** against the Python reference at [`playbook/handovers/climateRationale/context/05_trend-validation-reference.py`](context/05_trend-validation-reference.py). Pete caught a buggy formulation pre-commit in the JS port; the R implementation must produce identical results on the same test cases. **Do not trust "R has a Yue TFPW function" without numerical cross-validation** — the algorithm has multiple subtly-different formulations in the literature; only the Pete-corrected version is canonical for this notebook.
+  3. **Apply per-GCM** at line 810, replacing the raw `sens.slope(value)` + `mk.test(value)` calls with the TFPW-equivalent. Slope + p-value both produced from the pre-whitened series.
+  4. **Ensembling unchanged** — lines 931-943 stay as-is (mean/min/max/sd across GCMs of the TFPW-corrected slopes).
+  5. **Re-bake** the `_trends.parquet` / `_trends_ensemble.parquet` / `_trends_ensemble_minimal.parquet` outputs at lines 865 / 951 / 990.
+
+- **acceptance:**
+  - R-side TFPW produces numerically identical slope + p-value to the JS helper for the same input series (test against the Python reference's worked examples).
+  - Re-baked `_trends_*.parquet` family carries the TFPW-corrected stats.
+  - Quick spot-check: a known-autocorrelated GCM timeseries (e.g. TAVG with strong year-to-year persistence) should show a HIGHER p-value (less significant) after TFPW than before — confirming pre-whitening is reducing inflated significance.
+
+- **dependencies:** Could fold into the in-flight AC re-bake if implementation lands before jagermeyr sec 3.4 runs. Otherwise its own re-bake cycle for R/2.1 sec 3.4 only.
+
+- **STATUS (2026-05-28):** Open. Pipeline ask. Blocks [[CR-095]] (notebook-side surfacing) — that ticket can't ship until TFPW-corrected trends are on S3, otherwise the Future Projections trend overlay would carry inflated significance.
+
+---
+
+### CR-095 — Surface NEX-GDDP-CMIP6 trend stats in Future Projections (per-decade slope + IPCC qualifier badge) [NEW 2026-05-28]
+
+- **id:** CR-095
+- **title:** R/2.1 sec 3.4 already pre-computes per-GCM Mann-Kendall + Theil-Sen trend stats with inter-model ensemble — surface them in the notebook's Future Projections section as a trend overlay (matching Recent Changes' badge + IPCC AR6 calibrated-language treatment)
+- **type:** notebook (new feature, consumer-only)
+- **severity:** low (no current functionality at stake; unrealised analytical surface)
+
+- **where:** [`notebooks/climateRationale/notebook.qmd`](../../../notebooks/climateRationale/notebook.qmd) — Future Projections section renderers (`timeseries_futureProjections` at line 7303, `summary_futureProjections` at line 7626).
+
+- **what's available on S3 now:** Three pre-computed parquets from `hazards_prototype/R/2.1` sec 3.4:
+  - `..._trends.parquet` — per (admin × scenario × **GCM** × hazard × season) trend stats (slope, p-value, CI, decade change, start/end 5-year means). Full detail.
+  - `..._trends_ensemble.parquet` — collapsed across GCMs to per (admin × scenario × hazard × season × stat), with mean/min/max/sd of each trend stat across GCMs.
+  - `..._trends_ensemble_minimal.parquet` — filtered to PTOT / TAVG / TMAX × {value_diff, value_decade, anomaly_diff}. Light-weight subset for headline use.
+
+  Per Pete's principle that "ensembling is always done LAST" ([[ensembling-is-always-last]]), the notebook should consume the **`_trends_ensemble*.parquet`** outputs (ensemble of per-GCM trends), NOT compute trends client-side from the per-year `ensemble_season_timeseries.parquet` (which would compute trend OF the ensemble mean — wrong).
+
+- **proposed feature surfaces:**
+  1. **Trend badge** above each Future Projections facet — "+0.32 °C / decade (SSP585 ensemble mean, inter-model SD 0.08)", with calibrated-language wrapper ("high confidence" if ensemble-mean p-value < 0.05; "insufficient evidence" otherwise). Matches Recent Changes' existing badge UX.
+  2. **Inter-model agreement signal** — colour the badge or add a spread indicator when GCMs disagree on the trend direction (e.g. some positive, some negative).
+  3. **Optional: trend line overlay** on the ribbon chart — render the ensemble-mean Theil-Sen fitted line through the time-series points. Visual analog to Recent Changes' trend overlay.
+
+- **prerequisites (BLOCKED):** Cannot ship until [[CR-094]] lands the TFPW correction in R/2.1 sec 3.4. Without TFPW, the model-side significance reporting would not match the observational treatment (Methods text claim of methodological alignment would be inaccurate).
+
+- **implementation pattern (post-CR-094):**
+  - Add a new entry to `data/climateRationale/nbData.json` for the `_trends_ensemble_minimal.parquet` path.
+  - New `dbFutureTrends` cell + per-admin trend lookup (singleDB pattern per [[duckdb-wasm-per-plot-clients]]).
+  - Render badge using existing `trendOverlayMarks` style from `/helpers/trend.ojs` if applicable, OR a dedicated `futureTrendBadge` helper that reads the pre-computed stats.
+  - IPCC calibrated-language wrapper at the chart layer (reuse the existing Recent Changes wrapper code path).
+  - SPEI handling: not applicable (R/2.1 doesn't compute SPEI; SPEI is observational-only).
+
+- **acceptance:** Future Projections renders a trend badge per (admin × scenario × variable) showing per-decade change with inter-model spread and IPCC calibrated language. Methodology matches Recent Changes' observational trend treatment.
+
+- **dependencies:** BLOCKED on [[CR-094]] (TFPW pipeline fix).
+
+- **STATUS (2026-05-28):** Open, blocked.
+
+---
+
 ## Proposed PR groupings
 
 Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.
