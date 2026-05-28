@@ -2021,6 +2021,57 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+### CR-091 — Publish moderate + extreme severity bakes of `hazard_exposure` to S3 [NEW 2026-05-28]
+
+- **id:** CR-091
+- **title:** Hazard Exposure "Severity tier" advanced control is wired in the notebook but only the **severe** parquet exists on S3 — moderate and extreme tiers return empty plots
+- **type:** pipeline (hazards_prototype)
+- **severity:** medium (UI affordance is honest about being pending — selecting moderate/extreme shows "No data available" and the dropdown labels say "awaiting pipeline publish" — but the toggle is non-functional until publish)
+
+- **where:** S3 prefix `s3://digital-atlas/domain=hazard_exposure/source=nex-gddp-cmip6/region=ssa/processing=hazard-risk-exposure/variable=vop_nominal-usd21/period=jagermeyr/model=ENSEMBLEmean/`. Currently only the `severity=severe/int=multi-hazard.parquet` sub-key exists; sibling `severity=moderate/...` and `severity=extreme/...` are missing.
+
+- **why-this-matters:** `hazards_prototype/R/2_calculate_haz_freq.R` computes all three severity tiers internally (see [`metadata/haz_classes.csv`](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/metadata/haz_classes.csv) for the moderate / severe / extreme cut-offs at each index: NDWS ≥15/20/25, NDWL0 ≥2/5/8, NTx35 ≥7/14/21, THI-max >72/78/89). Only severe currently propagates to `R/3_freq_x_exposure.R` and ends up on S3. The notebook now exposes a Severity tier dropdown under "Advanced controls — tune the hazard definition" on the Hazard Exposure section ([notebook.qmd:3718](../../../notebooks/climateRationale/notebook.qmd#L3718)) with three options; only Severe is functional. Notebook SQL is already wired to filter `AND severity = '${hazardSeverity}'` — once moderate/extreme parquets are baked to sibling paths under the same canonical prefix (or, alternatively, added as additional rows in the existing parquet alongside `severity='severe'`), the dropdown becomes fully functional with **zero notebook-side changes** required.
+
+- **proposed-change (pipeline):** Two equivalent paths, pick whichever fits the pipeline's existing partitioning idiom:
+
+  1. **Sibling partitions** (matches current path pattern):
+     - `s3://...severity=moderate/int=multi-hazard.parquet`
+     - `s3://...severity=extreme/int=multi-hazard.parquet`
+
+     Notebook side then needs to swap from a single `s3_path` to a glob (`s3://...severity=*/int=multi-hazard.parquet`) or to register three views — small ~10-line follow-up. **Preferred** because it preserves predicate pushdown on severity (each query only reads one file).
+
+  2. **Single parquet with all three tiers** (matches `hazard_vars` and `hazard` taxonomy patterns within the parquet):
+     - Append rows with `severity = 'moderate'` and `severity = 'extreme'` to the existing canonical parquet.
+
+     Notebook side already filters `severity = '${hazardSeverity}'` so this works without any further change. Trade-off: parquet ~3× larger; row-group skipping on severity assumes the partitioning matches.
+
+- **acceptance:** Open the Hazard Exposure section, expand "Advanced controls", select Moderate (or Extreme) from the Severity tier dropdown. The chart renders with non-zero bars at the new tier (more exposure visible for moderate, less for extreme, compared to severe). Loading bar fires during the re-fetch.
+
+- **dependencies:** Tied to the Hazard Exposure pipeline. No notebook-side prerequisites.
+
+- **STATUS (2026-05-28):** Open. Notebook UI shipped; awaiting pipeline publish to activate the moderate / extreme tiers.
+
+---
+
+### CR-092 — Surface the crop-specific Ecocrop "Threshold definition" track in the chart caption / about-text [NEW 2026-05-28]
+
+- **id:** CR-092
+- **title:** When user selects "Crop-specific (FAO Ecocrop)" under Advanced controls, the chart caption / "About this plot" should reflect that the precipitation and crop-heat thresholds are now per-crop Ecocrop-derived
+- **type:** notebook (UX clarification)
+- **severity:** low (the Methods section explains the distinction; this would surface it inline)
+
+- **where:** [notebook.qmd:8004](../../../notebooks/climateRationale/notebook.qmd#L8004) `stackbars_hazardExposure` — chart title / caption generation.
+
+- **why-this-matters:** A user who toggles "Crop-specific" but doesn't read Methods may be confused about why the bar values shifted (and which crops shifted most). A one-line caption suffix like "(thresholds: generic)" / "(thresholds: FAO Ecocrop per-crop)" or a more detailed "About this plot" details disclosure would close the loop.
+
+- **proposed-change:** Append the active threshold style to the chart title or subtitle; expand the "About this plot" disclosure with the same content as the Methods section's Hazard formulation block.
+
+- **dependencies:** None. Notebook-only, ~20-line cosmetic change.
+
+- **STATUS (2026-05-28):** Open. Filed alongside CR-091 because both flow from the new advanced controls.
+
+---
+
 ## Proposed PR groupings
 
 Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.
