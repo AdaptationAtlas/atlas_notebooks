@@ -134,7 +134,60 @@ changes in VS Code's Source Control panel.
 
 ---
 
-## Current state (2026-05-27, end of session 17 — perf sweep + FAOSTAT integration + CMIP6 schema + y-axis fix)
+## Current state (2026-05-28, end of session 18 — cross-hazard threshold fix + Future Projections baseline marker + Hazard Exposure Advanced controls + dynamic caption + FR translation pass)
+
+### Where the branch is
+
+- `dev/climateRationale` — local matches `origin/dev/climateRationale` at **`af224ca` + `caveats.text` edit pending commit**. 11 commits added across session 18 on top of session 17's 13. Total since the merge base: 24 commits.
+- `hazards_prototype/develop` — CR-068 AC re-bake still in flight; CR-091 ask filed for moderate / extreme severity bakes at the canonical `vop_nominal-usd21` / `period=jagermeyr` prefix (currently only `severity=severe` is published there; the legacy `atlas_cmip6` / `vop_intld15` / `period=annual` track has all three severities baked but uses different units and source). CR-068(a) closing this gap is the highest-priority pipeline ask.
+
+### What's landed this session (chronological)
+
+**Cross-hazard threshold span fix:**
+
+- `5ea49a3` — `baselineStdByAdmin` was sourcing SDs from `recentChanges_plotData` (filtered by the Recent Changes selector `climateVarSelect.id`). Future Projections has an independent selector (`climateVarSelectFuture.id` since `bb18ba2`), so the threshold/maxStd2 logic was leaking another hazard's SD into the active chart. Symptom: TAVG anomaly with Highlight ON showed y-axis at ±60 °C with thresholds at ~25 / ~55 °C. Fix filters `recentChanges_data` directly by `climateVarSelectFuture.id` for both `baselineStdByAdmin` and `baselineMeanByAdmin`. Unit-tested: TAVG-anomaly-Highlight-ON now spans [-0.92, 3.08] instead of [-160, 160].
+
+**Future Projections baseline marker on Dot Plot view:**
+
+- `45fef1b` (Ribbon view dot+bar — superseded) → `63e995a` (final). Pete clarified the baseline dot+bar belongs in the **Dot Plot view**, not the Ribbon time-series. Reverted the Ribbon-view marker (restored original dashed-line baseline-mean reference) and prepended a grey "1995–2014" row to the per-admin SSP whisker stack: bar centres at 0 (anomaly mode) or baseline mean (absolute mode), spans ±1 interannual σ.
+
+**Hazard Exposure expanded methods + Advanced controls:**
+
+- `bef4c8c` — Methods expanded with the **Hazard formulation** subsection: hazard-composition taxonomy (singles + pairwise + triple), per-index day-count thresholds at all three severity tiers (NDWS ≥15/20/25, NDWL0 ≥2/5/8, NTx35 ≥7/14/21, THI-max >72/78/89), and per-variable notes on which become crop-specific in the Ecocrop composite vs which stay generic. EN + FR.
+- `444ede8` — Advanced controls disclosure folded below the Production Type / View Type row: collapsed-by-default `<details>` panel with two `Inputs.select` widgets — Severity tier (severe / moderate / extreme — only severe currently has data on S3) and Threshold definition (generic vs FAO Ecocrop crop-specific). SQL wired to filter `severity = '${hazardSeverity}'` and swap `hazard_vars` between generic and Ecocrop composite pairs. Loader dep array extended.
+- `a576250` — Inline-row layout fix. `Inputs.form` was stacking the selectors; swapped to manual composition + flex-row CSS with `!important` overrides to defeat Observable's default 100%-width.
+- `ec7554c` — Made Ecocrop the chart default after Pete observed it produces a consistent historic-vs-future picture, while the generic-threshold composites carry a known upstream-pipeline bug (historic underreports `heat` / `heat+wet` / `wet` vs future). Reframed the "Under construction" yellow callout to point specifically at the generic-track bug. Dropdown labels: Ecocrop → "(default)", Generic → "(testing only — known bug)".
+- `1dc709f` — About-this-plot caption now reactive to Advanced controls: severity word in the lead line, index list switches between Ecocrop (`PTOT-L / NTxS / THI-max / PTOT-G`) and Generic (`NDWS / NTx35 / THI-max / NDWL0`), second line either describes Ecocrop methods + Jägermeyr seasonal window OR flags the Generic upstream-bug caveat. EN + FR parameterised via new `sections.hazardExposure.caption.*` keys.
+
+**FR translation pass — 8 critical Methods + Help blocks (~8.6 kB):**
+
+- `af224ca` — Drift audit (background agent) found 8 substantive help/methods blocks with either `null` FR or FR-equals-EN. All 8 now have proper FR translations preserving markdown, citation links, section anchors, and technical terminology. FR runs 15-20% longer than EN as expected for scientific FR. Fixed items: `sections.recentChanges.help.{mapRenderingTitle,mapRendering,framing,anomaly}`, `sections.whyTwoDatasets.help.body`, `sections.futureProjections.help.framing`, `general.methods.{trendEstimation,observationalUncertainty}.text`. Conventions: OMM (WMO), GIEC (IPCC), "score z", "régionalisé" (downscaled), comma-decimal numerals.
+- Pending commit — `general.methods.caveats.text` had a stale EN line claiming "Hazard severity thresholds are crop-specific" that contradicts the new Methods → Hazard Exposure detail (NDWS / NDWL0 / THI-max stay generic in both modes; only PTOT-L / PTOT-G / NTxS go crop-specific, and only in Ecocrop mode). Refreshed EN + FR both.
+
+**Stale-caption sweep result:** Background Explore agent surveyed every `captionDetails(...)` call. All other captions in the notebook were already reactive to their controls (Observed Climate / Recent Changes / Ag Production / Production Trends / Future Projections ribbon+dot views / Extreme Events). Hazard Exposure was the only stale caption — fixed in `1dc709f`.
+
+### Deferred to next session
+
+1. **Pipeline: moderate + extreme severity bakes for `hazard_exposure`** ([[CR-091]]). The notebook UI is wired; just needs sibling parquets at `.../severity={moderate,extreme}/int=multi-hazard.parquet` (or rows added to the existing parquet). Currently CR-068 AC re-bake is mid-flight — same pipeline cycle could land both.
+2. **Pipeline: `hazard='none'` row** ([[CR-068]](a)) — Pete's question about "% exposure" + "total VoP" hinges on this. Code fix shipped (`41c1c00`), publish pending. Once it lands, [[CR-049]] (Togo-style table) unblocks AND we can add a "% exposure" View Type to the existing Hazard Exposure chart (~30 LoC).
+3. **Caption / About-this-plot reflection for the Threshold style toggle** ([[CR-092]]) — already filed; small follow-up.
+4. **Producer-side parquet rewrite** per `dispatches/2026-05-27_parquet-pushdown-pipeline-ask.md` — unchanged.
+5. **CMIP6 percentile columns** per `dispatches/2026-05-27_cmip6-ensemble-percentiles-followup.md` — unchanged.
+6. **Future Projections cold-fetch** — same producer-side dispatch.
+7. **Loading bars L2/L3** — pair with producer-side rewrite.
+8. **1995-2014 climatology COG** for the Recent Changes map — pipeline regeneration.
+
+### What this session did NOT touch
+
+- The 3 other FR-longer-than-EN drift candidates (`sections.productionTrends.introText`, `sections.hazardExposure.advancedControls.help`, `sections.productionTrends.byproductsVoPHint`). On manual side-by-side comparison the FR is faithfully in sync with the current EN — just naturally longer because French. Audit flagged on length ratio alone; not actual drift.
+
+### Memories updated this session
+
+- None new this session. Session 17's memories (`duckdb-wasm-per-plot-clients`, `parquet-ownership-filter-by-key`) still load-bearing.
+
+---
+
+## Old current state (2026-05-27, end of session 17 — perf sweep + FAOSTAT integration + CMIP6 schema + y-axis fix)
 
 ### Where the branch is
 
