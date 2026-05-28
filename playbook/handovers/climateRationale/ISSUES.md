@@ -2068,7 +2068,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **dependencies:** None. Notebook-only, ~20-line cosmetic change.
 
-- **STATUS (2026-05-28):** Open. Filed alongside CR-091 because both flow from the new advanced controls.
+- **STATUS (2026-05-28):** **CLOSED — shipped in `1dc709f` same session.** Caption now reactive to `hazardSeverity` + `hazardThresholdStyle`: lead line interpolates the severity word; indices list switches between Ecocrop (`PTOT-L / NTxS / THI-max / PTOT-G`) and Generic (`NDWS / NTx35 / THI-max / NDWL0`); second line either describes Ecocrop methods + Jägermeyr seasonal window OR flags the Generic upstream-bug caveat. New `sections.hazardExposure.caption.*` nbText keys (EN + FR) make the dynamic text fully localisable.
 
 ---
 

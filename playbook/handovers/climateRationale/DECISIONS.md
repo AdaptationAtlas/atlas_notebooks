@@ -931,6 +931,63 @@ After the perf work landed, picked up the F-2 follow-ups from `dispatches/2026-0
 - `feedback_duckdb-wasm-per-plot-clients.md` (new) — single-connection serialisation pattern + `singleDB(key)` helper.
 - `feedback_parquet-ownership-filter-by-key.md` (new) — filter by key, not section, when splitting parquets across `db*` cells.
 
+## Session state — 2026-05-28, session 18 (Hazard Exposure Advanced controls + dynamic captions + FR translation pass)
+
+Session opened on the cross-hazard threshold span bug filed at the end of session 17 (TAVG anomaly y-axis blown out to ±60 °C because the per-admin SD map was sourced from Recent Changes' selector instead of Future Projections'). Closed the bug, then expanded scope through three connected user asks: (a) include the historical baseline in the Future Projections Dot Plot view; (b) expose severity tier + threshold-style toggles for Hazard Exposure under a collapsed Advanced controls disclosure; (c) make the dynamic chart caption follow those toggles. Closed with a parallel sweep for other stale captions (came back clean — Hazard Exposure was the only one) plus a FR translation pass for 8 critical Methods + Help blocks the audit identified as missing or untranslated.
+
+### What landed (chronological)
+
+**Cross-hazard threshold span fix:**
+
+- `5ea49a3` — `baselineStdByAdmin` (and `baselineMeanByAdmin`) were built from `recentChanges_plotData`, which is filtered by the Recent Changes selector `climateVarSelect.id`. Future Projections has had an independent selector (`climateVarSelectFuture.id`) since `bb18ba2`, so the per-admin SDs feeding the threshold lines + `maxStd2` y-axis expansion were leaking another hazard's variance into the active Future Projections chart. Fix filters `recentChanges_data` directly by `climateVarSelectFuture.id` for both maps. Verified via unit-tested logic: TAVG anomaly + Highlight ON now spans [-0.92, 3.08] instead of [-160, 160].
+
+**Future Projections baseline marker on Dot Plot view:**
+
+- `45fef1b` (Ribbon view dot+bar at year `yearMin - 1`) — first attempt. Pete redirected: the baseline dot+bar belongs in the Dot Plot view, not the Ribbon time-series.
+- `63e995a` — replaced. Reverted the Ribbon-view marker (restored original dashed-line baseline-mean reference at the same per-admin position) and prepended a grey "1995–2014" row to the per-admin SSP whisker stack in `summary_futureProjections`: bar centres at 0 (anomaly mode) or per-admin baseline mean (absolute mode), spans ±1 interannual σ in both. Right-edge label uses the same `+X.X ± Y.Y unit` formatter as the SSP rows.
+
+**Hazard Exposure expanded Methods + Advanced controls:**
+
+- `bef4c8c` — Methods expanded with a **Hazard formulation** subsection covering: hazard-composition taxonomy (3 singles + 3 pairwise + triple intersection); per-index day-count thresholds at all three severity tiers (NDWS ≥15/20/25, NDWL0 ≥2/5/8, NTx35 ≥7/14/21, THI-max >72/78/89); explicit note on which become crop-specific in the Ecocrop composite (PTOT-L / PTOT-G / NTxS) vs which stay generic across all modes (NDWS / NDWL0 / THI-max). Pete corrected my first draft to nail this distinction. EN + FR.
+- `444ede8` — Advanced controls disclosure folded below the standard Production Type / View Type row: collapsed-by-default `<details>` panel with two `Inputs.select` widgets — Severity tier (severe / moderate / extreme) and Threshold definition (generic / FAO Ecocrop). SQL wired with `AND severity = '${hazardSeverity}'` + a conditional `hazard_vars in (...)` swap. Loader dep array extended to fire on either selection change. CR-091 (pipeline ask for moderate/extreme severity bakes) + CR-092 (caption reflection) filed.
+- `a576250` — Inline-row layout fix. `Inputs.form` was stacking the selectors despite my flex CSS — Observable's default sets `max-width: 640px` + `width: 100%` on the wrapping `<form>` element AND `min-width: 240px` on the inner `<select>`. Swapped to manual composition (two separate `Inputs.select` widgets in a custom `.advanced-hazard-row` div) + `!important` CSS overrides on form-wrapper + select widths.
+- `ec7554c` — **Ecocrop made the chart default** after Pete observed it produces a consistent historic-vs-future picture, while the generic-threshold composites carry the long-standing upstream-pipeline bug (historic underreports `heat` / `heat+wet` / `wet` vs future, [[CR-068]](b)). Dropdown labels inverted: Ecocrop now reads "(default)", Generic reads "(testing only — known bug)". The yellow "Under construction" callout above the chart rewritten to point specifically at the generic-track bug + explain why Ecocrop is the default. Methods "Currently surfaced" prose updated to lead with the Ecocrop composite definitions; FR mirrored. Generic remains exposed for pipeline-debugging.
+- `1dc709f` — **About-this-plot caption reactive to the Advanced controls.** Before this commit the multi-line caption was a hardcoded string saying "severe single- or multi-hazard events" + listing the generic indices (NDWS / NTx35 / THI-max / NDWL0) regardless of selection — after making Ecocrop the default that wording was actively misleading. Caption now interpolates the severity word into the lead line + switches the indices list (Ecocrop: `PTOT-L / NTxS / THI-max / PTOT-G`; Generic: `NDWS / NTx35 / THI-max / NDWL0`) + emits either the Ecocrop methods description (Jägermeyr seasonal window cite) or the Generic upstream-bug caveat in the second line. New `sections.hazardExposure.caption.*` nbText keys make the whole thing localisable.
+
+**FR translation pass:**
+
+- `af224ca` — Background Explore agent ran a FR drift audit on `nbText.json` (every EN/FR pair, length ratio + content sampling). Surfaced 8 critical items totalling ~8.6 kB of untranslated content (2 with `"fr": null`, 6 with FR=EN). Translated all 8 with proper FR scientific-prose conventions: OMM (WMO), GIEC (IPCC), "score z" (z-score), "régionalisé" (downscaled), "registre observationnel" (observational record), comma-decimal numerals (0,05° not 0.05°), non-breaking-space before colons/semicolons. Citations + URLs preserved verbatim (Mann-Kendall, Theil-Sen, Hollander–Wolfe, Yue, Dinku, Cattani, Sheridan, Verdin, NEX-GDDP-CMIP6, CHIRPS, CHIRTS-ERA5). FR runs 15-20% longer than EN, normal for scientific FR. Fixed items: `sections.recentChanges.help.{mapRenderingTitle,mapRendering,framing,anomaly}`, `sections.whyTwoDatasets.help.body`, `sections.futureProjections.help.framing`, `general.methods.{trendEstimation,observationalUncertainty}.text`.
+- `97bf710` — Caveats refresh + session handover close-out. The audit's "FR-longer-than-EN" drift candidates were investigated side-by-side: 3 of 4 turned out to be length-ratio false positives (FR is faithfully in sync with current EN; naturally longer). The 4th, `general.methods.caveats.text`, had a genuine semantic drift between EN and the rest of the document — the line "Hazard severity thresholds are crop-specific" contradicted the new Methods → Hazard Exposure detail (NDWS / NDWL0 / THI-max stay generic in both modes). Refreshed EN + FR both.
+
+**Stale-caption sweep (parallel agent):**
+
+- Surveyed every `captionDetails(...)` call in the notebook. Confirmed all other captions in the document are already reactive to their controls — Observed Climate (dynamic `baselinePeriod_obs`), Recent Changes (per-admin baseline calcs), Ag Production (dynamic year/unit from `exposure_plotData[0]`), Production Trends (dynamic `yStart` / `yEnd` / `productionVar.label` / `productionTopN`), Future Projections Ribbon (anomaly conditional logic), Future Projections Dot (parameterised via `summaryView.caption`), Extreme Events (`YEARS_PER_PERIOD` template). Hazard Exposure was the only stale caption — fixed in `1dc709f`. **No further work needed on this axis.**
+
+### Pattern decisions captured this session
+
+- **Caption text must follow the chart's reactive state.** When a `captionDetails(...)` call ships hardcoded prose about methodology, it has to flip back to dynamic the moment a control is added that affects the chart's interpretation. The Hazard Exposure caption stayed hardcoded through three control changes this session (Advanced controls landed, then severity wired in, then Ecocrop made default) before Pete spotted it — easy to miss because the caption is folded under a disclosure. Best to add the dependency at the same time as the control. Captured as a sweep finding (background agent found this was the only stale one across the whole notebook).
+- **Filter the *chart-effective* state into the caption, not the *raw* state.** The Severity dropdown lists three tiers but only severe currently has data; the caption interpolates the severity word as the user-facing severity (severe/moderate/extreme), not "the active SQL filter". When the chart shows a "No data available" placeholder for moderate/extreme, the caption still reads correctly because the disclosure's "active method" describes what the user *asked* for. Honest UX.
+- **`Inputs.form` stacks children vertically by default**, even when the parent form has `display: flex` set on it. Observable's CSS sets `max-width: 640px; width: 100%` on the wrapping `<form>` element AND `min-width: 240px` on the inner `<select>` — both have to be overridden (with `!important`) before two selectors can sit on the same flex row. For inline-side-by-side input layouts, prefer manual composition (two separate `Inputs.select` widgets in a custom flex container) over `Inputs.form`.
+- **Per-context baseline stats must be sourced from the per-context variable selector.** When two sections have independent variable selectors (Recent Changes vs Future Projections, both bound to different variables), any "baseline" reactive that crosses both needs to filter the underlying long-format data by the *consuming* section's variable, not via the *adjacent* section's plot-data view. `recentChanges_plotData` was the wrong intermediate — `recentChanges_data` filtered directly by `climateVarSelectFuture.id` was the right shape.
+- **Default to the data variant that's *consistent* between historic and future panels**, even when the alternative is the more "intuitive" track. Generic thresholds *sound* more interpretable ("days above 35 °C") but the historic-vs-future pipeline bug makes them misleading in this chart. Ecocrop is messier to describe in the caption (per-MapSPAM-commodity Ecocrop limits, plus mixed crop-specific + generic indices) but produces an honest comparison. The cost is one paragraph of methods text; the benefit is the chart isn't actively misleading users.
+- **Background Explore agents** are the right tool for "scan the whole codebase for stale X" questions where Y is a one-shot independent classification. Used twice in parallel this session: stale-caption sweep + FR translation drift audit. Both came back in <4 min with actionable findings. Saved ~30 min of foreground scanning.
+
+### ISSUES.md updates this session
+
+- **CR-091** (new) — pipeline ask for moderate + extreme severity bakes of `hazard_exposure` at the canonical `vop_nominal-usd21` / `period=jagermeyr` prefix. The notebook UI is wired and waiting; just needs the sibling parquets to land on S3 (or rows added to the existing parquet — either shape works because the SQL filters `severity = '${hazardSeverity}'`).
+- **CR-092** (new) — notebook follow-up to surface the active threshold style in the chart caption / "About this plot" text. Filed alongside CR-091 because both flow from the new Advanced controls. **Closed by `1dc709f`** in the same session — the dynamic caption already reflects the active threshold style.
+- **Cross-hazard threshold span fix annotation** — added an entry under the session-17 latent-follow-up block noting the fix shipped in `5ea49a3`.
+
+### Memory updates this session
+
+None new this session. Session 17's `feedback_duckdb-wasm-per-plot-clients` and `feedback_parquet-ownership-filter-by-key` remain load-bearing.
+
+### Final additions to session 18 (close-out)
+
+- **`general.methods.caveats.text` refresh** — picked up during the FR-drift reconciliation pass. The EN line "Hazard severity thresholds are crop-specific" predated the Advanced controls work and was actively wrong (NDWS / NDWL0 / THI-max stay generic; only PTOT-L / PTOT-G / NTxS go crop-specific, and only in Ecocrop mode). Both EN and FR refreshed to point readers at Methods → Hazard Exposure for the per-index detail.
+- **COWORK-SESSION-HANDOVER.md session-18 block** added.
+- **DECISIONS.md session-18 block** (this one) added.
+
 ### In flight / uncommitted
 
 - Working tree clean. Branch `dev/climateRationale` in sync with `origin/dev/climateRationale` at `636d00c` (plus the playbook updates being committed now).
