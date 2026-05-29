@@ -190,6 +190,8 @@ Three crashes during the re-bake produced one fix each, all in `R/2_calculate_ha
 
 Stage F status as of ~06:35 UTC 2026-05-28: annual section 2/2.1/4/4.1 complete; annual section 5.2 in final write sweep (44,885 / target 44,880 tifs); annual ensemble pass complete (2,244 ENSEMBLEmean + 2,244 ENSEMBLEsd). Jagermeyr 5.2 not yet started — ETA late morning UTC 2026-05-28 at the current ~9-12h-per-timeframe rate. Then STAGE C → D → E → cleanup → verify flow automatically per the runbook.
 
+**2026-05-29 update — Stage F COMPLETE.** Both timeframes finished cleanly: annual 44,880/44,880 at 10:14:59 UTC 2026-05-28; jagermeyr 44,880/44,880 at 23:59:46 UTC 2026-05-28. Log: `logs/F_resume_20260527_201101.log`. Runbook did NOT auto-chain to STAGE C — next maintainer must launch manually (see "Decisions applied — 2026-05-29" section). 50+ terra CRS/projection warnings in log are normal noise, not blockers.
+
 ### Producer-side parquet pushdown groundwork landed
 
 Independent workstream from CR-068 but landed in the same session. Three changes:
@@ -206,7 +208,57 @@ Three new memories captured this session for future debugging discipline. All li
 - **`feedback_pipeline_data_scale.md`** — concrete cost-of-rerun numbers + change-discipline rules. Stage F = ~9 h per timeframe. Mistakes that crash at iteration 1 waste 3-5 h of warmup. Always synthesise a 10-line probe before launching.
 - **`feedback_pipeline_directory_map.md`** — authoritative `project_dir` vs `working_dir` map, atlas_dirs key → resolved-path table, timeframe (annual/jagermeyr/SoS-*) bifurcation point, and 5 anti-patterns I've fallen into. **Reference BEFORE running any filesystem diagnostic.**
 
-Full hazards_prototype-side handover at `hazards_prototype/scripts/2026-05-26_handover.md` (2026-05-28 addendum at top, commit `aa2c3cd`).
+Full hazards_prototype-side handover at `hazards_prototype/scripts/2026-05-26_handover.md` (2026-05-29 addendum at top, commit `8b5af0a`).
+
+---
+
+## Decisions applied — 2026-05-29 (Stage F complete; STAGE C launch needed)
+
+Stage F finished cleanly at **2026-05-28 23:59:46 UTC**. No process is running on CGlabs. Runbook `scripts/2026-05-26_cr068_ac_rebake.sh.txt` did NOT auto-chain to STAGE C — either the runbook only scoped Stage F or the nohup chain was broken. STAGE C must be launched manually.
+
+### To launch STAGE C
+
+```bash
+cd ~/atlas/hazards_prototype
+git pull --ff-only origin develop
+
+# Verify Stage F outputs (expect 44880 each)
+WORKING=/home/jovyan/common_data/nex-gddp-cimp6_hazards
+find $WORKING/Data/hazard_timeseries_int/annual    -maxdepth 1 -name '*.tif' | wc -l
+find $WORKING/Data/hazard_timeseries_int/jagermeyr -maxdepth 1 -name '*.tif' | wc -l
+
+LOG="logs/C_3_freq_x_exp_$(date +%Y%m%d_%H%M%S).log"
+nohup Rscript R/3_freq_x_exposure.R > "$LOG" 2>&1 &
+echo "STAGE C launched, PID=$!, log=$LOG"
+```
+
+**worker_n4.2 is 6 — do not raise** (lowered from 16 in `a3d009a` after OOM; `~6 h` expected runtime). After C: D (validate) → E (publish to S3 canonical).
+
+### Post-Stage-E regression gate (CR-068 closure)
+
+```bash
+cd ~/atlas/atlas_notebooks
+./scripts/probe_no_hazard_arithmetic_quick.sh AGO      # expect all ratios ≤ 100%
+./scripts/probe_cross_parquet_vop_drift.sh AGO         # expect Query 0 NaN count = 0
+```
+
+Pre-bake AGO baseline (must all drop to ≤100%): rice 203.55%, sugarcane 117.9%, pearl-millet 107.9%, tobacco 105.3%, maize 100.8%, oilpalm 100.8%, soybean 100.1%, cattle-tropical 101.6%, goats-tropical 100.1%. Query 0 NaN: 561/6,021 pre-bake → expect 0 post-bake. If Pattern B per-admin1 drift persists post-E, residual mask-alignment problem in R/3 — `na.rm` fix alone didn't close it; new dispatch needed.
+
+### Before commissioning CMIP6 sub-ensemble pipeline work — `nexgddp_coverage.csv` flag
+
+`hazards_prototype/metadata/nexgddp_coverage.csv` (untracked, created 2026-05-29) audits which NEX-GDDP-CMIP6 models are fully available on CGlabs. Key findings relevant to the sub-ensemble bake (dispatch `2026-05-28_african-cmip6-sub-ensembles-research.md` §8.6):
+
+| Model | cg_labs | all (vars/5) | Sub-ensemble role |
+|---|---|---|---|
+| IPSL-CM6A-LR | **INCOMPLETE** | 5 | AFR-13 core member |
+| MIROC6 | **INCOMPLETE** | 5 | AFR-13 member |
+| MPI-ESM1-2-LR | **INCOMPLETE** | 5 | AFR-13 member |
+| INM-CM4-8 | **INCOMPLETE** | 5 | excluded from AFR-13 ✓ |
+| CMCC-ESM2 | TRUE | **3** (missing rsds/tasmax/tasmin) | AFR-13 member |
+| TaiESM1 | TRUE | **3** (missing rsds/tasmax/tasmin) | excluded from AFR-13 ✓ |
+| CanESM5 | TRUE | 4 (missing hurs) | excluded from AFR-13 ✓ |
+
+**Resolve before running the subsets loop:** three AFR-13 members (IPSL-CM6A-LR, MIROC6, MPI-ESM1-2-LR) are INCOMPLETE. Need to confirm whether INCOMPLETE means "partial data exists, pipeline may succeed for some indices" vs "data missing, subset silently computes on fewer models." Also confirm whether CMCC-ESM2's missing tasmax/tasmin prevents it contributing to TAVG/NTx35/THI-max calculations — if so, it should either be dropped from AFR-13 or noted as a caveat in Methods.
 
 ---
 
@@ -754,6 +806,8 @@ Full hazards_prototype-side handover at `hazards_prototype/scripts/2026-05-26_ha
 - **STATUS:** 🔄 **Phase 1 attempted 2026-05-14 and rolled back. BLOCKED on [[CR-068]]** (upstream `hazard_exposure` parquet needs an explicit "no hazard" / unexposed row before the % denominator is self-contained). The Phase 1 attempt computed the % denominator by cross-joining with the `exposure` parquet, which works arithmetically but fails the "audit in one table" property Pete needs: a reader can't see the 100 % reference next to the exposed slice. All Phase 1 code (the data cell, the figure cell, the section markup, the nbText.json keys) was reverted from the working tree the same day. **Scoping decisions above remain valid** — they're the right shape for when CR-049 resumes after [[CR-068]] lands; the only change at resume time is that the denominator query reads `value(hazard='any') + value(hazard='none')` from `hazard_exposure` itself instead of joining to `exposure`. **2026-05-26 update:** `hazard_exposure` re-baked + republished (issue-#9 mass-conservation fix); however the new bake **does NOT add the `hazard='none'` row**, so CR-049's blocker remains. CR-049 stays paused until CR-068(a) lands. **2026-05-27 update:** CR-068(a) code shipped (`hazards_prototype` commit `41c1c00` adds the `none` layer at R/2 sec 5.2). The AC re-bake (`scripts/2026-05-26_cr068_ac_rebake.sh.txt`) is mid-flight; once it completes the new canonical parquet will carry `hazard='none'` rows and CR-049 Phase 1 can resume. Resume shape per the dispatch's note: drop the cross-table denominator entirely and read `value(hazard='any') + value(hazard='none')` from `hazard_exposure` directly. **2026-05-28 update — cross-parquet shortcut empirically ruled out.** Probe at [`scripts/probe_no_hazard_arithmetic_quick.sh`](../../../scripts/probe_no_hazard_arithmetic_quick.sh) tested whether `total_VoP - value('any')` (computed across the two existing parquets) could serve as the no-hazard denominator without waiting for the AC re-bake. Result for AGO 1995-2014 historic: **value('any') > total_VoP for 7 of ~25 crops including headline ones** — rice 203.55 %, sugarcane 117.9 %, pearl-millet 107.9 %, tobacco 105.3 %, maize 100.8 %, oilpalm 100.8 %, soybean 100.1 %. The cross-parquet drift is direct evidence of `hazards_prototype` issue #9 ("exposure > VOP"). CR-049 Phase 1 stays paused until the AC re-bake publishes `hazard='none'` rows on the canonical key — no notebook-only interim ships. Full probe outcome at [`dispatches/2026-05-28_hazard-exposure-no-hazard-probe.md`](dispatches/2026-05-28_hazard-exposure-no-hazard-probe.md) (dispatch was originally optimistic about Approach A; corrected to Approach B after the probe).
 
 **2026-05-28 morning re-bake status:** AC re-bake ACTIVELY RUNNING after a single-session unblock of four discrete R/2 bugs (see "Decisions applied — 2026-05-28" above). Annual section 5.2 in final sweep; jagermeyr 5.2 not yet started; ETA late morning UTC 2026-05-28 for stage F completion, then STAGE C → D → E → cleanup → verify flows automatically. CR-049 Phase 1 can resume reading `value(hazard='any') + value(hazard='none')` from the new canonical the moment STAGE E publishes.
+
+**2026-05-29 update — Stage F COMPLETE; STAGE C not yet launched.** Both timeframes done (44,880/44,880 each). Runbook did NOT auto-chain; STAGE C requires manual launch (see "Decisions applied — 2026-05-29"). CR-049 Phase 1 unblocks the moment STAGE E publishes the new canonical.
 
 ### CR-026 — Overview section should link to GCF guidance
 
@@ -1348,6 +1402,8 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 - **STATUS:** Open. Pipeline-side. **Blocks [[CR-049]]** Phase 1 and Phase 2. Three distinct pipeline findings now bundled here: (a) missing `hazard='none'` row (original 2026-05-14); (b) different hazard categorisation between historic and future periods so the two panels are not directly comparable (added 2026-05-18); (c) SSP370 has zero rows for timeframes 2041-2060, 2061-2080, 2081-2100 (added 2026-05-18). Notebook surfaces (b) via an "Under construction" warning callout above the plot — the plot is being treated as preliminary until the pipeline fix lands. Debug dispatch issued 2026-05-18 (see above). **2026-05-26 update:** `hazard_exposure` parquet re-baked with the issue-#9 mass-conserving resample fix (`hazards_prototype` commits `a3d009a` + `8af46c5` + `f50e869`) and republished to the canonical S3 key on 2026-05-26 12:21 UTC. The re-bake closes a magnitude gap that was making CR-068(b) symptoms WORSE in subnational aggregates, but **all three CR-068 findings (a/b/c) remain present** — they live upstream of the resample sites (steps 1-2 of the pipeline, historic NDWS source) and were explicitly out of scope for this rebake. Fingerprint re-confirmed in `hazards_prototype/logs/D_validate_9_20260526_103030.log` [d] (AGO heat / wet / heat+wet still 0 historic) and [b] (AGO sugarcane SSP370 2041+ still 0). The bake does NOT add the `hazard='none'` row — CR-049 remains blocked. A separate producer-drift finding for the sibling `exposure` canonical landed in dispatch `2026-05-26_exposure-producer-drift.md` (handed to Brayden). **2026-05-26 root-cause walk:** Stage 1 + Stage 2A probes (logs `hazards_prototype/logs/cr068_stage1_raster_probe_20260526_152845.log` and `cr068_stage2a_ndws_root_cause_20260526_181358.log`) traced CR-068(b) all the way to the **upstream `AdaptationAtlas/hazards` repo's historic NDWS calculation**. Historic monthly NDWS rasters are saturated at mean/max ≈ 0.95 (every pixel water-stressed ~29 of 30 days every month, every year of 1995-2014); future ssp245 NDWS for the same GCM is normal (mean/max ≈ 0.70). Classification in `hazards_prototype/R/2_calculate_haz_freq.R` is correct — the inputs are broken. Dispatch to `AdaptationAtlas/hazards`: [`2026-05-26_hazards-repo-ndws-historic-saturation.md`](dispatches/2026-05-26_hazards-repo-ndws-historic-saturation.md). CR-068(c) (SSP370 missing 2041+) confirmed NOT a fetch bug — raw indices for SSP370 × all 4 future periods × 18 GCMs are present at `indices_dir`; the drop happens downstream in `hazards_prototype` Step 1 or 2 (separate Stage 2B-SSP370 probe TODO). **2026-05-27 update:** Stage 2B + 2C + 3 probes (`hazards_prototype/logs/cr068_stage{2b,2c,3}_*_20260526_*.log`) located CR-068(c) root cause: three `mean(...)` / `terra::app(..., fun=sd)` calls in `R/2_calculate_haz_freq.R` ENSEMBLE writers (lines 794, 1137, 1394) were missing `na.rm = TRUE`, so any per-GCM SSP370 2041+ raster with NaN pixels poisoned the ENSEMBLEmean output → R/3 read NaN → produced zeros in the published parquet. **Two code fixes shipped 2026-05-26**: commit `8d559b3` adds `na.rm = TRUE` to all 6 ENSEMBLE mean/sd writer sites (closes CR-068(c)); commit `41c1c00` adds a `hazard='none'` layer at R/2 sec 5.2 — per-pixel `1 - prob(any)` propagates downstream so `value(none) + value(any) = total_VoP(admin1, crop)` (closes CR-068(a)). The published parquet still reflects the pre-fix state until the AC re-bake (`scripts/2026-05-26_cr068_ac_rebake.sh.txt`) flows through R/2 sec 2/4/5.2 → R/3 STAGE C → STAGE D → STAGE E. **AC re-bake is mid-flight as of 2026-05-27** — Stage F annual section 2 completed; sections 4 + 5.2 + jagermeyr all sections still TODO. (b) remains upstream-only — `AdaptationAtlas/hazards` historic NDWS bug. **2026-05-28 update:** canonical parquet at `severity=severe/int=multi-hazard.parquet` last-modified timestamp is still 2026-05-26 15:21:59 UTC — the AC re-bake has NOT reached canonical-publish yet. `SELECT DISTINCT hazard` returns the same 8 categories as before (no `none` row). Empirical probe ([`scripts/probe_no_hazard_arithmetic_quick.sh`](../../../scripts/probe_no_hazard_arithmetic_quick.sh)) ran 2026-05-28 against the current parquets — direct evidence of issue #9 captured for use as a regression-test target after the next re-bake: for AGO 1995-2014 historic, `value('any') > total_VoP` for 7 of ~25 crops, including rice (203.55 %), sugarcane (117.9 %), pearl-millet (107.9 %), tobacco (105.3 %), maize (100.8 %). Most "OK" crops still sit at 95-99 % exposed (implausibly high — drift is broader than just the C1_FAIL crops). The next AC re-bake should drop these failures to ≤ 100 % AND should add `hazard='none'` rows. See [`dispatches/2026-05-28_hazard-exposure-no-hazard-probe.md`](dispatches/2026-05-28_hazard-exposure-no-hazard-probe.md) for the full outcome record.
 
 **2026-05-28 morning re-bake status:** AC re-bake is ACTIVELY RUNNING (parent R PID 108720, ~10 h elapsed since 2026-05-27 20:11 UTC kickoff). Annual sections 1/2/2.1/4/4.1 completed cleanly. Annual section 5.2 is in its final write sweep — 44,885 of ~44,880 expected interaction tifs at `working_dir/Data/hazard_timeseries_int/annual/` with 2,244 ENSEMBLEmean + 2,244 ENSEMBLEsd already written. Jagermeyr section 5.2 not yet started. ETA: jagermeyr completes late morning UTC 2026-05-28, then STAGE C → D → E → cleanup → verify run automatically. **The re-bake required four discrete bug fixes during the session** — TaiESM1 year-pair regex collapse (`4b28977`), hazard2 ext-stat infix mismatch (`8f22c2e` + `fa8e557`), debug-mode env flags so future_lapply errors weren't masked (`1afe533` + `e493b84`), and a one-time rename of 1,376 TaiESM1 orphan files. See "Decisions applied — 2026-05-28" section above for the full story + the all-combinations audit probe that would have caught the misalignments in ~30 seconds had it been run pre-launch.
+
+**2026-05-29 update — Stage F COMPLETE; canonical parquet NOT YET updated.** Annual 44,880/44,880 at 10:14:59 UTC 2026-05-28; jagermeyr 44,880/44,880 at 23:59:46 UTC 2026-05-28. Runbook did NOT auto-chain to STAGE C. No C/D/E logs dated after 2026-05-26. Canonical `severity=severe/int=multi-hazard.parquet` last-modified still 2026-05-26 15:21:59 UTC — pre-fix. STAGE C launch pending (see "Decisions applied — 2026-05-29"); CR-068 closes only once STAGE E publishes and post-bake probes pass.
 - **before-string:** n/a (schema + aggregation change).
 
 ### CR-069 — Methods section should enumerate the GCMs in the NEX-GDDP-CMIP6 ensemble [NEW 2026-05-15]
@@ -2068,26 +2124,27 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **where:** S3 prefix `s3://digital-atlas/domain=hazard_exposure/source=nex-gddp-cmip6/region=ssa/processing=hazard-risk-exposure/variable=vop_nominal-usd21/period=jagermeyr/model=ENSEMBLEmean/`. Currently only the `severity=severe/int=multi-hazard.parquet` sub-key exists; sibling `severity=moderate/...` and `severity=extreme/...` are missing.
 
-- **why-this-matters:** `hazards_prototype/R/2_calculate_haz_freq.R` computes all three severity tiers internally (see [`metadata/haz_classes.csv`](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/metadata/haz_classes.csv) for the moderate / severe / extreme cut-offs at each index: NDWS ≥15/20/25, NDWL0 ≥2/5/8, NTx35 ≥7/14/21, THI-max >72/78/89). Only severe currently propagates to `R/3_freq_x_exposure.R` and ends up on S3. The notebook now exposes a Severity tier dropdown under "Advanced controls — tune the hazard definition" on the Hazard Exposure section ([notebook.qmd:3718](../../../notebooks/climateRationale/notebook.qmd#L3718)) with three options; only Severe is functional. Notebook SQL is already wired to filter `AND severity = '${hazardSeverity}'` — once moderate/extreme parquets are baked to sibling paths under the same canonical prefix (or, alternatively, added as additional rows in the existing parquet alongside `severity='severe'`), the dropdown becomes fully functional with **zero notebook-side changes** required.
+- **why-this-matters:** `hazards_prototype/R/2_calculate_haz_freq.R` computes all three severity tiers internally (see [`metadata/haz_classes.csv`](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/metadata/haz_classes.csv) for the moderate / severe / extreme cut-offs at each index: NDWS ≥15/20/25, NDWL0 ≥2/5/8, NTx35 ≥7/14/21, THI-max >72/78/89). R/2 writes `.tif` files for all three tiers to `haz_risk_dir`; R/3 (`3_freq_x_exposure.R`) picks them all up via `list.files(haz_risk_dir, ".tif$")` and parses severity from filenames — it is NOT filtered to severe only. R/3 therefore already produces `haz-freq-exp_vop_nominal-usd-2021_ENSEMBLEmean_int_adm_moderate.parquet` and `..._extreme.parquet` locally as a natural byproduct of every run. **The bottleneck is the publish step** (`scripts/2026-05-26_publish_to_s3.sh.txt`), which is hardcoded to upload only the `_severe` file to the canonical S3 key. Moderate and extreme local parquets are never uploaded. The notebook now exposes a Severity tier dropdown under "Advanced controls — tune the hazard definition" on the Hazard Exposure section ([notebook.qmd:3718](../../../notebooks/climateRationale/notebook.qmd#L3718)) with three options; only Severe is functional. Notebook SQL is already wired to filter `AND severity = '${hazardSeverity}'` — once moderate/extreme parquets are published to sibling S3 paths, the dropdown becomes fully functional with **zero notebook-side changes** required.
 
-- **proposed-change (pipeline):** Two equivalent paths, pick whichever fits the pipeline's existing partitioning idiom:
+- **proposed-change (pipeline):** No new pipeline run needed. Local moderate and extreme parquets are produced as a byproduct of every R/3 run (including the in-flight AC re-bake STAGE C). The only work is extending the publish step to upload them.
 
-  1. **Sibling partitions** (matches current path pattern):
-     - `s3://...severity=moderate/int=multi-hazard.parquet`
-     - `s3://...severity=extreme/int=multi-hazard.parquet`
+  After STAGE C completes, two local files will exist at:
+  ```
+  Data/hazard_risk_vop_usd/jagermeyr/haz-freq-exp_vop_nominal-usd-2021_ENSEMBLEmean_int_adm_moderate.parquet
+  Data/hazard_risk_vop_usd/jagermeyr/haz-freq-exp_vop_nominal-usd-2021_ENSEMBLEmean_int_adm_extreme.parquet
+  ```
 
-     Notebook side then needs to swap from a single `s3_path` to a glob (`s3://...severity=*/int=multi-hazard.parquet`) or to register three views — small ~10-line follow-up. **Preferred** because it preserves predicate pushdown on severity (each query only reads one file).
+  Upload each with the same backup + validate + ACL pattern as `scripts/2026-05-26_publish_to_s3.sh.txt`, to sibling S3 keys:
+  - `s3://...severity=moderate/int=multi-hazard.parquet`
+  - `s3://...severity=extreme/int=multi-hazard.parquet`
 
-  2. **Single parquet with all three tiers** (matches `hazard_vars` and `hazard` taxonomy patterns within the parquet):
-     - Append rows with `severity = 'moderate'` and `severity = 'extreme'` to the existing canonical parquet.
-
-     Notebook side already filters `severity = '${hazardSeverity}'` so this works without any further change. Trade-off: parquet ~3× larger; row-group skipping on severity assumes the partitioning matches.
+  Notebook side then needs to swap from a single `s3_path` to a glob (`s3://...severity=*/int=multi-hazard.parquet`) or register three views — small ~10-line follow-up. **Preferred** because it preserves predicate pushdown on severity (each query only reads one file).
 
 - **acceptance:** Open the Hazard Exposure section, expand "Advanced controls", select Moderate (or Extreme) from the Severity tier dropdown. The chart renders with non-zero bars at the new tier (more exposure visible for moderate, less for extreme, compared to severe). Loading bar fires during the re-fetch.
 
 - **dependencies:** Tied to the Hazard Exposure pipeline. No notebook-side prerequisites.
 
-- **STATUS (2026-05-28):** Open. Notebook UI shipped; awaiting pipeline publish to activate the moderate / extreme tiers.
+- **STATUS:** Open. Notebook UI shipped; awaiting pipeline publish to activate the moderate / extreme tiers. **2026-05-29 update:** Stage F complete (44,880/44,880 both timeframes). STAGE C not yet launched — once STAGE C finishes, the local moderate and extreme parquets will exist and only the publish step (a ~40-line script) is needed. CR-091 is therefore unblocked the moment STAGE C completes, **without a separate R/3 re-run**.
 
 ---
 
@@ -2259,7 +2316,7 @@ These items live in the `hazards_prototype` repo (or the analogous FAOSTAT pre-f
 | **U-1** | [[CR-059]] — SPEI replaces raw-precip z-score for PTOT extreme-event classification | `bars_extremeEvents` reads SPEI for PTOT slice once schema lands | Open. Bundle with U-2 / U-3 in a single re-bake. | M (pipeline) |
 | **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | Open. Notebook ribbon swap is a follow-up once this lands. | M (pipeline) |
 | **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `s3://digital-atlas/.../adm0_faostat.parquet` | PR-N ([[CR-063]]) consumes the S3 path directly via the `production_timeseries` nbData entry. | ✓ FIXED 2026-05-15 by Brayden — parquet published; PR-N Phase A landed against it the same day. **2026-05-18 — Trade domain extension:** parquet republished with `export_quantity` + `export_value` added to the `variable` enum (6 levels total). Schema unchanged. Notebook side picks up via a future PR-N Phase B / C dispatch. | M (pipeline) |
-| **U-4** | [[CR-068]] — `hazard_exposure` parquet adds `hazard = "none"` / unexposed row per cell | PR-E (CR-049) Phase 1 drops the cross-table join and reads the denominator directly from `hazard_exposure`. | Open. **Sole unblock for [[CR-049]]** Phase 1; Phase 1 attempted 2026-05-14 and rolled back when the cross-table denominator turned out to be unauditable. | M (pipeline) |
+| **U-4** | [[CR-068]] — `hazard_exposure` parquet adds `hazard = "none"` / unexposed row per cell | PR-E (CR-049) Phase 1 drops the cross-table join and reads the denominator directly from `hazard_exposure`. | 🔄 Stage F complete 2026-05-28 23:59:46 UTC; **STAGE C not yet launched** (2026-05-29). Code fixes `8d559b3` + `41c1c00` in place. Awaiting C → D → E to publish canonical. | M (pipeline) |
 | **U-5 (optional)** | [[CR-058]] Option 3 — partition the projections + extremes parquet by `iso3` instead of (or in addition to) by `period` | First-fetch latency drops from ~30 s to ~1 s on the Future Projections + Extreme Events sections; nbData entries gain per-country `s3_paths`. | Open. **Optional** — Brayden can decline if the pipeline pass is already heavy; defer until users actively complain about latency. Measured 2026-05-15 as the highest-leverage perf fix (96 MB period parquet → ~2 MB per-country, 96 / 54). | M–L (pipeline) |
 
 Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
