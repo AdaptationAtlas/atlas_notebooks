@@ -1,0 +1,206 @@
+---
+pagetitle: "Sandbox — Observational month overlay (CR-098 P1)"
+date-created: "2026-05-29"
+---
+
+# Observational month overlay — Hawkins-style (CR-098 P1)
+
+Sandbox for the P1 "Year overlay" plot type from the CR-098 viz roadmap.
+One line per year, x-axis = month, colour = year (turbo palette, oldest →
+youngest). Most-recent year rendered in bold black on top.
+
+Source data: CHIRPS-CHIRTS-ERA5 admin-0 monthly aggregates
+(`adm0_obs.parquet`). Same parquet consumed by Recent Changes monthly
+view today — no new pipeline work.
+
+Controls below let you explore variable, country, baseline period, and
+whether to show anomalies or absolutes before deciding if P1 is worth
+wiring into the production selector.
+
+---
+
+## Controls
+
+```{ojs}
+viewof sandbox_iso3 = Inputs.select(
+  ["AGO", "KEN", "GHA", "ETH", "ZAF", "NGA", "TZA", "MOZ", "ZMB"],
+  { label: "Country", value: "AGO" }
+)
+```
+
+```{ojs}
+viewof sandbox_variable = Inputs.select(
+  ["TAVG", "TMAX", "TMIN", "PTOT"],
+  { label: "Variable", value: "TAVG" }
+)
+```
+
+```{ojs}
+viewof sandbox_baseline = Inputs.select(
+  ["1991-2020", "1995-2014"],
+  {
+    label: "Baseline period",
+    value: "1991-2020",
+    format: v => v === "1991-2020" ? "1991–2020 (WMO standard)" : "1995–2014 (Atlas CMIP6 window)",
+  }
+)
+```
+
+```{ojs}
+viewof sandbox_anomaly = Inputs.toggle({ label: "Show as anomaly vs baseline", value: true })
+```
+
+---
+
+## Data
+
+```{ojs}
+monthlyURL = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-monthly/variable=adm0_obs.parquet"
+```
+
+```{ojs}
+db_overlay = DuckDBClient.of()
+```
+
+```{ojs}
+overlay_raw = {
+  const rows = await db_overlay.query(`
+    SELECT year, month, value_mean
+    FROM read_parquet('${monthlyURL}')
+    WHERE iso3 = '${sandbox_iso3}'
+      AND variable = '${sandbox_variable}'
+      AND value_mean IS NOT NULL
+    ORDER BY year, month
+  `);
+  return Array.from(rows);
+}
+```
+
+```{ojs}
+// Per-month baseline means over the selected period.
+overlay_baseline = {
+  const [lo, hi] = sandbox_baseline === "1991-2020" ? [1991, 2020] : [1995, 2014];
+  const byMonth = d3.group(
+    overlay_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi),
+    d => Number(d.month)
+  );
+  const m = new Map();
+  for (const [mo, rows] of byMonth) {
+    m.set(mo, d3.mean(rows, d => d.value_mean));
+  }
+  return m;
+}
+```
+
+```{ojs}
+// Augment with anomaly; keep both value_mean and anomaly so the y-scale
+// label can switch cleanly between the two.
+// Coerce BigInt year/month to Number so d3 arithmetic and equality checks work.
+overlay_rows = overlay_raw.map(d => {
+  const year  = Number(d.year);
+  const month = Number(d.month);
+  const base  = overlay_baseline.get(month) ?? 0;
+  return {
+    year, month,
+    value_mean: d.value_mean,
+    anomaly:    d.value_mean - base,
+    value_plot: sandbox_anomaly ? d.value_mean - base : d.value_mean,
+  };
+})
+```
+
+```{ojs}
+// Coerce to Number — Arrow returns year/month as BigInt; Number() normalises
+// for sort comparisons and d3 arithmetic (BigInt breaks Math.max, subtraction).
+overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) => a - b)
+```
+
+---
+
+## Chart
+
+```{ojs}
+{
+  const [yearMin, yearMax] = [overlay_years[0], overlay_years[overlay_years.length - 1]];
+  const yColour = year =>
+    d3.interpolateTurbo((year - yearMin) / Math.max(yearMax - yearMin, 1));
+
+  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const baselinePeriodLabel = sandbox_baseline.replace("-", "–");
+
+  const yLabel = sandbox_anomaly
+    ? (sandbox_variable === "PTOT" ? "mm anomaly" : "°C anomaly")
+    + ` vs ${baselinePeriodLabel} baseline`
+    : (sandbox_variable === "PTOT" ? "mm" : "°C");
+
+  const chart = Plot.plot({
+    title: `${sandbox_iso3} — ${sandbox_variable} by month, ${yearMin}–${yearMax}`,
+    width: 860,
+    height: 340,
+    marginLeft: 70,
+    marginBottom: 44,
+    marginTop: 36,
+    x: {
+      label: null,
+      domain: [0.5, 12.5],
+      ticks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      tickFormat: mo => monthNames[mo - 1],
+    },
+    y: { label: yLabel, grid: true, nice: true },
+    marks: [
+      // Zero reference (only meaningful in anomaly mode).
+      sandbox_anomaly
+        ? Plot.ruleY([0], { stroke: "#4682b4", strokeDasharray: "3 2", strokeOpacity: 0.65 })
+        : null,
+      // All years except the most recent — colour-coded by year.
+      Plot.line(overlay_rows.filter(d => d.year !== yearMax), {
+        x: "month",
+        y: "value_plot",
+        stroke: d => yColour(d.year),
+        z: "year",
+        strokeWidth: 1,
+        strokeOpacity: 0.45,
+        tip: true,
+      }),
+      // Most recent year — bold black on top.
+      Plot.line(overlay_rows.filter(d => d.year === yearMax), {
+        x: "month",
+        y: "value_plot",
+        stroke: "#111",
+        z: "year",
+        strokeWidth: 2.5,
+        tip: true,
+      }),
+    ].filter(m => m !== null),
+  });
+
+  // Inline gradient legend.
+  const stops = [0, 0.25, 0.5, 0.75, 1].map(t => d3.interpolateTurbo(t)).join(",");
+  const legend = htl.html`<div style="display:flex;align-items:center;gap:10px;
+      font-size:0.86em;color:#555;margin:6px 0 2px;">
+    <span style="display:inline-block;width:140px;height:10px;
+      background:linear-gradient(to right,${stops});border-radius:2px;
+      border:1px solid #ddd;"></span>
+    <span>${yearMin} (oldest) → ${yearMax - 1} (previous years)</span>
+    <span style="display:inline-block;width:24px;height:3px;
+      background:#111;vertical-align:middle;"></span>
+    <span>${yearMax} (most recent, bold)</span>
+  </div>`;
+
+  return htl.html`<div>${chart}${legend}</div>`;
+}
+```
+
+---
+
+## Notes
+
+- **Anomaly mode** subtracts the per-month mean over the selected baseline window.
+  Absolute mode shows raw values — useful for PTOT (seasonal cycle dominates).
+- **PTOT** works but seasonal amplitude overwhelms year-to-year signal in anomaly mode;
+  absolute mode is more readable for precipitation.
+- **Most-recent year** bold black so the reader sees current conditions immediately.
+- **Tooltip** on hover shows `year`, `month`, `value_plot` via Plot's built-in tip.
+- Next step if Pete approves this view: wire as a `plotType_obs === "month-overlay"` branch
+  in `recentChanges_obs` (3 targeted edits, ~35 lines — see session notes).
