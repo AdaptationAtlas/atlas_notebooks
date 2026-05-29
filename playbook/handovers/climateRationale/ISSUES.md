@@ -2283,6 +2283,131 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **STATUS (2026-05-28):** Open, blocked.
 
+### CR-096 — Year-of-exceedance map (when does my country cross +1.5 / +2 / +3 °C?) [NEW 2026-05-29 · long-term dev]
+
+- **id:** CR-096
+- **title:** Add a Future Projections panel that maps, per pixel or admin1, the year each location's 15-year rolling-mean temperature first exceeds +1.5 °C / +2 °C / +3 °C relative to a 1995-2014 (or 1950-1979) baseline. SSP selector + threshold selector. Visual reference: the SSP585 CMIP6-ensemble Year-Crossing map (35-model, 15-yr moving average, 1950-1979 baseline) Pete shared 2026-05-29.
+- **type:** notebook (new feature) + **pipeline (re-bake required)**
+- **severity:** low (no current functionality at stake; high-impact narrative if delivered)
+- **where:** [`notebooks/climateRationale/notebook.qmd`](../../../notebooks/climateRationale/notebook.qmd) — new sub-panel in the Future Projections section. Data dependency in `hazards_prototype` CMIP6 pipeline.
+
+- **why-this-matters:** "When does my country cross +N °C?" is one of the cleanest narrative beats a Climate Rationale can deliver to proposal writers — a single map answers a question every reader already has in their head. It pairs naturally with the existing Future Projections section ("here's the climate at 2050") and the Recent Changes observational view ("here's how much you've already warmed") — together they bracket the warming trajectory.
+
+- **why-blocked:** Year-of-exceedance needs **annual ensemble-metric trajectories 2021-2100** (e.g. 80 years × N admins × N variables × N SSPs). The current `future_climate_timeseries` parquet is **period-aggregated** into four 20-year windows (2021-40, 2041-60, 2061-80, 2081-2100), each collapsed to mean / min / max / sd across the 18 GCMs. Period means cannot give "first year where 15-yr rolling mean exceeds X" — you'd be ≥50 % past +2 °C in some 20-year window and the label would only say "2030-2049". A coarser period-bucketed approximation is feasible with current data (see CR-097), but the per-year / per-pixel version is not.
+
+- **pipeline prerequisite (out of notebook scope):** Re-bake `hazards_prototype/R/2.1` (or sibling) to expose **annual ensemble statistics** for at least TAVG / TMAX / TMIN over 2021-2100, at admin1 or pixel resolution, per SSP. Suggested schema: long-form parquet with columns `(iso3, admin1_id?, year, scenario, variable, ensemble_mean, ensemble_min, ensemble_max, ensemble_sd, n_models)`. Per Pete's principle that ensembling is always done LAST ([[ensembling-is-always-last]]): compute per-GCM annual values first, then ensemble per (admin × year × variable × scenario). 18 GCMs × 80 years × 4 SSPs × 3 variables × ~770 admin1s ≈ 1.3 M rows uncompressed — well within the parquet sweet spot.
+
+- **proposed notebook feature surface (after pipeline lands):**
+  1. **Threshold selector** — radio: `+1.5 °C` / `+2 °C` / `+3 °C` (relative to baseline; baseline period is a Methods-note detail).
+  2. **SSP selector** — same control surface as existing Future Projections (SSP1-2.6 / SSP2-4.5 / SSP3-7.0 / SSP5-8.5).
+  3. **Map view** — admin1 choropleth coloured by year of first 15-yr-rolling-mean crossing. Discrete colour scale (e.g. 2020 / 2025 / 2030 / 2035 / 2040 / 2045 / 2050 / 2060 / 2070 / 2080 / 2090 / "not within century"). COG-friendly if we go per-pixel; admin1-friendly via existing topojson rendering.
+  4. **Country-summary callout** — for the selected country, e.g. "Mali crosses +2 °C around 2042 (ensemble median; 10th–90th percentile 2035-2049)" — uses ensemble spread.
+  5. **Cross-reference** — pair with Recent Changes observational view ("you've already warmed +X °C since 1991-2020; here's when the next +N °C arrives").
+
+- **acceptance:** A Future Projections sub-panel renders, per the user's selected country + admin1 + threshold + SSP, the year-of-crossing map plus an ensemble-spread callout. Methodology section explains the 15-yr rolling-mean rule, the baseline choice, and the ensemble-median interpretation.
+
+- **dependencies:** BLOCKED on a future pipeline ticket (`hazards_prototype` re-bake) to expose annual ensemble trajectories. No notebook-side work to start until that parquet lands.
+
+- **discovered:** 2026-05-29, chat-mode review — Pete shared a SSP585 CMIP6-ensemble Year-Crossing map as a viz reference. Feasibility audit confirmed the notebook's current `future_climate_timeseries` parquet is period-bucketed, not annual. Pete: "year of exceedance we push to long-term dev".
+
+- **STATUS (2026-05-29):** Open, parked long-term. Resume planning once the upstream annual-ensemble parquet is on the roadmap.
+
+- **see also:** [[CR-097]] for the period-bucketed approximation that works with current data (4 colour bins: 2021-40 / 2041-60 / 2061-80 / 2081-2100 / "not within century"); CR-095 (Future Projections trend badge — adjacent feature, same section).
+
+### CR-097 — Period-bucketed warming-threshold map (uses current data) [NEW 2026-05-29]
+
+- **id:** CR-097
+- **title:** Add a Future Projections sub-panel rendering an admin1 choropleth where each polygon is coloured by the first 20-year window whose ensemble-mean temperature anomaly exceeds +1.5 / +2 / +3 °C relative to the 1995-2014 baseline. SSP + threshold selectors. This is the period-bucketed salvage of the full year-of-exceedance map ([[CR-096]]) — coarser temporal resolution but feasible with the existing `future_climate_timeseries` parquet.
+- **type:** notebook (new feature, consumer-only)
+- **severity:** low (no current functionality at stake; high-narrative-impact if delivered)
+- **where:** [`notebooks/climateRationale/notebook.qmd`](../../../notebooks/climateRationale/notebook.qmd) — new sub-panel in the Future Projections section (siblings: existing CMIP6 panels at `timeseries_futureProjections` line 7303, `summary_futureProjections` line 7626).
+
+- **why-this-matters:** Same narrative beat as CR-096 — "when does my country cross +N °C?" — but using existing data. Even at period-bucket resolution (4 possible answers per admin1 + "not within century"), the visual answers the question every Climate Rationale reader has, and pairs cleanly with the Recent Changes observational view ("you've already warmed +X °C since 1991-2020; here's when the next threshold arrives").
+
+- **data available (no pipeline addition):**
+  - `s3://digital-atlas/.../future_climate_timeseries` — NEX-GDDP-CMIP6 future projections across four 20-year periods (2021-2040, 2041-2060, 2061-2080, 2081-2100). For each period, ensemble mean / min / max / sd across 18 GCMs, per SSP (1-2.6 / 2-4.5 / 3-7.0 / 5-8.5), at admin1 resolution. Both absolute (`mean`) and anomaly-vs-1995-2014 (`mean_anomaly`) columns side-by-side.
+  - The `mean_anomaly` column is exactly the input we need: per (admin1, scenario, variable, period), in °C above the 1995-2014 baseline.
+
+- **derivation rule (DuckDB or client-side JS):**
+  ```sql
+  -- per (admin1, scenario, variable, threshold_C):
+  SELECT
+    admin1_id, scenario, variable,
+    MIN(period) FILTER (WHERE mean_anomaly >= :threshold_C) AS first_period_crossing
+  FROM future_climate_timeseries
+  WHERE variable IN ('TAVG', 'TMAX', 'TMIN')
+  GROUP BY admin1_id, scenario, variable, threshold_C
+  ```
+  Result: 1 of 5 outcomes per admin1 → `2021-2040` / `2041-2060` / `2061-2080` / `2081-2100` / `NULL (not within century)`.
+
+- **proposed feature surface:**
+  1. **Threshold selector** — radio: `+1.5 °C` / `+2 °C` / `+3 °C`.
+  2. **SSP selector** — radio: SSP1-2.6 / SSP2-4.5 / SSP3-7.0 / SSP5-8.5 (matches existing Future Projections control surface).
+  3. **Variable selector** — TAVG (default) / TMAX / TMIN.
+  4. **Map view** — admin1 choropleth, 5 discrete colour bins (4 periods + "not within century"). Existing topojson rendering pattern from the observational sandbox map (commit `cd8cd76`) applies — but here the unit is admin1 polygon fill, not a per-pixel COG.
+  5. **Country-summary callout** — for the selected country, e.g. "Mali crosses +2 °C in 2041-2060 (SSP5-8.5, ensemble median; spread: SSP1-2.6 2061-2080, SSP3-7.0 2041-2060)" — uses the existing SSP cross-comparison framing.
+  6. **Methods note** — explicit caveat that this is coarser than the per-year reference (Pete shared 2026-05-29) because the underlying parquet is period-bucketed; refer to CR-096 for the higher-resolution version if the pipeline adds annual ensemble trajectories.
+
+- **acceptance:** A Future Projections sub-panel renders, per the user's selected country + threshold + SSP + variable, the admin1 choropleth + summary callout. Methods text explains the period-bucket caveat. SPEI / SPEI-* not exposed (anomaly framing doesn't apply to a standardised index).
+
+- **implementation pattern:**
+  - Add a new DuckDB view or client-side aggregation over the existing `future_climate_timeseries` parquet (no `nbData.json` change needed — same parquet, new query).
+  - SingleDB pattern per [[duckdb-wasm-per-plot-clients]] for the per-admin lookup.
+  - Reuse the existing admin1 topojson rendering from the observational map sandbox (canvas-based, country-clipped).
+  - Discrete colour scale — 5 bins; suggest a sequential perceptually-uniform palette (viridis or magma) with "not within century" as a distinct neutral (e.g. light grey or white).
+
+- **dependencies:** None. Unblocked.
+
+- **discovered:** 2026-05-29, chat-mode review — Pete shared a SSP585 CMIP6-ensemble Year-Crossing map as a viz reference. Pete: "year of exceedance we push to long-term dev" (i.e. CR-096 long-term); this period-bucketed variant filed in parallel as the near-term salvage that works with current data.
+
+- **STATUS (2026-05-29):** Open, unblocked. Awaiting scheduling.
+
+- **see also:** [[CR-096]] (long-term version with annual resolution + per-pixel option; blocked on pipeline addition); CR-095 (Future Projections trend badge — adjacent feature, same section).
+
+### CR-098 — Alternative observational chart types (sandbox-first exploration) [NEW 2026-05-29]
+
+- **id:** CR-098
+- **title:** Add four alternative visualisations to the observational (Recent Changes) section, all using the existing `adm{0,1}_obs.parquet` monthly admin-aggregated data (~44 years × 12 months × N admins). Sandbox-first prototyping per the existing helper sequencing pattern (see DECISIONS session 9 — "build helper → wire sandbox → Pete tests → commit → later production sweep"). 3D spiral dropped per Pete 2026-05-29.
+- **type:** notebook (new feature, consumer-only)
+- **severity:** low (alternative views; no current functionality at stake)
+- **where:** [`notebooks/climateRationale/notebook.qmd`](../../../notebooks/climateRationale/notebook.qmd) — observational sandbox cells first, then Recent Changes production section. New helpers under `helpers/`.
+
+- **why-this-matters:** The current observational section's plot-type selector covers line+bands, bars, warming stripes, line+stripes. The four candidates below answer different storytelling needs (annual cycle vs warming, distribution shifts, multi-year overlay) and are commonly used in climate-rationale and IPCC-style communication. Building them sandbox-first lets Pete eyeball each before committing to production.
+
+- **data available (no pipeline addition required):**
+  - `s3://digital-atlas/.../processing=admin-monthly/variable=adm{0,1}_obs.parquet` — monthly admin-aggregated CHIRPS-CHIRTS-ERA5 (PTOT / TAVG / TMAX / TMIN / SPEI-01..24), 1981-2024 (~44 years × 12 months).
+  - `s3://digital-atlas/.../processing=admin-periods/variable=adm{0,1}_obs.parquet` — annual + 3-month seasonal aggregates of the same.
+  - Both consumed by Recent Changes today via the singleDB pattern.
+
+- **proposed views (priority-ordered):**
+
+  - **P1 — Monthly line overlay (Hawkins-style)** — 12 months on x-axis, one line per year, rainbow palette by year. Direct port from the existing line plot; data shape already correct. Lowest-effort, highest-readability candidate. Visual reference: the @ed_hawkins "Global temperature changes since 1850 by month" classic.
+
+  - **P2 — 2D flat climate spiral** — months around the perimeter, years radiating outward (or stacking) with a rainbow-by-year palette. Polar projection in OJS via `d3-shape` arc generators on the existing monthly long table. Visual reference: the "Climate Spiral 2025" flat-projection variant Pete shared. (The Hawkins 3D animated version was considered and dropped — OJS effort too high relative to payoff.)
+
+  - **P3 — Ridge plot of anomaly distribution by decade** — KDE or histogram of monthly anomalies (vs the 1991-2020 climatology) per decade, stacked vertically. With ~44 years we get 4-5 decadal strata (1980s partial, 1990s, 2000s, 2010s, 2020s partial); 5-year bins are an alternative (9 strata, richer visual). Best paired with the Extremes / SPEI narrative. Visual reference: "Land Temperature Anomaly Distribution" ridge-plot.
+
+  - **P4 — Polar heatmap (monthly clock-face)** — 12 angular wedges (months), 44 radial rings (years), filled by absolute monthly value (or anomaly). Reads like a clock + warming gradient combined. Best for TAVG / TMAX. Visual reference: "Global Daily Temperatures (1940-2025)" polar heatmap — our version is monthly + 44 years (vs daily + 86 years in the reference), so the rings are coarser but the warming signal still reads clearly.
+
+- **what's NOT in scope:**
+  - ❌ 3D spiral (dropped 2026-05-29 — OJS effort vs payoff doesn't pencil out).
+  - ❌ Daily-resolution variants — pipeline aggregates to monthly before admin extraction.
+  - ❌ Multi-country overlays — single-country focus matches the rest of the observational section.
+
+- **implementation pattern (sandbox-first, matching CR-078 / CR-079):**
+  1. Build helper under `helpers/obsChartTypes.ojs` (or per-view: `helpers/obsMonthlyOverlay.ojs`, `helpers/obsSpiral.ojs`, etc.).
+  2. Wire into sandbox Section E with a plot-type variant gated by variable (SPEI may suppress some views, e.g. distribution-shift loses meaning on a standardised index).
+  3. Pete eyeballs locally + signs off per view.
+  4. Production sweep when stable.
+
+- **acceptance:** Sandbox renders each priority-ordered view from the same monthly observational parquet; Pete approves each individually before promotion to production. Existing plot-type selector ("Line+bands" / "Bars" / "Warming stripes" / "Line+stripes") grows by up to 4 entries (one per accepted view).
+
+- **dependencies:** None. Unblocked.
+
+- **discovered:** 2026-05-29, chat-mode review — Pete shared 5 viz references (polar daily heatmap, Hawkins 3D spiral, 2025 flat spiral, ridge plot, Hawkins monthly line overlay). After feasibility audit against current data + drop of the 3D spiral, P1–P4 are the surviving candidates.
+
+- **STATUS (2026-05-29):** Open, unblocked. Awaiting scheduling.
+
 ---
 
 ## Proposed PR groupings
