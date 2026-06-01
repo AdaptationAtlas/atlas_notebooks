@@ -2410,6 +2410,218 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+## CR-099 — Sandbox: CR-097 table mode references undefined variables
+
+- **type:** bug
+- **severity:** high
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` — CR-097 chart cell, `if (showTable)` branch (~line 1638)
+- **what-users-see:** Switching "Show table instead of map" toggle → JS runtime error (`aggData is not defined`); table never renders.
+- **why-wrong:** In OJS the `if (showTable) { return ... }` early-return branch uses `aggData`, `byScenario`, and `joinKey` before they are declared. Those variables are defined ~50 lines later in the same cell block (after the loading-state guard). OJS cells execute top-to-bottom so the early-return path hits the variables before they exist.
+- **proposed-change:** Move the `aggData` / `byScenario` / `joinKey` / `firstCrossing` declarations to the top of the chart cell (after the loading guard but before the `if (showTable)` branch). Alternatively restructure so the table branch calls `firstCrossing` directly from `cr097_data` without the aggregation step that depends on `aggData`.
+- **STATUS (2026-06-01):** Open, unblocked.
+
+---
+
+## CR-100 — Sandbox: P3 KDE uses fixed bandwidth (methodology)
+
+- **type:** methods
+- **severity:** med
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` — `p3_kde` cell, `const bw = isPTOT ? 10 : 0.5`
+- **what-users-see:** Ridge curves for temperature look smooth; for PTOT in arid/semi-arid countries (ETH north, NAM, NER) the kernel with bw=10 over-smooths and produces a near-Gaussian curve even when the underlying distribution is heavily right-skewed toward zero.
+- **why-wrong:** Fixed bandwidth assumes uniform data spread. Silverman's rule `bw = 0.9 × min(σ, IQR/1.34) × n^(−1/5)` adapts to the data spread per decade. Without it, the 2020s partial decade (4–5 years) gets the same bandwidth as the 1990s (10 years), making the 2020s look artificially smooth.
+- **proposed-change:** Replace fixed `bw` with Silverman's rule computed per decade: `const silverman = vals => { const σ = d3.deviation(vals); const iqr = (d3.quantile(vals.sort(d3.ascending), 0.75) - d3.quantile(vals, 0.25)) / 1.34; return 0.9 * Math.min(σ, iqr) * Math.pow(vals.length, -0.2); }; const bw = Math.max(silverman(values), isPTOT ? 2 : 0.1);`. Add a floor (`max(bw, 0.1)`) to prevent degenerate output for very short series.
+- **STATUS (2026-06-01):** Open, unblocked.
+
+---
+
+## CR-101 — Sandbox: P5 stats table annual row uses mean not sum for PTOT
+
+- **type:** bug
+- **severity:** med
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` — P5 table cell, `yearMeanRows` helper (~line 1298)
+- **what-users-see:** The "Annual" (or season) summary row for PTOT shows e.g. 58 mm — this is the mean of monthly means, not the total annual rainfall. Angola's annual rainfall is ~500–800 mm, not 58 mm.
+- **why-wrong:** `yearMeanRows` takes the year-grouped mean of `value_mean`. For temperature this is correct (annual mean temp = mean of monthly means). For precipitation it should be the sum (`d3.sum`) of monthly totals per year, then the mean/min/max across those annual totals.
+- **proposed-change:** In `rowStats`, detect `isPTOT` and use `d3.sum` for the annual total aggregation: `const yearMeanRows = (vrows, isP) => [...d3.group(vrows, d => d.year)].map(([y, rs]) => ({ year: y, value_mean: isP ? d3.sum(rs, d => d.value_mean) : d3.mean(rs, d => d.value_mean) }));`. For season rows, sum only the season months. For the header, label the PTOT annual column "total (mm)" rather than "mean (°C)".
+- **STATUS (2026-06-01):** Open, unblocked.
+
+---
+
+## CR-102 — Sandbox: P4 polar heatmap legend missing direction labels
+
+- **type:** ux
+- **severity:** low
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` — P4 chart cell, colour legend block (~line 1068)
+- **what-users-see:** Legend shows e.g. `−2.1 [gradient] +3.4 °C anomaly`. No explanation of which end is cooler vs warmer, or for PTOT which is drier vs wetter.
+- **why-wrong:** Same issue as the P6 grid legends — fixed for P6 in commit `5447340` but P4 was missed.
+- **proposed-change:** In the P4 legend block, add `const isPTOT4 = p4_controls.variable === "PTOT"; const dirLo4 = isAnomaly ? (isPTOT4 ? "← drier" : "← cooler") : null; const dirHi4 = isAnomaly ? (isPTOT4 ? "wetter →" : "warmer →") : null;` and include these italic spans flanking the gradient bar, mirroring the P6 legend pattern.
+- **STATUS (2026-06-01):** Open, unblocked.
+
+---
+
+## CR-103 — Sandbox: P1/P2/P3/P4 country lists limited to 9 countries
+
+- **type:** ux
+- **severity:** med
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` — `p1_controls`, `p2_controls`, `p3_controls`, `p4_controls`
+- **what-users-see:** Country dropdown shows 9 options (AGO, KEN, GHA, ETH, ZAF, NGA, TZA, MOZ, ZMB). CR-097 and P5/P6 show the full ~30-country Africa set.
+- **why-wrong:** Hard-coded during initial sandbox build; never extended. P5/P6 already have the correct full list.
+- **proposed-change:** Extract the country list and label map to a shared OJS cell (or copy from P6's `SCOPE_OPTS`/`SCOPE_LABELS`). Apply to all four sections. Country selector for P1/P2/P3/P4 should include at minimum all 30+ countries in `adm0_obs.parquet`; the full list can be derived from `cr097_controls`'s `COUNTRIES` array.
+- **STATUS (2026-06-01):** Open, unblocked.
+
+---
+
+## CR-104 — Sandbox: climate expert review findings — methods caveats per section
+
+- **type:** methods
+- **severity:** med
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` — all sections
+- **summary:** Review as a climate expert and non-expert user. Key findings by section:
+
+  **P1 — Monthly line overlay**
+  - Decade mean line uses arithmetic mean, not a trend estimate. Incomplete decades (2020s = 4–5 years) produce unreliable means; caption should note this.
+  - Anomaly is absolute (°C or mm), not percentage. For PTOT across countries with very different rainfall regimes, absolute anomalies are not comparable. Consider % of baseline as a toggle option.
+  - No uncertainty band around decade mean lines.
+
+  **P2 — Climate spiral**
+  - Reference rings (−1°C, 0°C, +1°C, +1.5°C, +2°C) are climatologically meaningful for temperature (1.5/2°C align with Paris Agreement targets). For PTOT the ±1σ / ±2σ rings are statistical; the user should know these are NOT policy targets.
+  - `cFactor = 0.45` clips anything ≥ +1.11°C to full red. This is appropriate for emphasis but is not stated. Add a note that the colour saturates at ~1 SD above/below baseline.
+  - PTOT spiral uses `aScale = 70 / anomalyStd` (data-adaptive radius scale). This makes the spiral legible per country but breaks cross-country radius comparisons. Note this in the section description.
+  - Stats block shows warmest/coolest single month. Missing: warmest/coolest year (12-month mean), which is more meaningful for trend communication.
+
+  **P3 — Ridge plot**
+  - KDE normalises each decade to unit height (density normalised by `maxD`). This means peak heights are NOT comparable — the 2020s partial decade (4–5 years) can look as "tall" as the 1990s (10 years). Should note "normalised for display" or switch to probability density.
+  - All-months default for PTOT mixes wet/dry season distributions → bimodal histogram that looks like two separate populations. This is informative but the bimodality should be explained in the caption (it's real: reflects alternating wet and dry seasons).
+  - No tooltip; users can't read specific density values.
+
+  **P4 — Polar heatmap**
+  - Season selector (start/end month) is non-obvious. When `sStart=0 || sEnd=0` (default), all months shown. User who accidentally sets one but not the other gets unexpected behaviour (all months, not partial season). Consider a toggle + dropdown like P1/P3.
+  - Month-label peripheral text (mean + max/min) gets extremely crowded on 12 wedges. At small viewport widths labels overlap. Should clip or abbreviate.
+  - The absolute mode (non-anomaly) uses Inferno scaled to data range. For a 40-year record of TAVG this is excellent — cool years visibly darker, warm years brighter. For PTOT the scale is dominated by anomalously wet months. Consider a percentile-based colour scale for PTOT.
+
+  **P5 — Monthly climatology heatmap & stats**
+  - Heatmap threshold dots (●=+1°C, ◉=+1.5°C) only shown for temperature; PTOT has no equivalent marker. Could show dots for extreme dry months (e.g. < −50 mm anomaly) or use percentile thresholds.
+  - "Annual" stats row uses `mean of monthly means` for all variables. For PTOT this understates total rainfall by ÷12 relative to the familiar annual total figure (see CR-101).
+  - Uncertainty toggle (±σ) shows inter-annual σ, not a confidence interval. Label should be more explicit: "± inter-annual std. dev. (σ)" rather than just "± σ".
+
+  **CR-097 — Warming threshold maps**
+  - `firstCrossing` returns the first 20-year period where ensemble-mean anomaly ≥ threshold. For SSP1-2.6 some admin1s cross a threshold in 2041-2060 and then the ensemble-mean can drop back below (especially for the +1°C threshold). The map would show "2041-2060" even if it's a transient crossing. Add a note that SSP1-2.6 shows _first exceedance_, not sustained exceedance, and that this matters for the 1°C threshold.
+  - Ensemble-mean threshold crossings understate uncertainty. The spread between P10 and P90 GCMs crossing the same threshold is typically 1–2 decades. A more honest presentation would show the inter-model range, not just the ensemble mean. Recommend flagging this in the methods text with a reference to IPCC AR6 WGI Chapter 4 (Constrained Projections).
+  - Colour scheme (red = earliest/soonest) will be read as "bad/alarming" for adaptation audiences — this is intentional and appropriate. The grey "not within century" is ambiguous: it could mean "this area doesn't warm" or "data missing". Clarify in legend: "< +X°C by 2100 under this scenario".
+
+  **P6 — Decade comparison maps**
+  - Decade grid "Trend (per decade)" stat uses simple OLS (`linSlope`), not the Theil-Sen+MK+TFPW used in the full-record trend maps below. This inconsistency should be documented: OLS on 10-year windows has low statistical power and high sensitivity to endpoint outliers. The full-record map is methodologically stronger. Recommend either removing the trend stat from the decade grid or labelling it clearly as "indicative OLS (n≤10)".
+  - Variability colour palette for PTOT uses BuGn (blue=high variability) which implies "wetter" to a user familiar with the other maps. A neutral palette (e.g. Purples or Greens) would avoid this colour-meaning conflict. Temperature uses Inferno (yellow=high variability) which is fine.
+  - `proj0` previously used a fixed [200, 170] coordinate space mismatched against `facetW × facetH` SVG viewBox → maps appeared positioned in upper-left of facets. **Fixed in sandbox commit `5447340`.**
+
+- **STATUS (2026-06-01):** Open — action items: (a) fix CR-099/CR-101/CR-102 bugs in sandbox; (b) document caveats in section descriptions (CR-105); (c) variability colour palette for PTOT is a future-polish item.
+
+---
+
+## CR-105 — Sandbox: write section descriptions, interpretation guides, and methods with citations
+
+- **type:** feature
+- **severity:** med
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` and (when promoted) `data/climateRationale/nbText.json`
+- **what it is:** Each sandbox section (P1–P6 + CR-097) needs three text blocks compatible with the main notebook's help/methods pattern:
+  1. **Section intro** — 1–2 sentence purpose statement + what it shows + primary use case (GCF proposal writing / adaptation planning).
+  2. **Interpretation guide** — how to read the chart, what to look for, common misreadings to avoid.
+  3. **Methods + citations** — data source, spatial aggregation method, baseline period rationale, trend/variability method, relevant IPCC AR6 / CHIRPS / CHIRTS citations.
+
+- **Draft content per section (for Pete to review):**
+
+  **P1 — Monthly line overlay ("Year-over-year monthly climate profile")**
+  - *Purpose:* Displays all years of observed monthly data simultaneously as individual lines, enabling visual identification of shifts in seasonal amplitude, timing, and variability over time.
+  - *Interpretation:* Lines shifting toward the warm/wet end (depending on variable) in recent years indicate a long-term trend. Widening of the line envelope signals increasing interannual variability. The most-recent year (gold/amber line) sits prominently on top.
+  - *Methods:* Data: CHIRPS-CHIRTS-ERA5 admin-0 monthly aggregates (Funk et al. 2015; Hersbach et al. 2020). Anomalies are simple departures from the selected baseline monthly mean. Decade mean lines are arithmetic means, not trend estimates; incomplete decades (e.g. 2020s) should be interpreted cautiously.
+  - *Citations:* Funk et al. (2015) CHIRPS, *Scientific Data* 2:150066. Hersbach et al. (2020) ERA5, *Q.J.R. Meteorol. Soc.* 146:1999–2049.
+
+  **P2 — Climate spiral ("Annual anomaly spiral")**
+  - *Purpose:* Polar-coordinate view where radius = anomaly magnitude. Years that are above or below the baseline push the ring outward or inward. The full record appears simultaneously, revealing a tightening spiral as warming accumulates.
+  - *Interpretation:* Rings near the central baseline circle = near-normal years. Rings pushed outward (warm/wet) or inward (cool/dry) indicate anomalous years. Recent years clustering at larger radii than early years is the signature warming signal. For temperature, the +1.5°C and +2°C reference rings correspond to Paris Agreement warming thresholds relative to 1850–1900 (Note: baseline in this chart is 1991–2020 or 1995–2014, not pre-industrial — these reference rings are illustrative, not policy-equivalent).
+  - *Methods:* Same CHIRPS-CHIRTS-ERA5 data as P1. Spiral radius scales at 70 px/°C for temperature; for precipitation, radius scales adaptively (70 px per 1 standard deviation of the baseline period anomalies). Colour encodes mean annual anomaly via selected palette (default RdBu).
+  - *Citations:* Hawkins et al. (2017) *BAMS* 98:999–1004 (climate spiral concept). Funk et al. (2015); Hersbach et al. (2020).
+
+  **P3 — Ridge plot ("Decadal distribution shift")**
+  - *Purpose:* Stacked Kernel Density Estimates (KDE) of monthly anomaly values per decade. Shows whether the distribution of anomalies is shifting (mean change) and/or broadening (variance change) over time.
+  - *Interpretation:* Curves shifting right = warmer/wetter decades. Broader/flatter curves = more variable. Bimodal curves for PTOT reflect seasonal mixing (wet and dry season months together); use the season filter to isolate one season's distribution.
+  - *Methods:* Epanechnikov kernel density estimation; bandwidth from Silverman's rule `0.9 × min(σ, IQR/1.34) × n^−0.2`. Curves normalised to unit peak height for display — not true probability densities; areas are not comparable across decades of different length. Anomalies vs the selected baseline monthly means.
+  - *Citations:* Silverman (1986) *Density Estimation*, CRC Press. Funk et al. (2015); Hersbach et al. (2020).
+
+  **P4 — Polar heatmap ("Monthly climate clock")**
+  - *Purpose:* 12 angular wedges (months) × N radial rings (years) coloured by value or anomaly. Reading from inner to outer rings traces the full record chronologically. Warming appears as a colour gradient from cool-inner to warm-outer.
+  - *Interpretation:* Consistent colour progression from inner to outer rings = sustained multi-decadal trend. Rings with heterogeneous colouring = high interannual variability. Dimmed wedges = months outside the selected season.
+  - *Methods:* Same CHIRPS-CHIRTS-ERA5 data as P1–P3. Colour scale diverging (anomaly mode) or sequential (absolute mode). Arc rendering via D3 arc generator.
+  - *Citations:* Funk et al. (2015); Hersbach et al. (2020).
+
+  **P5 — Monthly climatology: heatmap & statistics ("Long-run seasonal statistics")**
+  - *Purpose:* Year × month heatmap reveals the full seasonal and interannual pattern in one view. Statistics table gives the numerical backbone (mean, range, variability) for report writing.
+  - *Interpretation:* Heatmap: vertical stripes = year-to-year patterns; horizontal stripes = consistent seasonal cycles. White dots in temperature anomaly mode mark months exceeding +1°C / +1.5°C anomalies. Table: TMAX = mean of daily maximum temperatures (not the warmest recorded temperature); TMIN = mean of daily minimum temperatures (not the coldest). Annual/season row for PTOT = total precipitation, not mean monthly.
+  - *Methods:* Baseline monthly means from selected period. Anomalies = departure from monthly baseline. Interannual σ = standard deviation across years for each month. Min/max = observed across all years for that month.
+  - *Citations:* Funk et al. (2015); Hersbach et al. (2020).
+
+  **CR-097 — Warming threshold maps ("When does warming first reach +X°C?")**
+  - *Purpose:* For each admin unit, identifies the first 20-year CMIP6 period (2021–40, 2041–60, 2061–80, 2081–2100) in which the multi-model ensemble-mean temperature anomaly exceeds a user-selected threshold.
+  - *Interpretation:* Red = earliest warming; light yellow = latest. Grey = threshold not reached within the century under the selected scenario. Scenarios matter hugely: compare SSP1-2.6 (strong mitigation) vs SSP5-8.5 (high-emission) to see how much mitigation delays threshold crossings. Note: this shows the *first exceedance* of the ensemble mean; individual GCMs can cross the threshold 1–2 decades earlier or later, reflecting genuine model uncertainty.
+  - *Methods:* Data: NEX-GDDP-CMIP6 `ensemble_season_timeseries.parquet` (4 files, one per 20-year period), ensemble-mean `mean_anomaly` relative to 1995–2014 baseline. Threshold crossing = first period where ensemble-mean anomaly ≥ threshold. Admin0 values are the mean of constituent admin1 means. GCM ensemble: 5 models in the Atlas pipeline (GFDL-ESM4, IPSL-CM6A-LR, MPI-ESM1-2-HR, MRI-ESM2-0, UKESM1-0-LL).
+  - *Citations:* Thrasher et al. (2022) NEX-GDDP-CMIP6, *Earth and Space Science* 9:e2022EA002329. IPCC AR6 WGI Chapter 4 (Lee et al. 2021) — constrained future projections and scenario uncertainty.
+
+  **P6 — Observed decade comparison maps ("Spatial climate change by decade")**
+  - *Purpose:* Admin-level choropleths comparing climate statistics across multiple decades — mean anomaly, variability, and full-record Theil-Sen trend — for a selected variable. Enables spatial identification of warming/drying hotspots and regions of changing variability.
+  - *Interpretation:* Decade grid: compare colour intensity across columns to track decade-by-decade change. Mean anomaly panels use the full baseline; anomalies for decades within or near the baseline window will be smaller. Full-record trend maps show the statistically tested direction (Theil-Sen) and significance (Mann-Kendall, p<0.05) of the long-term trend. Variability maps show the standard deviation of annual values per decade — increasing values indicate higher year-to-year swings, independent of any trend direction.
+  - *Methods:* Data: CHIRPS-CHIRTS-ERA5 `adm1_obs.parquet` (sub-national annual/seasonal aggregates). Trend: Theil-Sen slope with pre-whitening (TFPW, Yue & Wang 2002) and Mann-Kendall significance test (Mann 1945; Kendall 1975). Significance p<0.05. Variability: inter-annual standard deviation (`d3.deviation`). For variability trends: Theil-Sen slope of a 5-year rolling mean-absolute-residual (detrended), normalised by baseline σ → %/decade. PTOT variability suppressed for admin1s with baseline mean <10 mm/month (arid zone artefact). SPEI variability trend suppressed (SPEI already a z-score, variability trend not meaningful).
+  - *Citations:* Funk et al. (2015); Hersbach et al. (2020). Yue & Wang (2002) *Water Resour. Res.* 38(6). Mann (1945) *Econometrica* 13:245–259. Kendall (1975) *Rank Correlation Methods*, Griffin.
+
+- **acceptance:** Each section has a visible methods/interpretation block consistent with the main notebook's `about-this-plot` disclosure pattern. Methods text is keyed into `nbText.json` (EN + FR) when promoted to production.
+- **STATUS (2026-06-01):** Open. Descriptions drafted above — Pete to review content; FR translation deferred until EN is approved.
+
+---
+
+## CR-106 — Main notebook: promote popup multi-select component from sandbox
+
+- **type:** ux
+- **severity:** med
+- **where:** `notebooks/climateRationale/notebook.qmd` — admin1 selector in any section that uses sub-national filtering.
+- **what-users-see:** Current multi-select for admin1 is a native `<select multiple>` that shows ~4 items before scrolling, with no search. The sandbox built a custom popup (searchable checkbox list + Select all / Clear / Close) that is significantly more usable when a country has 20+ admin1s.
+- **proposed-change:** Extract the popup multi-select component from `notebooks/sandbox/obs_month_overlay.qmd` (the `viewof cr097_admin1` cell, ~60 lines) into a shared helper: `helpers/popupMultiSelect.ojs`. The helper exports a factory function `popupMultiSelect(names, opts)` → returns a viewof-compatible element. Wire into the main notebook's admin1 selector. The sandbox CR-097 `viewof cr097_admin1` becomes a one-line call.
+- **DO NOT EDIT notebook.qmd until Pete has approved the component in sandbox.**
+- **STATUS (2026-06-01):** Open — blocked on Pete sign-off of the sandbox version.
+
+---
+
+## CR-107 — Main notebook: add regional scope options to admin selector
+
+- **type:** feature
+- **severity:** med
+- **where:** `notebooks/climateRationale/notebook.qmd` — the global country/admin selector (CR-034).
+- **what-users-see:** Admin selector offers individual countries only. Sandbox CR-097 and P6 added named region shortcuts (West Africa, East Africa, Central Africa, Southern Africa, North Africa, Sub-Saharan Africa, All Africa) that resolve to an iso3 list client-side.
+- **proposed-change:** Add `R:WAF / R:EAF / R:CAF / R:SAF / R:NAF / R:SSA / R:AFR` to the admin selector's scope options, formatted with `──` prefix for visual grouping. Wire region keys through the existing `country_select` reactive cell so that downstream cells (which use `iso3List`) continue working without change. Region definitions live in the sandbox's `cr097_region_defs` cell and can be shared via a new `helpers/regionDefs.ojs` cell.
+- **DO NOT EDIT notebook.qmd until Pete has approved the region selection behaviour in the P6 sandbox view.**
+- **STATUS (2026-06-01):** Open — blocked on Pete sign-off.
+
+---
+
+## CR-108 — Performance: CR-097 / P6 CMIP6 query load-time analysis vs main notebook
+
+- **type:** feature (diagnostic)
+- **severity:** low
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` — `cr097_data` cell; vs `notebooks/climateRationale/notebook.qmd` — `dbFutureHive` cell.
+
+- **finding:** The sandbox CR-097 is **not** more performant than the main notebook for CMIP6 data. Both scan the same 4 × ~20 MB `ensemble_season_timeseries.parquet` files without per-iso3 row-group pushdown. Expected cold-fetch time: **15–30 s** per country query, matching the main notebook's Future Projections section.
+
+- **root cause:** The CMIP6 parquets are partitioned by `period=` (four files) but NOT by `iso3`. DuckDB-WASM cannot skip row groups on non-partition columns without populated min/max stats in the parquet footer. The existing `iso3 IN (${iso3In})` predicate is: (a) the `IN (single-value)` form that defeats row-group pushdown per [[feedback_duckdb-wasm-parquet-pushdown]] memory; and (b) even if rewritten as `= 'KEN'`, stats are NULL in the canonical parquets (confirmed 2026-05-27 investigation). So predicate pushdown does not fire regardless.
+
+- **sandbox advantages** over main notebook for this section:
+  1. `db_cr097 = DuckDBClient.of()` is a fresh empty client — it does not queue behind the observational parquet queries that share `db_overlay`. (Main notebook had a similar fix via the per-section split in `cc0da9a`.)
+  2. The query starts immediately on page load (no section gate) — user sees the map ~15 s after page load rather than ~15 s after first scroll to the section.
+
+- **the real fix:** U-5 (`[[CR-058]]` Option 3) — per-iso3 partitioning of the projections parquet. Once done, a single-country query reads ~2 MB instead of ~80 MB. That fix lives in the `hazards_prototype` pipeline.
+
+- **interim improvement possible in sandbox:** Convert `iso3 IN (${iso3In})` to `iso3 = '${iso3List[0]}'` for single-country scope (saves ~5 s when stats are populated after a future re-bake). Not worth doing until the canonical parquets are rebaked with stats (U-5 / producer-side pipeline dispatch).
+
+- **STATUS (2026-06-01):** Diagnosed. No sandbox change needed until U-5 lands. Update CR-058 with this finding.
+
+---
+
 ## Proposed PR groupings
 
 Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.

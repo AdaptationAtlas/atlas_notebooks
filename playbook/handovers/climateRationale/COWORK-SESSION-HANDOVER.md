@@ -134,7 +134,60 @@ changes in VS Code's Source Control panel.
 
 ---
 
-## Current state (2026-05-28, end of session 18 — cross-hazard threshold fix + Future Projections baseline marker + Hazard Exposure Advanced controls + dynamic caption + FR translation pass)
+## Current state (2026-06-01, end of sessions 19–20 — sandbox P1–P6 + CR-097 build + climate/UX review + playbook update)
+
+### Where the branch is
+
+- `dev/climateRationale` — local has 2 uncommitted files: `notebooks/sandbox/obs_month_overlay.qmd` (built during session 19) and `notebooks/climateRationale/notebook.qmd` (trivial whitespace revert). Latest commit: `5447340` (fix sandbox P6 legend direction labels + P5 baseline bug + P6 projection + 2020s decade range). Pipeline status unchanged from session 18.
+
+### What's landed this session (sessions 19–20)
+
+**Sandbox — full P1–P6 + CR-097 build (`notebooks/sandbox/obs_month_overlay.qmd`, ~2270 lines):**
+
+| Section | What it is | Key implementation notes |
+|---|---|---|
+| P1 | Hawkins-style monthly year overlay | Plot.line, Turbo/Cividis palette, decade mean dashed lines, season highlight, stats block |
+| P2 | 2D climate spiral (NASA/Hawkins-correct) | radius=anomaly, colour=anomaly, reference rings (−1/0/+1/+1.5/+2°C), PTOT normalised to σ |
+| P3 | Ridge plot by decade | Epanechnikov KDE, season filter, dynamic x-domain from p02–p98 percentiles |
+| P4 | Polar heatmap (month wedges × year rings) | D3 arc generator, season opacity dimming, month-peripheral stats labels |
+| P5 | Monthly climatology heatmap + stats table | Plot.cell year×month, threshold dots (≥+1/+1.5°C), per-variable stats with min/max/σ |
+| CR-097 | Warming threshold maps (CMIP6) | 4-parquet UNION ALL, threshold × SSP facet grid, popup admin1 multi-select, admin0/1 toggle |
+| P6 | Observed decade comparison maps | adm1_obs.parquet, Theil-Sen+MK+TFPW full-record trend, variability trend, significance toggles |
+
+**Bug fixes committed in `5447340` / subsequent commits:**
+- P5 heatmap baseline: `[1981,2020]` → `[1991,2020]` (was using 10 extra years)
+- P6 `proj0.fitSize` uses fixed `[200,170]` instead of `[facetW-8, facetH-8]` — maps were left-aligned in facets
+- P6 2020s decade range upper bound: `2099` → `2029`
+- P6 grid legend direction labels: "← drier/cooler | wetter/warmer →" + variability "← stable | volatile →"
+
+**Playbook updates:**
+- ISSUES.md: added CR-099 through CR-108 (sandbox bugs, climate/UX review, methods caveats, section descriptions + citations, controls integration, performance analysis)
+- COWORK-SESSION-HANDOVER.md: this block
+
+### Remaining sandbox bugs (tracked as CRs)
+
+| CR | Bug | Where |
+|---|---|---|
+| CR-099 | CR-097 table mode: `aggData`/`byScenario`/`joinKey` undefined at top of branch | obs_month_overlay.qmd |
+| CR-101 | P5 PTOT annual row: mean instead of sum | obs_month_overlay.qmd |
+| CR-102 | P4 polar legend: no direction labels | obs_month_overlay.qmd |
+| CR-103 | P1/P2/P3/P4 country lists: 9 hardcoded vs full 30 | obs_month_overlay.qmd |
+
+### Deferred to next session
+
+1. Fix CR-099 / CR-101 / CR-102 / CR-103 in sandbox.
+2. Pete review of CR-105 section descriptions + citations draft — approve or edit EN before FR translation.
+3. CR-106 / CR-107 main-notebook integration (popup multi-select + regional scope) — DO NOT touch `notebook.qmd` until sandbox sign-off.
+4. CR-068 STAGE C launch on CGlabs (still not launched as of 2026-05-29; Stage F complete).
+5. Sub-ensemble pipeline — INCOMPLETE model investigation still blocking.
+
+### Switch model back to "high" effort (Pete reminder)
+
+Pete: you set the model to "very high effort" at the start of session 19. Remember to switch back.
+
+---
+
+## Old current state (2026-05-28, end of session 18 — cross-hazard threshold fix + Future Projections baseline marker + Hazard Exposure Advanced controls + dynamic caption + FR translation pass)
 
 ### Where the branch is
 
