@@ -22,32 +22,66 @@ wiring into the production selector.
 ## Controls
 
 ```{ojs}
-viewof sandbox_iso3 = Inputs.select(
-  ["AGO", "KEN", "GHA", "ETH", "ZAF", "NGA", "TZA", "MOZ", "ZMB"],
-  { label: "Country", value: "AGO" }
-)
+// P1 controls — flex grid, 3 per row.
+viewof p1_controls = {
+  const _iso3    = Inputs.select(["AGO","KEN","GHA","ETH","ZAF","NGA","TZA","MOZ","ZMB"],
+                     { label: "Country", value: "AGO" });
+  const _var     = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
+                     { label: "Variable", value: "TAVG" });
+  const _base    = Inputs.select(["1991-2020","1995-2014"],
+                     { label: "Baseline period", value: "1991-2020",
+                       format: v => v === "1991-2020" ? "1991–2020 (WMO)" : "1995–2014 (Atlas CMIP6)" });
+  const _anomaly = Inputs.toggle({ label: "Show as anomaly", value: true });
+  const _season  = Inputs.select(["All months","MAM","OND","JJA","DJF"],
+                     { label: "Season highlight", value: "All months" });
+  const _decade  = Inputs.checkbox(["1980s","1990s","2000s","2010s","2020s"],
+                     { label: "Highlight decades + mean lines" });
+
+  const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
+    <div style="min-width:160px;flex:1 1 160px;">${_iso3}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_var}</div>
+    <div style="min-width:220px;flex:1 1 220px;">${_base}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_season}</div>
+    <div style="min-width:260px;flex:1 1 260px;">${_decade}</div>
+  </div>`;
+  Object.defineProperty(form, "value", {
+    get: () => ({
+      iso3: _iso3.value, variable: _var.value, baseline: _base.value,
+      anomaly: _anomaly.value, season: _season.value, decade: _decade.value,
+    }),
+  });
+  return form;
+}
 ```
 
 ```{ojs}
-viewof sandbox_variable = Inputs.select(
-  ["TAVG", "TMAX", "TMIN", "PTOT"],
-  { label: "Variable", value: "TAVG" }
-)
+// Accessor aliases — downstream cells unchanged.
+sandbox_iso3     = p1_controls.iso3
+sandbox_variable = p1_controls.variable
+sandbox_baseline = p1_controls.baseline
+sandbox_anomaly  = p1_controls.anomaly
+p1_season        = p1_controls.season
+p1_decade        = p1_controls.decade
 ```
 
 ```{ojs}
-viewof sandbox_baseline = Inputs.select(
-  ["1991-2020", "1995-2014"],
-  {
-    label: "Baseline period",
-    value: "1991-2020",
-    format: v => v === "1991-2020" ? "1991–2020 (WMO standard)" : "1995–2014 (Atlas CMIP6 window)",
-  }
-)
+viewof cbMode = Inputs.toggle({ label: "Colour-blind friendly palette (Cividis / Okabe-Ito)", value: false })
 ```
 
 ```{ojs}
-viewof sandbox_anomaly = Inputs.toggle({ label: "Show as anomaly vs baseline", value: true })
+// Okabe-Ito — gold standard CB-safe categorical palette.
+okabeIto = ["#E69F00","#56B4E9","#009E73","#F0E442","#0072B2","#D55E00","#CC79A7","#000000"]
+```
+
+```{ojs}
+// Lookup: season label → month numbers
+seasonMonths = ({
+  "MAM": [3, 4, 5],
+  "OND": [10, 11, 12],
+  "JJA": [6, 7, 8],
+  "DJF": [12, 1, 2],
+})
 ```
 
 ---
@@ -122,73 +156,2115 @@ overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) 
 ```{ojs}
 {
   const [yearMin, yearMax] = [overlay_years[0], overlay_years[overlay_years.length - 1]];
-  const yColour = year =>
-    d3.interpolateTurbo((year - yearMin) / Math.max(yearMax - yearMin, 1));
+  const interp  = cbMode ? d3.interpolateCividis : d3.interpolateTurbo;
+  const yColour = year => interp((year - yearMin) / Math.max(yearMax - yearMin, 1));
+
+  // Decade highlight — checkbox returns array; empty = show all
+  const p1selDecs = p1_decade;  // array e.g. ["1980s","2020s"]
+  const p1inDec   = y => p1selDecs.length === 0
+    ? true
+    : p1selDecs.some(d => { const lo = parseInt(d); return y >= lo && y < lo + 10; });
+
+  // Fixed CB-safe colours per decade (Okabe-Ito order)
+  const decadeColors = {
+    "1980s": "#0072B2", "1990s": "#009E73",
+    "2000s": "#E69F00", "2010s": "#CC79A7", "2020s": "#D55E00",
+  };
 
   const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const countryNames = { AGO:"Angola", KEN:"Kenya", GHA:"Ghana", ETH:"Ethiopia",
+    ZAF:"South Africa", NGA:"Nigeria", TZA:"Tanzania", MOZ:"Mozambique", ZMB:"Zambia" };
+  const varNames = { TAVG:"Average temperature", TMAX:"Max. temperature",
+    TMIN:"Min. temperature", PTOT:"Total precipitation" };
 
   const baselinePeriodLabel = sandbox_baseline.replace("-", "–");
-
   const yLabel = sandbox_anomaly
     ? (sandbox_variable === "PTOT" ? "mm anomaly" : "°C anomaly")
-    + ` vs ${baselinePeriodLabel} baseline`
+      + ` vs ${baselinePeriodLabel}`
     : (sandbox_variable === "PTOT" ? "mm" : "°C");
 
+  // X domain: truncate to season months when active; full range otherwise.
+  const activeMos   = p1_season !== "All months" ? (seasonMonths[p1_season] ?? []) : null;
+  const sortedMos   = activeMos ? [...activeMos].sort((a, b) => a - b) : null;
+  const xDomain     = sortedMos
+    ? [sortedMos[0] - 0.6, sortedMos[sortedMos.length - 1] + 0.6]
+    : [0.5, 12.5];
+  const xTicks      = sortedMos ?? [1,2,3,4,5,6,7,8,9,10,11,12];
+
+  // Decade mean lines — driven by checkbox selection.
+  const decMean = (lo, hi) => {
+    const by = d3.group(overlay_rows.filter(d => d.year >= lo && d.year <= hi), d => d.month);
+    return [1,2,3,4,5,6,7,8,9,10,11,12].map(m => {
+      const vals = (by.get(m) ?? []).map(d => d.value_plot).filter(v => v != null);
+      return { month: m, value_plot: d3.mean(vals), std: d3.deviation(vals) ?? 0 };
+    }).filter(d => d.value_plot != null);
+  };
+
+  // For each selected decade, compute mean rows + summary stats.
+  const activeDecs = p1selDecs.length > 0 ? p1selDecs
+    : [];  // no checkboxes = no mean lines
+  const decadeData = activeDecs.map(dec => {
+    const lo = parseInt(dec);
+    const hi = Math.min(lo + 9, yearMax);
+    const meanRows = decMean(lo, hi);
+    const annMean  = d3.mean(meanRows, d => d.value_plot);
+    const annStd   = d3.mean(meanRows, d => d.std);
+    const unit = sandbox_variable === "PTOT" ? "mm" : "°C";
+    const label = `${dec}: ${annMean != null ? annMean.toFixed(2) : "–"}${unit} ±${annStd != null ? annStd.toFixed(2) : "–"}`;
+    return { dec, lo, hi, meanRows, annMean, annStd, label, col: decadeColors[dec] ?? "#888" };
+  });
+
+  // Data augmented with yearStr to prevent comma-formatted tooltip year.
+  const rows = overlay_rows.map(d => ({ ...d, yearStr: String(d.year) }));
+
   const chart = Plot.plot({
-    title: `${sandbox_iso3} — ${sandbox_variable} by month, ${yearMin}–${yearMax}`,
-    width: 860,
+    title: `${countryNames[sandbox_iso3] ?? sandbox_iso3} — ${varNames[sandbox_variable] ?? sandbox_variable}, ${yearMin}–${yearMax}`,
+    width: width,
     height: 340,
     marginLeft: 70,
     marginBottom: 44,
     marginTop: 36,
+    marginRight: 20,
     x: {
       label: null,
-      domain: [0.5, 12.5],
-      ticks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      domain: xDomain,
+      ticks: xTicks,
       tickFormat: mo => monthNames[mo - 1],
     },
     y: { label: yLabel, grid: true, nice: true },
     marks: [
-      // Zero reference (only meaningful in anomaly mode).
+      // Season highlight band — soft blue, not yellow.
+      ...(activeMos ? activeMos.map(mo =>
+        Plot.rect([{}], { x1: mo - 0.45, x2: mo + 0.45, y1: -Infinity, y2: Infinity,
+          fill: "#ddeeff", fillOpacity: 0.55 })
+      ) : []),
+      // Zero reference.
       sandbox_anomaly
-        ? Plot.ruleY([0], { stroke: "#4682b4", strokeDasharray: "3 2", strokeOpacity: 0.65 })
+        ? Plot.ruleY([0], { stroke: "#4682b4", strokeDasharray: "3 2", strokeOpacity: 0.55 })
         : null,
-      // All years except the most recent — colour-coded by year.
-      Plot.line(overlay_rows.filter(d => d.year !== yearMax), {
-        x: "month",
-        y: "value_plot",
-        stroke: d => yColour(d.year),
+      // All years except most recent.
+      Plot.line(rows.filter(d => d.year !== yearMax), {
+        x: "month", y: "value_plot",
+        stroke: d => p1inDec(d.year) ? yColour(d.year) : (cbMode ? "#888" : "#bbb"),
         z: "year",
-        strokeWidth: 1,
-        strokeOpacity: 0.45,
+        strokeWidth: d => p1inDec(d.year) ? 1.2 : 0.5,
+        strokeOpacity: d => p1inDec(d.year) ? (activeMos ? 0.35 : 0.5) : 0.15,
+        channels: { year: "yearStr" },
         tip: true,
       }),
-      // Most recent year — bold black on top.
-      Plot.line(overlay_rows.filter(d => d.year === yearMax), {
-        x: "month",
-        y: "value_plot",
-        stroke: "#111",
-        z: "year",
-        strokeWidth: 2.5,
-        tip: true,
+      // Most recent year — amber/gold, prominent.
+      Plot.line(rows.filter(d => d.year === yearMax), {
+        x: "month", y: "value_plot",
+        stroke: "#e8a000", z: "year", strokeWidth: 3,
+        channels: { year: "yearStr" }, tip: true,
       }),
+      // Season dots — coloured by year, sit on top of dimmed lines.
+      ...(activeMos ? [
+        Plot.dot(rows.filter(d => activeMos.includes(d.month)), {
+          x: "month", y: "value_plot",
+          fill: d => p1inDec(d.year)
+            ? (d.year === yearMax ? "#e8a000" : yColour(d.year))
+            : (cbMode ? "#888" : "#bbb"),
+          r: d => p1inDec(d.year) ? 3.5 : 2,
+          fillOpacity: d => p1inDec(d.year) ? 0.85 : 0.2,
+          channels: { year: "yearStr" }, tip: true,
+        })
+      ] : []),
+      // Decade mean lines + right-side labels — one per selected decade.
+      ...decadeData.map(({ meanRows, col }) =>
+        Plot.line(meanRows, {
+          x: "month", y: "value_plot",
+          stroke: col, strokeWidth: 2.2, strokeDasharray: "5 3",
+        })
+      ),
     ].filter(m => m !== null),
   });
 
-  // Inline gradient legend.
-  const stops = [0, 0.25, 0.5, 0.75, 1].map(t => d3.interpolateTurbo(t)).join(",");
-  const legend = htl.html`<div style="display:flex;align-items:center;gap:10px;
-      font-size:0.86em;color:#555;margin:6px 0 2px;">
-    <span style="display:inline-block;width:140px;height:10px;
+  // Legend.
+  const stops = [0, 0.25, 0.5, 0.75, 1].map(t => interp(t)).join(",");
+  const unit = sandbox_variable === "PTOT" ? "mm" : "°C";
+
+  // Stats block below chart — one coloured line per selected decade.
+  const statsBlock = decadeData.length > 0
+    ? htl.html`<div style="display:flex;gap:18px;flex-wrap:wrap;
+        font-size:0.83em;margin:4px 0 2px 70px;color:#555;">
+        <strong style="align-self:center;">Decade means:</strong>
+        ${decadeData.map(({ dec, col, annMean, annStd }) =>
+          htl.html`<span style="color:${col};font-weight:600;">
+            ${dec} ${annMean != null ? annMean.toFixed(2) : "–"}${unit} ±${annStd != null ? annStd.toFixed(2) : "–"}
+          </span>`
+        )}
+      </div>`
+    : null;
+
+  const decLegendItems = decadeData.map(({ dec, col }) =>
+    htl.html`<span style="display:flex;align-items:center;gap:4px;">
+      <span style="display:inline-block;width:20px;height:2px;
+        background:${col};border-top:2.5px dashed ${col};"></span>
+      <span>${dec} mean</span>
+    </span>`
+  );
+
+  const legend = htl.html`<div style="display:flex;align-items:center;gap:12px;
+      flex-wrap:wrap;font-size:0.86em;color:#555;margin:4px 0 2px;">
+    <span style="display:inline-block;width:120px;height:10px;
       background:linear-gradient(to right,${stops});border-radius:2px;
       border:1px solid #ddd;"></span>
-    <span>${yearMin} (oldest) → ${yearMax - 1} (previous years)</span>
+    <span>Year colour (older → more recent)</span>
     <span style="display:inline-block;width:24px;height:3px;
-      background:#111;vertical-align:middle;"></span>
-    <span>${yearMax} (most recent, bold)</span>
+      background:#e8a000;vertical-align:middle;border-radius:2px;"></span>
+    <span>Most recent year (${yearMax})</span>
+    ${decLegendItems}
   </div>`;
 
-  return htl.html`<div>${chart}${legend}</div>`;
+  return htl.html`<div>${chart}${statsBlock ?? ""}${legend}</div>`;
+}
+```
+
+---
+
+## P3 — Ridge plot of monthly anomaly distribution by decade
+
+Overlapping KDE curves per decade. Older decades at bottom, newest at top. Turbo palette
+(vivid throughout — no white centre). Own controls; PTOT included (wider x-domain makes
+seasonal shift visible even if noisier than temperature).
+
+```{ojs}
+// P3 controls — flex grid, 3 per row.
+viewof p3_controls = {
+  const _iso3     = Inputs.select(["AGO","KEN","GHA","ETH","ZAF","NGA","TZA","MOZ","ZMB"],
+                      { label: "Country", value: "AGO" });
+  const _variable = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
+                      { label: "Variable", value: "TAVG" });
+  const _baseline = Inputs.select(["1991-2020","1995-2014"],
+                      { label: "Baseline", value: "1991-2020",
+                        format: v => v === "1991-2020" ? "1991–2020 (WMO)" : "1995–2014 (Atlas)" });
+  const _season   = Inputs.select(["All months","MAM","OND","JJA","DJF"],
+                      { label: "Season", value: "All months" });
+  const _anomaly  = Inputs.toggle({ label: "Show as anomaly", value: true });
+
+  const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
+    <div style="min-width:160px;flex:1 1 160px;">${_iso3}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_variable}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_baseline}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_season}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
+  </div>`;
+
+  Object.defineProperty(form, "value", {
+    get: () => ({
+      iso3: _iso3.value, variable: _variable.value,
+      baseline: _baseline.value, season: _season.value, anomaly: _anomaly.value,
+    }),
+  });
+  return form;
+}
+```
+
+```{ojs}
+// Accessor aliases — downstream cells keep original names unchanged.
+p3_iso3     = p3_controls.iso3
+p3_variable = p3_controls.variable
+p3_baseline = p3_controls.baseline
+p3_season   = p3_controls.season
+p3_anomaly  = p3_controls.anomaly
+```
+
+```{ojs}
+p3_raw = {
+  const rows = await db_overlay.query(`
+    SELECT year, month, value_mean
+    FROM read_parquet('${monthlyURL}')
+    WHERE iso3 = '${p3_iso3}'
+      AND variable = '${p3_variable}'
+      AND value_mean IS NOT NULL
+    ORDER BY year, month
+  `);
+  return Array.from(rows);
+}
+```
+
+```{ojs}
+p3_base = {
+  const [lo, hi] = p3_baseline === "1991-2020" ? [1991, 2020] : [1995, 2014];
+  const byMonth = d3.group(
+    p3_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi),
+    d => Number(d.month)
+  );
+  const m = new Map();
+  for (const [mo, rows] of byMonth) m.set(mo, d3.mean(rows, d => d.value_mean));
+  return m;
+}
+```
+
+```{ojs}
+// Named cell so heatmap can consume it directly.
+p3_rows = p3_raw.map(d => {
+  const year    = Number(d.year);
+  const month   = Number(d.month);
+  const anomaly = d.value_mean - (p3_base.get(month) ?? 0);
+  return { year, month, value_mean: d.value_mean, anomaly,
+           value_plot: p3_anomaly ? anomaly : d.value_mean };
+})
+```
+
+```{ojs}
+// Epanechnikov KDE per decade. Always uses anomaly.
+p3_kde = {
+  const isPTOT   = p3_variable === "PTOT";
+  const bw       = isPTOT ? 10 : 0.5;
+  const activeMos = (p3_season !== "All months") ? (seasonMonths[p3_season] ?? null) : null;
+  const augmented = p3_rows.filter(d => activeMos === null || activeMos.includes(d.month));
+
+  // Compute x range from data AFTER augmented is defined (avoids TDZ).
+  const sortedAnom = augmented.map(d => d.value_plot).sort((a, b) => a - b);
+  const p02 = sortedAnom[Math.max(0, Math.floor(sortedAnom.length * 0.02))] ?? -2;
+  const p98 = sortedAnom[Math.min(sortedAnom.length - 1, Math.floor(sortedAnom.length * 0.98))] ?? 2;
+  const xPad = (p98 - p02) * 0.15;
+  const xRange = [Math.floor((p02 - xPad) * 2) / 2, Math.ceil((p98 + xPad) * 2) / 2];
+  const step     = isPTOT ? 1 : 0.05;
+  const kernel   = bw => x => Math.abs(x /= bw) <= 1 ? 0.75 * (1 - x * x) / bw : 0;
+  const k        = kernel(bw);
+  const thresh   = d3.range(xRange[0], xRange[1] + step * 0.5, step);
+
+  const byDecade = d3.group(augmented, d => Math.floor(d.year / 10) * 10);
+  const rows = [];
+  for (const [dec, drows] of byDecade) {
+    const values = drows.map(d => d.value_plot);
+    const label  = `${dec}s`;
+    const kde    = thresh.map(x => ({
+      x, decade: label, dec,
+      density: d3.mean(values, v => k(x - v)),
+    }));
+    const maxD = d3.max(kde, d => d.density);
+    kde.forEach(d => { d.density_norm = maxD > 0 ? d.density / maxD : 0; });
+    rows.push(...kde);
+  }
+  return rows;
+}
+```
+
+```{ojs}
+p3_decades = [...new Set(p3_kde.map(d => d.decade))].sort()
+```
+
+```{ojs}
+{
+  const spacing   = 0.78;  // < 1 → ridges overlap
+  const decadeIdx = Object.fromEntries(p3_decades.map((d, i) => [d, i]));
+  // Palette: Turbo (default, pretty) or Okabe-Ito sequential (CB-safe).
+  const nDec = Math.max(p3_decades.length - 1, 1);
+  const turboFor = d => cbMode
+    ? okabeIto[decadeIdx[d.decade] % okabeIto.length]
+    : d3.interpolateTurbo(decadeIdx[d.decade] / nDec);
+
+  const isPTOT   = p3_variable === "PTOT";
+  const xLabel   = p3_anomaly ? (isPTOT ? "mm anomaly" : "°C anomaly") : (isPTOT ? "mm" : "°C");
+  // Compute x domain from actual data range (p02–p98 + padding).
+  const _aSorted = p3_rows.map(d => d.anomaly).sort((a, b) => a - b);
+  const _p02 = _aSorted[Math.max(0, Math.floor(_aSorted.length * 0.02))] ?? -2;
+  const _p98 = _aSorted[Math.min(_aSorted.length - 1, Math.floor(_aSorted.length * 0.98))] ?? 2;
+  const _pad = (_p98 - _p02) * 0.15;
+  const xDomain = [Math.floor((_p02 - _pad) * 2) / 2, Math.ceil((_p98 + _pad) * 2) / 2];
+
+  const ridgeData = p3_kde.map(d => ({
+    ...d,
+    y1: decadeIdx[d.decade] * spacing,
+    y2: decadeIdx[d.decade] * spacing + d.density_norm,
+  }));
+
+  const labelData = p3_decades.map(d => ({
+    decade: d,
+    y: decadeIdx[d] * spacing + 0.05,
+  }));
+
+  return Plot.plot({
+    title: `${p3_iso3} — ${p3_variable} anomaly distribution by decade (vs ${p3_baseline.replace("-","–")})`,
+    width: width,
+    height: 320,
+    marginLeft: 60,
+    marginBottom: 44,
+    marginRight: 60,
+    marginTop: 36,
+    x: { label: xLabel, grid: true, domain: xDomain },
+    y: { axis: null, domain: [-0.1, p3_decades.length * spacing] },
+    marks: [
+      Plot.ruleY(p3_decades.map((d, i) => ({ y: i * spacing })), {
+        y: "y", stroke: "#ddd", strokeWidth: 0.8,
+      }),
+      Plot.areaY(ridgeData, {
+        x: "x", y1: "y1", y2: "y2",
+        fill: turboFor, fillOpacity: 0.6, z: "decade",
+      }),
+      Plot.line(ridgeData, {
+        x: "x", y: "y2",
+        stroke: turboFor, strokeWidth: 1.5, z: "decade",
+      }),
+      Plot.ruleX([0], { stroke: "#444", strokeDasharray: "3 2", strokeOpacity: 0.6 }),
+      Plot.text(labelData, {
+        x: xDomain[1] * 0.95, y: "y",
+        text: "decade", fontSize: 11,
+        fill: d => cbMode
+          ? okabeIto[decadeIdx[d.decade] % okabeIto.length]
+          : d3.interpolateTurbo(decadeIdx[d.decade] / nDec),
+        fontWeight: "bold", textAnchor: "end",
+      }),
+    ],
+  });
+}
+```
+
+```{ojs}
+// P3 legend — immediately after ridge plot, before heatmap
+htl.html`<div style="display:flex;gap:12px;flex-wrap:wrap;
+    font-size:0.84em;color:#555;margin:4px 0 6px;">
+  ${p3_decades.map((d, i) => {
+    const col = cbMode
+      ? okabeIto[i % okabeIto.length]
+      : d3.interpolateTurbo(i / Math.max(p3_decades.length - 1, 1));
+    return htl.html`<span style="display:flex;align-items:center;gap:5px;">
+      <span style="display:inline-block;width:14px;height:14px;
+        background:${col};opacity:0.7;border-radius:2px;"></span>
+      <span>${d}</span>
+    </span>`;
+  })}
+  <span style="color:#888;font-style:italic;">
+    x-axis: monthly ${p3_variable === "PTOT" ? "precipitation" : "temperature"} anomaly
+    vs ${p3_baseline.replace("-","–")} baseline
+    ${p3_season !== "All months" ? `(${p3_season} only)` : "(all months)"}
+  </span>
+</div>`
+```
+
+---
+
+## P2 — Climate spiral (flat 2D)
+
+Faithful to the NASA/Hawkins spiral: **radius = anomaly** (centre = 0°C baseline, outward = warmer),
+**colour = anomaly** (blue = below baseline, red = above). All years drawn simultaneously — old cool
+years cluster near the baseline ring, recent warm years push outward. Jan at top, clockwise.
+
+```{ojs}
+// P2 controls — flex grid, 3 per row. Anomaly is always ON for the spiral (radius = anomaly).
+viewof p2_controls = {
+  const _iso3    = Inputs.select(["AGO","KEN","GHA","ETH","ZAF","NGA","TZA","MOZ","ZMB"],
+                     { label: "Country", value: "AGO" });
+  const _var     = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
+                     { label: "Variable", value: "TAVG" });
+  const _base    = Inputs.select(["1991-2020","1995-2014"],
+                     { label: "Baseline", value: "1991-2020",
+                       format: v => v === "1991-2020" ? "1991–2020 (WMO)" : "1995–2014 (Atlas)" });
+  const _dark    = Inputs.toggle({ label: "Dark background", value: true });
+  const _palette = Inputs.select(
+                     ["RdBu (classic)","PuOr (CB-safe)","Spectral","Inferno",
+                      "BrBG (drought/wet)","PRGn (CB-safe 2)","RdYlBu","Coolwarm"],
+                     { label: "Palette", value: "RdBu (classic)" });
+  const _decade  = Inputs.select(["All decades","1980s","1990s","2000s","2010s","2020s"],
+                     { label: "Highlight decade", value: "All decades" });
+
+  const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
+    <div style="min-width:160px;flex:1 1 160px;">${_iso3}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_var}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_base}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_dark}</div>
+    <div style="min-width:220px;flex:1 1 220px;">${_palette}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_decade}</div>
+  </div>`;
+  Object.defineProperty(form, "value", {
+    get: () => ({
+      iso3: _iso3.value, variable: _var.value, baseline: _base.value,
+      dark: _dark.value, palette: _palette.value, decade: _decade.value,
+    }),
+  });
+  return form;
+}
+```
+
+```{ojs}
+// Accessor aliases — downstream cells unchanged.
+p2_iso3     = p2_controls.iso3
+p2_variable = p2_controls.variable
+p2_baseline = p2_controls.baseline
+p2_dark     = p2_controls.dark
+p2_palette  = p2_controls.palette
+p2_decade   = p2_controls.decade
+```
+
+```{ojs}
+p2_raw = {
+  const rows = await db_overlay.query(`
+    SELECT year, month, value_mean
+    FROM read_parquet('${monthlyURL}')
+    WHERE iso3 = '${p2_iso3}'
+      AND variable = '${p2_variable}'
+      AND value_mean IS NOT NULL
+    ORDER BY year, month
+  `);
+  return Array.from(rows);
+}
+```
+
+```{ojs}
+p2_base = {
+  const [lo, hi] = p2_baseline === "1991-2020" ? [1991, 2020] : [1995, 2014];
+  const byMonth = d3.group(
+    p2_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi),
+    d => Number(d.month)
+  );
+  const m = new Map();
+  for (const [mo, rows] of byMonth) m.set(mo, d3.mean(rows, d => d.value_mean));
+  return m;
+}
+```
+
+```{ojs}
+p2_rows = p2_raw.map(d => {
+  const year  = Number(d.year);
+  const month = Number(d.month);
+  return { year, month, value_mean: d.value_mean,
+           anomaly: d.value_mean - (p2_base.get(month) ?? 0) };
+})
+```
+
+```{ojs}
+p2_years = [...new Set(p2_rows.map(d => d.year))].sort((a, b) => a - b)
+```
+
+
+```{ojs}
+{
+  const W = 600, H = 600;
+  const cx = W / 2, cy = H / 2;
+  const rBase  = 140;  // radius for 0°C anomaly (baseline ring)
+  // Scale: 70px per °C (or per σ for PTOT)
+  const isTavg = ["TAVG","TMAX","TMIN"].includes(p2_variable);
+  const anomalyStd = d3.deviation(p2_rows, d => d.anomaly) ?? 1;
+  const aScale = isTavg ? 70 : (70 / anomalyStd);
+
+  // Palette — reversed so warm anomaly = warm colour.
+  const cFactor = 0.45;
+  const paletteFn = {
+    "RdBu (classic)":    t => d3.interpolateRdBu(t),
+    "PuOr (CB-safe)":    t => d3.interpolatePuOr(t),
+    "Spectral":          t => d3.interpolateSpectral(t),
+    "Inferno":           t => d3.interpolateInferno(1 - t),
+    "BrBG (drought/wet)":t => d3.interpolateBrBG(t),
+    "PRGn (CB-safe 2)":  t => d3.interpolatePRGn(t),
+    "RdYlBu":            t => d3.interpolateRdYlBu(t),
+    "Coolwarm":          t => d3.scaleSequential([0,1])
+                                .interpolator(d3.interpolateRgb("#3b4cc0","#b40426"))(1-t),
+  }[p2_palette] ?? (t => d3.interpolateRdBu(t));
+  const anomalyColour = v => paletteFn(Math.max(0, Math.min(1, 0.5 - v * cFactor)));
+
+  // Baseline ring: uses palette midpoint colour but forced to minimum contrast.
+  // Bright green fallback matches the NASA Hawkins convention.
+  const baselineMid = paletteFn(0.5);
+  // Always override to a vivid green — midpoint of most palettes is white/yellow,
+  // which blends with year rings. Green is the established Hawkins convention.
+  const baselineRingCol = "#00cc55";
+
+  // Decade highlight
+  const selDec = p2_decade === "All decades" ? null : parseInt(p2_decade);
+  const inDecade = y => selDec === null || (y >= selDec && y < selDec + 10);
+
+  const years  = p2_years;
+  const yMin   = years[0], yMax = years[years.length - 1];
+
+  // Jan at top (−π/2), clockwise
+  const θ = mo => (mo - 1) / 12 * 2 * Math.PI - Math.PI / 2;
+  const rFor = anomaly => Math.max(8, rBase + anomaly * aScale);
+
+  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const countryNames = { AGO:"Angola", KEN:"Kenya", GHA:"Ghana", ETH:"Ethiopia",
+    ZAF:"South Africa", NGA:"Nigeria", TZA:"Tanzania", MOZ:"Mozambique", ZMB:"Zambia" };
+  const varNames = { TAVG:"Avg. temp.", TMAX:"Max. temp.", TMIN:"Min. temp.", PTOT:"Precip." };
+
+  const byYear = d3.group(p2_rows, d => d.year);
+
+  const bg       = p2_dark ? "#111" : "#fff";
+  const txtCol   = p2_dark ? "#ccc" : "#333";
+  const spokeCol = p2_dark ? "#2a2a2a" : "#e0e0e0";
+
+  const svg = d3.create("svg")
+    .attr("viewBox", `0 0 ${W} ${H}`)
+    .attr("width", W).attr("height", H)
+    .style("background", bg)
+    .style("font-family", "sans-serif");
+
+  // Reference rings drawn LAST so they sit on top of data rings.
+  // Stored here, appended after year loop.
+  const refs = isTavg
+    ? [{ v: -1,   col: "#4393c3",    label: "−1°C" },
+       { v:  0,   col: baselineRingCol, label: "0°C" },
+       { v:  1,   col: "#f4a261",    label: "+1°C" },
+       { v:  1.5, col: "#e76f51",    label: "+1.5°C" },
+       { v:  2,   col: "#d62728",    label: "+2°C" }]
+    : [{ v: -anomalyStd,   col: "#4393c3",    label: "−1σ" },
+       { v:  0,            col: baselineRingCol, label: "0" },
+       { v:  anomalyStd,   col: "#f4a261",    label: "+1σ" },
+       { v:  2*anomalyStd, col: "#d62728",    label: "+2σ" }];
+
+  // Month spokes + labels (drawn first, behind everything).
+  const spokeR = rFor(isTavg ? 2.2 : 2.2 * anomalyStd) + 5;
+  for (let mo = 1; mo <= 12; mo++) {
+    const angle = θ(mo);
+    svg.append("line")
+      .attr("x1", cx + 5 * Math.cos(angle)).attr("y1", cy + 5 * Math.sin(angle))
+      .attr("x2", cx + spokeR * Math.cos(angle)).attr("y2", cy + spokeR * Math.sin(angle))
+      .attr("stroke", spokeCol).attr("stroke-width", 0.7);
+    const lr = spokeR + 16;
+    svg.append("text")
+      .attr("x", cx + lr * Math.cos(angle)).attr("y", cy + lr * Math.sin(angle))
+      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("font-size", 11).attr("fill", txtCol)
+      .text(monthNames[mo - 1]);
+  }
+
+  // Draw each year's ring — oldest first, newest on top.
+  for (const y of years) {
+    const rows = (byYear.get(y) ?? []).sort((a, b) => a.month - b.month);
+    if (rows.length < 2) continue;
+    const pts = rows.map(d => {
+      const v = d.anomaly;
+      const r = rFor(v);
+      return { x: cx + r * Math.cos(θ(d.month)), y: cy + r * Math.sin(θ(d.month)), a: v };
+    });
+    if (rows.length === 12) pts.push(pts[0]);
+    const isLatest   = y === yMax;
+    const highlighted = inDecade(y);
+    const midAnomaly  = d3.mean(rows, d => d.anomaly);
+    const greyCol     = p2_dark ? "#444" : "#bbb";
+
+    svg.append("path")
+      .attr("d", "M" + pts.map(p => p.x.toFixed(1) + "," + p.y.toFixed(1)).join("L"))
+      .attr("fill", "none")
+      .attr("stroke", isLatest ? "#e8a000" : (highlighted ? anomalyColour(midAnomaly) : greyCol))
+      .attr("stroke-width", highlighted ? (isLatest ? 2.5 : 1.1) : 0.5)
+      .attr("stroke-opacity", highlighted ? (isLatest ? 1 : 0.8) : 0.45);
+  }
+
+  // Reference rings drawn ON TOP of data rings — thicker, clearly visible.
+  for (const ref of refs) {
+    const r = rFor(ref.v);
+    if (r < 5 || r > W / 2 - 30) continue;
+    svg.append("circle")
+      .attr("cx", cx).attr("cy", cy).attr("r", r)
+      .attr("fill", "none").attr("stroke", ref.col)
+      .attr("stroke-width", ref.v === 0 ? 2.5 : 1.8)
+      .attr("stroke-dasharray", ref.v === 0 ? "none" : "6,4")
+      .attr("stroke-opacity", 0.9);
+    svg.append("text")
+      .attr("x", cx + 4).attr("y", cy - r - 3)
+      .attr("text-anchor", "middle").attr("font-size", 9)
+      .attr("fill", ref.col).attr("font-weight", "bold")
+      .text(ref.label);
+  }
+
+  // Year labels every 10 years — placed just inside the ring at the Jan spoke (top).
+  // Each decade offset slightly so labels don't stack.
+  for (const [idx, y] of years.filter(y => y % 10 === 0).entries()) {
+    const janRows = (byYear.get(y) ?? []).filter(d => d.month === 1);
+    if (!janRows.length) continue;
+    const r = rFor(janRows[0].anomaly);
+    // Alternate left/right of the Jan spoke to avoid overlap.
+    const dx = idx % 2 === 0 ? -18 : 18;
+    svg.append("text")
+      .attr("x", cx + dx)
+      .attr("y", cy - r - 2)
+      .attr("font-size", 8).attr("fill", p2_dark ? "#666" : "#aaa")
+      .attr("text-anchor", "middle").text(y);
+  }
+
+  // Invisible hover dots with <title> tooltips — one per (year, month) point.
+  for (const [y, yRows] of byYear) {
+    for (const d of yRows.sort((a, b) => a.month - b.month)) {
+      const v = d.anomaly;
+      const r = rFor(v);
+      const hx = cx + r * Math.cos(θ(d.month));
+      const hy = cy + r * Math.sin(θ(d.month));
+      const tip = svg.append("circle")
+        .attr("cx", hx).attr("cy", hy).attr("r", 6)
+        .attr("fill", "transparent").attr("stroke", "none")
+        .style("cursor", "crosshair");
+      tip.append("title")
+        .text(`${y} ${monthNames[d.month - 1]}: ${v > 0 ? "+" : ""}${v.toFixed(2)} ${isTavg ? "°C" : "mm"} anomaly`);
+    }
+  }
+
+  // Title
+  svg.append("text")
+    .attr("x", cx).attr("y", 16)
+    .attr("text-anchor", "middle").attr("font-size", 13).attr("font-weight", "bold")
+    .attr("fill", txtCol)
+    .text(`${countryNames[p2_iso3] ?? p2_iso3} — ${varNames[p2_variable] ?? p2_variable} anomaly`);
+
+  // Legend
+  // Reversed: left = cool end (t=1), right = warm end (t=0) — matches "Cooler → Warmer" label.
+  const gradStops = [1, 0.75, 0.5, 0.25, 0].map(t => paletteFn(t)).join(",");
+  const legendBg  = p2_dark ? "#1a1a1a" : "#f8f8f8";
+  const legendTxt = p2_dark ? "#ccc" : "#333";
+  const legend = htl.html`<div style="display:flex;flex-wrap:wrap;gap:16px;
+      align-items:center;padding:8px 12px;background:${legendBg};
+      border-radius:4px;margin-top:6px;font-size:0.82em;color:${legendTxt};">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span>Cooler ←</span>
+      <span style="display:inline-block;width:140px;height:10px;
+        background:linear-gradient(to right,${gradStops});
+        border-radius:2px;border:1px solid #4444;"></span>
+      <span>→ Warmer</span>
+      <span style="color:#999;font-size:0.9em;">(line colour = monthly anomaly vs ${p2_baseline.replace("-","–")} baseline)</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span style="display:inline-block;width:28px;height:3px;
+        background:#e8a000;border-radius:2px;"></span>
+      <span>Most recent year</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span style="display:inline-block;width:28px;height:2px;
+        background:${baselineRingCol};border-radius:2px;"></span>
+      <span>0°C baseline ring</span>
+    </div>
+  </div>`;
+
+  // Stats summary.
+  const unit2 = isTavg ? "°C" : "mm";
+  const allRows = [...byYear.values()].flat();
+  const warmest = allRows.reduce((a, b) => b.anomaly > a.anomaly ? b : a, allRows[0]);
+  const coolest = allRows.reduce((a, b) => b.anomaly < a.anomaly ? b : a, allRows[0]);
+  const latestRows = byYear.get(yMax) ?? [];
+  const latestMean = d3.mean(latestRows, d => d.anomaly);
+  const oldestRows = byYear.get(yMin) ?? [];
+  const oldestMean = d3.mean(oldestRows, d => d.anomaly);
+  const statsTxt = p2_dark ? "#aaa" : "#555";
+  const statsEl = htl.html`<div style="font-size:0.82em;color:${statsTxt};
+      padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
+      display:flex;gap:20px;flex-wrap:wrap;">
+    <span>🔴 Warmest: <strong>${warmest.year} ${monthNames[warmest.month-1]}</strong> (${warmest.anomaly > 0 ? "+" : ""}${warmest.anomaly.toFixed(2)}${unit2})</span>
+    <span>🔵 Coolest: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> (${coolest.anomaly.toFixed(2)}${unit2})</span>
+    <span>📅 ${yMin} mean: <strong>${oldestMean != null ? (oldestMean > 0 ? "+" : "") + oldestMean.toFixed(2) : "–"}${unit2}</strong></span>
+    <span>📅 ${yMax} mean: <strong>${latestMean != null ? (latestMean > 0 ? "+" : "") + latestMean.toFixed(2) : "–"}${unit2}</strong></span>
+  </div>`;
+
+  return htl.html`<div>${svg.node()}${statsEl}${legend}</div>`;
+}
+```
+
+---
+
+## P4 — Polar heatmap (monthly clock-face)
+
+12 month wedges around the clock (Jan at top, clockwise), years as concentric rings outward.
+Cell fill = value or anomaly. Warming visible as colour shift from inner (old) to outer (recent) rings.
+
+```{ojs}
+viewof p4_controls = {
+  const moNames = ["—","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const moFmt   = v => moNames[v] ?? "—";
+  const moOpts  = [0,1,2,3,4,5,6,7,8,9,10,11,12];
+
+  const _iso3     = Inputs.select(["AGO","KEN","GHA","ETH","ZAF","NGA","TZA","MOZ","ZMB"],
+                      { label: "Country", value: "AGO" });
+  const _variable = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
+                      { label: "Variable", value: "TAVG" });
+  const _baseline = Inputs.select(["1991-2020","1995-2014"],
+                      { label: "Baseline", value: "1991-2020",
+                        format: v => v === "1991-2020" ? "1991–2020 (WMO)" : "1995–2014 (Atlas)" });
+  const _anomaly  = Inputs.toggle({ label: "Show as anomaly", value: true });
+  const _dark     = Inputs.toggle({ label: "Dark background", value: false });
+  const _sStart   = Inputs.select(moOpts, { label: "Season start", value: 0, format: moFmt });
+  const _sEnd     = Inputs.select(moOpts, { label: "Season end",   value: 0, format: moFmt });
+
+  const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
+    <div style="min-width:160px;flex:1 1 160px;">${_iso3}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_variable}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_baseline}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_dark}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_sStart}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_sEnd}</div>
+  </div>`;
+  Object.defineProperty(form, "value", {
+    get: () => ({
+      iso3: _iso3.value, variable: _variable.value, baseline: _baseline.value,
+      anomaly: _anomaly.value, dark: _dark.value,
+      seasonStart: _sStart.value, seasonEnd: _sEnd.value,
+    }),
+  });
+  return form;
+}
+```
+
+```{ojs}
+p4_raw = {
+  const rows = await db_overlay.query(`
+    SELECT year, month, value_mean
+    FROM read_parquet('${monthlyURL}')
+    WHERE iso3 = '${p4_controls.iso3}'
+      AND variable = '${p4_controls.variable}'
+      AND value_mean IS NOT NULL
+    ORDER BY year, month
+  `);
+  return Array.from(rows);
+}
+```
+
+```{ojs}
+p4_base = {
+  const [lo, hi] = p4_controls.baseline === "1991-2020" ? [1991, 2020] : [1995, 2014];
+  const byMonth = d3.group(
+    p4_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi),
+    d => Number(d.month)
+  );
+  const m = new Map();
+  for (const [mo, rows] of byMonth) m.set(mo, d3.mean(rows, d => d.value_mean));
+  return m;
+}
+```
+
+```{ojs}
+p4_rows = p4_raw.map(d => {
+  const year  = Number(d.year);
+  const month = Number(d.month);
+  const anomaly = d.value_mean - (p4_base.get(month) ?? 0);
+  return { year, month, value_mean: d.value_mean, anomaly,
+           value_plot: p4_controls.anomaly ? anomaly : d.value_mean };
+})
+```
+
+```{ojs}
+p4_years = [...new Set(p4_rows.map(d => d.year))].sort((a, b) => a - b)
+```
+
+```{ojs}
+{
+  const W = 580, H = 580;
+  const cx = W / 2, cy = H / 2;
+  const rInner = 40;   // innermost year ring
+  const rOuter = 255;  // outermost year ring
+
+  const years  = p4_years;
+  const yMin   = years[0], yMax = years[years.length - 1];
+  const nYears = Math.max(yMax - yMin, 1);
+  const ringW  = (rOuter - rInner) / nYears;  // px per year
+
+  const isAnomaly = p4_controls.anomaly;
+  const isPTOT = p4_controls.variable === "PTOT";
+  const u = isPTOT ? "mm" : "°C";  // short unit (no "anomaly" suffix)
+
+  // Season highlight: 0 = all months.
+  const sS = p4_controls.seasonStart, sE = p4_controls.seasonEnd;
+  const hasSeason = sS > 0 && sE > 0;
+  const inSeason = mo => {
+    if (!hasSeason) return true;
+    if (sS <= sE) return mo >= sS && mo <= sE;
+    return mo >= sS || mo <= sE;  // cross-year wrap e.g. Nov→Feb
+  };
+
+  const vals = p4_rows.map(d => d.value_plot);
+  const vMin = d3.min(vals), vMax = d3.max(vals);
+
+  // Colour scale — diverging (anomaly) or sequential (absolute)
+  const colourFn = isAnomaly
+    ? (v => cbMode ? d3.interpolatePuOr(0.5 - v / (Math.max(Math.abs(vMin), vMax, 1) * 2.2))
+                   : d3.interpolateRdBu(0.5 - v / (Math.max(Math.abs(vMin), vMax, 1) * 2.2)))
+    : (v => cbMode ? d3.interpolatePlasma(0.1 + 0.8 * (v - vMin) / (vMax - vMin || 1))
+                   : d3.interpolateInferno(0.05 + 0.9 * (v - vMin) / (vMax - vMin || 1)));
+
+  // Month angle: Jan at top (−π/2), clockwise, each wedge = 2π/12
+  const wedge  = 2 * Math.PI / 12;
+  const θStart = mo => (mo - 1) * wedge - Math.PI / 2;
+  const θEnd   = mo => mo * wedge - Math.PI / 2;
+
+  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const countryNames = { AGO:"Angola", KEN:"Kenya", GHA:"Ghana", ETH:"Ethiopia",
+    ZAF:"South Africa", NGA:"Nigeria", TZA:"Tanzania", MOZ:"Mozambique", ZMB:"Zambia" };
+  const varNames = { TAVG:"Avg. temp.", TMAX:"Max. temp.", TMIN:"Min. temp.", PTOT:"Precip." };
+  const unit = isAnomaly ? (p4_controls.variable === "PTOT" ? "mm" : "°C") + " anomaly"
+                         : (p4_controls.variable === "PTOT" ? "mm" : "°C");
+
+  const bg     = p4_controls.dark ? "#111" : "#fff";
+  const txtCol = p4_controls.dark ? "#ccc" : "#333";
+  const arc    = d3.arc();
+
+  const svg = d3.create("svg")
+    .attr("viewBox", `0 0 ${W} ${H}`)
+    .attr("width", W).attr("height", H)
+    .style("background", bg).style("font-family", "sans-serif");
+
+  // Draw one arc cell per (year, month)
+  const byYear = d3.group(p4_rows, d => d.year);
+  for (const y of years) {
+    const yRows = (byYear.get(y) ?? []).sort((a, b) => a.month - b.month);
+    const rI = rInner + (y - yMin) * ringW;
+    const rO = rI + ringW;
+    for (const d of yRows) {
+      const cell = svg.append("path")
+        .attr("d", arc({ innerRadius: rI, outerRadius: rO,
+                         startAngle: θStart(d.month), endAngle: θEnd(d.month) }))
+        .attr("transform", `translate(${cx},${cy})`)
+        .attr("fill", colourFn(d.value_plot))
+        .attr("fill-opacity", inSeason(d.month) ? 1.0 : 0.15)
+        .attr("stroke", bg).attr("stroke-width", 0.3);
+      cell.append("title")
+        .text(`${y} ${monthNames[d.month - 1]}: ${d.value_plot > 0 ? "+" : ""}${d.value_plot.toFixed(2)} ${unit}`);
+    }
+  }
+
+  // Month labels: name + mean + max (temp) or max+min (PTOT).
+  const moStats = new Map([1,2,3,4,5,6,7,8,9,10,11,12].map(mo => {
+    const moRows = p4_rows.filter(d => d.month === mo);
+    const vals = moRows.map(d => d.value_plot);
+    return [mo, {
+      mean: d3.mean(vals),
+      max:  d3.max(vals),
+      min:  d3.min(vals),
+    }];
+  }));
+  const dimCol = p4_controls.dark ? "#888" : "#777";
+  for (let mo = 1; mo <= 12; mo++) {
+    const midAngle = (θStart(mo) + θEnd(mo)) / 2;
+    const lx = cx + (rOuter + 18) * Math.sin(midAngle);
+    const ly = cy - (rOuter + 18) * Math.cos(midAngle);
+    const st = moStats.get(mo);
+    const sgn = v => v > 0 && isAnomaly ? "+" : "";
+    const f   = v => v != null ? `${sgn(v)}${v.toFixed(1)}${u}` : "–";
+    const statsLine = isPTOT
+      ? `↑${f(st.max)} ↓${f(st.min)}`
+      : `↑${f(st.max)}`;
+    svg.append("text")
+      .attr("x", lx).attr("y", ly - 8)
+      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("font-size", 11).attr("fill", txtCol)
+      .text(monthNames[mo - 1]);
+    svg.append("text")
+      .attr("x", lx).attr("y", ly + 5)
+      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("font-size", 8.5).attr("fill", dimCol)
+      .text(f(st.mean));
+    svg.append("text")
+      .attr("x", lx).attr("y", ly + 17)
+      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+      .attr("font-size", 8).attr("fill", dimCol)
+      .text(statsLine);
+  }
+
+  // Decade ring labels at Jan wedge (outer edge of decade boundary)
+  for (const y of years.filter(y => y % 10 === 0)) {
+    const rLabel = rInner + (y - yMin) * ringW;
+    svg.append("text")
+      .attr("x", cx).attr("y", cy - rLabel - 2)
+      .attr("text-anchor", "middle").attr("font-size", 8)
+      .attr("fill", p4_controls.dark ? "#555" : "#aaa")
+      .text(y);
+  }
+
+  // Title
+  svg.append("text")
+    .attr("x", cx).attr("y", 15)
+    .attr("text-anchor", "middle").attr("font-size", 13).attr("font-weight", "bold")
+    .attr("fill", txtCol)
+    .text(`${countryNames[p4_controls.iso3] ?? p4_controls.iso3} — ${varNames[p4_controls.variable] ?? p4_controls.variable}${isAnomaly ? " anomaly" : ""}`);
+
+  // Colour legend (gradient bar below chart)
+  const nStops = 20;
+  const gradStops = d3.range(nStops).map(i => colourFn(vMin + i / (nStops - 1) * (vMax - vMin))).join(",");
+  const legendBg  = p4_controls.dark ? "#1a1a1a" : "#f8f8f8";
+  const legendTxt = p4_controls.dark ? "#ccc" : "#444";
+  const legend = htl.html`<div style="display:flex;align-items:center;gap:8px;
+      font-size:0.82em;color:${legendTxt};padding:6px 12px;background:${legendBg};
+      border-radius:4px;margin-top:4px;">
+    <span>${vMin.toFixed(1)}</span>
+    <span style="display:inline-block;width:160px;height:10px;
+      background:linear-gradient(to right,${gradStops});border-radius:2px;border:1px solid #4444;"></span>
+    <span>${vMax.toFixed(1)} ${unit}</span>
+    <span style="color:#888;margin-left:8px;">Inner ring = ${yMin} · Outer ring = ${yMax}</span>
+  </div>`;
+
+  // Stats table — one row per month + Annual + Season (if set).
+  return htl.html`<div>${svg.node()}${legend}</div>`;
+}
+```
+
+---
+
+## P5 — Monthly climatology: anomaly heatmap & statistics
+
+Monthly climate summary for a selected country. **Heatmap view**: year × month grid coloured by anomaly — warmer recent years read red, cooler earlier years blue; white dots mark threshold exceedances. **Table view**: long-run statistics (mean / min / max / interannual σ) across all four variables, filterable by season. TMAX = mean of daily maximum temperatures; TMIN = mean of daily minimum temperatures.
+
+```{ojs}
+viewof p5_controls = {
+  const moNames = ["—","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const moOpts  = [0,1,2,3,4,5,6,7,8,9,10,11,12];
+  const moFmt   = v => moNames[v] ?? "—";
+
+  const _iso3   = Inputs.select(["AGO","KEN","GHA","ETH","ZAF","NGA","TZA","MOZ","ZMB"],
+                    { label: "Country", value: "AGO" });
+  const _base   = Inputs.select(["1991-2020","1995-2014"],
+                    { label: "Baseline", value: "1991-2020",
+                      format: v => v === "1991-2020" ? "1991–2020 (WMO)" : "1995–2014 (Atlas)" });
+  const _sStart = Inputs.select(moOpts, { label: "Season start", value: 0, format: moFmt });
+  const _sEnd   = Inputs.select(moOpts, { label: "Season end",   value: 0, format: moFmt });
+  const _var    = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
+                    { label: "Heatmap variable", value: "TAVG" });
+  const _anomaly= Inputs.toggle({ label: "Anomaly mode", value: true });
+  const _summary  = Inputs.toggle({ label: "Show annual/season summary row", value: true });
+  const _view    = Inputs.radio(["Heatmap", "Table", "Both"],
+                     { label: "View", value: "Both" });
+
+  const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
+    <div style="min-width:160px;flex:1 1 160px;">${_iso3}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_base}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_sStart}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_sEnd}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_var}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_summary}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_view}</div>
+  </div>`;
+  Object.defineProperty(form, "value", {
+    get: () => ({
+      iso3: _iso3.value, baseline: _base.value,
+      seasonStart: _sStart.value, seasonEnd: _sEnd.value,
+      variable: _var.value, anomaly: _anomaly.value,
+      showSummary: _summary.value, view: _view.value,
+    }),
+  });
+  return form;
+}
+```
+
+```{ojs}
+p5_raw = {
+  const rows = await db_overlay.query(`
+    SELECT year, month, variable, value_mean
+    FROM read_parquet('${monthlyURL}')
+    WHERE iso3 = '${p5_controls.iso3}'
+      AND variable IN ('TAVG','TMAX','TMIN','PTOT')
+      AND value_mean IS NOT NULL
+    ORDER BY variable, year, month
+  `);
+  return Array.from(rows);
+}
+```
+
+```{ojs}
+// Heatmap — year × month for selected variable.
+{
+  if (p5_controls.view === "Table") return htl.html`<div></div>`;
+  const selVar = p5_controls.variable;
+  const isPTOT = selVar === "PTOT";
+  const isAnom = p5_controls.anomaly;
+  const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  // Compute baseline means for selected variable.
+  const [blo, bhi] = p5_controls.baseline === "1991-2020" ? [1981,2020] : [1995,2014];
+  const vRows = p5_raw
+    .filter(d => d.variable === selVar)
+    .map(d => ({ year: Number(d.year), month: Number(d.month), value_mean: d.value_mean }));
+  const baseMo = new Map([1,2,3,4,5,6,7,8,9,10,11,12].map(mo => {
+    const subset = vRows.filter(d => d.year >= blo && d.year <= bhi && d.month === mo);
+    return [mo, d3.mean(subset, d => d.value_mean)];
+  }));
+  // Season filter
+  const sS5 = p5_controls.seasonStart, sE5 = p5_controls.seasonEnd;
+  const hasSeason5 = sS5 > 0 && sE5 > 0;
+  const inSeason5 = mo => {
+    if (!hasSeason5) return true;
+    return sS5 <= sE5 ? (mo >= sS5 && mo <= sE5) : (mo >= sS5 || mo <= sE5);
+  };
+  const activeMos5 = [1,2,3,4,5,6,7,8,9,10,11,12].filter(inSeason5);
+
+  const allRows = vRows.map(d => ({
+    ...d, mo: monthNames[d.month - 1],
+    value_plot: isAnom ? d.value_mean - (baseMo.get(d.month) ?? 0) : d.value_mean,
+  }));
+  const hmRows = allRows.filter(d => inSeason5(d.month));
+
+  // Summary row: mean across active months per year
+  const summaryLabel = hasSeason5
+    ? `${monthNames[sS5-1]}–${monthNames[sE5-1]}`
+    : "Annual";
+  const summaryRows = p5_controls.showSummary
+    ? [...d3.group(hmRows, d => d.year)].map(([y, rs]) => ({
+        year: y, month: -1, mo: summaryLabel,
+        value_mean: d3.mean(rs, d => d.value_mean),
+        value_plot: d3.mean(rs, d => d.value_plot),
+      }))
+    : [];
+
+  const allHmRows = [...hmRows, ...summaryRows];
+  const allYears  = [...new Set(allHmRows.map(d => d.year))].sort((a,b) => a-b);
+  const maxAnom   = Math.max(d3.max(allHmRows, d => Math.abs(d.value_plot)) ?? 2, 1);
+  const unit      = isAnom ? (isPTOT ? "mm anomaly" : "°C anomaly") : (isPTOT ? "mm" : "°C");
+
+  // y domain: active month names (reversed = Dec top) + summary label at bottom
+  const moOrder = [
+    ...activeMos5.map(m => monthNames[m-1]).reverse(),
+    ...(p5_controls.showSummary ? [summaryLabel] : []),
+  ];
+  const hmHeight = Math.max(150, (moOrder.length) * 18 + 64);
+
+  return Plot.plot({
+    title: `${p5_controls.iso3} — ${selVar}: monthly ${isAnom ? "anomaly" : "value"}${isAnom && !isPTOT ? " (● ≥ +1°C  ◉ ≥ +1.5°C)" : ""}`,
+    width: width, height: hmHeight,
+    marginLeft: 60, marginBottom: 34, marginTop: 30, marginRight: 10,
+    x: { label: "Year", domain: allYears, tickFormat: y => y % 5 === 0 ? String(y) : "" },
+    y: { label: null, domain: moOrder },
+    color: { type: "diverging", scheme: cbMode ? "PRGn" : "RdBu", reverse: true,
+             domain: [-maxAnom, maxAnom], label: unit, legend: true },
+    marks: [
+      // Monthly rows
+      Plot.cell(hmRows, {
+        x: "year", y: "mo", fill: "value_plot", inset: 0.5, tip: true,
+        channels: { year: d => String(d.year), month: "mo",
+                    value: d => `${d.value_plot > 0 && isAnom ? "+" : ""}${d.value_plot.toFixed(2)} ${unit}` },
+      }),
+      // Summary row — insetTop gap creates visual separation from monthly rows
+      ...(summaryRows.length ? [Plot.cell(summaryRows, {
+        x: "year", y: "mo", fill: "value_plot",
+        inset: 0.5, insetTop: 6,
+        tip: true,
+        channels: { year: d => String(d.year), period: "mo",
+                    value: d => `${d.value_plot > 0 && isAnom ? "+" : ""}${d.value_plot.toFixed(2)} ${unit}` },
+      })] : []),
+      ...(isAnom && !isPTOT ? [Plot.dot(hmRows.filter(d => d.value_plot >= 1), {
+        x: "year", y: "mo", fill: "white", r: 2, fillOpacity: 0.8,
+      })] : []),
+      ...(isAnom && !isPTOT ? [Plot.dot(hmRows.filter(d => d.value_plot >= 1.5), {
+        x: "year", y: "mo", fill: "none", stroke: "white", strokeWidth: 1.5, r: 3.5, strokeOpacity: 0.9,
+      })] : []),
+    ],
+  });
+}
+```
+
+```{ojs}
+// Table-only controls — shown only when table is visible.
+// viewof must always return a form even when hidden, so value stays accessible.
+viewof p5_table_controls = {
+  const _minmax = Inputs.toggle({ label: "Show min / max", value: true });
+  const _uncert = Inputs.toggle({ label: "Show uncertainty (±σ)", value: false });
+  const form = htl.html`<div style="display:flex;gap:12px;align-items:center;
+      padding:6px 0;border-top:1px solid #ddd;margin-top:8px;display:${p5_controls.view === "Heatmap" ? "none" : "flex"};">
+    <strong style="font-size:0.82em;color:#666;">Table options:</strong>
+    <div>${_minmax}</div>
+    <div>${_uncert}</div>
+  </div>`;
+  Object.defineProperty(form, "value", {
+    get: () => ({ showMinMax: _minmax.value, showUncert: _uncert.value }),
+  });
+  return form;
+}
+```
+
+```{ojs}
+{
+  if (p5_controls.view === "Heatmap") return htl.html`<div></div>`;
+  const vars    = ["TAVG","TMAX","TMIN","PTOT"];
+  // Clear column headers: TMAX/TMIN are mean-daily-max/min, not absolute extremes.
+  const headers = {
+    TAVG: "TAVG — mean temp (°C)",
+    TMAX: "TMAX — avg. daily max (°C)",
+    TMIN: "TMIN — avg. daily min (°C)",
+    PTOT: "PTOT — precip (mm)",
+  };
+  const units   = { TAVG:"°C", TMAX:"°C", TMIN:"°C", PTOT:"mm" };
+  const moNames = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const fmt     = v => v == null ? "–" : v.toFixed(1);
+
+  const sS = p5_controls.seasonStart, sE = p5_controls.seasonEnd;
+  const hasSeason = sS > 0 && sE > 0;
+  const inSeason  = mo => {
+    if (!hasSeason) return true;
+    if (sS <= sE) return mo >= sS && mo <= sE;
+    return mo >= sS || mo <= sE;
+  };
+  const activeMos = [1,2,3,4,5,6,7,8,9,10,11,12].filter(inSeason);
+
+  const byVar = d3.group(
+    p5_raw.map(d => ({ ...d, year: Number(d.year), month: Number(d.month) })),
+    d => d.variable
+  );
+
+  const rowStats = (vrows) => {
+    if (!vrows?.length) return null;
+    const mean  = d3.mean(vrows, d => d.value_mean);
+    const sigma = d3.deviation(vrows, d => d.value_mean);
+    const minR  = vrows.reduce((a, b) => b.value_mean < a.value_mean ? b : a);
+    const maxR  = vrows.reduce((a, b) => b.value_mean > a.value_mean ? b : a);
+    return { mean, sigma, minVal: minR.value_mean, minYear: minR.year,
+             maxVal: maxR.value_mean, maxYear: maxR.year };
+  };
+  const yearMeanRows = (vrows) => [...d3.group(vrows, d => d.year)]
+    .map(([y, rs]) => ({ year: y, value_mean: d3.mean(rs, d => d.value_mean) }));
+
+  const periodRows = [
+    ...activeMos.map(mo => ({ label: moNames[mo], mo })),
+    ...(p5_controls.showSummary ? [{ label: hasSeason ? `${moNames[sS]}–${moNames[sE]}` : "Annual", mo: "summary" }] : []),
+  ];
+
+  const showMM = p5_table_controls.showMinMax;
+  const showU  = p5_table_controls.showUncert;
+  const minC = "#3a6fbf", maxC = "#b22222", sigC = "#888";
+
+  const th    = `padding:5px 8px;text-align:left;border-bottom:2px solid #999;font-size:0.82em;background:#eee;`;
+  const td    = `padding:3px 8px;border-bottom:1px solid #ddd;font-size:0.82em;vertical-align:top;`;
+  const tdLbl = `padding:3px 8px;border-bottom:1px solid #ddd;font-size:0.82em;white-space:nowrap;font-weight:`;
+
+  const cell = (s, unit) => {
+    if (!s) return htl.html`<td style="${td}">–</td>`;
+    return htl.html`<td style="${td}">
+      <div style="font-weight:600">${fmt(s.mean)} ${unit}</div>
+      ${showMM ? htl.html`
+        <div style="font-size:0.82em;color:${minC}">↓ ${fmt(s.minVal)} (${s.minYear})</div>
+        <div style="font-size:0.82em;color:${maxC}">↑ ${fmt(s.maxVal)} (${s.maxYear})</div>` : ""}
+      ${showU  ? htl.html`
+        <div style="font-size:0.82em;color:${sigC}">± ${fmt(s.sigma)} σ</div>` : ""}
+    </td>`;
+  };
+
+  return htl.html`
+  <p style="font-size:0.83em;color:#777;margin:2px 0 6px;">
+    ${p5_controls.iso3} · Baseline: ${p5_controls.baseline}
+    ${hasSeason ? ` · ${moNames[sS]}–${moNames[sE]}` : " · All months"}
+    ${showMM ? " · ↓ min ↑ max" : ""}${showU ? " · ± σ" : ""}
+  </p>
+  <div style="overflow-x:auto;">
+    <table style="border-collapse:collapse;width:100%;background:#fff;">
+      <thead><tr>
+        <th style="${th}">Period</th>
+        ${vars.map(v => htl.html`<th style="${th}">${headers[v]}</th>`)}
+      </tr></thead>
+      <tbody>
+        ${periodRows.map(({ label, mo }) => {
+          const isSummary = mo === "summary";
+          const sep = isSummary ? "border-top:2px solid #999;" : "";
+          const fw  = isSummary ? "bold" : "normal";
+          const stats = vars.map(v => {
+            const vrows = byVar.get(v) ?? [];
+            if (isSummary) return rowStats(yearMeanRows(hasSeason ? vrows.filter(d => inSeason(d.month)) : vrows));
+            return rowStats(vrows.filter(d => d.month === mo));
+          });
+          return htl.html`<tr style="${sep}">
+            <td style="${tdLbl}${fw};${sep}">${label}</td>
+            ${stats.map((s, vi) => cell(s, units[vars[vi]]))}
+          </tr>`;
+        })}
+      </tbody>
+    </table>
+  </div>`;
+}
+```
+
+---
+
+## CR-097 — Warming threshold map (when does each admin1 first cross +1.5 / +2 / +3 °C?)
+
+Admin1 choropleth: colour = first 20-year period where ensemble-mean temperature anomaly
+(vs 1995–2014 baseline) exceeds the chosen threshold. Uses the existing
+`ensemble_season_timeseries` CMIP6 future-projection parquets — no pipeline wait.
+
+5 colour bins: 2021-40 (earliest) → 2081-2100 (latest) → grey ("not within century").
+
+```{ojs}
+// topojson-client via require (UMD bundle, works in Observable runtime)
+topojson = require("topojson-client@3")
+```
+
+```{ojs}
+viewof cr097_controls = {
+  const COUNTRIES = ["AGO","BWA","BEN","BFA","CIV","CMR","COD","ETH","GHA","GIN",
+    "KEN","MDG","MLI","MOZ","MRT","MWI","NAM","NER","NGA","RWA","SDN","SEN",
+    "SLE","SOM","SSD","TGO","TZA","UGA","ZAF","ZMB","ZWE"];
+  const COUNTRY_NAMES = { AGO:"Angola", BWA:"Botswana", BEN:"Benin", BFA:"Burkina Faso",
+    CIV:"Côte d'Ivoire", CMR:"Cameroon", COD:"DR Congo", ETH:"Ethiopia", GHA:"Ghana",
+    GIN:"Guinea", KEN:"Kenya", MDG:"Madagascar", MLI:"Mali", MOZ:"Mozambique",
+    MRT:"Mauritania", MWI:"Malawi", NAM:"Namibia", NER:"Niger", NGA:"Nigeria",
+    RWA:"Rwanda", SDN:"Sudan", SEN:"Senegal", SLE:"Sierra Leone", SOM:"Somalia",
+    SSD:"South Sudan", TGO:"Togo", TZA:"Tanzania", UGA:"Uganda", ZAF:"South Africa",
+    ZMB:"Zambia", ZWE:"Zimbabwe" };
+
+  const SCOPE_OPTS = [
+    ...COUNTRIES,
+    "R:WAF","R:EAF","R:CAF","R:SAF","R:NAF","R:SSA","R:AFR"
+  ];
+  const SCOPE_LABELS = {
+    ...COUNTRY_NAMES,
+    "R:WAF": "── West Africa",
+    "R:EAF": "── East Africa",
+    "R:CAF": "── Central Africa",
+    "R:SAF": "── Southern Africa",
+    "R:NAF": "── North Africa",
+    "R:SSA": "── Sub-Saharan Africa",
+    "R:AFR": "── All Africa",
+  };
+
+  const sspLabels = { ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" };
+
+  const _scope   = Inputs.select(SCOPE_OPTS,
+                     { label: "Country / Region", value: "KEN",
+                       format: v => SCOPE_LABELS[v] ?? v });
+  const _ssp     = Inputs.checkbox(["ssp126","ssp245","ssp370","ssp585"],
+                     { label: "Scenarios (cols)", value: ["ssp126","ssp245","ssp370","ssp585"],
+                       format: v => sspLabels[v] });
+  const _thresh  = Inputs.checkbox([1, 1.5, 2, 3],
+                     { label: "Thresholds (rows)", value: [1, 1.5, 2, 3],
+                       format: v => `+${v}°C` });
+  const _var     = Inputs.select(["TAVG","TMAX","TMIN"],
+                     { label: "Variable", value: "TAVG" });
+  const _season  = Inputs.select(["annual","MAM","OND","JJA","DJF"],
+                     { label: "Season", value: "annual" });
+  const _table   = Inputs.toggle({ label: "Show table instead of map", value: false });
+
+  const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
+    <div style="min-width:200px;flex:1 1 200px;">${_scope}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_ssp}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_thresh}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_var}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_season}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_table}</div>
+  </div>`;
+  Object.defineProperty(form, "value", {
+    get: () => ({ scope: _scope.value, ssp: _ssp.value, threshold: _thresh.value,
+                  variable: _var.value, season: _season.value, showTable: _table.value }),
+  });
+  return form;
+}
+```
+
+```{ojs}
+// DuckDB client for CMIP6 future projections (separate from observational client).
+db_cr097 = DuckDBClient.of()
+```
+
+```{ojs}
+cr097_base = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months"
+```
+
+```{ojs}
+// Region → iso3 list mapping. R:AFR = all countries in topojson.
+cr097_region_defs = ({
+  "R:WAF": ["BEN","BFA","CIV","GHA","GIN","GMB","GNB","LBR","MLI","MRT","NER","NGA","SEN","SLE","TGO","CPV"],
+  "R:EAF": ["BDI","COM","DJI","ERI","ETH","KEN","MDG","MOZ","MUS","MWI","RWA","SOM","SSD","SYC","TZA","UGA"],
+  "R:CAF": ["CAF","CMR","COD","COG","GAB","GNQ","STP","TCD"],
+  "R:SAF": ["AGO","BWA","LSO","NAM","SWZ","ZAF","ZMB","ZWE"],
+  "R:NAF": ["DZA","EGY","ESH","LBY","MAR","SDN","TUN"],
+})
+```
+
+```{ojs}
+// Derived: is single country or region? iso3 list for the query.
+cr097_scope_info = {
+  const scope = cr097_controls.scope;
+  const isCountry = !scope.startsWith("R:");
+  const REGIONS = cr097_region_defs;
+  const ALL_ISO3 = Object.values(REGIONS).flat();
+  const SSA = [...REGIONS["R:WAF"],...REGIONS["R:EAF"],...REGIONS["R:CAF"],...REGIONS["R:SAF"]];
+  const iso3List = isCountry ? [scope]
+    : scope === "R:SSA" ? SSA
+    : scope === "R:AFR" ? ALL_ISO3
+    : (REGIONS[scope] ?? [scope]);
+  return { isCountry, iso3List, scope };
+}
+```
+
+```{ojs}
+// Query: adapt iso3 filter and admin level based on scope + map level.
+cr097_data = {
+  const { variable, season, ssp } = cr097_controls;
+  const { isCountry, iso3List }   = cr097_scope_info;
+  const ssps  = Array.isArray(ssp) && ssp.length ? ssp : ["ssp245"];
+  const sspIn = ssps.map(s => `'${s}'`).join(",");
+  const iso3In = iso3List.map(c => `'${c}'`).join(",");
+
+  // Always query admin1 rows (IS NOT NULL) — national-level rows may not exist.
+  // Admin0 aggregation done client-side in chart cell.
+  const periods = ["2021-2040","2041-2060","2061-2080","2081-2100"];
+  const urls = periods.map(p =>
+    `${cr097_base}/period=${p}/baseline=1995-2014/variable=ensemble_season_timeseries.parquet`);
+
+  const makeUnion = (url, period) => `
+    SELECT admin1_name, iso3, scenario, '${period}' AS period, mean_anomaly
+    FROM read_parquet('${url}')
+    WHERE iso3 IN (${iso3In}) AND hazard = '${variable}' AND season = '${season}' AND admin1_name IS NOT NULL`;
+
+  const sql = `
+    WITH combined AS (
+      ${periods.map((p, i) => makeUnion(urls[i], p)).join(" UNION ALL ")}
+    ),
+    period_means AS (
+      SELECT admin1_name, iso3, scenario, period, AVG(mean_anomaly) AS pmean
+      FROM combined GROUP BY ALL
+    )
+    SELECT admin1_name, iso3, scenario, period, pmean
+    FROM period_means
+    ORDER BY scenario, iso3, admin1_name, period
+  `;
+  const rows = await db_cr097.query(sql);
+  return Array.from(rows);
+}
+```
+
+```{ojs}
+cr097_topo    = fetch("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").then(r => r.json())
+```
+
+```{ojs}
+cr097_topo_a0 = fetch("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").then(r => r.json())
+```
+
+```{ojs}
+// Admin1 names: only for single country, empty for regions (hides popup).
+cr097_admin1_names = cr097_scope_info.isCountry
+  ? topojson.feature(cr097_topo, cr097_topo.objects["atlas_gaul24_a1_africa"])
+      .features.filter(f => f.properties.iso3 === cr097_scope_info.scope)
+      .map(f => f.properties.admin1_name).sort()
+  : []
+```
+
+```{ojs}
+// Map level toggle — shown for REGIONS only (countries always use admin1).
+// For countries: silently returns "admin1".
+viewof cr097_map_level = {
+  if (cr097_scope_info.isCountry) {
+    const f = htl.html`<span></span>`;
+    Object.defineProperty(f, "value", { get: () => "admin1" });
+    return f;
+  }
+  return Inputs.radio(["admin0","admin1"],
+    { label: "Map level (region view)", value: "admin0",
+      format: v => v === "admin0" ? "Admin0 (country polygons)" : "Admin1 (sub-national)" });
+}
+```
+
+```{ojs}
+// Admin1 filter popup — hidden for regions.
+viewof cr097_admin1 = {
+  const names = cr097_admin1_names;
+  if (names.length === 0) {
+    const f = htl.html`<span></span>`;
+    Object.defineProperty(f, "value", { get: () => [] });
+    return f;
+  }
+  let selected = [];
+  const wrap     = htl.html`<div style="position:relative;display:inline-block;min-width:240px;font-family:sans-serif;">`;
+  const btn      = htl.html`<button style="width:100%;text-align:left;padding:6px 10px;border:1px solid #aaa;background:#fff;cursor:pointer;border-radius:3px;font-size:0.88em;">All admin1s ▼</button>`;
+  const dropdown = htl.html`<div style="display:none;position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:280px;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.18);padding:8px;">`;
+  const search   = htl.html`<input type="text" placeholder="Search…" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:3px;box-sizing:border-box;margin-bottom:6px;font-size:0.86em;">`;
+  const actRow   = htl.html`<div style="display:flex;gap:6px;margin-bottom:6px;">`;
+  const selAll   = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;">Select all</button>`;
+  const clrBtn   = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;">Clear</button>`;
+  const closeBtn = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;margin-left:auto;">Close ✕</button>`;
+  actRow.append(selAll, clrBtn, closeBtn);
+  const listDiv  = htl.html`<div style="max-height:240px;overflow-y:auto;">`;
+  const update   = () => {
+    btn.textContent = selected.length === 0 ? "All admin1s ▼" : `${selected.length} of ${names.length} ▼`;
+    wrap.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const renderList = (q = "") => {
+    listDiv.innerHTML = "";
+    names.filter(n => n.toLowerCase().includes(q.toLowerCase())).forEach(n => {
+      const lbl = htl.html`<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer;font-size:0.86em;">`;
+      const cb  = htl.html`<input type="checkbox">`;
+      cb.checked = selected.includes(n);
+      cb.onchange = () => { selected = cb.checked ? [...selected, n] : selected.filter(x => x !== n); update(); };
+      lbl.append(cb, document.createTextNode(n));
+      listDiv.append(lbl);
+    });
+  };
+  btn.onclick      = () => dropdown.style.display === "none"
+    ? (dropdown.style.display = "block", search.value = "", renderList(), search.focus())
+    : (dropdown.style.display = "none");
+  closeBtn.onclick = () => dropdown.style.display = "none";
+  search.oninput   = () => renderList(search.value);
+  selAll.onclick   = () => { selected = [...names]; renderList(search.value); update(); };
+  clrBtn.onclick   = () => { selected = []; renderList(search.value); update(); };
+  dropdown.append(search, actRow, listDiv);
+  wrap.append(btn, dropdown);
+  renderList();
+  Object.defineProperty(wrap, "value", { get: () => selected });
+  return wrap;
+}
+```
+
+```{ojs}
+{
+  const { variable, season, showTable } = cr097_controls;
+  const { isCountry, iso3List, scope }  = cr097_scope_info;
+  const mapLevel   = cr097_map_level;
+  const ssps       = Array.isArray(cr097_controls.ssp) && cr097_controls.ssp.length
+    ? cr097_controls.ssp : ["ssp245"];
+  const thresholds = Array.isArray(cr097_controls.threshold) && cr097_controls.threshold.length
+    ? [...cr097_controls.threshold].sort((a,b) => a-b) : [1.5];
+  const sspLabels  = { ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" };
+
+  // Country → always admin1. Region → follow toggle (default admin0).
+  const useAdmin1Map = isCountry ? true : (mapLevel === "admin1");
+
+  // Colour scale: 5 bins + "not within century" grey.
+  const periodColours = {
+    "2021-2040": "#e31a1c",
+    "2041-2060": "#fd8d3c",
+    "2061-2080": "#fecc5c",
+    "2081-2100": "#ffffb2",
+    null:        "#cccccc",
+  };
+  const periodLabels = {
+    "2021-2040": "2021–2040 (earliest)",
+    "2041-2060": "2041–2060",
+    "2061-2080": "2061–2080",
+    "2081-2100": "2081–2100 (latest)",
+    null:        "Not within century",
+  };
+
+  // Build lookup: admin1_name → first_crossing (string match — safer than gaul code)
+  const crossing = new Map(cr097_data.map(d => [d.join_key, d.first_crossing]));
+
+  // Select topojson layer and feature key based on map level.
+  const useAdmin1 = useAdmin1Map;
+  const allFeatures = useAdmin1
+    ? topojson.feature(cr097_topo,    cr097_topo.objects["atlas_gaul24_a1_africa"]).features
+    : topojson.feature(cr097_topo_a0, cr097_topo_a0.objects["atlas_gaul24_a0_africa"]).features;
+  const featureProp = useAdmin1Map ? "admin1_name" : "iso3";
+
+  // Filter features to current scope.
+  const countryFeatures = allFeatures.filter(f => iso3List.includes(f.properties.iso3));
+  const selAdmin1 = useAdmin1 ? (cr097_admin1 ?? []) : [];
+  const features = selAdmin1.length > 0
+    ? countryFeatures.filter(f => selAdmin1.includes(f.properties[featureProp]))
+    : countryFeatures;
+
+  // Table mode: render crossing table instead of maps.
+  if (showTable) {
+    const admin1s = [...new Set(aggData.map(d => d.join_key))].sort();
+    const byS     = d3.group(cr097_data, d => d.scenario);
+    const th = `padding:4px 8px;text-align:left;border-bottom:2px solid #999;font-size:0.8em;background:#eee;white-space:nowrap;`;
+    const td = `padding:3px 8px;border-bottom:1px solid #eee;font-size:0.8em;white-space:nowrap;`;
+    return htl.html`<div style="overflow-x:auto;margin-top:6px;">
+      <p style="font-size:0.83em;color:#777;margin:2px 0 4px;">
+        ${scope} · ${variable} · ${season} · vs 1995–2014 baseline · first 20-yr period crossing threshold
+      </p>
+      <table style="border-collapse:collapse;width:100%;">
+        <thead><tr>
+          <th style="${th}">Admin1</th>
+          ${ssps.flatMap(s => thresholds.map(t =>
+            htl.html`<th style="${th}">${sspLabels[s]} ≥+${t}°C</th>`
+          ))}
+        </tr></thead>
+        <tbody>
+          ${admin1s
+            .filter(a => selAdmin1.length === 0 || selAdmin1.includes(a))
+            .map(a1 => htl.html`<tr>
+            <td style="${td}">${a1}</td>
+            ${ssps.flatMap(s => {
+              const sRows = d3.group(byScenario.get(s) ?? [], joinKey);
+              return thresholds.map(t => {
+                const cross = firstCrossing(sRows.get(a1) ?? [], t);
+                return htl.html`<td style="${td};color:${periodColours[cross ?? null]};">
+                  ${periodLabels[cross ?? null]}
+                </td>`;
+              });
+            })}
+          </tr>`)}
+        </tbody>
+      </table>
+    </div>`;
+  }
+
+  if (!features.length) return htl.html`<p style="color:#c00">
+    No map features for <strong>${scope}</strong> (${aggData.length} data rows, ${countryFeatures.length} topojson features before filter).
+    Check that iso3List = [${iso3List.join(",")}] matches topojson iso3 property.
+  </p>`;
+
+  // Show loading state if data hasn't arrived yet.
+  if (!cr097_data || !cr097_data.length) return htl.html`<p style="color:#888;font-style:italic;padding:12px 0;">
+    ⏳ Fetching CMIP6 future-projection parquets (DuckDB-WASM, ~20 MB across 4 files — may take 15–30 s)…
+  </p>`;
+
+  // Helper: first period >= threshold.
+  const firstCrossing = (rows, t) => {
+    const sorted = [...rows].sort((a,b) => a.period.localeCompare(b.period));
+    return sorted.find(d => Number(d.pmean) >= t)?.period ?? null;
+  };
+
+  // Admin1 rows always fetched. For admin0/region view: aggregate to iso3 per (scenario,period).
+  const aggData = useAdmin1Map
+    ? cr097_data.map(d => ({ join_key: d.admin1_name, scenario: d.scenario, period: d.period, pmean: Number(d.pmean) }))
+    : [...d3.group(cr097_data, d => `${d.iso3}|${d.scenario}|${d.period}`)].map(([k, rs]) => {
+        const [jk, scenario, period] = k.split("|");
+        return { join_key: jk, scenario, period, pmean: d3.mean(rs, d => Number(d.pmean)) };
+      });
+
+  const byScenario = d3.group(aggData, d => d.scenario);
+
+  // join_key — admin1_name or iso3
+  const joinKey = d => d.join_key;
+
+  // Facet dimensions: cols = SSPs, rows = thresholds.
+  const nCols  = Math.max(ssps.length, 1);
+  const nRows  = Math.max(thresholds.length, 1);
+  const labelW = 52;  // left label column
+  const facetW = Math.max(160, Math.floor((width - labelW - nCols * 2) / nCols));
+  const facetH = Math.round(facetW * 0.85);
+  const proj0  = d3.geoMercator().fitSize([facetW - 12, facetH - 24],
+    { type: "FeatureCollection", features });
+  const path0  = d3.geoPath().projection(proj0);
+
+  // SSP column headers
+  const colHeaders = htl.html`<div style="display:flex;gap:2px;margin-left:${labelW}px;margin-bottom:2px;">
+    ${ssps.map(s => htl.html`<div style="width:${facetW}px;text-align:center;font-size:10px;font-weight:bold;color:#333;">${sspLabels[s]}</div>`)}
+  </div>`;
+
+  // Grid rows
+  const gridRows = thresholds.map(t => {
+    const cells = ssps.map(s => {
+      const sRows   = byScenario.get(s) ?? [];
+      const byKey   = d3.group(sRows, joinKey);
+      const crossing = new Map([...byKey].map(([k, rs]) => [k, firstCrossing(rs, t)]));
+
+      const svg = d3.create("svg")
+        .attr("viewBox", `0 0 ${facetW} ${facetH}`)
+        .attr("width", facetW).attr("height", facetH)
+        .style("border", "1px solid #eee");
+      const g = svg.append("g").attr("transform", "translate(6, 4)");
+
+      // Pass 1: all country admin1 boundaries as grey outlines (always visible).
+      for (const f of countryFeatures) {
+        g.append("path").attr("d", path0(f))
+          .attr("fill", selAdmin1.length > 0 ? "#f5f5f5" : "none")
+          .attr("stroke", "#888").attr("stroke-width", 0.5);
+      }
+      // Pass 2: selected (or all when no selection) filled with threshold colour — no stroke here.
+      for (const f of features) {
+        const cross = crossing.get(f.properties[featureProp]) ?? null;
+        g.append("path").attr("d", path0(f))
+          .attr("fill", periodColours[cross]).attr("stroke", "none")
+          .append("title")
+          .text(`${f.properties[featureProp]}: ${periodLabels[cross ?? null]}`);
+      }
+      // Pass 3: all boundary lines on top of everything — always visible.
+      for (const f of countryFeatures) {
+        g.append("path").attr("d", path0(f))
+          .attr("fill", "none").attr("stroke", "#888").attr("stroke-width", 0.5);
+      }
+      return svg.node();
+    });
+
+    return htl.html`<div style="display:flex;gap:2px;align-items:center;margin-bottom:2px;">
+      <div style="width:${labelW}px;font-size:10px;font-weight:bold;color:#c00;text-align:right;padding-right:6px;">≥+${t}°C</div>
+      ${cells}
+    </div>`;
+  });
+
+  // Shared legend
+  const legSvg = d3.create("svg").attr("width", width).attr("height", 24);
+  let lx = labelW;
+  for (const [p, label] of Object.entries(periodLabels)) {
+    legSvg.append("rect").attr("x", lx).attr("y", 5).attr("width", 11).attr("height", 11)
+      .attr("fill", periodColours[p]).attr("stroke", "#aaa").attr("stroke-width", 0.5);
+    legSvg.append("text").attr("x", lx+14).attr("y", 14).attr("font-size", 9).attr("fill", "#333")
+      .text(label);
+    lx += label.length * 5.2 + 26;
+  }
+
+  return htl.html`<div>
+    <p style="font-size:0.83em;color:#777;margin:2px 0 4px;">
+      ${scope} · ${variable} · ${season} season · vs 1995–2014 baseline
+    </p>
+    ${colHeaders}
+    ${gridRows}
+    ${legSvg.node()}
+  </div>`;
+}
+```
+
+---
+
+## P6 — Observed climate: decade comparison maps
+
+Choropleth grid using CHIRPS-CHIRTS-ERA5 observational data. **Rows = stats** (mean anomaly vs
+baseline / linear trend / interannual variability). **Columns = decades**. Each cell shows
+admin1 or admin0 polygons coloured by that stat for that decade. Trend computed client-side
+(linear regression °C or mm per decade). No pipeline work needed — uses existing `adm1_obs.parquet`.
+
+```{ojs}
+// Import Theil-Sen + Mann-Kendall + TFPW from the same helper used in the main notebook.
+import { mannKendall } from "/helpers/trend.ojs"
+```
+
+```{ojs}
+viewof p6_controls = {
+  const SCOPE_OPTS = ["AGO","BWA","BEN","BFA","CIV","CMR","COD","ETH","GHA","GIN",
+    "KEN","MDG","MLI","MOZ","MRT","MWI","NAM","NER","NGA","RWA","SDN","SEN",
+    "SLE","SOM","SSD","TGO","TZA","UGA","ZAF","ZMB","ZWE",
+    "R:WAF","R:EAF","R:CAF","R:SAF","R:NAF","R:AFR"];
+  const SCOPE_LABELS = { AGO:"Angola", BWA:"Botswana", BEN:"Benin", BFA:"Burkina Faso",
+    CIV:"Côte d'Ivoire", CMR:"Cameroon", COD:"DR Congo", ETH:"Ethiopia", GHA:"Ghana",
+    GIN:"Guinea", KEN:"Kenya", MDG:"Madagascar", MLI:"Mali", MOZ:"Mozambique",
+    MRT:"Mauritania", MWI:"Malawi", NAM:"Namibia", NER:"Niger", NGA:"Nigeria",
+    RWA:"Rwanda", SDN:"Sudan", SEN:"Senegal", SLE:"Sierra Leone", SOM:"Somalia",
+    SSD:"South Sudan", TGO:"Togo", TZA:"Tanzania", UGA:"Uganda", ZAF:"South Africa",
+    ZMB:"Zambia", ZWE:"Zimbabwe",
+    "R:WAF":"── West Africa","R:EAF":"── East Africa","R:CAF":"── Central Africa",
+    "R:SAF":"── Southern Africa","R:NAF":"── North Africa","R:AFR":"── All Africa" };
+
+  const _scope    = Inputs.select(SCOPE_OPTS, { label:"Country / Region", value:"KEN",
+                      format: v => SCOPE_LABELS[v] ?? v });
+  const _var      = Inputs.select(
+                      ["TAVG","TMAX","TMIN","PTOT","SPEI-03","SPEI-12"],
+                      { label:"Variable", value:"TAVG",
+                        format: v => ({
+                          TAVG:"TAVG — avg temp", TMAX:"TMAX — mean daily max", TMIN:"TMIN — mean daily min",
+                          PTOT:"PTOT — precipitation",
+                          "SPEI-03":"SPEI-03 (3-month) ★ main notebook",
+                          "SPEI-12":"SPEI-12 (12-month) ★",
+                        }[v] ?? v) });
+  const _season   = Inputs.select(["annual","MAM","OND","JJA","DJF"],
+                      { label:"Season", value:"annual" });
+  const _base     = Inputs.select(["1991-2020","1995-2014"],
+                      { label:"Baseline", value:"1991-2020",
+                        format: v => v === "1991-2020" ? "1991–2020 (WMO)" : "1995–2014 (Atlas)" });
+  const _decades  = Inputs.checkbox(["1980s","1990s","2000s","2010s","2020s"],
+                      { label:"Decades (cols)", value:["1990s","2000s","2010s","2020s"] });
+  const _stats    = Inputs.checkbox(
+                      ["Mean","Min","Max","Mean anomaly","Trend (per decade)","Variability (σ)"],
+                      { label:"Stats (rows)",
+                        value:["Mean anomaly","Trend (per decade)"] });
+  const _level    = Inputs.radio(["admin1","admin0"],
+                      { label:"Level", value:"admin1",
+                        format: v => v === "admin1" ? "Admin1" : "Admin0 (country)" });
+
+  const _sigBdr  = Inputs.toggle({ label: "Trend: significance border", value: true });
+  const _sigDot  = Inputs.toggle({ label: "Trend: significance dot", value: true });
+
+  const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
+    <div style="min-width:200px;flex:1 1 200px;">${_scope}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_var}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_season}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_base}</div>
+    <div style="min-width:260px;flex:1 1 260px;">${_decades}</div>
+    <div style="min-width:320px;flex:1 1 320px;">${_stats}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_level}</div>
+    <div style="min-width:220px;flex:1 1 220px;">${_sigBdr}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_sigDot}</div>
+  </div>`;
+  Object.defineProperty(form, "value", {
+    get: () => ({
+      scope: _scope.value, variable: _var.value, season: _season.value,
+      baseline: _base.value, decades: _decade_arr(_decades.value),
+      stats: _stats.value, level: _level.value,
+      sigBorders: _sigBdr.value, sigDots: _sigDot.value,
+    }),
+  });
+  function _decade_arr(sel) { return sel.length ? sel : ["2010s"]; }
+  return form;
+}
+```
+
+```{ojs}
+// Scope → iso3 list (reuse CR-097 region defs).
+p6_scope_info = {
+  const scope = p6_controls.scope;
+  const isCountry = !scope.startsWith("R:");
+  const R = cr097_region_defs;
+  const ALL = Object.values(R).flat();
+  const iso3List = isCountry ? [scope]
+    : scope === "R:AFR" ? ALL
+    : (R[scope] ?? [scope]);
+  return { isCountry, iso3List };
+}
+```
+
+```{ojs}
+// Separate DuckDB client for P6 — avoids blocking CR-097 queries.
+db_p6 = DuckDBClient.of()
+```
+
+```{ojs}
+// Observational annual/seasonal data for selected country/region.
+p6_obs_raw = {
+  const { iso3List } = p6_scope_info;
+  const { variable, season, level } = p6_controls;
+  const iso3In = iso3List.map(c => `'${c}'`).join(",");
+  const url = level === "admin1"
+    ? "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm1_obs.parquet"
+    : "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet";
+  const keyCol = level === "admin1" ? "admin1_name, iso3" : "iso3";
+  const rows = await db_p6.query(`
+    SELECT ${keyCol}, year, value_mean
+    FROM read_parquet('${url}')
+    WHERE iso3 IN (${iso3In}) AND variable = '${variable}' AND period = '${season}'
+      AND value_mean IS NOT NULL
+    ORDER BY iso3, ${level === "admin1" ? "admin1_name," : ""} year
+  `);
+  return Array.from(rows).map(d => ({
+    ...d, year: Number(d.year), value_mean: Number(d.value_mean),
+    join_key: level === "admin1" ? d.admin1_name : d.iso3,
+  }));
+}
+```
+
+```{ojs}
+// Per-admin baseline means over selected window.
+p6_base_means = {
+  const [lo, hi] = p6_controls.baseline === "1991-2020" ? [1991, 2020] : [1995, 2014];
+  const byKey = d3.group(p6_obs_raw.filter(d => d.year >= lo && d.year <= hi), d => d.join_key);
+  const m = new Map();
+  for (const [k, rows] of byKey) m.set(k, d3.mean(rows, d => d.value_mean));
+  return m;
+}
+```
+
+```{ojs}
+// Compute stat per (join_key × decade).
+p6_stats = {
+  const decadeRanges = {
+    "1980s": [1980, 1989], "1990s": [1990, 1999],
+    "2000s": [2000, 2009], "2010s": [2010, 2019], "2020s": [2020, 2099],
+  };
+
+  // Linear trend slope (value units per year → × 10 = per decade).
+  const linSlope = (pairs) => {
+    const n = pairs.length;
+    if (n < 4) return null;
+    const xm = d3.mean(pairs, d => d.year);
+    const ym = d3.mean(pairs, d => d.value_mean);
+    const num = d3.sum(pairs, d => (d.year - xm) * (d.value_mean - ym));
+    const den = d3.sum(pairs, d => (d.year - xm) ** 2);
+    return den > 0 ? (num / den) * 10 : null;
+  };
+
+  const result = [];
+  const byKey = d3.group(p6_obs_raw, d => d.join_key);
+
+  for (const [key, allRows] of byKey) {
+    const baseMean = p6_base_means.get(key) ?? null;
+    for (const [dec, [lo, hi]] of Object.entries(decadeRanges)) {
+      const decRows = allRows.filter(d => d.year >= lo && d.year <= hi);
+      if (!decRows.length) continue;
+      const vals = decRows.map(d => d.value_mean);
+      const mean = d3.mean(vals);
+      result.push({
+        join_key: key,
+        decade: dec,
+        "Mean":              mean ?? null,
+        "Min":               d3.min(vals) ?? null,
+        "Max":               d3.max(vals) ?? null,
+        "Mean anomaly":      baseMean != null && mean != null ? mean - baseMean : null,
+        "Trend (per decade)": linSlope(decRows),
+        "Variability (σ)":   d3.deviation(vals) ?? null,
+      });
+    }
+  }
+  return result;
+}
+```
+
+```{ojs}
+{
+  if (!p6_obs_raw.length) return htl.html`<p style="color:#888;font-style:italic;">⏳ Loading observational data…</p>`;
+
+  const { scope, variable, season, stats, level } = p6_controls;
+  const decades = p6_controls.decades;
+  const { isCountry, iso3List } = p6_scope_info;
+  const isPTOT = variable === "PTOT";
+  const isSPEI = variable.startsWith("SPEI");
+  const isWetVar = isPTOT || isSPEI;  // positive = wetter = blue
+  const rawUnit = isPTOT ? "mm" : isSPEI ? "σ" : "°C";
+  const unit = { "Mean": rawUnit, "Min": rawUnit, "Max": rawUnit,
+                 "Mean anomaly":       rawUnit,
+                 "Trend (per decade)": isPTOT ? "mm/dec" : isSPEI ? "σ/dec" : "°C/dec",
+                 "Variability (σ)":    rawUnit };
+
+  // Features: admin1 or admin0 topojson filtered to scope.
+  const allFeatures = level === "admin1"
+    ? topojson.feature(cr097_topo,    cr097_topo.objects["atlas_gaul24_a1_africa"]).features
+    : topojson.feature(cr097_topo_a0, cr097_topo_a0.objects["atlas_gaul24_a0_africa"]).features;
+  const featProp = level === "admin1" ? "admin1_name" : "iso3";
+  const features = allFeatures.filter(f => iso3List.includes(f.properties.iso3));
+  if (!features.length) return htl.html`<p style="color:#c00">No features for ${scope}.</p>`;
+
+  const proj0 = d3.geoMercator().fitSize([200, 170], { type:"FeatureCollection", features });
+  const path0 = d3.geoPath().projection(proj0);
+
+  // Build lookup: Map<stat, Map<decade, Map<join_key, value>>>
+  const byStatDecade = new Map();
+  for (const stat of stats) {
+    const byDec = new Map();
+    for (const dec of decades) {
+      const decRows = p6_stats.filter(d => d.decade === dec);
+      byDec.set(dec, new Map(decRows.map(d => [d.join_key, d[stat]])));
+    }
+    byStatDecade.set(stat, byDec);
+  }
+
+  // Auto-scale each stat across ALL decades (symmetric for anomaly/trend).
+  const SYMM_STATS = new Set(["Mean anomaly","Trend (per decade)"]);
+  const SEQ_STATS  = new Set(["Mean","Min","Max","Variability (σ)"]);
+
+  const statExtent = new Map([...stats, "Trend (per decade)"].map(stat => {
+    const vals = p6_stats.map(d => d[stat]).filter(v => v != null);
+    if (SYMM_STATS.has(stat)) {
+      const absMax = d3.max(vals, Math.abs) || 1;
+      return [stat, [-absMax, absMax]];
+    }
+    return [stat, [d3.min(vals) ?? 0, d3.max(vals) ?? 1]];
+  }));
+
+  // PTOT: positive anomaly = wetter = blue; temperature: warm = red. Reverse direction for precip.
+  const colourFn = (stat, v, extent) => {
+    if (v == null) return "#ddd";
+    const [lo, hi] = extent;
+    const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+    if (SEQ_STATS.has(stat)) {
+      // Sequential: for PTOT use BuGn (blue=wet), for temp use Inferno (bright=hot)
+      return cbMode
+        ? d3.interpolatePlasma(t)
+        : isWetVar ? d3.interpolateBuGn(t) : d3.interpolateInferno(0.1 + 0.85 * t);
+    }
+    // Diverging direction by stat/variable:
+    // temp: warm=red (1-t), wetvar: wet=blue (t), variability: volatile=red (1-t same as temp)
+    const dir = isWetVar ? t : 1 - t;
+    return cbMode ? d3.interpolatePuOr(dir) : d3.interpolateRdBu(dir);
+  };
+
+  // Trend (per decade) is unreliable at <10 years — exclude from decade grid,
+  // shown separately below as a full-record trend map.
+  const gridStats = stats.filter(s => s !== "Trend (per decade)");
+
+  const labelW = 130;
+  const facetW = Math.max(180, Math.floor((width - labelW - decades.length * 4) / decades.length));
+  const facetH = Math.round(facetW * 1.1);  // taller ratio to avoid southern truncation
+
+  // Column headers
+  const colH = htl.html`<div style="display:flex;gap:4px;margin-left:${labelW}px;margin-bottom:2px;">
+    ${decades.map(d => htl.html`<div style="width:${facetW}px;text-align:center;font-size:10px;font-weight:bold;color:#333;">${d}</div>`)}
+  </div>`;
+
+  // Grid rows — excludes Trend (shown separately below as full-record map)
+  const gridRows = gridStats.map(stat => {
+    const extent = statExtent.get(stat);
+    const cells = decades.map(dec => {
+      const crossingMap = byStatDecade.get(stat)?.get(dec) ?? new Map();
+      const svg = d3.create("svg")
+        .attr("viewBox", `0 0 ${facetW} ${facetH}`)
+        .attr("width", facetW).attr("height", facetH)
+        .style("border", "1px solid #eee");
+      const g = svg.append("g").attr("transform", "translate(4,4)");
+      // Background boundaries
+      for (const f of features) {
+        g.append("path").attr("d", path0(f))
+          .attr("fill", "#f5f5f5").attr("stroke", "#888").attr("stroke-width", 0.4);
+      }
+      // Coloured fill
+      for (const f of features) {
+        const v = crossingMap.get(f.properties[featProp]) ?? null;
+        if (v == null) continue;
+        g.append("path").attr("d", path0(f))
+          .attr("fill", colourFn(stat, v, extent)).attr("stroke", "none");
+        g.select("path:last-child").append("title")
+          .text(`${f.properties[featProp]}: ${v?.toFixed(2)} ${unit[stat]}`);
+      }
+      // Boundary lines on top
+      for (const f of features) {
+        g.append("path").attr("d", path0(f))
+          .attr("fill", "none").attr("stroke", "#888").attr("stroke-width", 0.4);
+      }
+      return svg.node();
+    });
+
+    // Gradient legend for this stat
+    const [lo, hi] = extent;
+    const isSymm = SYMM_STATS.has(stat);
+    const nStops = 10;
+    const stops = d3.range(nStops).map(i => colourFn(stat, lo + i / (nStops-1) * (hi - lo), extent)).join(",");
+    const legW = facetW * decades.length + (decades.length - 1) * 4;
+    const dirLoGrid = stat === "Mean anomaly"
+      ? (isWetVar ? "← drier" : "← cooler")
+      : stat === "Variability (σ)" ? "← stable" : null;
+    const dirHiGrid = stat === "Mean anomaly"
+      ? (isWetVar ? "wetter →" : "warmer →")
+      : stat === "Variability (σ)" ? "volatile →" : null;
+    const varNote = stat === "Variability (σ)" ? "· inter-annual std. dev." : null;
+    const legEl = htl.html`<div style="margin:2px 0 4px ${labelW}px;font-size:9px;color:#666;">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        ${dirLoGrid ? htl.html`<span style="font-style:italic;color:#999;white-space:nowrap;">${dirLoGrid}</span>` : ""}
+        <span>${lo.toFixed(1)}</span>
+        <span style="display:inline-block;width:100px;height:8px;background:linear-gradient(to right,${stops});border-radius:2px;border:1px solid #ddd;flex-shrink:0;"></span>
+        <span>${hi.toFixed(1)} ${unit[stat]}</span>
+        ${dirHiGrid ? htl.html`<span style="font-style:italic;color:#999;white-space:nowrap;">${dirHiGrid}</span>` : ""}
+        ${varNote ? htl.html`<span style="color:#aaa;">${varNote}</span>` : ""}
+      </div>
+    </div>`;
+
+    return htl.html`<div style="margin-bottom:8px;">
+      <div style="display:flex;gap:4px;align-items:flex-start;">
+        <div style="width:${labelW}px;font-size:10px;font-weight:bold;color:#555;padding-top:4px;text-align:right;padding-right:8px;">${stat}</div>
+        ${cells}
+      </div>
+      ${legEl}
+    </div>`;
+  });
+
+  // Full-record trend maps (shown when Trend is selected).
+  // Method: Theil-Sen slope + Mann-Kendall + TFPW — same as main notebook.
+  let trendMap = "";
+  if (stats.includes("Trend (per decade)")) {
+    const byKey  = d3.group(p6_obs_raw, d => d.join_key);
+    const yMin   = d3.min(p6_obs_raw, d => d.year);
+    const yMax2  = d3.max(p6_obs_raw, d => d.year);
+    const baseMeans = p6_base_means;
+
+    // Per-admin1: Theil-Sen mean trend + variability trend.
+    // Variability: slope of |anomaly| normalised by baseline σ → % change/decade.
+    // SPEI is already a z-score — skip variability trend for it.
+    const showVarTrend = !isSPEI;
+    const mkResults = new Map([...byKey].map(([k, rows]) => {
+      const sorted = rows.sort((a,b) => a.year - b.year);
+      const vals  = sorted.map(d => d.value_mean);
+      const years = sorted.map(d => d.year);
+      const mk    = mannKendall(vals, { xValues: years, minN: 15 });
+      if (!showVarTrend) return [k, { mk, mkVar: null, mkVarPct: null }];
+      const [blo, bhi] = p6_controls.baseline === "1991-2020" ? [1991,2020] : [1995,2014];
+      const baseRows = sorted.filter(d => d.year >= blo && d.year <= bhi);
+      const bMean  = d3.mean(baseRows, d => d.value_mean) ?? 0;
+      const bSigma = d3.deviation(baseRows, d => d.value_mean) || 1;
+      // For PTOT in near-zero areas (mean < 10mm), variability % is meaningless.
+      // Skip these to avoid desert inflation artefact.
+      if (isPTOT && Math.abs(bMean) < 10) return [k, { mk, mkVar: null, mkVarPct: null }];
+      // Detrended residuals: subtract Theil-Sen fitted line to remove mean-shift confound.
+      const slope = mk.slope || 0;
+      const xm    = d3.mean(years);
+      const ym    = d3.mean(vals);
+      const intercept = ym - slope * xm;
+      const residuals = sorted.map(d => ({
+        year: d.year,
+        resid: Math.abs(d.value_mean - (slope * d.year + intercept)),
+      }));
+      // Rolling 5-year σ of residuals — tracks genuine variability change.
+      const rollingPts = residuals.slice(2, -2).map((_, i) => {
+        const win = residuals.slice(i, i + 5).map(r => r.resid);
+        return { year: residuals[i + 2].year, value: d3.mean(win) };
+      }).filter(d => d.value != null);
+      const mkVar = mannKendall(rollingPts.map(d => d.value), { xValues: rollingPts.map(d => d.year), minN: 10 });
+      const mkVarPct = mkVar.slopePerDecade != null ? mkVar.slopePerDecade / bSigma * 100 : null;
+      return [k, { mk, mkVar, mkVarPct }];
+    }));
+
+    const renderTrendMap = (title, note, valueOf, sigOf, overrideUnit, isVarMap = false) => {
+      const tUnit = overrideUnit ?? unit["Trend (per decade)"];
+      // Colour direction: variability=volatile→red; temp=warming→red; precip/SPEI=wetting→blue.
+      const trendDir = t => isVarMap ? 1 - t : (isWetVar ? t : 1 - t);
+      const trendColour = (v, ext) => {
+        if (v == null) return "#ddd";
+        const [lo, hi] = ext;
+        const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+        return cbMode ? d3.interpolatePuOr(trendDir(t)) : d3.interpolateRdBu(trendDir(t));
+      };
+      // Direction labels depend on map type, not unit string.
+      const dirLo = isVarMap ? "← stable"    : isWetVar ? "← drying"  : "← cooling";
+      const dirHi = isVarMap ? "volatile →"  : isWetVar ? "wetting →" : "warming →";
+      const tVals = [...mkResults.values()].map(valueOf).filter(v => v != null);
+      if (!tVals.length) return null;
+      const tMax = d3.max(tVals, Math.abs) || 1;
+      const tExt = [-tMax, tMax];
+      const tMapW = Math.min(width - labelW, 340);
+      const tMapH = Math.round(tMapW * 1.1);
+      const tProj = d3.geoMercator().fitSize([tMapW - 8, tMapH - 8], { type:"FeatureCollection", features });
+      const tPath = d3.geoPath().projection(tProj);
+      const svg = d3.create("svg").attr("viewBox",`0 0 ${tMapW} ${tMapH}`)
+        .attr("width", tMapW).attr("height", tMapH).style("border","1px solid #eee");
+      const g = svg.append("g").attr("transform","translate(4,4)");
+      // Background
+      for (const f of features) g.append("path").attr("d",tPath(f))
+        .attr("fill","#f5f5f5").attr("stroke","none");
+
+      const nFeat   = features.length;
+      const useFade = nFeat > 80;          // always fade for regional views
+      const showBdr = p6_controls.sigBorders;
+      const showDot = p6_controls.sigDots && !useFade;  // dots only for country view
+      const sigBdrW = nFeat <= 50 ? 1.0 : 0.6;
+
+      // Coloured fill — fade non-significant for regional views.
+      for (const f of features) {
+        const res = mkResults.get(f.properties[featProp]);
+        const v = res ? valueOf(res) : null;
+        if (v == null) continue;
+        const sig = res && sigOf(res);
+        g.append("path").attr("d",tPath(f))
+          .attr("fill", trendColour(v, tExt))
+          .attr("fill-opacity", useFade ? (sig ? 1.0 : 0.22) : 1.0)
+          .attr("stroke","none");
+      }
+
+      // Boundary lines — all features.
+      for (const f of features) g.append("path").attr("d",tPath(f))
+        .attr("fill","none").attr("stroke","#888").attr("stroke-width",0.3);
+
+      // Significance markers on top — controlled by toggles.
+      if (showBdr) for (const f of features) {
+        const res = mkResults.get(f.properties[featProp]);
+        if (!res || !sigOf(res)) continue;
+        g.append("path").attr("d",tPath(f))
+          .attr("fill","none").attr("stroke","#111").attr("stroke-width",sigBdrW);
+        if (showDot) {
+          const [cx, cy] = tProj(d3.geoCentroid(f)) ?? [0,0];
+          g.append("circle").attr("cx",cx).attr("cy",cy).attr("r",2)
+            .attr("fill","white").attr("fill-opacity",0.85);
+        }
+      }
+      const tStops = d3.range(10).map(i => trendColour(-tMax + i/9*2*tMax, tExt)).join(",");
+      return htl.html`<div style="flex:0 0 auto;max-width:${tMapW + 8}px;">
+        <div style="font-size:10px;font-weight:bold;color:#555;margin-bottom:3px;">${title}</div>
+        <div style="font-size:9px;color:#888;margin-bottom:3px;max-width:${tMapW}px;white-space:normal;">${note}</div>
+        ${svg.node()}
+        <div style="font-size:9px;color:#666;margin-top:2px;">
+          <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+            <span style="font-style:italic;">${dirLo}</span>
+            <span>${(-tMax).toFixed(2)}</span>
+            <span style="display:inline-block;width:70px;height:7px;background:linear-gradient(to right,${tStops});border-radius:2px;border:1px solid #ddd;"></span>
+            <span>+${tMax.toFixed(2)} ${tUnit}</span>
+            <span style="font-style:italic;">${dirHi}</span>
+          </div>
+          <div style="margin-top:2px;color:#444;">
+            Significance (p &lt; 0.05):
+            ${showBdr ? "black border" : ""}${showBdr && showDot ? " + " : ""}${showDot ? "● dot" : ""}
+            ${!showBdr && !showDot ? "significance indicators off" : ""}
+            ${useFade ? " · faded = not significant (regional)" : ""}
+          </div>
+        </div>
+      </div>`;
+    };
+
+    const meanTrendEl = renderTrendMap(
+      `Mean trend — ${yMin}–${yMax2}`,
+      "Theil-Sen slope + Mann-Kendall + TFPW · same method as main notebook",
+      r => r.mk?.slopePerDecade ?? null,
+      r => r.mk?.significant5pct ?? false,
+      unit["Trend (per decade)"]
+    );
+    const varTrendEl = showVarTrend ? renderTrendMap(
+      `Variability trend — ${yMin}–${yMax2}`,
+      "% change/decade in detrended residual variability (Theil-Sen of rolling 5-yr mean-absolute-residual, normalised by baseline σ). Detrended = mean shift removed.",
+      r => r.mkVarPct ?? null,
+      r => r.mkVar?.significant5pct ?? false,
+      "%/decade"
+    ) : null;
+
+    trendMap = meanTrendEl || varTrendEl ? htl.html`<div style="margin-top:14px;border-top:1px solid #ddd;padding-top:8px;">
+      <div style="font-size:11px;font-weight:bold;color:#444;margin-bottom:6px;">Full-record trend maps</div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;">
+        ${meanTrendEl ?? ""}${varTrendEl ?? ""}
+      </div>
+    </div>` : "";
+  }
+
+  return htl.html`<div>
+    <p style="font-size:0.83em;color:#777;margin:2px 0 6px;">
+      ${scope} · ${variable} · ${season} · baseline ${p6_controls.baseline}
+    </p>
+    ${colH}${gridRows}${trendMap}
+  </div>`;
 }
 ```
 
@@ -196,11 +2272,10 @@ overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) 
 
 ## Notes
 
-- **Anomaly mode** subtracts the per-month mean over the selected baseline window.
-  Absolute mode shows raw values — useful for PTOT (seasonal cycle dominates).
-- **PTOT** works but seasonal amplitude overwhelms year-to-year signal in anomaly mode;
-  absolute mode is more readable for precipitation.
-- **Most-recent year** bold black so the reader sees current conditions immediately.
-- **Tooltip** on hover shows `year`, `month`, `value_plot` via Plot's built-in tip.
-- Next step if Pete approves this view: wire as a `plotType_obs === "month-overlay"` branch
-  in `recentChanges_obs` (3 targeted edits, ~35 lines — see session notes).
+- **P1 (Year overlay):** Temperature only — PTOT seasonal amplitude swamps year-to-year signal.
+- **P3 (Ridge plot):** Always uses anomaly regardless of the P1 toggle. PTOT ridge is noisier but
+  can still show shift in wet/dry season distributions.
+- **P2 (Spiral):** Radius = anomaly. Incomplete rings (2026 Jan–Apr) render as open arcs.
+- **P4 (Polar heatmap):** All variables; anomaly or absolute toggle. Inner = oldest year, outer = most recent.
+- **CB toggle** applies to P1, P2, P3, P4.
+- **CR-097:** Choropleth colour = first 20-year period crossing the threshold. Table below shows per-admin1 detail. If features don't filter correctly the topojson property name for country filtering may need adjustment.
