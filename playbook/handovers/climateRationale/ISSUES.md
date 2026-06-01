@@ -2868,13 +2868,13 @@ When ready, these need: fresh rebake via respective producer scripts + sandbox u
 **Launch command (CGlabs):**
 ```bash
 cd ~/atlas/hazards_prototype
-git pull --ff-only origin develop   # gets e7eed37
+git pull --ff-only origin develop   # gets 9923942 (CR-094 TFPW + CR-060 quantiles + FORCE_OVERWRITE flags)
 
 export SETUP_SCRIPT="$HOME/atlas/hazards_prototype/R/0_server_setup.R"
 export R21_SCRIPT="$HOME/atlas/hazards_prototype/R/2.1_create_monthly_haz_tables.R"
 
 LOG="logs/R21_pushdown_$(date +%Y%m%d_%H%M%S).log"
-nohup bash -c "FORCE_OVERWRITE=1 SKIP_R2_1_3_4=1 Rscript -e '
+nohup bash -c "FORCE_OVERWRITE=1 Rscript -e '
 options(error = function() { traceback(2); quit(status=1, save=\"no\") })
 source(Sys.getenv(\"SETUP_SCRIPT\"))
 source(Sys.getenv(\"R21_SCRIPT\"))
@@ -2883,6 +2883,10 @@ source(Sys.getenv(\"R21_SCRIPT\"))
 echo "R/2.1 launched, PID=$!, log=$LOG"
 tail -f "$LOG"
 ```
+
+**Section 3.4 NOW RUNS** (CR-094 TFPW implemented `9923942`). Adds ~9h per timeframe for trend computation. Full R/2.1 rerun = sec 1–3.4 = expect **~20-24h wall-clock** on CGlabs. If trends are not needed urgently, add `SKIP_R2_1_3_4=1` to cut ~18h — but then trend parquets won't have TFPW-corrected stats and CR-095 remains blocked.
+
+**Also baked in this run:** CR-060 quantiles (`f42d720`) — q5/q17/q50/q83/q95/n_models in `ensemble_season_timeseries.parquet`. CR-061 ribbon swap dispatchable after publish.
 
 **S3 publish path — resolved 2026-06-01:**
 `push_to_s3.R` section 4.2 uses the LEGACY `s3://digital-atlas/hazards/hazard_timeseries_mean_month` path. The notebook reads the NEWER `domain=climate/type=hazard-indices/...` path. No existing publisher script maps R/2.1 local outputs to the `domain=climate` path — the original publish was a one-off. Post-rerun publish step = custom Rscript that maps the 5 local `*_ensemble_seasons.parquet` files to the 5 canonical S3 keys and uploads with `ACL="public-read"`. Template:
