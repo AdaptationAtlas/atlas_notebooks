@@ -33,6 +33,8 @@ viewof p1_controls = {
                      { label: "Baseline period", value: "1991-2020",
                        format: v => v === "1991-2020" ? "1991–2020 (WMO)" : "1995–2014 (Atlas CMIP6)" });
   const _anomaly = Inputs.toggle({ label: "Show as anomaly", value: true });
+  const _pctAnom = Inputs.toggle({ label: "PTOT anomaly as % (only when PTOT + anomaly)", value: false });
+  const _band    = Inputs.toggle({ label: "Decade mean ± σ band", value: false });
   const _season  = Inputs.select(["All months","MAM","OND","JJA","DJF"],
                      { label: "Season highlight", value: "All months" });
   const _decade  = Inputs.checkbox(["1980s","1990s","2000s","2010s","2020s"],
@@ -43,13 +45,16 @@ viewof p1_controls = {
     <div style="min-width:160px;flex:1 1 160px;">${_var}</div>
     <div style="min-width:220px;flex:1 1 220px;">${_base}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
+    <div style="min-width:240px;flex:1 1 240px;">${_pctAnom}</div>
+    <div style="min-width:200px;flex:1 1 200px;">${_band}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_season}</div>
     <div style="min-width:260px;flex:1 1 260px;">${_decade}</div>
   </div>`;
   Object.defineProperty(form, "value", {
     get: () => ({
       iso3: _iso3.value, variable: _var.value, baseline: _base.value,
-      anomaly: _anomaly.value, season: _season.value, decade: _decade.value,
+      anomaly: _anomaly.value, pctAnomaly: _pctAnom.value, band: _band.value,
+      season: _season.value, decade: _decade.value,
     }),
   });
   return form;
@@ -62,6 +67,8 @@ sandbox_iso3     = p1_controls.iso3
 sandbox_variable = p1_controls.variable
 sandbox_baseline = p1_controls.baseline
 sandbox_anomaly  = p1_controls.anomaly
+p1_pct_anomaly   = p1_controls.pctAnomaly
+p1_band          = p1_controls.band
 p1_season        = p1_controls.season
 p1_decade        = p1_controls.decade
 ```
@@ -149,16 +156,22 @@ overlay_baseline = {
 ```{ojs}
 // Augment with anomaly; keep both value_mean and anomaly so the y-scale
 // label can switch cleanly between the two.
+// PTOT % anomaly mode: (value - base) / base * 100 — only when PTOT + anomaly toggle on.
 // Coerce BigInt year/month to Number so d3 arithmetic and equality checks work.
 overlay_rows = overlay_raw.map(d => {
   const year  = Number(d.year);
   const month = Number(d.month);
   const base  = overlay_baseline.get(month) ?? 0;
+  const anom  = d.value_mean - base;
+  const isPTOTpct = sandbox_variable === "PTOT" && sandbox_anomaly && p1_pct_anomaly && base > 0;
   return {
     year, month,
     value_mean: d.value_mean,
-    anomaly:    d.value_mean - base,
-    value_plot: sandbox_anomaly ? d.value_mean - base : d.value_mean,
+    anomaly:    anom,
+    value_plot: isPTOTpct ? (anom / base) * 100
+              : sandbox_anomaly ? anom
+              : d.value_mean,
+    is_pct: isPTOTpct,
   };
 })
 ```
@@ -198,10 +211,12 @@ overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) 
     TMIN:"Min. temperature", PTOT:"Total precipitation" };
 
   const baselinePeriodLabel = sandbox_baseline.replace("-", "–");
-  const yLabel = sandbox_anomaly
-    ? (sandbox_variable === "PTOT" ? "mm anomaly" : "°C anomaly")
-      + ` vs ${baselinePeriodLabel}`
-    : (sandbox_variable === "PTOT" ? "mm" : "°C");
+  const isPTOTpctMode = sandbox_variable === "PTOT" && sandbox_anomaly && p1_pct_anomaly;
+  const yLabel = isPTOTpctMode
+    ? `% anomaly vs ${baselinePeriodLabel}`
+    : sandbox_anomaly
+      ? (sandbox_variable === "PTOT" ? "mm anomaly" : "°C anomaly") + ` vs ${baselinePeriodLabel}`
+      : (sandbox_variable === "PTOT" ? "mm" : "°C");
 
   // X domain: truncate to season months when active; full range otherwise.
   const activeMos   = p1_season !== "All months" ? (seasonMonths[p1_season] ?? []) : null;
@@ -229,7 +244,7 @@ overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) 
     const meanRows = decMean(lo, hi);
     const annMean  = d3.mean(meanRows, d => d.value_plot);
     const annStd   = d3.mean(meanRows, d => d.std);
-    const unit = sandbox_variable === "PTOT" ? "mm" : "°C";
+    const unit = isPTOTpctMode ? "%" : (sandbox_variable === "PTOT" ? "mm" : "°C");
     const nYears = hi - lo + 1;
     const partial = nYears < 10;
     const label = `${dec}${partial ? ` (n=${nYears})` : ""}: ${annMean != null ? annMean.toFixed(2) : "–"}${unit} ±${annStd != null ? annStd.toFixed(2) : "–"}`;
@@ -292,6 +307,17 @@ overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) 
           channels: { year: "yearStr" }, tip: true,
         })
       ] : []),
+      // Decade ± σ band (optional) — one Plot.areaY per selected decade, drawn under the line.
+      ...(p1_band ? decadeData.map(({ meanRows, col }) =>
+        Plot.areaY(meanRows.map(r => ({
+          month: r.month,
+          y1: r.value_plot - (r.std ?? 0),
+          y2: r.value_plot + (r.std ?? 0),
+        })), {
+          x: "month", y1: "y1", y2: "y2",
+          fill: col, fillOpacity: 0.12, curve: "monotone-x",
+        })
+      ) : []),
       // Decade mean lines + right-side labels — one per selected decade.
       ...decadeData.map(({ meanRows, col }) =>
         Plot.line(meanRows, {
@@ -304,7 +330,7 @@ overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) 
 
   // Legend.
   const stops = [0, 0.25, 0.5, 0.75, 1].map(t => interp(t)).join(",");
-  const unit = sandbox_variable === "PTOT" ? "mm" : "°C";
+  const unit = isPTOTpctMode ? "%" : (sandbox_variable === "PTOT" ? "mm" : "°C");
 
   // Stats block below chart — one coloured line per selected decade.
   // Partial decades flagged with year count so the user knows the mean is from <10 years.
@@ -581,6 +607,9 @@ htl.html`<div style="display:flex;gap:12px;flex-wrap:wrap;
     ${p3_season !== "All months" ? `(${p3_season} only)` : "(all months)"}
     · y-axis: KDE density normalised to unit peak per decade (heights comparable, areas not).
     Bandwidth: Silverman's rule per decade.
+    ${p3_variable === "PTOT" && p3_season === "All months"
+      ? htl.html` · <strong>PTOT all-months</strong>: distributions can appear bimodal because dry-season months cluster near zero anomaly and wet-season months produce a longer tail. Use the season filter to isolate one regime.`
+      : ""}
   </span>
 </div>`
 ```
@@ -906,7 +935,18 @@ p2_years = [...new Set(p2_rows.map(d => d.year))].sort((a, b) => a - b)
     <span>📅 ${yMax} mean: <strong>${latestMean != null ? sgn(latestMean) + latestMean.toFixed(2) : "–"}${unit2}</strong></span>
   </div>`;
 
-  return htl.html`<div>${svg.node()}${statsEl}${legend}</div>`;
+  const caveatEl = htl.html`<div style="font-size:0.78em;color:#888;font-style:italic;
+      padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
+      line-height:1.4;max-width:980px;">
+    <strong>Reading note:</strong>
+    Reference rings at ±1°C / +1.5°C / +2°C show statistical context — they are <em>not</em>
+    equivalent to Paris Agreement targets (those are relative to 1850–1900 pre-industrial; this
+    spiral uses ${p2_baseline.replace("-","–")} as baseline). Colour saturates at ~1 SD above/below
+    baseline (cFactor = 0.45) — extreme months hit the palette limits even if values are larger.
+    For PTOT, ring radius is scaled per-country by inter-annual σ — radii are <em>not</em>
+    comparable across countries with different rainfall regimes.
+  </div>`;
+  return htl.html`<div>${svg.node()}${statsEl}${legend}${caveatEl}</div>`;
 }
 ```
 
@@ -922,6 +962,15 @@ viewof p4_controls = {
   const moNames = ["—","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const moFmt   = v => moNames[v] ?? "—";
   const moOpts  = [0,1,2,3,4,5,6,7,8,9,10,11,12];
+  // Preset map: name → [start, end] month numbers. Custom uses the start/end pickers.
+  const presets = {
+    "All months": [0, 0],
+    "MAM":        [3, 5],
+    "JJA":        [6, 8],
+    "OND":        [10, 12],
+    "DJF":        [12, 2],
+    "Custom":     null,
+  };
 
   const _iso3     = Inputs.select(obs_country_codes,
                       { label: "Country", value: "AGO",
@@ -933,8 +982,10 @@ viewof p4_controls = {
                         format: v => v === "1991-2020" ? "1991–2020 (WMO)" : "1995–2014 (Atlas)" });
   const _anomaly  = Inputs.toggle({ label: "Show as anomaly", value: true });
   const _dark     = Inputs.toggle({ label: "Dark background", value: false });
-  const _sStart   = Inputs.select(moOpts, { label: "Season start", value: 0, format: moFmt });
-  const _sEnd     = Inputs.select(moOpts, { label: "Season end",   value: 0, format: moFmt });
+  const _preset   = Inputs.select(Object.keys(presets),
+                      { label: "Season preset", value: "All months" });
+  const _sStart   = Inputs.select(moOpts, { label: "Custom start (preset=Custom)", value: 0, format: moFmt });
+  const _sEnd     = Inputs.select(moOpts, { label: "Custom end (preset=Custom)",   value: 0, format: moFmt });
 
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
     <div style="min-width:160px;flex:1 1 160px;">${_iso3}</div>
@@ -942,15 +993,21 @@ viewof p4_controls = {
     <div style="min-width:200px;flex:1 1 200px;">${_baseline}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_dark}</div>
-    <div style="min-width:140px;flex:1 1 140px;">${_sStart}</div>
-    <div style="min-width:140px;flex:1 1 140px;">${_sEnd}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_preset}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sStart}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sEnd}</div>
   </div>`;
   Object.defineProperty(form, "value", {
-    get: () => ({
-      iso3: _iso3.value, variable: _variable.value, baseline: _baseline.value,
-      anomaly: _anomaly.value, dark: _dark.value,
-      seasonStart: _sStart.value, seasonEnd: _sEnd.value,
-    }),
+    get: () => {
+      // Preset overrides start/end unless "Custom" is selected.
+      const p = _preset.value;
+      const [pS, pE] = p === "Custom" ? [_sStart.value, _sEnd.value] : (presets[p] ?? [0, 0]);
+      return {
+        iso3: _iso3.value, variable: _variable.value, baseline: _baseline.value,
+        anomaly: _anomaly.value, dark: _dark.value,
+        preset: p, seasonStart: pS, seasonEnd: pE,
+      };
+    },
   });
   return form;
 }
@@ -1023,14 +1080,22 @@ p4_years = [...new Set(p4_rows.map(d => d.year))].sort((a, b) => a - b)
   };
 
   const vals = p4_rows.map(d => d.value_plot);
-  const vMin = d3.min(vals), vMax = d3.max(vals);
+  // Domain choice: anomaly mode uses full extent (symmetric); absolute mode uses p5-p95
+  // for PTOT so a single wet month doesn't compress the whole scale, full extent for temp.
+  const sortedV = [...vals].sort((a, b) => a - b);
+  const pct = q => sortedV[Math.max(0, Math.min(sortedV.length - 1, Math.floor(sortedV.length * q)))];
+  const vMinFull = d3.min(vals), vMaxFull = d3.max(vals);
+  const vMin = (!isAnomaly && isPTOT) ? (pct(0.05) ?? vMinFull) : vMinFull;
+  const vMax = (!isAnomaly && isPTOT) ? (pct(0.95) ?? vMaxFull) : vMaxFull;
+  const clip = v => Math.max(vMin, Math.min(vMax, v));
 
   // Colour scale — diverging (anomaly) or sequential (absolute)
   const colourFn = isAnomaly
     ? (v => cbMode ? d3.interpolatePuOr(0.5 - v / (Math.max(Math.abs(vMin), vMax, 1) * 2.2))
                    : d3.interpolateRdBu(0.5 - v / (Math.max(Math.abs(vMin), vMax, 1) * 2.2)))
-    : (v => cbMode ? d3.interpolatePlasma(0.1 + 0.8 * (v - vMin) / (vMax - vMin || 1))
-                   : d3.interpolateInferno(0.05 + 0.9 * (v - vMin) / (vMax - vMin || 1)));
+    : (v => { const c = clip(v); return cbMode
+                   ? d3.interpolatePlasma(0.1 + 0.8 * (c - vMin) / (vMax - vMin || 1))
+                   : d3.interpolateInferno(0.05 + 0.9 * (c - vMin) / (vMax - vMin || 1)); });
 
   // Month angle: Jan at top (−π/2), clockwise, each wedge = 2π/12
   const wedge  = 2 * Math.PI / 12;
@@ -1089,22 +1154,19 @@ p4_years = [...new Set(p4_rows.map(d => d.year))].sort((a, b) => a - b)
     const ly = cy - (rOuter + 18) * Math.cos(midAngle);
     const st = moStats.get(mo);
     const sgn = v => v > 0 && isAnomaly ? "+" : "";
-    const f   = v => v != null ? `${sgn(v)}${v.toFixed(1)}${u}` : "–";
+    const f   = v => v != null ? `${sgn(v)}${v.toFixed(1)}` : "–";
+    // 2-line label: month name + condensed stats (mean · max [· min for PTOT]).
+    // Unit shown once at end to save horizontal space.
     const statsLine = isPTOT
-      ? `↑${f(st.max)} ↓${f(st.min)}`
-      : `↑${f(st.max)}`;
+      ? `μ${f(st.mean)}·↑${f(st.max)}·↓${f(st.min)}${u}`
+      : `μ${f(st.mean)}·↑${f(st.max)}${u}`;
     svg.append("text")
-      .attr("x", lx).attr("y", ly - 8)
+      .attr("x", lx).attr("y", ly - 4)
       .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
-      .attr("font-size", 11).attr("fill", txtCol)
+      .attr("font-size", 11).attr("font-weight", "bold").attr("fill", txtCol)
       .text(monthNames[mo - 1]);
     svg.append("text")
-      .attr("x", lx).attr("y", ly + 5)
-      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
-      .attr("font-size", 8.5).attr("fill", dimCol)
-      .text(f(st.mean));
-    svg.append("text")
-      .attr("x", lx).attr("y", ly + 17)
+      .attr("x", lx).attr("y", ly + 9)
       .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
       .attr("font-size", 8).attr("fill", dimCol)
       .text(statsLine);
