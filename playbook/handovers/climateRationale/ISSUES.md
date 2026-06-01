@@ -2442,7 +2442,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 - **what-users-see:** Switching "Show table instead of map" toggle → JS runtime error (`aggData is not defined`); table never renders.
 - **why-wrong:** In OJS the `if (showTable) { return ... }` early-return branch uses `aggData`, `byScenario`, and `joinKey` before they are declared. Those variables are defined ~50 lines later in the same cell block (after the loading-state guard). OJS cells execute top-to-bottom so the early-return path hits the variables before they exist.
 - **proposed-change:** Move the `aggData` / `byScenario` / `joinKey` / `firstCrossing` declarations to the top of the chart cell (after the loading guard but before the `if (showTable)` branch). Alternatively restructure so the table branch calls `firstCrossing` directly from `cr097_data` without the aggregation step that depends on `aggData`.
-- **STATUS (2026-06-01):** Open, unblocked.
+- **STATUS (2026-06-01):** ✓ FIXED in `3422667`. Loading guard moved above table branch; helpers + `aggData` / `byScenario` / `joinKey` / `firstCrossing` declared before table branch; dead `crossing` map (referenced non-existent `d.first_crossing` column) removed. Table mode renders for both admin0 and admin1 scope; header label adapts to map level.
 
 ---
 
@@ -2454,7 +2454,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 - **what-users-see:** Ridge curves for temperature look smooth; for PTOT in arid/semi-arid countries (ETH north, NAM, NER) the kernel with bw=10 over-smooths and produces a near-Gaussian curve even when the underlying distribution is heavily right-skewed toward zero.
 - **why-wrong:** Fixed bandwidth assumes uniform data spread. Silverman's rule `bw = 0.9 × min(σ, IQR/1.34) × n^(−1/5)` adapts to the data spread per decade. Without it, the 2020s partial decade (4–5 years) gets the same bandwidth as the 1990s (10 years), making the 2020s look artificially smooth.
 - **proposed-change:** Replace fixed `bw` with Silverman's rule computed per decade: `const silverman = vals => { const σ = d3.deviation(vals); const iqr = (d3.quantile(vals.sort(d3.ascending), 0.75) - d3.quantile(vals, 0.25)) / 1.34; return 0.9 * Math.min(σ, iqr) * Math.pow(vals.length, -0.2); }; const bw = Math.max(silverman(values), isPTOT ? 2 : 0.1);`. Add a floor (`max(bw, 0.1)`) to prevent degenerate output for very short series.
-- **STATUS (2026-06-01):** Open, unblocked.
+- **STATUS (2026-06-01):** ✓ FIXED in `3422667`. Per-decade Silverman bandwidth with PTOT/TAVG-appropriate floors. Caption clarifies "densities normalised to unit peak per decade — heights comparable, areas not".
 
 ---
 
@@ -2466,7 +2466,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 - **what-users-see:** The "Annual" (or season) summary row for PTOT shows e.g. 58 mm — this is the mean of monthly means, not the total annual rainfall. Angola's annual rainfall is ~500–800 mm, not 58 mm.
 - **why-wrong:** `yearMeanRows` takes the year-grouped mean of `value_mean`. For temperature this is correct (annual mean temp = mean of monthly means). For precipitation it should be the sum (`d3.sum`) of monthly totals per year, then the mean/min/max across those annual totals.
 - **proposed-change:** In `rowStats`, detect `isPTOT` and use `d3.sum` for the annual total aggregation: `const yearMeanRows = (vrows, isP) => [...d3.group(vrows, d => d.year)].map(([y, rs]) => ({ year: y, value_mean: isP ? d3.sum(rs, d => d.value_mean) : d3.mean(rs, d => d.value_mean) }));`. For season rows, sum only the season months. For the header, label the PTOT annual column "total (mm)" rather than "mean (°C)".
-- **STATUS (2026-06-01):** Open, unblocked.
+- **STATUS (2026-06-01):** ✓ FIXED in `3422667` (table side). Renamed `yearMeanRows` → `yearAggRows(vrows, isPTOT)`. Header updated to "PTOT — precip (mm, monthly total / annual sum)". Heatmap summary row intentionally kept as MEAN so colour scale stays consistent with the monthly cells; exact PTOT annual totals live in the table.
 
 ---
 
@@ -2478,7 +2478,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 - **what-users-see:** Legend shows e.g. `−2.1 [gradient] +3.4 °C anomaly`. No explanation of which end is cooler vs warmer, or for PTOT which is drier vs wetter.
 - **why-wrong:** Same issue as the P6 grid legends — fixed for P6 in commit `5447340` but P4 was missed.
 - **proposed-change:** In the P4 legend block, add `const isPTOT4 = p4_controls.variable === "PTOT"; const dirLo4 = isAnomaly ? (isPTOT4 ? "← drier" : "← cooler") : null; const dirHi4 = isAnomaly ? (isPTOT4 ? "wetter →" : "warmer →") : null;` and include these italic spans flanking the gradient bar, mirroring the P6 legend pattern.
-- **STATUS (2026-06-01):** Open, unblocked.
+- **STATUS (2026-06-01):** ✓ FIXED in `3422667`. Direction labels added; legend flex-wraps on narrow viewports.
 
 ---
 
@@ -2490,7 +2490,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 - **what-users-see:** Country dropdown shows 9 options (AGO, KEN, GHA, ETH, ZAF, NGA, TZA, MOZ, ZMB). CR-097 and P5/P6 show the full ~30-country Africa set.
 - **why-wrong:** Hard-coded during initial sandbox build; never extended. P5/P6 already have the correct full list.
 - **proposed-change:** Extract the country list and label map to a shared OJS cell (or copy from P6's `SCOPE_OPTS`/`SCOPE_LABELS`). Apply to all four sections. Country selector for P1/P2/P3/P4 should include at minimum all 30+ countries in `adm0_obs.parquet`; the full list can be derived from `cr097_controls`'s `COUNTRIES` array.
-- **STATUS (2026-06-01):** Open, unblocked.
+- **STATUS (2026-06-01):** ✓ FIXED in `3422667`. Added shared cells `obs_country_codes` (31 iso3 codes) + `obs_country_labels` (display names) above P1. All of P1/P2/P3/P4/P5 now read from these — single source of truth.
 
 ---
 
@@ -2537,7 +2537,14 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
   - Variability colour palette for PTOT uses BuGn (blue=high variability) which implies "wetter" to a user familiar with the other maps. A neutral palette (e.g. Purples or Greens) would avoid this colour-meaning conflict. Temperature uses Inferno (yellow=high variability) which is fine.
   - `proj0` previously used a fixed [200, 170] coordinate space mismatched against `facetW × facetH` SVG viewBox → maps appeared positioned in upper-left of facets. **Fixed in sandbox commit `5447340`.**
 
-- **STATUS (2026-06-01):** Open — action items: (a) fix CR-099/CR-101/CR-102 bugs in sandbox; (b) document caveats in section descriptions (CR-105); (c) variability colour palette for PTOT is a future-polish item.
+- **STATUS (2026-06-01):** ✓ ALL REVIEW ACTIONS FIXED in `3422667` + `94d6a35`. Specific by section:
+  - **P1:** Decade-mean legend now shows `(n=N)` for partial decades · PTOT % anomaly toggle wired (`isPTOTpctMode` re-scales axis + legend) · Decade mean ±σ band toggle paints Plot.areaY ribbon under the mean line.
+  - **P2:** Warmest/Coolest **year** (12-month mean) added alongside the single-month extremes · "Wettest/Driest" terminology used for PTOT · Caveat block clarifies (a) reference rings are statistical not Paris-Agreement targets given baseline ≠ pre-industrial, (b) cFactor=0.45 colour saturation, (c) PTOT radius scaled per-country by σ so radii are not comparable across countries.
+  - **P3:** KDE normalisation caveat ("heights comparable, areas not") added to legend · Bandwidth method ("Silverman's rule") surfaced · PTOT all-months bimodal explanation appended when that combo is active · Tooltip on the ridge curve exposes decade / anomaly / density / n.
+  - **P4:** Direction labels added to gradient legend · Season preset dropdown (All / MAM / JJA / OND / DJF / Custom) replaces the raw start/end ambiguity · PTOT absolute mode now uses p5-p95 percentile-clipped colour scale · Month-peripheral labels condensed to 2 lines.
+  - **P5:** PTOT anomaly heatmap now shows wet/dry dots at ±1σ-per-month thresholds · Uncertainty label clarified to `σy` with inter-annual-std-dev tooltip + caption · Table PTOT annual = SUM (header updated); heatmap summary kept as MEAN for colour-scale consistency.
+  - **CR-097:** Grey legend swatch relabelled "Threshold not reached by 2100" · Reading-note paragraph below figure explains ensemble-mean limitation + SSP1-2.6 transient-crossing caveat.
+  - **P6:** Variability palette swapped from BuGn → Purples (Viridis for CB) so darkness no longer reads as "wetter" · Decade-grid OLS vs full-record Theil-Sen+MK+TFPW distinction documented in under-chart caveat paragraph · Projection `fitSize` already fixed in `5447340`.
 
 ---
 
@@ -2596,7 +2603,73 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
   - *Citations:* Funk et al. (2015); Hersbach et al. (2020). Yue & Wang (2002) *Water Resour. Res.* 38(6). Mann (1945) *Econometrica* 13:245–259. Kendall (1975) *Rank Correlation Methods*, Griffin.
 
 - **acceptance:** Each section has a visible methods/interpretation block consistent with the main notebook's `about-this-plot` disclosure pattern. Methods text is keyed into `nbText.json` (EN + FR) when promoted to production.
-- **STATUS (2026-06-01):** Open. Descriptions drafted above — Pete to review content; FR translation deferred until EN is approved.
+
+- **nbText.json key sketch (for production wiring — EN drafts; FR deferred):**
+
+  Mirror the existing `sections.recentChanges.help.{framingTitle, framing, anomalyTitle, anomaly, mapRenderingTitle, mapRendering}` pattern. Each sandbox view becomes either (a) a top-level `sections.<name>` with its own intro / help / quickInsight, or (b) a sub-key inside `sections.recentChanges.help` if Pete decides to fold P1–P4 in as alternate views of an existing chart. Recommend (a) for P5/P6/CR-097 (they are visually distinct sections); recommend (b) for P1/P2/P3/P4 (they are alternate plot types of the same observational monthly data).
+
+  Skeleton — paste under `sections` in `nbText.json` when ready to promote. EN copy is the **Draft content per section** block above:
+
+  ```jsonc
+  "obsYearOverlay": {                              // P1 — promote to recentChanges.help.{p1*} if folded in
+    "title":          { "en": "Year-over-year monthly climate profile",          "fr": null },
+    "introText":      { "en": "<purpose paragraph from CR-105 draft>",            "fr": null },
+    "help": {
+      "interpretationTitle": { "en": "How to read this chart",                    "fr": null },
+      "interpretation":      { "en": "<interpretation paragraph>",                "fr": null },
+      "methodsTitle":        { "en": "Methods & data",                            "fr": null },
+      "methods":             { "en": "<methods paragraph + citations>",           "fr": null }
+    }
+  },
+  "obsSpiral":     { /* P2 — same shape */ },
+  "obsRidge":      { /* P3 — same shape */ },
+  "obsPolarHeatmap": { /* P4 — same shape */ },
+  "obsMonthlyClimatology": {                       // P5 — distinct section
+    "title":   { "en": "Long-run seasonal statistics",                            "fr": null },
+    "introText": { "en": "<purpose>",                                             "fr": null },
+    "help": {
+      "interpretationTitle": { "en": "How to read this section",                  "fr": null },
+      "interpretation":      { "en": "<incl. TMAX/TMIN clarification + PTOT annual=sum>", "fr": null },
+      "methodsTitle":        { "en": "Methods",                                   "fr": null },
+      "methods":             { "en": "<methods + citations>",                     "fr": null }
+    }
+  },
+  "warmingThresholdMap": {                         // CR-097 — distinct section under futureProjections
+    "title":   { "en": "When does warming first reach +X°C?",                     "fr": null },
+    "introText": { "en": "<purpose>",                                             "fr": null },
+    "help": {
+      "interpretationTitle": { "en": "How to read this map",                      "fr": null },
+      "interpretation":      { "en": "<incl. ensemble-mean caveat + SSP1-2.6 transience>", "fr": null },
+      "methodsTitle":        { "en": "Methods & ensemble",                        "fr": null },
+      "methods":             { "en": "<NEX-GDDP-CMIP6 + Thrasher 2022 + IPCC AR6 Ch.4>", "fr": null }
+    }
+  },
+  "obsDecadeMaps": {                               // P6 — distinct section
+    "title":   { "en": "Spatial climate change by decade",                        "fr": null },
+    "introText": { "en": "<purpose>",                                             "fr": null },
+    "help": {
+      "interpretationTitle": { "en": "How to read this section",                  "fr": null },
+      "interpretation":      { "en": "<incl. OLS vs Theil-Sen distinction, variability suppressions>", "fr": null },
+      "methodsTitle":        { "en": "Methods & statistics",                      "fr": null },
+      "methods":             { "en": "<Theil-Sen + MK + TFPW + Yue&Wang + Mann + Kendall citations>", "fr": null }
+    }
+  }
+  ```
+
+  Citations referenced (full bibliography for `general.methods.references.text` or the new section help blocks):
+
+  - Funk, C. et al. (2015). The Climate Hazards Infrared Precipitation with Stations — a new environmental record for monitoring extremes. *Scientific Data* **2**, 150066. https://doi.org/10.1038/sdata.2015.66
+  - Hersbach, H. et al. (2020). The ERA5 global reanalysis. *Q.J.R. Meteorol. Soc.* **146**, 1999–2049. https://doi.org/10.1002/qj.3803
+  - Hawkins, E., Sutton, R., & Stainforth, D. (2017). Connecting climate model projections of global temperature change with the real world. *BAMS* **98**, 999–1004.
+  - Silverman, B.W. (1986). *Density Estimation for Statistics and Data Analysis*. CRC Press.
+  - Yue, S. & Wang, C.Y. (2002). Applicability of pre-whitening to eliminate the influence of serial correlation on the Mann-Kendall test. *Water Resour. Res.* **38**(6). https://doi.org/10.1029/2001WR000861
+  - Mann, H.B. (1945). Nonparametric tests against trend. *Econometrica* **13**, 245–259.
+  - Kendall, M.G. (1975). *Rank Correlation Methods*, 4th ed. Griffin, London.
+  - Thrasher, B. et al. (2022). NASA Global Daily Downscaled Projections, CMIP6. *Earth and Space Science* **9**, e2022EA002329. https://doi.org/10.1029/2022EA002329
+  - IPCC AR6 WGI Chapter 4 — Lee, J.-Y. et al. (2021). Future Global Climate: Scenario-Based Projections and Near-Term Information. In *Climate Change 2021: The Physical Science Basis*. Cambridge University Press.
+  - Thornthwaite, C.W. (1948) — for SPEI background if SPEI sections want the original Thornthwaite reference; SPEI itself: Vicente-Serrano, S.M., Beguería, S., & López-Moreno, J.I. (2010). *J. Climate* **23**, 1696–1718.
+
+- **STATUS (2026-06-01):** EN drafts complete (above) · nbText.json skeleton sketched (above) · FR translation deferred until Pete signs off EN · Production wiring (sandbox → main notebook) blocked on CR-106 + CR-107 component promotion.
 
 ---
 

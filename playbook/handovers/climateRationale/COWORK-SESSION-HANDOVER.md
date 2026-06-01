@@ -134,11 +134,16 @@ changes in VS Code's Source Control panel.
 
 ---
 
-## Current state (2026-06-01, end of sessions 19–20 — sandbox P1–P6 + CR-097 build + climate/UX review + playbook update)
+## Current state (2026-06-01, end of sessions 19–20 — sandbox P1–P6 + CR-097 build + climate/UX review + full CR-099/100/101/102/103/104 fix pass)
 
 ### Where the branch is
 
-- `dev/climateRationale` — local has 2 uncommitted files: `notebooks/sandbox/obs_month_overlay.qmd` (built during session 19) and `notebooks/climateRationale/notebook.qmd` (trivial whitespace revert). Latest commit: `5447340` (fix sandbox P6 legend direction labels + P5 baseline bug + P6 projection + 2020s decade range). Pipeline status unchanged from session 18.
+- `dev/climateRationale` — clean tree, all session work committed. Latest commits on top of session-18 `af224ca`:
+  - `5447340` — initial P6 legend direction labels + P5 baseline bug + P6 projection + 2020s decade range
+  - `5fa97c1` — playbook block + CR-099–108 filed
+  - `3422667` — sandbox bug fixes (CR-099/100/101/102/103) + CR-104 first pass (P1 n_years / P2 year stats / P3 tooltip / P5 PTOT dots + σy / P6 palette + caveat / CR-097 grey label + caveat)
+  - `94d6a35` — sandbox CR-104 finish (P1 PTOT % + ±σ band / P2 caveat block / P3 bimodal note / P4 season preset + PTOT percentile + condensed labels)
+- Pipeline status unchanged from session 18 — CR-068 STAGE C still not launched on CGlabs.
 
 ### What's landed this session (sessions 19–20)
 
@@ -164,22 +169,28 @@ changes in VS Code's Source Control panel.
 - ISSUES.md: added CR-099 through CR-108 (sandbox bugs, climate/UX review, methods caveats, section descriptions + citations, controls integration, performance analysis)
 - COWORK-SESSION-HANDOVER.md: this block
 
-### Remaining sandbox bugs (tracked as CRs)
+### Sandbox CR status snapshot (all in commits above)
 
-| CR | Bug | Where |
+| CR | Title | Status |
 |---|---|---|
-| CR-099 | CR-097 table mode: `aggData`/`byScenario`/`joinKey` undefined at top of branch | obs_month_overlay.qmd |
-| CR-101 | P5 PTOT annual row: mean instead of sum | obs_month_overlay.qmd |
-| CR-102 | P4 polar legend: no direction labels | obs_month_overlay.qmd |
-| CR-103 | P1/P2/P3/P4 country lists: 9 hardcoded vs full 30 | obs_month_overlay.qmd |
+| CR-099 | CR-097 table mode undefined vars | ✓ FIXED `3422667` |
+| CR-100 | P3 KDE fixed bandwidth → Silverman | ✓ FIXED `3422667` |
+| CR-101 | P5 PTOT annual mean → sum (table) | ✓ FIXED `3422667` |
+| CR-102 | P4 polar legend direction labels | ✓ FIXED `3422667` |
+| CR-103 | Country lists 9 → 31 (shared cells) | ✓ FIXED `3422667` |
+| CR-104 | Climate/UX expert review action items | ✓ ALL ACTIONED `3422667` + `94d6a35` |
+| CR-105 | Section descriptions + citations + nbText.json sketch | EN drafts complete; FR + production wiring deferred |
+| CR-106 | Popup multi-select → main notebook | Open — blocked on Pete sign-off |
+| CR-107 | Regional scope options → main notebook | Open — blocked on Pete sign-off |
+| CR-108 | CR-097 performance vs main notebook | Diagnosed — no sandbox change; real fix = U-5 |
 
 ### Deferred to next session
 
-1. Fix CR-099 / CR-101 / CR-102 / CR-103 in sandbox.
-2. Pete review of CR-105 section descriptions + citations draft — approve or edit EN before FR translation.
-3. CR-106 / CR-107 main-notebook integration (popup multi-select + regional scope) — DO NOT touch `notebook.qmd` until sandbox sign-off.
+1. Pete review of CR-105 EN drafts (section descriptions + interpretation + methods + citations) — approve or edit before FR translation.
+2. CR-106 popup multi-select extraction to `helpers/popupMultiSelect.ojs` — only after Pete signs off sandbox component.
+3. CR-107 regional scope wiring into main notebook admin selector — only after Pete signs off P6 region behaviour.
 4. CR-068 STAGE C launch on CGlabs (still not launched as of 2026-05-29; Stage F complete).
-5. Sub-ensemble pipeline — INCOMPLETE model investigation still blocking.
+5. Sub-ensemble pipeline — INCOMPLETE model investigation still blocking CMIP6 percentile bake.
 
 ### Switch model back to "high" effort (Pete reminder)
 
