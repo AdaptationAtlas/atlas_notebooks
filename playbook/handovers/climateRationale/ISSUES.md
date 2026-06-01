@@ -192,6 +192,8 @@ Stage F status as of ~06:35 UTC 2026-05-28: annual section 2/2.1/4/4.1 complete;
 
 **2026-05-29 update — Stage F COMPLETE.** Both timeframes finished cleanly: annual 44,880/44,880 at 10:14:59 UTC 2026-05-28; jagermeyr 44,880/44,880 at 23:59:46 UTC 2026-05-28. Log: `logs/F_resume_20260527_201101.log`. Runbook did NOT auto-chain to STAGE C — next maintainer must launch manually (see "Decisions applied — 2026-05-29" section). 50+ terra CRS/projection warnings in log are normal noise, not blockers.
 
+**2026-05-30 update — STAGE C/D/E COMPLETE.** Full AC re-bake finished. Stage C (R/3, `FORCE_OVERWRITE=1`, `worker_n4.2=1`) completed 2026-05-30 05:05:27 UTC (274.5 min annual + 266.7 min jagermeyr, 12 warnings only). Stage D PASSED (0 breaches). Stage E published to canonical S3 2026-05-30 15:54:24 UTC — new etag `4c6e822161edba3a90f28b4848197716`, 58,809,303 bytes. E4 apples-to-apples confirmed 0 breaches against published URL. Post-bake probes (`probe_no_hazard_arithmetic_quick.sh`, `probe_cross_parquet_vop_drift.sh`) still outstanding — atlas_notebooks path on CGlabs not yet located. Troubleshooting notes: (1) bare `Rscript R/3_freq_x_exposure.R` fails — must use `source(SETUP_SCRIPT)` pattern (see corrected handover); (2) DuckDB `read_parquet()` crashes with arrow 22.0.0 — Stage D validate script now uses arrow+data.table instead; (3) initial Stage C publish was a no-op (same etag) — FORCE_OVERWRITE=1 required; (4) worker_n4.2 lowered from 6 → 2 → 1 (sequential) due to OOM with `none`-layer TIFs.
+
 ### Producer-side parquet pushdown groundwork landed
 
 Independent workstream from CR-068 but landed in the same session. Three changes:
@@ -243,6 +245,24 @@ cd ~/atlas/atlas_notebooks
 ```
 
 Pre-bake AGO baseline (must all drop to ≤100%): rice 203.55%, sugarcane 117.9%, pearl-millet 107.9%, tobacco 105.3%, maize 100.8%, oilpalm 100.8%, soybean 100.1%, cattle-tropical 101.6%, goats-tropical 100.1%. Query 0 NaN: 561/6,021 pre-bake → expect 0 post-bake. If Pattern B per-admin1 drift persists post-E, residual mask-alignment problem in R/3 — `na.rm` fix alone didn't close it; new dispatch needed.
+
+---
+
+## Decisions applied — 2026-05-30 (CR-068 AC re-bake COMPLETE + R/2.1 pushdown strategy)
+
+### CR-068 AC re-bake closed
+
+Full Stage C → D → E chain completed. Several issues resolved along the way — full record in `hazards_prototype/scripts/2026-05-26_handover.md` (2026-05-30 addendum). Key decisions:
+
+- **worker_n4.2 = 1** (sequential). `hazard='none'` layer increased per-group TIF footprint enough to OOM at 6 and at 2. Sequential is the safe floor until memory profile is understood. `a3d009a` (6) → `e7c43ac` (2) → `59c8392` (1).
+- **FORCE_OVERWRITE=1 required** for any R/3 re-run that needs to regenerate existing outputs. Default is `overwrite=FALSE`; forgetting this silently publishes a no-op (same etag, same content).
+- **Stage C launch command fixed** — bare `Rscript R/3_freq_x_exposure.R` fails with `haz_meta_url not found`; must source `0_server_setup.R` first via SETUP_SCRIPT env-var pattern. Corrected in handover.
+- **DuckDB + arrow 22.0.0 incompatible** for `read_parquet()` — Stage D validate script rewritten to use `arrow::read_parquet` + `data.table` aggregations. DuckDB SELECT 42 works; any parquet read crashes connection. Root cause: DuckDB 1.5.2 bundled Arrow conflicts with arrow R package 22.0.0.
+- **Post-bake probes pending** — atlas_notebooks path not located on CGlabs. Need `find /home/jovyan -name "probe_no_hazard_arithmetic_quick.sh"` to locate before running.
+
+### Next workstream: R/2.1 parquet pushdown + notebook optimization
+
+See "Strategy: R/2.1 parquet pushdown + notebook optimization" section below (after Issues).
 
 ### Before commissioning CMIP6 sub-ensemble pipeline work — `nexgddp_coverage.csv` flag
 
@@ -808,6 +828,8 @@ Pre-bake AGO baseline (must all drop to ≤100%): rice 203.55%, sugarcane 117.9%
 **2026-05-28 morning re-bake status:** AC re-bake ACTIVELY RUNNING after a single-session unblock of four discrete R/2 bugs (see "Decisions applied — 2026-05-28" above). Annual section 5.2 in final sweep; jagermeyr 5.2 not yet started; ETA late morning UTC 2026-05-28 for stage F completion, then STAGE C → D → E → cleanup → verify flows automatically. CR-049 Phase 1 can resume reading `value(hazard='any') + value(hazard='none')` from the new canonical the moment STAGE E publishes.
 
 **2026-05-29 update — Stage F COMPLETE; STAGE C not yet launched.** Both timeframes done (44,880/44,880 each). Runbook did NOT auto-chain; STAGE C requires manual launch (see "Decisions applied — 2026-05-29"). CR-049 Phase 1 unblocks the moment STAGE E publishes the new canonical.
+
+**2026-05-30 update — CANONICAL PUBLISHED. CR-049 UNBLOCKED.** Stage E published 2026-05-30 15:54:24 UTC (etag `4c6e822161edba3a90f28b4848197716`). Canonical now carries `hazard='none'` rows — confirmed by Stage D row count: 60,402,360 rows vs 60,331,368 pre-bake (+70,992 = the `none` rows). CR-049 Phase 1 can now resume: denominator = `value(hazard='any') + value(hazard='none')` from `hazard_exposure` directly.
 
 ### CR-026 — Overview section should link to GCF guidance
 
@@ -1404,6 +1426,8 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 **2026-05-28 morning re-bake status:** AC re-bake is ACTIVELY RUNNING (parent R PID 108720, ~10 h elapsed since 2026-05-27 20:11 UTC kickoff). Annual sections 1/2/2.1/4/4.1 completed cleanly. Annual section 5.2 is in its final write sweep — 44,885 of ~44,880 expected interaction tifs at `working_dir/Data/hazard_timeseries_int/annual/` with 2,244 ENSEMBLEmean + 2,244 ENSEMBLEsd already written. Jagermeyr section 5.2 not yet started. ETA: jagermeyr completes late morning UTC 2026-05-28, then STAGE C → D → E → cleanup → verify run automatically. **The re-bake required four discrete bug fixes during the session** — TaiESM1 year-pair regex collapse (`4b28977`), hazard2 ext-stat infix mismatch (`8f22c2e` + `fa8e557`), debug-mode env flags so future_lapply errors weren't masked (`1afe533` + `e493b84`), and a one-time rename of 1,376 TaiESM1 orphan files. See "Decisions applied — 2026-05-28" section above for the full story + the all-combinations audit probe that would have caught the misalignments in ~30 seconds had it been run pre-launch.
 
 **2026-05-29 update — Stage F COMPLETE; canonical parquet NOT YET updated.** Annual 44,880/44,880 at 10:14:59 UTC 2026-05-28; jagermeyr 44,880/44,880 at 23:59:46 UTC 2026-05-28. Runbook did NOT auto-chain to STAGE C. No C/D/E logs dated after 2026-05-26. Canonical `severity=severe/int=multi-hazard.parquet` last-modified still 2026-05-26 15:21:59 UTC — pre-fix. STAGE C launch pending (see "Decisions applied — 2026-05-29"); CR-068 closes only once STAGE E publishes and post-bake probes pass.
+
+**2026-05-30 update — CR-068(a) CLOSED; (b) upstream only; (c) partially closed.** Stage E published 2026-05-30 15:54 UTC. (a) `hazard='none'` rows confirmed in canonical (+70,992 rows, Stage D row-count check). (c) `na.rm=TRUE` fix in ENSEMBLE writers — SSP370 2041+ still shows zeros in Stage D [b] snapshot (sugarcane/oilpalm/cocoa); this may be residual NaN where ALL GCMs have NaN pixels even after na.rm fix — post-bake Stage 2C re-probe needed to confirm. (b) remains upstream-only. Post-bake probes (`probe_no_hazard_arithmetic_quick.sh`, `probe_cross_parquet_vop_drift.sh`) not yet run — atlas_notebooks path on CGlabs not located. Backup at `s3://digital-atlas/sandbox/backup/20260530_154522/...` (ACL=public-read, valid rollback).
 - **before-string:** n/a (schema + aggregation change).
 
 ### CR-069 — Methods section should enumerate the GCMs in the NEX-GDDP-CMIP6 ensemble [NEW 2026-05-15]
@@ -2653,7 +2677,7 @@ These items live in the `hazards_prototype` repo (or the analogous FAOSTAT pre-f
 | **U-1** | [[CR-059]] — SPEI replaces raw-precip z-score for PTOT extreme-event classification | `bars_extremeEvents` reads SPEI for PTOT slice once schema lands | Open. Bundle with U-2 / U-3 in a single re-bake. | M (pipeline) |
 | **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | Open. Notebook ribbon swap is a follow-up once this lands. | M (pipeline) |
 | **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `s3://digital-atlas/.../adm0_faostat.parquet` | PR-N ([[CR-063]]) consumes the S3 path directly via the `production_timeseries` nbData entry. | ✓ FIXED 2026-05-15 by Brayden — parquet published; PR-N Phase A landed against it the same day. **2026-05-18 — Trade domain extension:** parquet republished with `export_quantity` + `export_value` added to the `variable` enum (6 levels total). Schema unchanged. Notebook side picks up via a future PR-N Phase B / C dispatch. | M (pipeline) |
-| **U-4** | [[CR-068]] — `hazard_exposure` parquet adds `hazard = "none"` / unexposed row per cell | PR-E (CR-049) Phase 1 drops the cross-table join and reads the denominator directly from `hazard_exposure`. | 🔄 Stage F complete 2026-05-28 23:59:46 UTC; **STAGE C not yet launched** (2026-05-29). Code fixes `8d559b3` + `41c1c00` in place. Awaiting C → D → E to publish canonical. | M (pipeline) |
+| **U-4** | [[CR-068]] — `hazard_exposure` parquet adds `hazard = "none"` / unexposed row per cell | PR-E (CR-049) Phase 1 drops the cross-table join and reads the denominator directly from `hazard_exposure`. | ✓ **DELIVERED 2026-05-30.** C/D/E complete. Canonical published (etag `4c6e822161edba3a90f28b4848197716`), +70,992 `none` rows confirmed. CR-049 Phase 1 unblocked. | M (pipeline) |
 | **U-5 (optional)** | [[CR-058]] Option 3 — partition the projections + extremes parquet by `iso3` instead of (or in addition to) by `period` | First-fetch latency drops from ~30 s to ~1 s on the Future Projections + Extreme Events sections; nbData entries gain per-country `s3_paths`. | Open. **Optional** — Brayden can decline if the pipeline pass is already heavy; defer until users actively complain about latency. Measured 2026-05-15 as the highest-leverage perf fix (96 MB period parquet → ~2 MB per-country, 96 / 54). | M–L (pipeline) |
 
 Effort key: **S** ≤ 1 dev-day · **M** 1–3 days · **L** 3–7 days.
@@ -2732,6 +2756,86 @@ These are explicitly out of scope for this round per Pete's "focus on immediate 
 **Overview / framing — surfaced 2026-05-13 from Pete's Q5 answer:**
 - **CR-NEW-cacc1-overview** — Ask CACC1 (Cesare Scartozzi's programme) to produce dedicated Overview content: guidance on how to write a climate rationale, framing for GCF audiences, links to worked examples. **Pete to surface to Cesare.** When delivered, it replaces / extends the single GCF link in CR-026.
 - **CR-NEW-examples-section** — Add a new "Examples" section near the Summary (not the Overview) listing worked climate rationales. First entry would be the Togo SAT report; **blocked on a stable public URL for the Togo PDF** (host on the Atlas CDN first).
+
+---
+
+## Strategy: R/2.1 parquet pushdown + notebook optimization (2026-05-30)
+
+### Context
+
+The `ensemble_season_timeseries.parquet` (and sibling R/2.1 outputs) feeding **Future Projections** has a 10-min cold-load wait in the notebook. Root cause: parquet written by pyarrow (NULL column stats → DuckDB-WASM can't skip row groups). The `write_parquet_pushdown` migration was done in commit `64d3cfa` but R/2.1 has never been re-run on CGlabs to produce the optimized files.
+
+**Constraint (Pete, 2026-05-30):** Leave the canonical `hazard_exposure` parquet untouched — just published, potentially used by diverse notebooks, structural risk outweighs the benefit for now. The R/3 5-deferred `write_parquet_pushdown` sites remain deferred.
+
+### What "pushdown optimization" gives us for R/2.1 outputs
+
+- DuckDB-native byte format (eliminates the `[object WebAssembly.Exception]` crash risk)
+- 50k row groups (avg column-chunk ~76 KB vs ~150 KB at rg=100k)
+- Sorted by `[iso3, hazard, scenario, timeframe]` → row-group skipping on single-country queries
+- Populated min/max stats → predicate pushdown actually works
+- Schema unchanged — same columns, same types, just better layout
+
+### Recommended order
+
+**Step 0 — Post-bake probes (CGlabs, ~10 min)**
+Find atlas_notebooks and run the probes to confirm CR-068(a) closure:
+```bash
+find /home/jovyan -name "probe_no_hazard_arithmetic_quick.sh" 2>/dev/null
+# then:
+cd <found_path>/..
+./scripts/probe_no_hazard_arithmetic_quick.sh AGO
+./scripts/probe_cross_parquet_vop_drift.sh AGO
+```
+Expected: all ratios ≤100%, NaN count = 0.
+
+**Step 1 — WASM smoke test (local browser, ~15 min)**
+5 sandbox CMIP6 files were rebaked and uploaded 2026-05-27 at `s3://digital-atlas/sandbox/parquet-pushdown/`. The WASM smoke test has NOT been run yet. Must pass before promoting any pushdown-format parquets to production paths.
+
+Dispatch: `atlas_notebooks/dispatches/2026-05-27_parquet-pushdown-sandbox-smoke-test.md`
+
+Quick procedure:
+1. In `data/climateRationale/nbData.json`, swap the 5 `future_climate_timeseries` parquet URLs to `sandbox/parquet-pushdown/` prefix
+2. `quarto render notebooks/climateRationale/notebook.qmd`
+3. Open in Chrome, Network tab + disabled cache, scroll to Future Projections
+4. Check: no `WebAssembly.Exception`, bytes transferred < 50 MB (vs ~1.6 GB baseline), wall-clock < 60s
+5. **Revert** nbData.json (do NOT commit)
+
+**PASS** → proceed to Step 2. **FAIL** → `[object WebAssembly.Exception]` in console → abort; diagnose via dispatch §4.
+
+**Step 2 — Rerun R/2.1 (CGlabs, ~several hours)**
+
+R/2.1 sections to run:
+- Sections 1–3.3: fast, produce `ensemble_season_timeseries.parquet` and siblings
+- Section 3.4 (Theil-Sen trends): ~9h per timeframe — **SKIP for now** (outputs not yet surfaced in notebook; blocked by CR-094 TFPW fix)
+
+Launch pattern (skip 3.4):
+```bash
+export SETUP_SCRIPT="$HOME/atlas/hazards_prototype/R/0_server_setup.R"
+# R/2.1 uses its own setup convention — check the script header for exact invocation
+# Key: FORCE_OVERWRITE=1 to regenerate existing parquets with pushdown layout
+```
+**Always check overwrite controls before launching** (see [[feedback_check_overwrite_controls]]).
+
+**Step 3 — Publish R/2.1 outputs to S3**
+
+R/2.1 publishes via `push_to_s3.R` or equivalent. The `write_parquet_pushdown` migration means the local files will already have the optimized layout; publishing them is a straight upload (no structural change to schema).
+
+**Step 4 — WASM browser test against new canonical R/2.1 parquets**
+
+Same smoke-test procedure as Step 1 but pointing at the newly published canonical paths. Confirm Future Projections cold-load drops from ~10 min to <60s. If cold-load is still slow, re-check that the R/2.1 parquets actually got the pushdown layout (run `write_parquet_pushdown` verification query — see `_helpers.R` docstring).
+
+### What NOT to do yet
+
+- ❌ `hazard_exposure` canonical — leave as-is (just published 2026-05-30, diverse consumers)
+- ❌ R/3 5 deferred `write_parquet_pushdown` sites — leave deferred per handover
+- ❌ R/2.1 section 3.4 trends — blocked on CR-094 TFPW implementation
+- ❌ Any schema change to any canonical — structural changes need blast-radius check first
+
+### Open questions before Step 2
+
+1. **R/2.1 runtime with FORCE_OVERWRITE**: sections 1–3.3 only — how long on CGlabs? Need a timing estimate before launching.
+2. **Sort keys for `ensemble_season_timeseries.parquet`**: proposed `[iso3, hazard, scenario, timeframe]` — confirm this matches how the notebook queries (single-country + hazard filter is the hot path).
+3. **R/2.1 invocation pattern**: does it use the same `SETUP_SCRIPT` env-var approach as R/3, or does it have its own setup?
 
 ---
 
