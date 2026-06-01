@@ -200,7 +200,7 @@ Independent workstream from CR-068 but landed in the same session. Three changes
 
 - **`R/_helpers.R::write_parquet_pushdown` default `row_group_size` 100000 → 50000**, plus a `max_avg_chunk_kb = 200` soft ceiling check and a small-table escape clause (rows < 2× row_group_size accepts a single row group). Parameter sweep at `/tmp/parquet-pushdown-experiment/` confirmed DuckDB 1.5 has no `DATA_PAGE_SIZE` / `WRITE_PAGE_INDEX` option — only `ROW_GROUP_SIZE` controls per-fetch granularity. `rg=50000` halves avg compressed column-chunk size (~150 KB → ~76 KB) vs `rg=100000` with only +0.3% file size.
 - **`R/2.1_create_monthly_haz_tables.R` all 9 `arrow::write_parquet` sites migrated to `write_parquet_pushdown`** (commit `64d3cfa`). Lines 204/318/441/520/652/708/833/915/950 — covers the canonical climateRationale `ensemble_season_timeseries.parquet` producer (line 652) plus 8 sibling intermediates / likely-canonical-for-other-notebooks files. AtlasDataManageR publisher confirmed byte-preserving (`s3$put_object(Body = local_path)` — no parquet parse/re-encode), so producer-side row-group + sort layout reaches canonical S3 verbatim on the next R/2.1 run.
-- **Sandbox CMIP6 rebake live on S3** at `s3://digital-atlas/sandbox/parquet-pushdown/...` — 5 future_climate_timeseries parquets rebaked via the R/misc rebake script with corrected CMIP6 sort (`hazard` not `variable`, commit `cbf3e0e`) at rg=50000. The browser WASM smoke test (the REAL perf gate) dispatched but not yet executed — see `dispatches/2026-05-27_parquet-pushdown-sandbox-smoke-test.md`.
+- **Sandbox CMIP6 rebake live on S3** at `s3://digital-atlas/sandbox/parquet-pushdown/...` — 5 future_climate_timeseries parquets rebaked via the R/misc rebake script with corrected CMIP6 sort (`hazard` not `variable`, commit `cbf3e0e`) at rg=50000. **2026-06-01 update: WASM smoke test PASSED** (16.2 MB vs ~1.6 GB baseline, no WebAssembly.Exception), all 5 files promoted to canonical via Stage 6 (see strategy section), Stage 7 verify passed, sandbox deleted. R/2.1 rerun needed to replace with fresh source-data parquets.
 
 ### New project memory entries
 
@@ -2832,83 +2832,83 @@ These are explicitly out of scope for this round per Pete's "focus on immediate 
 
 ---
 
-## Strategy: R/2.1 parquet pushdown + notebook optimization (2026-05-30)
+## Strategy: R/2.1 parquet pushdown + notebook optimization (updated 2026-06-01)
 
-### Context
+### Progress as of 2026-06-01
 
-The `ensemble_season_timeseries.parquet` (and sibling R/2.1 outputs) feeding **Future Projections** has a 10-min cold-load wait in the notebook. Root cause: parquet written by pyarrow (NULL column stats → DuckDB-WASM can't skip row groups). The `write_parquet_pushdown` migration was done in commit `64d3cfa` but R/2.1 has never been re-run on CGlabs to produce the optimized files.
+| Step | Status | Notes |
+|---|---|---|
+| Post-bake probes | ✓ DONE | Run 2026-06-01. CR-068(a) confirmed. Pattern B + Luanda NaN persist (separate dispatches). |
+| WASM smoke test | ✓ PASS | 2026-06-01. 16.2 MB transferred (vs ~1.6 GB baseline, 99% reduction). No WebAssembly.Exception. |
+| Stage 6 promotion | ✓ DONE | 5 CMIP6 `ensemble_season_timeseries.parquet` promoted sandbox → canonical. Backups at `.preFix.bak`. |
+| Stage 7 verify | ✓ PASS | 13,680 rows for AGO annual in <5s via HTTPS DuckDB. |
+| Sandbox cleanup | ✓ DONE | `aws s3 rm --recursive s3://digital-atlas/sandbox/parquet-pushdown/` (also removed 9 other sandbox files that were NOT promoted — see below). |
+| R/2.1 rerun | 🔜 NEXT | Code changes committed `e7eed37`. Awaiting CGlabs launch. |
 
-**Constraint (Pete, 2026-05-30):** Leave the canonical `hazard_exposure` parquet untouched — just published, potentially used by diverse notebooks, structural risk outweighs the benefit for now. The R/3 5-deferred `write_parquet_pushdown` sites remain deferred.
+### What's live now
 
-### What "pushdown optimization" gives us for R/2.1 outputs
+The 5 canonical `ensemble_season_timeseries.parquet` files at `s3://digital-atlas/domain=climate/...` are the **pre-baked sandbox versions** (rg=50000, DuckDB-native, sorted). These are a stopgap — they work and deliver the WASM latency benefit, but they were generated from old code (2026-05-27 rebake, 5-GCM subset). R/2.1 rerun will replace them with fresh data from current source using the same pushdown layout.
 
-- DuckDB-native byte format (eliminates the `[object WebAssembly.Exception]` crash risk)
-- 50k row groups (avg column-chunk ~76 KB vs ~150 KB at rg=100k)
-- Sorted by `[iso3, hazard, scenario, timeframe]` → row-group skipping on single-country queries
-- Populated min/max stats → predicate pushdown actually works
-- Schema unchanged — same columns, same types, just better layout
+### Other sandbox files deleted without promoting (need fresh rebake later)
 
-### Recommended order
+These were in the sandbox but NOT promoted before the `aws s3 rm` cleanup:
+- `adm0_obs.parquet`, `adm1_obs.parquet` (observational — smaller files, lower urgency)
+- `adm0_sectorGDP_usd2015.parquet`, `adm0_sectorLanduse.parquet`, `adm01_pov-rates.parquet`, `adm0_faostat.parquet` (socioeconomic)
+- `crop-livestock_all.parquet` (exposure — also has Brayden's republish debt from exposure-producer-drift dispatch)
+- `hazard_exposure int=multi-hazard.parquet` (left untouched per decision — structure risk)
 
-**Step 0 — Post-bake probes (CGlabs, ~10 min)**
-Find atlas_notebooks and run the probes to confirm CR-068(a) closure:
+When ready, these need: fresh rebake via respective producer scripts + sandbox upload + smoke test + Stage 6 promotion each.
+
+### R/2.1 rerun plan
+
+**Code changes already committed** (`e7eed37`):
+- `overwrite1/overwrite2` now read `FORCE_OVERWRITE` env var (was hardcoded FALSE)
+- Section 3.4 trends wrapped in `SKIP_R2_1_3_4` guard (~9h per timeframe, skip for pushdown-only rerun)
+
+**Launch command (CGlabs):**
 ```bash
-find /home/jovyan -name "probe_no_hazard_arithmetic_quick.sh" 2>/dev/null
-# then:
-cd <found_path>/..
-./scripts/probe_no_hazard_arithmetic_quick.sh AGO
-./scripts/probe_cross_parquet_vop_drift.sh AGO
-```
-Expected: all ratios ≤100%, NaN count = 0.
+cd ~/atlas/hazards_prototype
+git pull --ff-only origin develop   # gets e7eed37
 
-**Step 1 — WASM smoke test (local browser, ~15 min)**
-5 sandbox CMIP6 files were rebaked and uploaded 2026-05-27 at `s3://digital-atlas/sandbox/parquet-pushdown/`. The WASM smoke test has NOT been run yet. Must pass before promoting any pushdown-format parquets to production paths.
-
-Dispatch: `atlas_notebooks/dispatches/2026-05-27_parquet-pushdown-sandbox-smoke-test.md`
-
-Quick procedure:
-1. In `data/climateRationale/nbData.json`, swap the 5 `future_climate_timeseries` parquet URLs to `sandbox/parquet-pushdown/` prefix
-2. `quarto render notebooks/climateRationale/notebook.qmd`
-3. Open in Chrome, Network tab + disabled cache, scroll to Future Projections
-4. Check: no `WebAssembly.Exception`, bytes transferred < 50 MB (vs ~1.6 GB baseline), wall-clock < 60s
-5. **Revert** nbData.json (do NOT commit)
-
-**PASS** → proceed to Step 2. **FAIL** → `[object WebAssembly.Exception]` in console → abort; diagnose via dispatch §4.
-
-**Step 2 — Rerun R/2.1 (CGlabs, ~several hours)**
-
-R/2.1 sections to run:
-- Sections 1–3.3: fast, produce `ensemble_season_timeseries.parquet` and siblings
-- Section 3.4 (Theil-Sen trends): ~9h per timeframe — **SKIP for now** (outputs not yet surfaced in notebook; blocked by CR-094 TFPW fix)
-
-Launch pattern (skip 3.4):
-```bash
 export SETUP_SCRIPT="$HOME/atlas/hazards_prototype/R/0_server_setup.R"
-# R/2.1 uses its own setup convention — check the script header for exact invocation
-# Key: FORCE_OVERWRITE=1 to regenerate existing parquets with pushdown layout
+export R21_SCRIPT="$HOME/atlas/hazards_prototype/R/2.1_create_monthly_haz_tables.R"
+
+LOG="logs/R21_pushdown_$(date +%Y%m%d_%H%M%S).log"
+nohup bash -c "FORCE_OVERWRITE=1 SKIP_R2_1_3_4=1 Rscript -e '
+options(error = function() { traceback(2); quit(status=1, save=\"no\") })
+source(Sys.getenv(\"SETUP_SCRIPT\"))
+source(Sys.getenv(\"R21_SCRIPT\"))
+'; RC=\$?; echo \"===== R/2.1 DONE (exit: \$RC) =====\"" \
+  > "$LOG" 2>&1 &
+echo "R/2.1 launched, PID=$!, log=$LOG"
+tail -f "$LOG"
 ```
-**Always check overwrite controls before launching** (see [[feedback_check_overwrite_controls]]).
 
-**Step 3 — Publish R/2.1 outputs to S3**
+**Open question before launching — S3 publish path:**
+push_to_s3.R (section 4.2) uploads to `s3://digital-atlas/hazards/hazard_timeseries_mean_month` but the notebook reads from `s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/...`. Different paths — unclear which publisher creates the `domain=climate` structure. Must resolve before the publish step or the new parquets won't reach the notebook. Ask Pete / check AtlasDataManageR documentation.
 
-R/2.1 publishes via `push_to_s3.R` or equivalent. The `write_parquet_pushdown` migration means the local files will already have the optimized layout; publishing them is a straight upload (no structural change to schema).
+**Runtime estimate:** Unknown — no timing markers in R/2.1. Section 3.1 processes 5 GCMs × 5 timeframes × 4 scenarios. Expect hours but less than R/2 (5 vs 18+ GCMs). Run a 10-line probe on one GCM × timeframe × scenario before launching full rerun.
 
-**Step 4 — WASM browser test against new canonical R/2.1 parquets**
+**Post-rerun:**
+1. Identify correct S3 publish path (see open question above)
+2. Publish with `upload_files_to_s3(..., mode="public-read")` — NOT `s3_file_copy` (strips ACL)
+3. Stage 7-style DuckDB HTTPS verify on new canonical
 
-Same smoke-test procedure as Step 1 but pointing at the newly published canonical paths. Confirm Future Projections cold-load drops from ~10 min to <60s. If cold-load is still slow, re-check that the R/2.1 parquets actually got the pushdown layout (run `write_parquet_pushdown` verification query — see `_helpers.R` docstring).
+### Concurrent issues (not blocking R/2.1)
 
-### What NOT to do yet
+| Issue | Owner | Status |
+|---|---|---|
+| Pattern B per-admin1 drift (R/3 mask alignment) | Pete / new dispatch | New dispatch needed; `na.rm` alone insufficient |
+| CR-068(b) Luanda NaN (historic NDWS saturation) | AdaptationAtlas/hazards | Upstream; dispatch queued |
+| `crop-livestock_all` republish (exposure drift) | Brayden | Queued |
+| Other sandbox parquets (obs, socioeconomic) | Future session | Low urgency |
 
-- ❌ `hazard_exposure` canonical — leave as-is (just published 2026-05-30, diverse consumers)
-- ❌ R/3 5 deferred `write_parquet_pushdown` sites — leave deferred per handover
+### What NOT to do
+
+- ❌ `hazard_exposure` canonical — untouched (Pete, 2026-05-30)
+- ❌ R/3 5 deferred `write_parquet_pushdown` sites — stay deferred
 - ❌ R/2.1 section 3.4 trends — blocked on CR-094 TFPW implementation
-- ❌ Any schema change to any canonical — structural changes need blast-radius check first
-
-### Open questions before Step 2
-
-1. **R/2.1 runtime with FORCE_OVERWRITE**: sections 1–3.3 only — how long on CGlabs? Need a timing estimate before launching.
-2. **Sort keys for `ensemble_season_timeseries.parquet`**: proposed `[iso3, hazard, scenario, timeframe]` — confirm this matches how the notebook queries (single-country + hazard filter is the hot path).
-3. **R/2.1 invocation pattern**: does it use the same `SETUP_SCRIPT` env-var approach as R/3, or does it have its own setup?
+- ❌ Schema changes to any canonical without blast-radius check
 
 ---
 
