@@ -2267,7 +2267,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **dependencies:** Could fold into the in-flight AC re-bake if implementation lands before jagermeyr sec 3.4 runs. Otherwise its own re-bake cycle for R/2.1 sec 3.4 only.
 
-- **STATUS (2026-05-28):** Open. Pipeline ask. Blocks [[CR-095]] (notebook-side surfacing) — that ticket can't ship until TFPW-corrected trends are on S3, otherwise the Future Projections trend overlay would carry inflated significance.
+- **STATUS:** 🔄 **Pipeline code SHIPPED 2026-06-01** (`hazards_prototype` commit `9923942`). `yue_tfpw()` function added to R/2.1 section 3.4; validated 4/4 against `05_trend-validation-reference.py` (zero diff on slope/AC/p for all test series including critical Series D where buggy gives p=0.232 vs correct p=0.002). `tfpw_applied` and `lag1_ac` columns added to `_trends.parquet` for auditing. Trends parquets on S3 still reflect old schema — will update on the upcoming R/2.1 rerun (section 3.4 no longer skipped). Once published, [[CR-095]] notebook overlay is dispatchable.
 
 ---
 
@@ -2305,7 +2305,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **dependencies:** BLOCKED on [[CR-094]] (TFPW pipeline fix).
 
-- **STATUS (2026-05-28):** Open, blocked.
+- **STATUS:** Open, **unblocked as of 2026-06-01** (CR-094 TFPW shipped `9923942`). Dispatchable once R/2.1 rerun publishes TFPW-corrected `_trends*.parquet` to canonical S3.
 
 ### CR-096 — Year-of-exceedance map (when does my country cross +1.5 / +2 / +3 °C?) [NEW 2026-05-29 · long-term dev]
 
