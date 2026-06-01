@@ -2884,15 +2884,40 @@ echo "R/2.1 launched, PID=$!, log=$LOG"
 tail -f "$LOG"
 ```
 
-**Open question before launching — S3 publish path:**
-push_to_s3.R (section 4.2) uploads to `s3://digital-atlas/hazards/hazard_timeseries_mean_month` but the notebook reads from `s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/...`. Different paths — unclear which publisher creates the `domain=climate` structure. Must resolve before the publish step or the new parquets won't reach the notebook. Ask Pete / check AtlasDataManageR documentation.
+**S3 publish path — resolved 2026-06-01:**
+`push_to_s3.R` section 4.2 uses the LEGACY `s3://digital-atlas/hazards/hazard_timeseries_mean_month` path. The notebook reads the NEWER `domain=climate/type=hazard-indices/...` path. No existing publisher script maps R/2.1 local outputs to the `domain=climate` path — the original publish was a one-off. Post-rerun publish step = custom Rscript that maps the 5 local `*_ensemble_seasons.parquet` files to the 5 canonical S3 keys and uploads with `ACL="public-read"`. Template:
 
-**Runtime estimate:** Unknown — no timing markers in R/2.1. Section 3.1 processes 5 GCMs × 5 timeframes × 4 scenarios. Expect hours but less than R/2 (5 vs 18+ GCMs). Run a 10-line probe on one GCM × timeframe × scenario before launching full rerun.
+```r
+# Run on CGlabs after R/2.1 completes.
+# local_files: list with each period's *_anomaly-1995-2014_ensemble_seasons.parquet
+# Verify exact filenames first: list.files(output_dir, "_ensemble_seasons.parquet", full.names=TRUE)
+source("R/0_server_setup.R")
+suppressPackageStartupMessages({pacman::p_load(s3fs)})
+BUCKET <- "digital-atlas"
+PREFIX <- "domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months"
+BASELINE <- "1995-2014"
+periods <- c("1995-2014", "2021-2040", "2041-2060", "2061-2080", "2081-2100")
+output_dir <- atlas_dirs$data_dir$hazard_timeseries_mean_month
+for (p in periods) {
+  local_f <- list.files(output_dir,
+    pattern = paste0(".*", gsub("-", ".", p), ".*_ensemble_seasons\\.parquet$"),
+    full.names = TRUE)
+  stopifnot(length(local_f) == 1)
+  s3_key <- sprintf("%s/period=%s/baseline=%s/variable=ensemble_season_timeseries.parquet", PREFIX, p, BASELINE)
+  cat("UPLOAD period =", p, "\n  ", local_f, "\n  -> s3://", BUCKET, "/", s3_key, "\n")
+  s3fs::s3_file_upload(local_f, sprintf("s3://%s/%s", BUCKET, s3_key), ACL = "public-read", overwrite = TRUE)
+  cat("DONE\n\n")
+}
+```
+
+Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_seasons")`) before running — R/2.1 naming uses gsub on the data column, which varies by scenario/period setup.
+
+**Runtime estimate:** Unknown — no timing markers in R/2.1. 5 GCMs × 5 timeframes × 4 scenarios. Expect hours but shorter than R/2 (18+ GCMs). Run a 10-line probe on one GCM × timeframe first if concerned.
 
 **Post-rerun:**
-1. Identify correct S3 publish path (see open question above)
-2. Publish with `upload_files_to_s3(..., mode="public-read")` — NOT `s3_file_copy` (strips ACL)
-3. Stage 7-style DuckDB HTTPS verify on new canonical
+1. Verify local output files exist (check filenames match publish template above)
+2. Run custom publish script above (download+upload, NOT s3_file_copy — strips ACL)
+3. Stage 7 DuckDB HTTPS verify on new canonical
 
 ### Concurrent issues (not blocking R/2.1)
 
