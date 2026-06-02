@@ -349,7 +349,7 @@ viewof facetCols     = Inputs.input(5);
       viewof plotLineWidth,
     );
     const facetColsSelect = Inputs.bind(
-      Inputs.select([1, 2, 3, 4, 5], { label: "Facet columns (P6)", value: facetCols }),
+      Inputs.select([1, 2, 3, 4, 5], { label: "Facet columns (P1 + P6)", value: facetCols }),
       viewof facetCols,
     );
     const wrapper = html`<div class="atlas-toc-extras">
@@ -1135,9 +1135,9 @@ loaderDiv("plotP1")
 //| output: false
 {
   // Dep trigger — re-run this render cell when any input changes.
-  [globalSingleCountry, globalBaseline, sandbox_iso3, sandbox_variable, sandbox_baseline,
+  [globalSingleCountry, globalBaseline, globalAdmin1, sandbox_iso3, sandbox_variable, sandbox_baseline,
    sandbox_anomaly, p1_pct_anomaly, p1_band, p1_season, p1_decade,
-   overlay_rows, cbMode, width];
+   overlay_rows, cbMode, facetCols, width];
   renderToDiv("plotP1", () => {
   const [yearMin, yearMax] = [overlay_years[0], overlay_years[overlay_years.length - 1]];
   const interp  = cbMode ? d3.interpolateCividis : d3.interpolateTurbo;
@@ -1202,22 +1202,41 @@ loaderDiv("plotP1")
     return { dec, lo, hi, nYears, partial, meanRows, annMean, annStd, label, col: decadeColors[dec] ?? "#888" };
   });
 
-  const rows = overlay_rows.map(d => ({ ...d, yearStr: String(d.year) }));
+  // Facet by admin1 when the global admin1 popup has selections.
+  // Matches main notebook's recentChanges grid-facet pattern (notebook.qmd
+  // ~line 2040): precompute _fx / _fy per admin1 from the sidebar's
+  // `facetCols` control + per-mark `fx: "_fx", fy: "_fy"` channels.
+  // z channel becomes a composite "${admin}_${year}" so year-lines stay
+  // inside their own facet instead of being routed across the grid.
+  const adminFromRows = [...new Set(overlay_rows.map(d => d.admin1_name).filter(Boolean))].sort();
+  const isFaceted   = adminFromRows.length > 0;
+  const admin1Names = isFaceted ? adminFromRows : [null];
+  const nCols       = isFaceted ? Math.max(1, Math.min(facetCols, admin1Names.length)) : 1;
+  const nRows       = isFaceted ? Math.ceil(admin1Names.length / nCols) : 1;
+  const adminFP     = new Map(admin1Names.map((a, i) => [a, { _fx: i % nCols, _fy: Math.floor(i / nCols) }]));
+  const fxOf        = a => adminFP.get(a)?._fx ?? 0;
+  const fyOf        = a => adminFP.get(a)?._fy ?? 0;
 
-  // Facet by admin1 when the global admin1 popup has selections. One
-  // sub-plot per admin1, stacked vertically — matches main notebook's
-  // recentChanges fy-facet pattern (notebook.qmd ~line 2042).
-  const isFaceted   = rows.length > 0 && rows[0].admin1_name != null;
-  const admin1Names = isFaceted
-    ? [...new Set(rows.map(d => d.admin1_name).filter(Boolean))].sort()
-    : null;
-  const nFacets     = isFaceted ? admin1Names.length : 1;
-  const facetH      = isFaceted ? Math.max(180, Math.round(340 / Math.min(3, nFacets))) : 340;
-  const chartHeight = isFaceted ? facetH * nFacets + 40 : 340;
-  const titleStr    = isFaceted
-    ? `${countryNames[sandbox_iso3] ?? sandbox_iso3} — ${varNames[sandbox_variable] ?? sandbox_variable}, ${yearMin}–${yearMax} · ${nFacets} admin1${nFacets === 1 ? "" : "s"}`
+  const rows = overlay_rows.map(d => ({
+    ...d,
+    yearStr: String(d.year),
+    _fx: isFaceted ? fxOf(d.admin1_name) : 0,
+    _fy: isFaceted ? fyOf(d.admin1_name) : 0,
+  }));
+
+  // Per-facet replication data for non-data marks (zero ruleY, season
+  // rect) so they appear in every facet, not just the first one.
+  const facetCells = admin1Names.map(a => ({ admin1_name: a, _fx: fxOf(a), _fy: fyOf(a) }));
+
+  const facetW   = isFaceted ? Math.floor((width - 80) / nCols) : width;
+  const facetH   = isFaceted ? Math.max(200, Math.min(280, Math.round(facetW * 0.55))) : 340;
+  const chartHeight = isFaceted ? facetH * nRows + 80 : 340;
+  const titleStr = isFaceted
+    ? `${countryNames[sandbox_iso3] ?? sandbox_iso3} — ${varNames[sandbox_variable] ?? sandbox_variable}, ${yearMin}–${yearMax} · ${admin1Names.length} admin1${admin1Names.length === 1 ? "" : "s"}`
     : `${countryNames[sandbox_iso3] ?? sandbox_iso3} — ${varNames[sandbox_variable] ?? sandbox_variable}, ${yearMin}–${yearMax}`;
-  const fyConfig    = isFaceted ? { label: null, domain: admin1Names } : undefined;
+
+  // Composite z so lines don't connect across admin1 facets.
+  const lineZ = isFaceted ? d => `${d.admin1_name}_${d.year}` : "year";
 
   const chart = Plot.plot({
     title: titleStr,
@@ -1234,32 +1253,49 @@ loaderDiv("plotP1")
       tickFormat: mo => monthNames[mo - 1],
     },
     y: { label: yLabel, grid: true, nice: true },
-    ...(isFaceted ? { fy: fyConfig, facet: { data: rows, y: "admin1_name" } } : {}),
+    ...(isFaceted ? {
+      fx: { axis: null, domain: d3.range(nCols) },
+      fy: { axis: null, domain: d3.range(nRows) },
+    } : {}),
     marks: [
-      // Season highlight band — soft blue, not yellow.
-      ...(activeMos ? activeMos.map(mo =>
-        Plot.rect([{}], { x1: mo - 0.45, x2: mo + 0.45, y1: -Infinity, y2: Infinity,
-          fill: "#ddeeff", fillOpacity: 0.55 })
+      // Season highlight band — replicated per-facet via facetCells.
+      ...(activeMos ? activeMos.flatMap(mo =>
+        Plot.rect(facetCells, {
+          x1: mo - 0.45, x2: mo + 0.45, y1: -Infinity, y2: Infinity,
+          fill: "#ddeeff", fillOpacity: 0.55,
+          fx: isFaceted ? "_fx" : undefined,
+          fy: isFaceted ? "_fy" : undefined,
+        })
       ) : []),
-      // Zero reference.
+      // Zero reference — replicated per-facet via facetCells.
       sandbox_anomaly
-        ? Plot.ruleY([0], { stroke: "#4682b4", strokeDasharray: "3 2", strokeOpacity: 0.55 })
+        ? Plot.ruleY(facetCells.map(c => ({ ...c, y: 0 })), {
+            y: "y",
+            stroke: "#4682b4", strokeDasharray: "3 2", strokeOpacity: 0.55,
+            fx: isFaceted ? "_fx" : undefined,
+            fy: isFaceted ? "_fy" : undefined,
+          })
         : null,
       // All years except most recent.
       Plot.line(rows.filter(d => d.year !== yearMax), {
         x: "month", y: "value_plot",
         stroke: d => p1inDec(d.year) ? yColour(d.year) : (cbMode ? "#888" : "#bbb"),
-        z: "year",
+        z: lineZ,
         strokeWidth: d => p1inDec(d.year) ? 1.2 : 0.5,
         strokeOpacity: d => p1inDec(d.year) ? (activeMos ? 0.35 : 0.5) : 0.15,
-        channels: { year: "yearStr" },
+        channels: { year: "yearStr", admin1: "admin1_name" },
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
         tip: true,
       }),
       // Most recent year — amber/gold, prominent.
       Plot.line(rows.filter(d => d.year === yearMax), {
         x: "month", y: "value_plot",
-        stroke: "#e8a000", z: "year", strokeWidth: 3,
-        channels: { year: "yearStr" }, tip: true,
+        stroke: "#e8a000", z: lineZ, strokeWidth: 3,
+        channels: { year: "yearStr", admin1: "admin1_name" },
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
+        tip: true,
       }),
       // Season dots — coloured by year, sit on top of dimmed lines.
       ...(activeMos ? [
@@ -1270,11 +1306,26 @@ loaderDiv("plotP1")
             : (cbMode ? "#888" : "#bbb"),
           r: d => p1inDec(d.year) ? 3.5 : 2,
           fillOpacity: d => p1inDec(d.year) ? 0.85 : 0.2,
-          channels: { year: "yearStr" }, tip: true,
+          channels: { year: "yearStr", admin1: "admin1_name" },
+          fx: isFaceted ? "_fx" : undefined,
+          fy: isFaceted ? "_fy" : undefined,
+          tip: true,
         })
       ] : []),
-      // Decade ± σ band (optional) — one Plot.areaY per selected decade, drawn under the line.
-      ...(p1_band ? decadeData.map(({ meanRows, col }) =>
+      // Per-facet admin1 label in the top-right of each panel.
+      ...(isFaceted ? [
+        Plot.text(facetCells, {
+          fx: "_fx", fy: "_fy",
+          text: "admin1_name",
+          frameAnchor: "top-right",
+          dx: -6, dy: 4,
+          fontSize: 11, fontWeight: 600, fill: "#444",
+        })
+      ] : []),
+      // Decade band / decade-mean overlays — only render in non-faceted
+      // mode for now. Per-admin1 decade means require per-(admin1, decade)
+      // aggregation which would inflate this cell; deferred.
+      ...(!isFaceted && p1_band ? decadeData.map(({ meanRows, col }) =>
         Plot.areaY(meanRows.map(r => ({
           month: r.month,
           y1: r.value_plot - (r.std ?? 0),
@@ -1284,13 +1335,12 @@ loaderDiv("plotP1")
           fill: col, fillOpacity: 0.12, curve: "monotone-x",
         })
       ) : []),
-      // Decade mean lines + right-side labels — one per selected decade.
-      ...decadeData.map(({ meanRows, col }) =>
+      ...(!isFaceted ? decadeData.map(({ meanRows, col }) =>
         Plot.line(meanRows, {
           x: "month", y: "value_plot",
           stroke: col, strokeWidth: 2.2, strokeDasharray: "5 3",
         })
-      ),
+      ) : []),
     ].filter(m => m !== null),
   });
 
