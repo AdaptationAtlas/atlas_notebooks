@@ -821,25 +821,29 @@ viewof p1_controls = {
                      { label: "Variable", value: "TAVG" });
   const _anomaly = Inputs.toggle({ label: "Show as anomaly", value: true });
   const _pctAnom = Inputs.toggle({ label: "PTOT anomaly as % (only when PTOT + anomaly)", value: false });
+  const { _preset, _sStart, _sEnd } = seasonControls();
   const _band    = Inputs.toggle({ label: "Decade mean ± σ band", value: false });
-  const _season  = Inputs.select(["All months","MAM","OND","JJA","DJF"],
-                     { label: "Season highlight", value: "All months" });
   const _decade  = Inputs.checkbox(["1980s","1990s","2000s","2010s","2020s"],
                      { label: "Highlight decades + mean lines" });
 
+  // Consistent ordering across P1 / P3 / P4 / P5:
+  // Variable → Anomaly → (PTOT %) → Season preset → Custom start → Custom end → section-specific extras.
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
     <div style="min-width:160px;flex:1 1 160px;">${_var}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
     <div style="min-width:240px;flex:1 1 240px;">${_pctAnom}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_preset}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sStart}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sEnd}</div>
     <div style="min-width:200px;flex:1 1 200px;">${_band}</div>
-    <div style="min-width:160px;flex:1 1 160px;">${_season}</div>
     <div style="min-width:260px;flex:1 1 260px;">${_decade}</div>
   </div>`;
   Object.defineProperty(form, "value", {
     get: () => ({
       variable: _var.value,
       anomaly: _anomaly.value, pctAnomaly: _pctAnom.value, band: _band.value,
-      season: _season.value, decade: _decade.value,
+      seasonPreset: _preset.value, seasonStart: _sStart.value, seasonEnd: _sEnd.value,
+      decade: _decade.value,
     }),
   });
   return form;
@@ -854,13 +858,71 @@ sandbox_baseline = globalBaseline
 sandbox_anomaly  = p1_controls.anomaly
 p1_pct_anomaly   = p1_controls.pctAnomaly
 p1_band          = p1_controls.band
-p1_season        = p1_controls.season
+p1_season        = seasonMonthRange(p1_controls.seasonPreset, p1_controls.seasonStart, p1_controls.seasonEnd)
+p1_seasonLabel   = p1_controls.seasonPreset === "Custom"
+  ? `Custom (${p1_controls.seasonStart}–${p1_controls.seasonEnd})`
+  : p1_controls.seasonPreset
 p1_decade        = p1_controls.decade
 ```
 
 ```{ojs}
 // Okabe-Ito — gold standard CB-safe categorical palette.
 okabeIto = ["#E69F00","#56B4E9","#009E73","#F0E442","#0072B2","#D55E00","#CC79A7","#000000"]
+```
+
+```{ojs}
+// Shared season-preset map — same shape as the P4 controls so every
+// "recent history" section (P1 / P3 / P4 / P5) exposes an identical
+// preset + custom-start + custom-end trio.
+// Value pairs are [startMonth, endMonth]; "All months" maps to [0, 0]
+// which `seasonMonthRange` treats as "no filter".
+seasonPresetMap = ({
+  "All months": [0, 0],
+  "MAM":        [3, 5],
+  "JJA":        [6, 8],
+  "OND":        [10, 12],
+  "DJF":        [12, 2],
+  "Custom":     null,
+})
+```
+
+```{ojs}
+// Resolve preset + start + end month numbers to an ordered month list.
+// Returns null when the active range is "all months" so callers can
+// skip the highlight band / season filter. Handles wrap-around (DJF
+// start=12, end=2 → [12, 1, 2]).
+seasonMonthRange = (preset, start, end) => {
+  const resolved = preset === "Custom" ? [start, end] : (seasonPresetMap[preset] ?? [0, 0]);
+  const [s, e] = resolved;
+  if (s === 0 || e === 0) return null;
+  if (s <= e) {
+    const out = [];
+    for (let m = s; m <= e; m++) out.push(m);
+    return out;
+  }
+  const out = [];
+  for (let m = s; m <= 12; m++) out.push(m);
+  for (let m = 1; m <= e; m++) out.push(m);
+  return out;
+}
+```
+
+```{ojs}
+// Reusable trio of season-preset / custom-start / custom-end inputs.
+// Returns a `viewof`-compatible form whose `.value` is
+// `{ preset, start, end, months }`. Months is null when "All months"
+// (or any preset that resolves to [0, 0]), otherwise an ordered list of
+// month numbers including wrap-around for DJF.
+seasonControls = ({ defaultPreset = "All months" } = {}) => {
+  const moNames = ["—","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const moFmt   = v => moNames[v] ?? "—";
+  const moOpts  = [0,1,2,3,4,5,6,7,8,9,10,11,12];
+  const _preset = Inputs.select(Object.keys(seasonPresetMap),
+                    { label: "Season preset", value: defaultPreset });
+  const _sStart = Inputs.select(moOpts, { label: "Custom start (preset=Custom)", value: 0, format: moFmt });
+  const _sEnd   = Inputs.select(moOpts, { label: "Custom end (preset=Custom)",   value: 0, format: moFmt });
+  return { _preset, _sStart, _sEnd };
+}
 ```
 
 ```{ojs}
@@ -1010,7 +1072,7 @@ loaderDiv("plotP1")
       : (sandbox_variable === "PTOT" ? "mm" : "°C");
 
   // X domain: truncate to season months when active; full range otherwise.
-  const activeMos   = p1_season !== "All months" ? (seasonMonths[p1_season] ?? []) : null;
+  const activeMos   = p1_season;
   const sortedMos   = activeMos ? [...activeMos].sort((a, b) => a - b) : null;
   const xDomain     = sortedMos
     ? [sortedMos[0] - 0.6, sortedMos[sortedMos.length - 1] + 0.6]
@@ -1172,7 +1234,7 @@ captionDetails(htl.html`
     · ${sandbox_variable}
     · ${sandbox_anomaly ? (p1_pct_anomaly && sandbox_variable === "PTOT" ? "anomaly (%)" : "anomaly") : "absolute"}
     · baseline ${sandbox_baseline.replace("-","–")}
-    ${p1_season !== "All months" ? ` · season highlight ${p1_season}` : ""}
+    ${p1_season ? ` · season highlight ${p1_seasonLabel}` : ""}
     ${p1_decade && p1_decade.length ? ` · highlighted decades: ${p1_decade.join(", ")}` : ""}
   </p>
   <p style="margin:0;font-size:0.92em;color:#555;">
@@ -1251,19 +1313,22 @@ ${_lang(nbText.sections.p3.help.body)}
 viewof p3_controls = {
   const _variable = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
                       { label: "Variable", value: "TAVG" });
-  const _season   = Inputs.select(["All months","MAM","OND","JJA","DJF"],
-                      { label: "Season", value: "All months" });
   const _anomaly  = Inputs.toggle({ label: "Show as anomaly", value: true });
+  const { _preset, _sStart, _sEnd } = seasonControls();
 
+  // Consistent ordering: Variable → Anomaly → Season preset → Custom start → Custom end.
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
     <div style="min-width:160px;flex:1 1 160px;">${_variable}</div>
-    <div style="min-width:160px;flex:1 1 160px;">${_season}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_preset}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sStart}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sEnd}</div>
   </div>`;
 
   Object.defineProperty(form, "value", {
     get: () => ({
-      variable: _variable.value, season: _season.value, anomaly: _anomaly.value,
+      variable: _variable.value, anomaly: _anomaly.value,
+      seasonPreset: _preset.value, seasonStart: _sStart.value, seasonEnd: _sEnd.value,
     }),
   });
   return form;
@@ -1275,7 +1340,10 @@ viewof p3_controls = {
 p3_iso3     = globalSingleCountry
 p3_variable = p3_controls.variable
 p3_baseline = globalBaseline
-p3_season   = p3_controls.season
+p3_season      = seasonMonthRange(p3_controls.seasonPreset, p3_controls.seasonStart, p3_controls.seasonEnd)
+p3_seasonLabel = p3_controls.seasonPreset === "Custom"
+  ? `Custom (${p3_controls.seasonStart}–${p3_controls.seasonEnd})`
+  : p3_controls.seasonPreset
 p3_anomaly  = p3_controls.anomaly
 ```
 
@@ -1324,7 +1392,7 @@ p3_rows = p3_raw.map(d => {
 // degenerate output on short series (Silverman 1986).
 p3_kde = {
   const isPTOT   = p3_variable === "PTOT";
-  const activeMos = (p3_season !== "All months") ? (seasonMonths[p3_season] ?? null) : null;
+  const activeMos = p3_season;
   const augmented = p3_rows.filter(d => activeMos === null || activeMos.includes(d.month));
 
   // Compute x range from data AFTER augmented is defined (avoids TDZ).
@@ -1464,7 +1532,7 @@ captionDetails(htl.html`
     <strong>${obs_country_labels[p3_iso3] ?? p3_iso3} (${p3_iso3})</strong>
     · ${p3_variable}${p3_anomaly ? " anomaly" : ""}
     · baseline ${p3_baseline.replace("-","–")}
-    · ${p3_season === "All months" ? "all months" : p3_season + " season"}
+    · ${p3_season ? p3_seasonLabel + " season" : "all months"}
   </p>
   <p style="margin:0;font-size:0.92em;color:#555;">
     Epanechnikov KDE per decade with Silverman bandwidth (per-decade adaptive). Curves are
@@ -1491,10 +1559,10 @@ htl.html`<div style="display:flex;gap:12px;flex-wrap:wrap;
   <span style="color:#888;font-style:italic;">
     x-axis: monthly ${p3_variable === "PTOT" ? "precipitation" : "temperature"} anomaly
     vs ${p3_baseline.replace("-","–")} baseline
-    ${p3_season !== "All months" ? `(${p3_season} only)` : "(all months)"}
+    ${p3_season ? `(${p3_seasonLabel} only)` : "(all months)"}
     · y-axis: KDE density normalised to unit peak per decade (heights comparable, areas not).
     Bandwidth: Silverman's rule per decade.
-    ${p3_variable === "PTOT" && p3_season === "All months"
+    ${p3_variable === "PTOT" && !p3_season
       ? htl.html` · <strong>PTOT all-months</strong>: distributions can appear bimodal because dry-season months cluster near zero anomaly and wet-season months produce a longer tail. Use the season filter to isolate one regime.`
       : ""}
   </span>
@@ -1558,6 +1626,11 @@ ${_lang(nbText.sections.p2.help.body)}
 viewof p2_controls = {
   const _var     = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
                      { label: "Variable", value: "TAVG" });
+  // P2 spiral renders all 12 months by design (annual loop); anomaly is
+  // always on. We expose the standard season trio so the legend/stats can
+  // scope to a season — chart geometry is unchanged.
+  const _anomalyDummy = htl.html`<span></span>`;
+  const { _preset, _sStart, _sEnd } = seasonControls();
   const _dark    = Inputs.toggle({ label: "Dark background", value: true });
   const _palette = Inputs.select(
                      ["RdBu (classic)","PuOr (CB-safe)","Spectral","Inferno",
@@ -1566,8 +1639,13 @@ viewof p2_controls = {
   const _decade  = Inputs.select(["All decades","1980s","1990s","2000s","2010s","2020s"],
                      { label: "Highlight decade", value: "All decades" });
 
+  // Consistent ordering across P1 / P3 / P4 / P5:
+  // Variable → Season preset → Custom start → Custom end → section-specific extras.
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
     <div style="min-width:160px;flex:1 1 160px;">${_var}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_preset}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sStart}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sEnd}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_dark}</div>
     <div style="min-width:220px;flex:1 1 220px;">${_palette}</div>
     <div style="min-width:180px;flex:1 1 180px;">${_decade}</div>
@@ -1575,6 +1653,7 @@ viewof p2_controls = {
   Object.defineProperty(form, "value", {
     get: () => ({
       variable: _var.value,
+      seasonPreset: _preset.value, seasonStart: _sStart.value, seasonEnd: _sEnd.value,
       dark: _dark.value, palette: _palette.value, decade: _decade.value,
     }),
   });
@@ -1590,6 +1669,10 @@ p2_baseline = globalBaseline
 p2_dark     = p2_controls.dark
 p2_palette  = p2_controls.palette
 p2_decade   = p2_controls.decade
+p2_season      = seasonMonthRange(p2_controls.seasonPreset, p2_controls.seasonStart, p2_controls.seasonEnd)
+p2_seasonLabel = p2_controls.seasonPreset === "Custom"
+  ? `Custom (${p2_controls.seasonStart}–${p2_controls.seasonEnd})`
+  : p2_controls.seasonPreset
 ```
 
 ```{ojs}
@@ -1640,7 +1723,7 @@ loaderDiv("plotP2")
 ```{ojs}
 //| output: false
 {
-  [globalSingleCountry, globalBaseline, p2_variable, p2_dark, p2_palette, p2_decade,
+  [globalSingleCountry, globalBaseline, p2_variable, p2_dark, p2_palette, p2_decade, p2_season,
    p2_rows, p2_years, cbMode, width];
   renderToDiv("plotP2", () => {
   const W = 600, H = 600;
@@ -1848,11 +1931,16 @@ loaderDiv("plotP2")
   // the legend / stats reflect only that decade. yMin / yMax in this block
   // become the range of years inside the active decade so the "1980 mean" /
   // "2026 mean" rows show the decade endpoints, not the full-record endpoints.
-  const allRows  = [...byYear.values()].flat().filter(d => inDecade(d.year));
+  const inSeasonStat = mo => !p2_season || p2_season.includes(mo);
+  const allRows  = [...byYear.values()].flat()
+    .filter(d => inDecade(d.year) && inSeasonStat(d.month));
   const warmest  = allRows.reduce((a, b) => b.anomaly > a.anomaly ? b : a, allRows[0]);
   const coolest  = allRows.reduce((a, b) => b.anomaly < a.anomaly ? b : a, allRows[0]);
   const yearMeans = [...byYear].filter(([y]) => inDecade(y))
-    .map(([y, rs]) => ({ year: y, mean: d3.mean(rs, d => d.anomaly) }))
+    .map(([y, rs]) => ({
+      year: y,
+      mean: d3.mean(rs.filter(d => inSeasonStat(d.month)), d => d.anomaly),
+    }))
     .filter(d => d.mean != null);
   const warmYr   = yearMeans.reduce((a, b) => b.mean > a.mean ? b : a, yearMeans[0]);
   const coolYr   = yearMeans.reduce((a, b) => b.mean < a.mean ? b : a, yearMeans[0]);
@@ -1875,6 +1963,7 @@ loaderDiv("plotP2")
     <span>📅 ${yLo} mean: <strong>${oldestMean != null ? sgn(oldestMean) + oldestMean.toFixed(2) : "–"}${unit2}</strong></span>
     <span>📅 ${yHi} mean: <strong>${latestMean != null ? sgn(latestMean) + latestMean.toFixed(2) : "–"}${unit2}</strong></span>
     ${selDec !== null ? htl.html`<span style="color:#888;">↳ scoped to <strong>${selDec}s</strong></span>` : ""}
+    ${p2_season ? htl.html`<span style="color:#888;">↳ season: <strong>${p2_seasonLabel}</strong></span>` : ""}
   </div>`;
 
   const caveatEl = htl.html`<div style="font-size:0.78em;color:#888;font-style:italic;
@@ -1982,46 +2071,31 @@ ${_lang(nbText.sections.p4.help.body)}
 
 ```{ojs}
 viewof p4_controls = {
-  const moNames = ["—","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const moFmt   = v => moNames[v] ?? "—";
-  const moOpts  = [0,1,2,3,4,5,6,7,8,9,10,11,12];
-  // Preset map: name → [start, end] month numbers. Custom uses the start/end pickers.
-  const presets = {
-    "All months": [0, 0],
-    "MAM":        [3, 5],
-    "JJA":        [6, 8],
-    "OND":        [10, 12],
-    "DJF":        [12, 2],
-    "Custom":     null,
-  };
-
   // P4 section-specific controls — country + baseline driven by globalSingleCountry / globalBaseline.
   const _variable = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
                       { label: "Variable", value: "TAVG" });
   const _anomaly  = Inputs.toggle({ label: "Show as anomaly", value: true });
+  const { _preset, _sStart, _sEnd } = seasonControls();
   const _dark     = Inputs.toggle({ label: "Dark background", value: false });
-  const _preset   = Inputs.select(Object.keys(presets),
-                      { label: "Season preset", value: "All months" });
-  const _sStart   = Inputs.select(moOpts, { label: "Custom start (preset=Custom)", value: 0, format: moFmt });
-  const _sEnd     = Inputs.select(moOpts, { label: "Custom end (preset=Custom)",   value: 0, format: moFmt });
 
+  // Consistent ordering across P1 / P3 / P4 / P5:
+  // Variable → Anomaly → Season preset → Custom start → Custom end → section-specific extras.
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
     <div style="min-width:160px;flex:1 1 160px;">${_variable}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
-    <div style="min-width:160px;flex:1 1 160px;">${_dark}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_preset}</div>
     <div style="min-width:180px;flex:1 1 180px;">${_sStart}</div>
     <div style="min-width:180px;flex:1 1 180px;">${_sEnd}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_dark}</div>
   </div>`;
   Object.defineProperty(form, "value", {
     get: () => {
-      // Preset overrides start/end unless "Custom" is selected.
       const p = _preset.value;
-      const [pS, pE] = p === "Custom" ? [_sStart.value, _sEnd.value] : (presets[p] ?? [0, 0]);
+      const [pS, pE] = p === "Custom" ? [_sStart.value, _sEnd.value] : (seasonPresetMap[p] ?? [0, 0]);
       return {
         variable: _variable.value,
         anomaly: _anomaly.value, dark: _dark.value,
-        preset: p, seasonStart: pS, seasonEnd: pE,
+        seasonPreset: p, preset: p, seasonStart: pS, seasonEnd: pE,
       };
     },
   });
@@ -2316,34 +2390,36 @@ ${_lang(nbText.sections.p5.help.body)}
 
 ```{ojs}
 viewof p5_controls = {
-  const moNames = ["—","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const moOpts  = [0,1,2,3,4,5,6,7,8,9,10,11,12];
-  const moFmt   = v => moNames[v] ?? "—";
-
   // P5 section-specific controls — country + baseline driven by globalSingleCountry / globalBaseline.
-  const _sStart = Inputs.select(moOpts, { label: "Season start", value: 0, format: moFmt });
-  const _sEnd   = Inputs.select(moOpts, { label: "Season end",   value: 0, format: moFmt });
   const _var    = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
-                    { label: "Heatmap variable", value: "TAVG" });
-  const _anomaly= Inputs.toggle({ label: "Anomaly mode", value: true });
-  const _summary  = Inputs.toggle({ label: "Show annual/season summary row", value: true });
+                    { label: "Variable", value: "TAVG" });
+  const _anomaly= Inputs.toggle({ label: "Show as anomaly", value: true });
+  const { _preset, _sStart, _sEnd } = seasonControls();
+  const _summary = Inputs.toggle({ label: "Show annual/season summary row", value: true });
   const _view    = Inputs.radio(["Heatmap", "Table", "Both"],
                      { label: "View", value: "Heatmap" });
 
+  // Consistent ordering: Variable → Anomaly → Season preset → Custom start → Custom end → section-specific extras.
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
-    <div style="min-width:140px;flex:1 1 140px;">${_sStart}</div>
-    <div style="min-width:140px;flex:1 1 140px;">${_sEnd}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_var}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_preset}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sStart}</div>
+    <div style="min-width:180px;flex:1 1 180px;">${_sEnd}</div>
     <div style="min-width:200px;flex:1 1 200px;">${_summary}</div>
     <div style="min-width:200px;flex:1 1 200px;">${_view}</div>
   </div>`;
   Object.defineProperty(form, "value", {
-    get: () => ({
-      seasonStart: _sStart.value, seasonEnd: _sEnd.value,
-      variable: _var.value, anomaly: _anomaly.value,
-      showSummary: _summary.value, view: _view.value,
-    }),
+    get: () => {
+      // Resolve preset → effective [start, end] (Custom uses the pickers).
+      const p = _preset.value;
+      const [pS, pE] = p === "Custom" ? [_sStart.value, _sEnd.value] : (seasonPresetMap[p] ?? [0, 0]);
+      return {
+        variable: _var.value, anomaly: _anomaly.value,
+        seasonPreset: p, seasonStart: pS, seasonEnd: pE,
+        showSummary: _summary.value, view: _view.value,
+      };
+    },
   });
   return form;
 }
