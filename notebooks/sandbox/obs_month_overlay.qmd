@@ -658,11 +658,82 @@ adminPatternTipBody = htl.html`<div>${md`${_lang(nbText.sections.intro.adminPatt
 ::: {.controls-row}
 
 ```{ojs}
-viewof globalCountry = Inputs.select(obs_country_codes, {
-  label: _lang(nbText.sections.globals.countryLabel),
-  value: "AGO",
-  format: v => obs_country_labels[v] ?? v,
-});
+// Global scope — single Country OR Region picker drives every section on the page.
+// Country values are 3-letter iso3 codes; regions are "R:WAF" / "R:EAF" / etc. as
+// defined in globalRegionDefs. Same dropdown that used to live inside CR-097.
+viewof globalScope = {
+  const SCOPE_OPTS = [
+    ...obs_country_codes,
+    "R:WAF", "R:EAF", "R:CAF", "R:SAF", "R:NAF", "R:SSA", "R:AFR"
+  ];
+  const SCOPE_LABELS = {
+    ...obs_country_labels,
+    "R:WAF": "── West Africa",
+    "R:EAF": "── East Africa",
+    "R:CAF": "── Central Africa",
+    "R:SAF": "── Southern Africa",
+    "R:NAF": "── North Africa",
+    "R:SSA": "── Sub-Saharan Africa",
+    "R:AFR": "── All Africa",
+  };
+  return Inputs.select(SCOPE_OPTS, {
+    label: "Country / Region",
+    value: "KEN",
+    format: v => SCOPE_LABELS[v] ?? v,
+  });
+}
+```
+
+```{ojs}
+// Admin1 popup multi-select — promoted from CR-097. Only renders when scope is a
+// single country (region scopes don't expose individual admin1s in this picker).
+// Returns [] when no admin1 selected (chart consumers treat [] as "all admin1s").
+viewof globalAdmin1 = {
+  const names = globalAdmin1Names;
+  if (!names || names.length === 0) {
+    const f = htl.html`<span></span>`;
+    Object.defineProperty(f, "value", { get: () => [] });
+    return f;
+  }
+  let selected = [];
+  const wrap     = htl.html`<div style="position:relative;display:inline-block;min-width:240px;font-family:sans-serif;">`;
+  const btn      = htl.html`<button style="width:100%;text-align:left;padding:6px 10px;border:1px solid #aaa;background:#fff;cursor:pointer;border-radius:3px;font-size:0.88em;">All admin1s ▼</button>`;
+  const dropdown = htl.html`<div style="display:none;position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:280px;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.18);padding:8px;">`;
+  const search   = htl.html`<input type="text" placeholder="Search…" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:3px;box-sizing:border-box;margin-bottom:6px;font-size:0.86em;">`;
+  const actRow   = htl.html`<div style="display:flex;gap:6px;margin-bottom:6px;">`;
+  const selAll   = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;">Select all</button>`;
+  const clrBtn   = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;">Clear</button>`;
+  const closeBtn = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;margin-left:auto;">Close ✕</button>`;
+  actRow.append(selAll, clrBtn, closeBtn);
+  const listDiv  = htl.html`<div style="max-height:240px;overflow-y:auto;">`;
+  const update   = () => {
+    btn.textContent = selected.length === 0 ? "All admin1s ▼" : `${selected.length} of ${names.length} ▼`;
+    wrap.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const renderList = (q = "") => {
+    listDiv.innerHTML = "";
+    names.filter(n => n.toLowerCase().includes(q.toLowerCase())).forEach(n => {
+      const lbl = htl.html`<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer;font-size:0.86em;">`;
+      const cb  = htl.html`<input type="checkbox">`;
+      cb.checked = selected.includes(n);
+      cb.onchange = () => { selected = cb.checked ? [...selected, n] : selected.filter(x => x !== n); update(); };
+      lbl.append(cb, document.createTextNode(n));
+      listDiv.append(lbl);
+    });
+  };
+  btn.onclick      = () => dropdown.style.display === "none"
+    ? (dropdown.style.display = "block", search.value = "", renderList(), search.focus())
+    : (dropdown.style.display = "none");
+  closeBtn.onclick = () => dropdown.style.display = "none";
+  search.oninput   = () => renderList(search.value);
+  selAll.onclick   = () => { selected = [...names]; renderList(search.value); update(); };
+  clrBtn.onclick   = () => { selected = []; renderList(search.value); update(); };
+  dropdown.append(search, actRow, listDiv);
+  wrap.append(btn, dropdown);
+  renderList();
+  Object.defineProperty(wrap, "value", { get: () => selected });
+  return wrap;
+}
 ```
 
 ```{ojs}
@@ -681,6 +752,22 @@ viewof cbMode = Inputs.toggle({
 ```
 
 :::
+
+```{ojs}
+// Notice when a region scope is active — P1-P5 fall back to a single country
+// (the first iso3 in the region with observational data) because those sections
+// don't support region scopes natively. CR-097 + P6 honour the region.
+{
+  if (globalScopeInfo.isCountry) return htl.html`<div></div>`;
+  return htl.html`<div style="font-size:0.78em;color:#7a4f00;background:#fff7e6;
+      border:1px solid #f5d57e;border-radius:3px;padding:4px 10px;margin:4px 14px 0;">
+    ⚠ Region <strong>${globalScopeInfo.scope}</strong> selected — P1 / P2 / P3 / P4 / P5
+    show <strong>${obs_country_labels[globalSingleCountry] ?? globalSingleCountry}
+    (${globalSingleCountry})</strong>, the first observational country in the region.
+    CR-097 + P6 honour the full region.
+  </div>`;
+}
+```
 
 ```{=html}
 </div>
@@ -708,7 +795,7 @@ ${_lang(nbText.sections.p1.help.body)}
 ```
 
 ```{ojs}
-// P1 section-specific controls (country + baseline driven by globalCountry / globalBaseline).
+// P1 section-specific controls (country + baseline driven by globalSingleCountry / globalBaseline).
 viewof p1_controls = {
   const _var     = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
                      { label: "Variable", value: "TAVG" });
@@ -741,7 +828,7 @@ viewof p1_controls = {
 
 ```{ojs}
 // Accessor aliases — country/baseline come from the global controls at the top of the page.
-sandbox_iso3     = globalCountry
+sandbox_iso3     = globalSingleCountry
 sandbox_variable = p1_controls.variable
 sandbox_baseline = globalBaseline
 sandbox_anomaly  = p1_controls.anomaly
@@ -868,7 +955,7 @@ loaderDiv("plotP1")
 //| output: false
 {
   // Dep trigger — re-run this render cell when any input changes.
-  [globalCountry, globalBaseline, sandbox_iso3, sandbox_variable, sandbox_baseline,
+  [globalSingleCountry, globalBaseline, sandbox_iso3, sandbox_variable, sandbox_baseline,
    sandbox_anomaly, p1_pct_anomaly, p1_band, p1_season, p1_decade,
    overlay_rows, cbMode, width];
   renderToDiv("plotP1", () => {
@@ -1052,7 +1139,7 @@ loaderDiv("plotP1")
 
   return chartDownloadMenu(
     htl.html`<div>${chart}${statsBlock ?? ""}${legend}</div>`,
-    { filename: `p1_year_overlay_${globalCountry}_${p1_controls.variable}` }
+    { filename: `p1_year_overlay_${globalSingleCountry}_${p1_controls.variable}` }
   );
   });
 }
@@ -1062,7 +1149,7 @@ loaderDiv("plotP1")
 // P1 caption — dynamic short summary of the active view + collapsible "About this plot".
 captionDetails(htl.html`
   <p style="margin:0 0 4px;color:#444;">
-    <strong>${obs_country_labels[globalCountry] ?? globalCountry} (${globalCountry})</strong>
+    <strong>${obs_country_labels[globalSingleCountry] ?? globalSingleCountry} (${globalSingleCountry})</strong>
     · ${sandbox_variable}
     · ${sandbox_anomaly ? (p1_pct_anomaly && sandbox_variable === "PTOT" ? "anomaly (%)" : "anomaly") : "absolute"}
     · baseline ${sandbox_baseline.replace("-","–")}
@@ -1094,10 +1181,10 @@ quickInsightP1 = (() => {
   const isPTOT = sandbox_variable === "PTOT";
   const unit   = isPTOT ? (p1_pct_anomaly ? "%" : "mm") : "°C";
   const verb   = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
-  const cName  = obs_country_labels[globalCountry] ?? globalCountry;
+  const cName  = obs_country_labels[globalSingleCountry] ?? globalSingleCountry;
   return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
     { name: "country",  value: cName },
-    { name: "iso3",     value: globalCountry },
+    { name: "iso3",     value: globalSingleCountry },
     { name: "delta",    value: Math.abs(delta).toFixed(2) },
     { name: "unit",     value: unit },
     { name: "verb",     value: verb },
@@ -1131,7 +1218,7 @@ ${_lang(nbText.sections.p3.help.body)}
 ```
 
 ```{ojs}
-// P3 section-specific controls (country + baseline driven by globalCountry / globalBaseline).
+// P3 section-specific controls (country + baseline driven by globalSingleCountry / globalBaseline).
 viewof p3_controls = {
   const _variable = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
                       { label: "Variable", value: "TAVG" });
@@ -1156,7 +1243,7 @@ viewof p3_controls = {
 
 ```{ojs}
 // Accessor aliases — country/baseline come from the global controls.
-p3_iso3     = globalCountry
+p3_iso3     = globalSingleCountry
 p3_variable = p3_controls.variable
 p3_baseline = globalBaseline
 p3_season   = p3_controls.season
@@ -1264,7 +1351,7 @@ loaderDiv("plotP3")
 ```{ojs}
 //| output: false
 {
-  [globalCountry, globalBaseline, p3_variable, p3_season, p3_anomaly,
+  [globalSingleCountry, globalBaseline, p3_variable, p3_season, p3_anomaly,
    p3_kde, p3_decades, cbMode, width];
   renderToDiv("plotP3", () => {
   const spacing   = 0.78;  // < 1 → ridges overlap
@@ -1437,7 +1524,7 @@ ${_lang(nbText.sections.p2.help.body)}
 
 ```{ojs}
 // P2 section-specific controls — anomaly is always ON for the spiral (radius = anomaly).
-// Country + baseline driven by globalCountry / globalBaseline.
+// Country + baseline driven by globalSingleCountry / globalBaseline.
 viewof p2_controls = {
   const _var     = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
                      { label: "Variable", value: "TAVG" });
@@ -1467,7 +1554,7 @@ viewof p2_controls = {
 
 ```{ojs}
 // Accessor aliases — country/baseline come from the global controls.
-p2_iso3     = globalCountry
+p2_iso3     = globalSingleCountry
 p2_variable = p2_controls.variable
 p2_baseline = globalBaseline
 p2_dark     = p2_controls.dark
@@ -1522,7 +1609,7 @@ loaderDiv("plotP2")
 ```{ojs}
 //| output: false
 {
-  [globalCountry, globalBaseline, p2_variable, p2_dark, p2_palette, p2_decade,
+  [globalSingleCountry, globalBaseline, p2_variable, p2_dark, p2_palette, p2_decade,
    p2_rows, p2_years, cbMode, width];
   renderToDiv("plotP2", () => {
   const W = 600, H = 600;
@@ -1858,7 +1945,7 @@ viewof p4_controls = {
     "Custom":     null,
   };
 
-  // P4 section-specific controls — country + baseline driven by globalCountry / globalBaseline.
+  // P4 section-specific controls — country + baseline driven by globalSingleCountry / globalBaseline.
   const _variable = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
                       { label: "Variable", value: "TAVG" });
   const _anomaly  = Inputs.toggle({ label: "Show as anomaly", value: true });
@@ -1897,7 +1984,7 @@ p4_raw = {
   const rows = await db_overlay.query(`
     SELECT year, month, value_mean
     FROM read_parquet('${monthlyURL}')
-    WHERE iso3 = '${globalCountry}'
+    WHERE iso3 = '${globalSingleCountry}'
       AND variable = '${p4_controls.variable}'
       AND value_mean IS NOT NULL
     ORDER BY year, month
@@ -1940,7 +2027,7 @@ loaderDiv("plotP4")
 ```{ojs}
 //| output: false
 {
-  [globalCountry, globalBaseline, p4_controls, p4_rows, p4_years, cbMode, width];
+  [globalSingleCountry, globalBaseline, p4_controls, p4_rows, p4_years, cbMode, width];
   renderToDiv("plotP4", () => {
   const W = 580, H = 580;
   const cx = W / 2, cy = H / 2;
@@ -2073,7 +2160,7 @@ loaderDiv("plotP4")
     .attr("x", cx).attr("y", 15)
     .attr("text-anchor", "middle").attr("font-size", 13).attr("font-weight", "bold")
     .attr("fill", txtCol)
-    .text(`${countryNames[globalCountry] ?? globalCountry} — ${varNames[p4_controls.variable] ?? p4_controls.variable}${isAnomaly ? " anomaly" : ""}`);
+    .text(`${countryNames[globalSingleCountry] ?? globalSingleCountry} — ${varNames[p4_controls.variable] ?? p4_controls.variable}${isAnomaly ? " anomaly" : ""}`);
 
   // Colour legend (gradient bar below chart)
   const nStops = 20;
@@ -2098,7 +2185,7 @@ loaderDiv("plotP4")
   // Stats table — one row per month + Annual + Season (if set).
   return chartDownloadMenu(
     htl.html`<div>${svg.node()}${legend}</div>`,
-    { filename: `p4_polar_${globalCountry}_${p4_controls.variable}` }
+    { filename: `p4_polar_${globalSingleCountry}_${p4_controls.variable}` }
   );
   });
 }
@@ -2108,7 +2195,7 @@ loaderDiv("plotP4")
 // P4 caption.
 captionDetails(htl.html`
   <p style="margin:0 0 4px;color:#444;">
-    <strong>${obs_country_labels[globalCountry] ?? globalCountry} (${globalCountry})</strong>
+    <strong>${obs_country_labels[globalSingleCountry] ?? globalSingleCountry} (${globalSingleCountry})</strong>
     · ${p4_controls.variable}${p4_controls.anomaly ? " anomaly" : " absolute"}
     · baseline ${globalBaseline.replace("-","–")}
     · preset ${p4_controls.preset}
@@ -2182,7 +2269,7 @@ viewof p5_controls = {
   const moOpts  = [0,1,2,3,4,5,6,7,8,9,10,11,12];
   const moFmt   = v => moNames[v] ?? "—";
 
-  // P5 section-specific controls — country + baseline driven by globalCountry / globalBaseline.
+  // P5 section-specific controls — country + baseline driven by globalSingleCountry / globalBaseline.
   const _sStart = Inputs.select(moOpts, { label: "Season start", value: 0, format: moFmt });
   const _sEnd   = Inputs.select(moOpts, { label: "Season end",   value: 0, format: moFmt });
   const _var    = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
@@ -2216,7 +2303,7 @@ p5_raw = {
   const rows = await db_overlay.query(`
     SELECT year, month, variable, value_mean
     FROM read_parquet('${monthlyURL}')
-    WHERE iso3 = '${globalCountry}'
+    WHERE iso3 = '${globalSingleCountry}'
       AND variable IN ('TAVG','TMAX','TMIN','PTOT')
       AND value_mean IS NOT NULL
     ORDER BY variable, year, month
@@ -2233,7 +2320,7 @@ loaderDiv("plotP5Heatmap")
 //| output: false
 // Heatmap — year × month for selected variable.
 {
-  [globalCountry, globalBaseline, p5_controls, p5_raw, cbMode, width];
+  [globalSingleCountry, globalBaseline, p5_controls, p5_raw, cbMode, width];
   renderToDiv("plotP5Heatmap", () => {
   if (p5_controls.view === "Table") return htl.html`<div></div>`;
   const selVar = p5_controls.variable;
@@ -2291,7 +2378,7 @@ loaderDiv("plotP5Heatmap")
   const hmHeight = Math.max(150, (moOrder.length) * 18 + 64);
 
   const p5HmChart = Plot.plot({
-    title: `${globalCountry} — ${selVar}: monthly ${isAnom ? "anomaly" : "value"}${isAnom && !isPTOT ? " (● ≥ +1°C  ◉ ≥ +1.5°C)" : ""}${isAnom && isPTOT ? " (● wet >+1σ  ○ dry <−1σ, σ per-month)" : ""}`,
+    title: `${globalSingleCountry} — ${selVar}: monthly ${isAnom ? "anomaly" : "value"}${isAnom && !isPTOT ? " (● ≥ +1°C  ◉ ≥ +1.5°C)" : ""}${isAnom && isPTOT ? " (● wet >+1σ  ○ dry <−1σ, σ per-month)" : ""}`,
     width: width, height: hmHeight,
     marginLeft: 60, marginBottom: 34, marginTop: 30, marginRight: 10,
     x: { label: "Year", domain: allYears, tickFormat: y => y % 5 === 0 ? String(y) : "" },
@@ -2336,7 +2423,7 @@ loaderDiv("plotP5Heatmap")
       })() : []),
     ],
   });
-  return chartDownloadMenu(p5HmChart, { filename: `p5_heatmap_${globalCountry}_${selVar}` });
+  return chartDownloadMenu(p5HmChart, { filename: `p5_heatmap_${globalSingleCountry}_${selVar}` });
   });
 }
 ```
@@ -2345,7 +2432,7 @@ loaderDiv("plotP5Heatmap")
 // P5 caption — heatmap-side description.
 captionDetails(htl.html`
   <p style="margin:0 0 4px;color:#444;">
-    <strong>${obs_country_labels[globalCountry] ?? globalCountry} (${globalCountry})</strong>
+    <strong>${obs_country_labels[globalSingleCountry] ?? globalSingleCountry} (${globalSingleCountry})</strong>
     · ${p5_controls.variable}${p5_controls.anomaly ? " anomaly" : " absolute"}
     · baseline ${globalBaseline.replace("-","–")}
     ${p5_controls.seasonStart > 0 && p5_controls.seasonEnd > 0
@@ -2386,7 +2473,7 @@ loaderDiv("plotP5Table")
 ```{ojs}
 //| output: false
 {
-  [globalCountry, globalBaseline, p5_controls, p5_table_controls, p5_raw, width];
+  [globalSingleCountry, globalBaseline, p5_controls, p5_table_controls, p5_raw, width];
   renderToDiv("plotP5Table", () => {
   if (p5_controls.view === "Heatmap") return htl.html`<div></div>`;
   const vars    = ["TAVG","TMAX","TMIN","PTOT"];
@@ -2456,7 +2543,7 @@ loaderDiv("plotP5Table")
 
   return htl.html`
   <p style="font-size:0.83em;color:#777;margin:2px 0 6px;">
-    ${globalCountry} · Baseline: ${globalBaseline}
+    ${globalSingleCountry} · Baseline: ${globalBaseline}
     ${hasSeason ? ` · ${moNames[sS]}–${moNames[sE]}` : " · All months"}
     ${showMM ? " · ↓ min year / ↑ max year" : ""}${showU ? " · ± σy = inter-annual std. dev." : ""}
   </p>
@@ -2556,37 +2643,7 @@ topojson = require("topojson-client@3")
 
 ```{ojs}
 viewof cr097_controls = {
-  const COUNTRIES = ["AGO","BWA","BEN","BFA","CIV","CMR","COD","ETH","GHA","GIN",
-    "KEN","MDG","MLI","MOZ","MRT","MWI","NAM","NER","NGA","RWA","SDN","SEN",
-    "SLE","SOM","SSD","TGO","TZA","UGA","ZAF","ZMB","ZWE"];
-  const COUNTRY_NAMES = { AGO:"Angola", BWA:"Botswana", BEN:"Benin", BFA:"Burkina Faso",
-    CIV:"Côte d'Ivoire", CMR:"Cameroon", COD:"DR Congo", ETH:"Ethiopia", GHA:"Ghana",
-    GIN:"Guinea", KEN:"Kenya", MDG:"Madagascar", MLI:"Mali", MOZ:"Mozambique",
-    MRT:"Mauritania", MWI:"Malawi", NAM:"Namibia", NER:"Niger", NGA:"Nigeria",
-    RWA:"Rwanda", SDN:"Sudan", SEN:"Senegal", SLE:"Sierra Leone", SOM:"Somalia",
-    SSD:"South Sudan", TGO:"Togo", TZA:"Tanzania", UGA:"Uganda", ZAF:"South Africa",
-    ZMB:"Zambia", ZWE:"Zimbabwe" };
-
-  const SCOPE_OPTS = [
-    ...COUNTRIES,
-    "R:WAF","R:EAF","R:CAF","R:SAF","R:NAF","R:SSA","R:AFR"
-  ];
-  const SCOPE_LABELS = {
-    ...COUNTRY_NAMES,
-    "R:WAF": "── West Africa",
-    "R:EAF": "── East Africa",
-    "R:CAF": "── Central Africa",
-    "R:SAF": "── Southern Africa",
-    "R:NAF": "── North Africa",
-    "R:SSA": "── Sub-Saharan Africa",
-    "R:AFR": "── All Africa",
-  };
-
   const sspLabels = { ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" };
-
-  const _scope   = Inputs.select(SCOPE_OPTS,
-                     { label: "Country / Region", value: "KEN",
-                       format: v => SCOPE_LABELS[v] ?? v });
   const _ssp     = Inputs.checkbox(["ssp126","ssp245","ssp370","ssp585"],
                      { label: "Scenarios (cols)", value: ["ssp126","ssp245","ssp370","ssp585"],
                        format: v => sspLabels[v] });
@@ -2600,7 +2657,6 @@ viewof cr097_controls = {
   const _table   = Inputs.toggle({ label: "Show table instead of map", value: false });
 
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
-    <div style="min-width:200px;flex:1 1 200px;">${_scope}</div>
     <div style="min-width:200px;flex:1 1 200px;">${_ssp}</div>
     <div style="min-width:140px;flex:1 1 140px;">${_thresh}</div>
     <div style="min-width:140px;flex:1 1 140px;">${_var}</div>
@@ -2608,7 +2664,7 @@ viewof cr097_controls = {
     <div style="min-width:180px;flex:1 1 180px;">${_table}</div>
   </div>`;
   Object.defineProperty(form, "value", {
-    get: () => ({ scope: _scope.value, ssp: _ssp.value, threshold: _thresh.value,
+    get: () => ({ ssp: _ssp.value, threshold: _thresh.value,
                   variable: _var.value, season: _season.value, showTable: _table.value }),
   });
   return form;
@@ -2626,7 +2682,7 @@ cr097_base = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=hazard-
 
 ```{ojs}
 // Region → iso3 list mapping. R:AFR = all countries in topojson.
-cr097_region_defs = ({
+globalRegionDefs = ({
   "R:WAF": ["BEN","BFA","CIV","GHA","GIN","GMB","GNB","LBR","MLI","MRT","NER","NGA","SEN","SLE","TGO","CPV"],
   "R:EAF": ["BDI","COM","DJI","ERI","ETH","KEN","MDG","MOZ","MUS","MWI","RWA","SOM","SSD","SYC","TZA","UGA"],
   "R:CAF": ["CAF","CMR","COD","COG","GAB","GNQ","STP","TCD"],
@@ -2637,10 +2693,10 @@ cr097_region_defs = ({
 
 ```{ojs}
 // Derived: is single country or region? iso3 list for the query.
-cr097_scope_info = {
-  const scope = cr097_controls.scope;
+globalScopeInfo = {
+  const scope = globalScope;
   const isCountry = !scope.startsWith("R:");
-  const REGIONS = cr097_region_defs;
+  const REGIONS = globalRegionDefs;
   const ALL_ISO3 = Object.values(REGIONS).flat();
   const SSA = [...REGIONS["R:WAF"],...REGIONS["R:EAF"],...REGIONS["R:CAF"],...REGIONS["R:SAF"]];
   const iso3List = isCountry ? [scope]
@@ -2649,6 +2705,17 @@ cr097_scope_info = {
     : (REGIONS[scope] ?? [scope]);
   return { isCountry, iso3List, scope };
 }
+```
+
+```{ojs}
+// Derived: single iso3 for sections that don't support region scopes (P1-P5).
+// If the user picks a region, P1-P5 fall back to the first iso3 in the region
+// that ALSO appears in `obs_country_codes` (i.e. has observational data on S3).
+// Some region member countries (GMB / GNB / LBR / BDI / COM / etc.) don't have
+// observational parquets so we skip past them.
+globalSingleCountry = globalScopeInfo.isCountry
+  ? globalScopeInfo.scope
+  : (globalScopeInfo.iso3List.find(c => obs_country_codes.includes(c)) ?? "KEN")
 ```
 
 ```{ojs}
@@ -2663,7 +2730,7 @@ cr097Visible = sectionVisible("plotCR097", "300px");
 cr097_data = {
   if (!cr097Visible) return [];
   const { variable, season, ssp } = cr097_controls;
-  const { isCountry, iso3List }   = cr097_scope_info;
+  const { isCountry, iso3List }   = globalScopeInfo;
   const ssps  = Array.isArray(ssp) && ssp.length ? ssp : ["ssp245"];
   const sspIn = ssps.map(s => `'${s}'`).join(",");
   const iso3In = iso3List.map(c => `'${c}'`).join(",");
@@ -2697,18 +2764,18 @@ cr097_data = {
 ```
 
 ```{ojs}
-cr097_topo    = fetch("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").then(r => r.json())
+globalTopoA1    = fetch("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").then(r => r.json())
 ```
 
 ```{ojs}
-cr097_topo_a0 = fetch("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").then(r => r.json())
+globalTopoA0 = fetch("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").then(r => r.json())
 ```
 
 ```{ojs}
 // Admin1 names: only for single country, empty for regions (hides popup).
-cr097_admin1_names = cr097_scope_info.isCountry
-  ? topojson.feature(cr097_topo, cr097_topo.objects["atlas_gaul24_a1_africa"])
-      .features.filter(f => f.properties.iso3 === cr097_scope_info.scope)
+globalAdmin1Names = globalScopeInfo.isCountry
+  ? topojson.feature(globalTopoA1, globalTopoA1.objects["atlas_gaul24_a1_africa"])
+      .features.filter(f => f.properties.iso3 === globalScopeInfo.scope)
       .map(f => f.properties.admin1_name).sort()
   : []
 ```
@@ -2716,8 +2783,8 @@ cr097_admin1_names = cr097_scope_info.isCountry
 ```{ojs}
 // Map level toggle — shown for REGIONS only (countries always use admin1).
 // For countries: silently returns "admin1".
-viewof cr097_map_level = {
-  if (cr097_scope_info.isCountry) {
+viewof globalMapLevel = {
+  if (globalScopeInfo.isCountry) {
     const f = htl.html`<span></span>`;
     Object.defineProperty(f, "value", { get: () => "admin1" });
     return f;
@@ -2728,55 +2795,9 @@ viewof cr097_map_level = {
 }
 ```
 
-```{ojs}
-// Admin1 filter popup — hidden for regions.
-viewof cr097_admin1 = {
-  const names = cr097_admin1_names;
-  if (names.length === 0) {
-    const f = htl.html`<span></span>`;
-    Object.defineProperty(f, "value", { get: () => [] });
-    return f;
-  }
-  let selected = [];
-  const wrap     = htl.html`<div style="position:relative;display:inline-block;min-width:240px;font-family:sans-serif;">`;
-  const btn      = htl.html`<button style="width:100%;text-align:left;padding:6px 10px;border:1px solid #aaa;background:#fff;cursor:pointer;border-radius:3px;font-size:0.88em;">All admin1s ▼</button>`;
-  const dropdown = htl.html`<div style="display:none;position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:280px;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.18);padding:8px;">`;
-  const search   = htl.html`<input type="text" placeholder="Search…" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:3px;box-sizing:border-box;margin-bottom:6px;font-size:0.86em;">`;
-  const actRow   = htl.html`<div style="display:flex;gap:6px;margin-bottom:6px;">`;
-  const selAll   = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;">Select all</button>`;
-  const clrBtn   = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;">Clear</button>`;
-  const closeBtn = htl.html`<button style="font-size:0.8em;padding:2px 8px;cursor:pointer;margin-left:auto;">Close ✕</button>`;
-  actRow.append(selAll, clrBtn, closeBtn);
-  const listDiv  = htl.html`<div style="max-height:240px;overflow-y:auto;">`;
-  const update   = () => {
-    btn.textContent = selected.length === 0 ? "All admin1s ▼" : `${selected.length} of ${names.length} ▼`;
-    wrap.dispatchEvent(new Event("input", { bubbles: true }));
-  };
-  const renderList = (q = "") => {
-    listDiv.innerHTML = "";
-    names.filter(n => n.toLowerCase().includes(q.toLowerCase())).forEach(n => {
-      const lbl = htl.html`<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer;font-size:0.86em;">`;
-      const cb  = htl.html`<input type="checkbox">`;
-      cb.checked = selected.includes(n);
-      cb.onchange = () => { selected = cb.checked ? [...selected, n] : selected.filter(x => x !== n); update(); };
-      lbl.append(cb, document.createTextNode(n));
-      listDiv.append(lbl);
-    });
-  };
-  btn.onclick      = () => dropdown.style.display === "none"
-    ? (dropdown.style.display = "block", search.value = "", renderList(), search.focus())
-    : (dropdown.style.display = "none");
-  closeBtn.onclick = () => dropdown.style.display = "none";
-  search.oninput   = () => renderList(search.value);
-  selAll.onclick   = () => { selected = [...names]; renderList(search.value); update(); };
-  clrBtn.onclick   = () => { selected = []; renderList(search.value); update(); };
-  dropdown.append(search, actRow, listDiv);
-  wrap.append(btn, dropdown);
-  renderList();
-  Object.defineProperty(wrap, "value", { get: () => selected });
-  return wrap;
-}
-```
+<!-- viewof globalAdmin1 is defined in the sticky-strip cell at the top of the
+     page (moved there as part of CR-097-scope → global promotion). -->
+
 
 ```{ojs}
 loaderDiv("plotCR097")
@@ -2785,12 +2806,12 @@ loaderDiv("plotCR097")
 ```{ojs}
 //| output: false
 {
-  [cr097_controls, cr097_scope_info, cr097_map_level, cr097_admin1, cr097_data,
-   cr097_topo, cr097_topo_a0, width];
+  [cr097_controls, globalScopeInfo, globalMapLevel, globalAdmin1, cr097_data,
+   globalTopoA1, globalTopoA0, width];
   renderToDiv("plotCR097", () => {
   const { variable, season, showTable } = cr097_controls;
-  const { isCountry, iso3List, scope }  = cr097_scope_info;
-  const mapLevel   = cr097_map_level;
+  const { isCountry, iso3List, scope }  = globalScopeInfo;
+  const mapLevel   = globalMapLevel;
   const ssps       = Array.isArray(cr097_controls.ssp) && cr097_controls.ssp.length
     ? cr097_controls.ssp : ["ssp245"];
   const thresholds = Array.isArray(cr097_controls.threshold) && cr097_controls.threshold.length
@@ -2844,13 +2865,13 @@ loaderDiv("plotCR097")
   // Select topojson layer and feature key based on map level.
   const useAdmin1 = useAdmin1Map;
   const allFeatures = useAdmin1
-    ? topojson.feature(cr097_topo,    cr097_topo.objects["atlas_gaul24_a1_africa"]).features
-    : topojson.feature(cr097_topo_a0, cr097_topo_a0.objects["atlas_gaul24_a0_africa"]).features;
+    ? topojson.feature(globalTopoA1,    globalTopoA1.objects["atlas_gaul24_a1_africa"]).features
+    : topojson.feature(globalTopoA0, globalTopoA0.objects["atlas_gaul24_a0_africa"]).features;
   const featureProp = useAdmin1Map ? "admin1_name" : "iso3";
 
   // Filter features to current scope.
   const countryFeatures = allFeatures.filter(f => iso3List.includes(f.properties.iso3));
-  const selAdmin1 = useAdmin1 ? (cr097_admin1 ?? []) : [];
+  const selAdmin1 = useAdmin1 ? (globalAdmin1 ?? []) : [];
   const features = selAdmin1.length > 0
     ? countryFeatures.filter(f => selAdmin1.includes(f.properties[featureProp]))
     : countryFeatures;
@@ -2990,13 +3011,13 @@ loaderDiv("plotCR097")
 // CR-097 caption.
 captionDetails(htl.html`
   <p style="margin:0 0 4px;color:#444;">
-    <strong>${cr097_scope_info.scope}</strong>
+    <strong>${globalScopeInfo.scope}</strong>
     · ${cr097_controls.variable}
     · ${cr097_controls.season} season
     · vs 1995–2014 baseline
     · ${Array.isArray(cr097_controls.ssp) ? cr097_controls.ssp.join(", ") : "ssp245"}
     · thresholds: ${(Array.isArray(cr097_controls.threshold) ? cr097_controls.threshold : [1.5]).map(t => `+${t}°C`).join(", ")}
-    · ${cr097_scope_info.isCountry ? "admin1 view" : (cr097_map_level === "admin1" ? "admin1 (regional)" : "admin0 (regional)")}
+    · ${globalScopeInfo.isCountry ? "admin1 view" : (globalMapLevel === "admin1" ? "admin1 (regional)" : "admin0 (regional)")}
   </p>
   <p style="margin:0;font-size:0.92em;color:#555;">
     First 20-year period in which the ensemble-mean CMIP6 anomaly exceeds the threshold.
@@ -3072,22 +3093,6 @@ import { mannKendall } from "/helpers/trend.ojs"
 
 ```{ojs}
 viewof p6_controls = {
-  const SCOPE_OPTS = ["AGO","BWA","BEN","BFA","CIV","CMR","COD","ETH","GHA","GIN",
-    "KEN","MDG","MLI","MOZ","MRT","MWI","NAM","NER","NGA","RWA","SDN","SEN",
-    "SLE","SOM","SSD","TGO","TZA","UGA","ZAF","ZMB","ZWE",
-    "R:WAF","R:EAF","R:CAF","R:SAF","R:NAF","R:AFR"];
-  const SCOPE_LABELS = { AGO:"Angola", BWA:"Botswana", BEN:"Benin", BFA:"Burkina Faso",
-    CIV:"Côte d'Ivoire", CMR:"Cameroon", COD:"DR Congo", ETH:"Ethiopia", GHA:"Ghana",
-    GIN:"Guinea", KEN:"Kenya", MDG:"Madagascar", MLI:"Mali", MOZ:"Mozambique",
-    MRT:"Mauritania", MWI:"Malawi", NAM:"Namibia", NER:"Niger", NGA:"Nigeria",
-    RWA:"Rwanda", SDN:"Sudan", SEN:"Senegal", SLE:"Sierra Leone", SOM:"Somalia",
-    SSD:"South Sudan", TGO:"Togo", TZA:"Tanzania", UGA:"Uganda", ZAF:"South Africa",
-    ZMB:"Zambia", ZWE:"Zimbabwe",
-    "R:WAF":"── West Africa","R:EAF":"── East Africa","R:CAF":"── Central Africa",
-    "R:SAF":"── Southern Africa","R:NAF":"── North Africa","R:AFR":"── All Africa" };
-
-  const _scope    = Inputs.select(SCOPE_OPTS, { label:"Country / Region", value:"KEN",
-                      format: v => SCOPE_LABELS[v] ?? v });
   const _var      = Inputs.select(
                       ["TAVG","TMAX","TMIN","PTOT","SPEI-03","SPEI-12"],
                       { label:"Variable", value:"TAVG",
@@ -3112,10 +3117,9 @@ viewof p6_controls = {
   const _sigBdr  = Inputs.toggle({ label: "Trend: significance border", value: true });
   const _sigDot  = Inputs.toggle({ label: "Trend: significance dot", value: true });
 
-  // Scope picker kept local — supports R:WAF / R:EAF etc. that the global single-country
-  // selector cannot express. Baseline driven by globalBaseline.
+  // Scope + baseline come from the global sticky strip; only section-specific
+  // controls live here.
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
-    <div style="min-width:200px;flex:1 1 200px;">${_scope}</div>
     <div style="min-width:140px;flex:1 1 140px;">${_var}</div>
     <div style="min-width:140px;flex:1 1 140px;">${_season}</div>
     <div style="min-width:260px;flex:1 1 260px;">${_decades}</div>
@@ -3126,7 +3130,7 @@ viewof p6_controls = {
   </div>`;
   Object.defineProperty(form, "value", {
     get: () => ({
-      scope: _scope.value, variable: _var.value, season: _season.value,
+      variable: _var.value, season: _season.value,
       decades: _decade_arr(_decades.value),
       stats: _stats.value, level: _level.value,
       sigBorders: _sigBdr.value, sigDots: _sigDot.value,
@@ -3137,19 +3141,6 @@ viewof p6_controls = {
 }
 ```
 
-```{ojs}
-// Scope → iso3 list (reuse CR-097 region defs).
-p6_scope_info = {
-  const scope = p6_controls.scope;
-  const isCountry = !scope.startsWith("R:");
-  const R = cr097_region_defs;
-  const ALL = Object.values(R).flat();
-  const iso3List = isCountry ? [scope]
-    : scope === "R:AFR" ? ALL
-    : (R[scope] ?? [scope]);
-  return { isCountry, iso3List };
-}
-```
 
 ```{ojs}
 // Separate DuckDB client for P6 — avoids blocking CR-097 queries.
@@ -3167,7 +3158,7 @@ p6Visible = sectionVisible("plotP6", "300px");
 // Observational annual/seasonal data for selected country/region.
 p6_obs_raw = {
   if (!p6Visible) return [];
-  const { iso3List } = p6_scope_info;
+  const { iso3List } = globalScopeInfo;
   const { variable, season, level } = p6_controls;
   const iso3In = iso3List.map(c => `'${c}'`).join(",");
   const url = level === "admin1"
@@ -3251,14 +3242,15 @@ loaderDiv("plotP6")
 ```{ojs}
 //| output: false
 {
-  [globalBaseline, p6_controls, p6_scope_info, p6_obs_raw, p6_base_means, p6_stats,
-   cr097_topo, cr097_topo_a0, cbMode, width];
+  [globalBaseline, p6_controls, globalScopeInfo, p6_obs_raw, p6_base_means, p6_stats,
+   globalTopoA1, globalTopoA0, cbMode, width];
   renderToDiv("plotP6", () => {
   if (!p6_obs_raw.length) return htl.html`<p style="color:#888;font-style:italic;">⏳ Loading observational data…</p>`;
 
-  const { scope, variable, season, stats, level } = p6_controls;
+  const { variable, season, stats, level } = p6_controls;
+  const scope = globalScope;
   const decades = p6_controls.decades;
-  const { isCountry, iso3List } = p6_scope_info;
+  const { isCountry, iso3List } = globalScopeInfo;
   const isPTOT = variable === "PTOT";
   const isSPEI = variable.startsWith("SPEI");
   const isWetVar = isPTOT || isSPEI;  // positive = wetter = blue
@@ -3270,8 +3262,8 @@ loaderDiv("plotP6")
 
   // Features: admin1 or admin0 topojson filtered to scope.
   const allFeatures = level === "admin1"
-    ? topojson.feature(cr097_topo,    cr097_topo.objects["atlas_gaul24_a1_africa"]).features
-    : topojson.feature(cr097_topo_a0, cr097_topo_a0.objects["atlas_gaul24_a0_africa"]).features;
+    ? topojson.feature(globalTopoA1,    globalTopoA1.objects["atlas_gaul24_a1_africa"]).features
+    : topojson.feature(globalTopoA0, globalTopoA0.objects["atlas_gaul24_a0_africa"]).features;
   const featProp = level === "admin1" ? "admin1_name" : "iso3";
   const features = allFeatures.filter(f => iso3List.includes(f.properties.iso3));
   if (!features.length) return htl.html`<p style="color:#c00">No features for ${scope}.</p>`;
@@ -3580,7 +3572,7 @@ loaderDiv("plotP6")
 // P6 caption.
 captionDetails(htl.html`
   <p style="margin:0 0 4px;color:#444;">
-    <strong>${p6_controls.scope}</strong>
+    <strong>${globalScope}</strong>
     · ${p6_controls.variable}
     · ${p6_controls.season} season
     · baseline ${globalBaseline.replace("-","–")}
