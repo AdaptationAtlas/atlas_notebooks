@@ -2784,10 +2784,21 @@ viewof p6_controls = {
                       { label:"Season", value:"annual" });
   const _decades  = Inputs.checkbox(["1980s","1990s","2000s","2010s","2020s"],
                       { label:"Decades (cols)", value:["1990s","2000s","2010s","2020s"] });
-  const _stats    = Inputs.checkbox(
-                      ["Mean","Min","Max","Mean anomaly","Trend (per decade)","Variability (σ)"],
-                      { label:"Stats (rows)",
-                        value:["Mean anomaly","Trend (per decade)"] });
+  // Aggregation = ONE of Min / Mean / Max (radio).
+  const _agg      = Inputs.radio(["Min","Mean","Max"],
+                      { label: "Aggregation", value: "Mean" });
+  // Show = derived stats to render as grid rows / trend maps.
+  // - Value:              the agg per decade (raw value).
+  // - Anomaly:            agg − baseline mean (diverging colour).
+  // - Trend:              per-decade OLS slope (decade grid) + full-record
+  //                       Theil-Sen + Mann-Kendall full-record map below.
+  // - Variability:        within-decade σ of yearly values.
+  // - Variability trend:  Theil-Sen of rolling 5-yr mean-absolute-residual,
+  //                       normalised by baseline σ. Full-record map below.
+  const _show     = Inputs.checkbox(
+                      ["Value","Anomaly","Trend","Variability","Variability trend"],
+                      { label: "Show",
+                        value: ["Anomaly","Trend","Variability trend"] });
   const _level    = Inputs.radio(["admin1","admin0"],
                       { label:"Level", value:"admin1",
                         format: v => v === "admin1" ? "Admin1" : "Admin0 (country)" });
@@ -2795,13 +2806,26 @@ viewof p6_controls = {
   const _sigBdr  = Inputs.toggle({ label: "Trend: significance border", value: true });
   const _sigDot  = Inputs.toggle({ label: "Trend: significance dot", value: true });
 
+  // Derive the internal `stats` array (matching the keys p6_stats produces)
+  // from (agg, show). "Variability trend" is rendered as a full-record map
+  // beneath the grid, not as a decade row — so it's not in `stats`.
+  function _deriveStats(agg, show) {
+    const out = [];
+    if (show.includes("Value")) out.push(agg);
+    if (show.includes("Anomaly")) out.push(`${agg} anomaly`);
+    if (show.includes("Trend")) out.push("Trend (per decade)");
+    if (show.includes("Variability")) out.push("Variability (σ)");
+    return out;
+  }
+
   // Scope + baseline come from the global sticky strip; only section-specific
   // controls live here.
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
     <div style="min-width:140px;flex:1 1 140px;">${_var}</div>
     <div style="min-width:140px;flex:1 1 140px;">${_season}</div>
     <div style="min-width:260px;flex:1 1 260px;">${_decades}</div>
-    <div style="min-width:320px;flex:1 1 320px;">${_stats}</div>
+    <div style="min-width:160px;flex:1 1 160px;">${_agg}</div>
+    <div style="min-width:300px;flex:1 1 300px;">${_show}</div>
     <div style="min-width:180px;flex:1 1 180px;">${_level}</div>
     <div style="min-width:220px;flex:1 1 220px;">${_sigBdr}</div>
     <div style="min-width:200px;flex:1 1 200px;">${_sigDot}</div>
@@ -2810,7 +2834,9 @@ viewof p6_controls = {
     get: () => ({
       variable: _var.value, season: _season.value,
       decades: _decade_arr(_decades.value),
-      stats: _stats.value, level: _level.value,
+      agg: _agg.value, show: _show.value,
+      stats: _deriveStats(_agg.value, _show.value),
+      level: _level.value,
       sigBorders: _sigBdr.value, sigDots: _sigDot.value,
     }),
   });
@@ -2898,13 +2924,17 @@ p6_stats = {
       if (!decRows.length) continue;
       const vals = decRows.map(d => d.value_mean);
       const mean = d3.mean(vals);
+      const min  = d3.min(vals) ?? null;
+      const max  = d3.max(vals) ?? null;
       result.push({
         join_key: key,
         decade: dec,
         "Mean":              mean ?? null,
-        "Min":               d3.min(vals) ?? null,
-        "Max":               d3.max(vals) ?? null,
+        "Min":               min,
+        "Max":               max,
         "Mean anomaly":      baseMean != null && mean != null ? mean - baseMean : null,
+        "Min anomaly":       baseMean != null && min  != null ? min  - baseMean : null,
+        "Max anomaly":       baseMean != null && max  != null ? max  - baseMean : null,
         "Trend (per decade)": linSlope(decRows),
         "Variability (σ)":   d3.deviation(vals) ?? null,
       });
@@ -2926,7 +2956,7 @@ loaderDiv("plotP6")
   renderToDiv("plotP6", () => {
   if (!p6_obs_raw.length) return htl.html`<p style="color:#888;font-style:italic;">⏳ Loading observational data…</p>`;
 
-  const { variable, season, stats, level } = p6_controls;
+  const { variable, season, stats, show, agg, level } = p6_controls;
   const scope = globalScope;
   const decades = p6_controls.decades;
   const { isCountry, iso3List } = globalScopeInfo;
@@ -2936,6 +2966,8 @@ loaderDiv("plotP6")
   const rawUnit = isPTOT ? "mm" : isSPEI ? "σ" : "°C";
   const unit = { "Mean": rawUnit, "Min": rawUnit, "Max": rawUnit,
                  "Mean anomaly":       rawUnit,
+                 "Min anomaly":        rawUnit,
+                 "Max anomaly":        rawUnit,
                  "Trend (per decade)": isPTOT ? "mm/dec" : isSPEI ? "σ/dec" : "°C/dec",
                  "Variability (σ)":    rawUnit };
 
@@ -2959,7 +2991,7 @@ loaderDiv("plotP6")
   }
 
   // Auto-scale each stat across ALL decades (symmetric for anomaly/trend).
-  const SYMM_STATS = new Set(["Mean anomaly","Trend (per decade)"]);
+  const SYMM_STATS = new Set(["Mean anomaly","Min anomaly","Max anomaly","Trend (per decade)"]);
   const SEQ_STATS  = new Set(["Mean","Min","Max","Variability (σ)"]);
 
   const statExtent = new Map([...stats, "Trend (per decade)"].map(stat => {
@@ -3096,8 +3128,13 @@ loaderDiv("plotP6")
 
   // Full-record trend maps (shown when Trend is selected).
   // Method: Theil-Sen slope + Mann-Kendall + TFPW — same as main notebook.
+  // Full-record trend / variability-trend maps. Gated independently on
+  // `show.includes("Trend")` (mean / agg trend map) and
+  // `show.includes("Variability trend")` (variability trend map).
+  const showFullTrend    = show.includes("Trend");
+  const showVarTrendMap  = show.includes("Variability trend");
   let trendMap = "";
-  if (stats.includes("Trend (per decade)")) {
+  if (showFullTrend || showVarTrendMap) {
     const byKey  = d3.group(p6_obs_raw, d => d.join_key);
     const yMin   = d3.min(p6_obs_raw, d => d.year);
     const yMax2  = d3.max(p6_obs_raw, d => d.year);
@@ -3224,19 +3261,20 @@ loaderDiv("plotP6")
       </div>`;
     };
 
-    const meanTrendEl = renderTrendMap(
-      `Mean trend — ${yMin}–${yMax2}`,
+    const meanTrendEl = showFullTrend ? renderTrendMap(
+      `${agg} trend — ${yMin}–${yMax2}`,
       "Theil-Sen slope + Mann-Kendall + TFPW · same method as main notebook",
       r => r.mk?.slopePerDecade ?? null,
       r => r.mk?.significant5pct ?? false,
       unit["Trend (per decade)"]
-    );
-    const varTrendEl = showVarTrend ? renderTrendMap(
+    ) : null;
+    const varTrendEl = (showVarTrendMap && showVarTrend) ? renderTrendMap(
       `Variability trend — ${yMin}–${yMax2}`,
       "% change/decade in detrended residual variability (Theil-Sen of rolling 5-yr mean-absolute-residual, normalised by baseline σ). Detrended = mean shift removed.",
       r => r.mkVarPct ?? null,
       r => r.mkVar?.significant5pct ?? false,
-      "%/decade"
+      "%/decade",
+      true
     ) : null;
 
     trendMap = meanTrendEl || varTrendEl ? htl.html`<div style="margin-top:14px;border-top:1px solid #ddd;padding-top:8px;">
