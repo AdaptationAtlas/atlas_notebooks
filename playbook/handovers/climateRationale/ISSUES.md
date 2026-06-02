@@ -2736,7 +2736,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **risk:** Touches every chart cell's data accessors → if mis-wired, charts go blank. Smoke-test each section after the swap by reloading the sandbox preview and clicking through every country in `obs_country_codes`.
 
-- **STATUS (2026-06-02):** Open, unblocked. Deferred from scaffolding-parity commit (sized to fit in a single careful pass). Pete sign-off on scaffolding parity before tackling this.
+- **STATUS (2026-06-02):** ✓ FIXED in `<this-commit>`. Global controls section added between intro and P1: `viewof globalCountry` + `viewof globalBaseline` + `viewof cbMode` in a `.controls-row` wrapper. P1 / P2 / P3 / P4 / P5 controls cells stripped of `_iso3` and `_baseline` widgets — each per-section controls panel now shows ≤ 6 inputs (variable + section-specific extras). Accessor aliases (`sandbox_iso3`, `p3_iso3`, `p2_iso3`, etc.) all rewired to `globalCountry`. Chart cells using `pN_controls.iso3` / `pN_controls.baseline` rewired to `globalCountry` / `globalBaseline` directly. **CR-097 + P6 keep their local scope picker** (region support, per Pete's exception); P6 baseline picker removed and rewired to `globalBaseline`; CR-097 baseline stays hardcoded to 1995-2014 in the S3 publish path (CMIP6-only). Fence balance preserved (65/65 — net +2 OJS cells from the new globalCountry + globalBaseline + cbMode-move).
 
 ---
 
