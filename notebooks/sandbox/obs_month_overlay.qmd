@@ -55,15 +55,26 @@ hr.section-divider {
    actual navbar height (different Quarto themes / viewports produce
    different heights — main notebook hardcodes 56 px, sandbox measures). */
 .global-admin-selectors {
+  display: block !important;       /* force block context — some Quarto wrappers default to display: contents which kills sticky */
+  isolation: isolate;              /* fresh stacking context */
   position: -webkit-sticky;
   position: sticky;
   top: var(--cr-nav-h, 56px);
   z-index: 1019;
   background: #fff;
-  padding: 0.5rem 0;
+  padding: 0.5rem 14px;
   border-bottom: 1px solid #e5e7eb;
-  margin-bottom: 1rem;
+  margin: 0 0 1rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+/* Polyfill-class applied by JS when native sticky doesn't engage — relocates
+   the strip to be a direct child of <body> and switches to position: fixed. */
+.global-admin-selectors.cr-sticky-fixed {
+  position: fixed !important;
+  top: var(--cr-nav-h, 56px) !important;
+  left: 0; right: 0;
+  margin: 0 auto;
+  max-width: 1200px;
 }
 
 /* Override Quarto / Bootstrap overflow settings on article-body ancestors
@@ -427,7 +438,6 @@ document.documentElement.style.setProperty("--plot-text-weight", plotTextBold ? 
 // Measure the real Quarto navbar height + push it onto :root as a CSS variable
 // (--cr-nav-h). The .global-admin-selectors `top` reads this variable so the
 // sticky strip pins flush against the navbar regardless of theme/viewport.
-// Re-measures on viewport resize.
 {
   const setNavH = () => {
     const navEl = document.querySelector("header#quarto-header") || document.querySelector(".navbar");
@@ -436,10 +446,60 @@ document.documentElement.style.setProperty("--plot-text-weight", plotTextBold ? 
   };
   setNavH();
   window.addEventListener("resize", setNavH);
-  // Also re-measure once the page finishes laying out (atlasTOC + navbar logos
-  // alter navbar height after first paint).
   setTimeout(setNavH, 250);
   setTimeout(setNavH, 1000);
+}
+```
+
+```{ojs}
+//| output: false
+// Sticky-polyfill watchdog. If native `position: sticky` doesn't engage
+// (Quarto theme or some ancestor with `overflow: hidden|auto` traps the
+// element), this watchdog detects it and switches the strip to
+// `position: fixed` instead — same visual result, doesn't depend on
+// ancestor overflow.
+//
+// Detection: observe the strip with IntersectionObserver and a top
+// rootMargin equal to the navbar height. If the strip's bounding rect
+// `top` ever exceeds (viewport top + nav height + 1), sticky isn't
+// working — toggle the `.cr-sticky-fixed` class which switches to fixed
+// positioning.
+{
+  function activatePolyfill() {
+    const strip = document.querySelector(".global-admin-selectors");
+    if (!strip) { requestAnimationFrame(activatePolyfill); return; }
+
+    // Make the strip a direct child of <body> so `position: fixed` doesn't
+    // get clipped by any ancestor with `overflow: hidden`. Original parent
+    // gets a placeholder spacer of the same height so layout doesn't jump.
+    const placeholder = document.createElement("div");
+    placeholder.className = "global-admin-selectors-placeholder";
+    placeholder.style.height = strip.offsetHeight + "px";
+
+    // Sticky-test: scroll listener checks whether the strip's getBoundingClientRect().top
+    // stays at or near the expected pinned offset. If not, switch to fixed.
+    let switched = false;
+    const navH = () => parseInt(getComputedStyle(document.documentElement).getPropertyValue("--cr-nav-h")) || 56;
+
+    function check() {
+      if (switched) return;
+      const r = strip.getBoundingClientRect();
+      const expected = navH();
+      // If the strip's natural position is ABOVE the expected pinned-top
+      // (i.e. it's scrolled off-screen instead of sticking), polyfill.
+      if (r.top < expected - 3 && window.scrollY > 0) {
+        switched = true;
+        // Insert placeholder where strip was; move strip to body.
+        strip.parentNode.insertBefore(placeholder, strip);
+        document.body.appendChild(strip);
+        strip.classList.add("cr-sticky-fixed");
+        window.removeEventListener("scroll", check);
+      }
+    }
+    window.addEventListener("scroll", check, { passive: true });
+    setTimeout(check, 100);
+  }
+  activatePolyfill();
 }
 ```
 
@@ -561,7 +621,9 @@ adminPatternTipBody = htl.html`<div>${md`${_lang(nbText.sections.intro.adminPatt
 md`<p class="below-h1-methods-link"><a href="#methods-climate-data">${_lang(nbText.sections.methodsPageLabel)}</a></p>`
 ```
 
-::: {.global-admin-selectors}
+```{=html}
+<div class="global-admin-selectors">
+```
 
 ::: {.controls-row}
 
@@ -590,7 +652,9 @@ viewof cbMode = Inputs.toggle({
 
 :::
 
-:::
+```{=html}
+</div>
+```
 
 <hr class="section-divider" />
 
