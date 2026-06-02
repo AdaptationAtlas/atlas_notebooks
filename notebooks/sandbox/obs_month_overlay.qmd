@@ -275,7 +275,11 @@ nbText = await FileAttachment("/data/sandbox/obs_month_overlay_nbText.json").jso
 ```{ojs}
 // Floating atlasTOC panel — replaces the default Quarto left-TOC. Same helper +
 // options as the main notebook so the "On this page" experience is identical.
-import { atlasTOC } from "/helpers/toc.ojs";
+import { atlasTOC, tocStyle } from "/helpers/toc.ojs";
+```
+
+```{ojs}
+tocStyle
 ```
 
 ```{ojs}
@@ -348,6 +352,9 @@ viewof facetCols     = Inputs.input(5);
 // (Previously auto-collapsed below 1480 px viewport width, which left
 // the sidebar invisible on narrower screens with no obvious way back.)
 {
+  // Defensive: clear any leftover collapse class on first run so the TOC
+  // is guaranteed to be visible after a hard refresh.
+  document.body.classList.remove("atlas-toc-collapsed");
   if (!document.querySelector(".atlas-toc-toggle")) {
     const btn = document.createElement("button");
     btn.className = "atlas-toc-toggle";
@@ -697,8 +704,10 @@ viewof globalAdmin1 = {
     return f;
   }
   let selected = [];
-  const wrap     = htl.html`<div style="position:relative;display:inline-block;min-width:240px;font-family:sans-serif;">`;
-  const btn      = htl.html`<button style="width:100%;text-align:left;padding:6px 10px;border:1px solid #aaa;background:#fff;cursor:pointer;border-radius:3px;font-size:0.88em;">All admin1s ▼</button>`;
+  const wrap     = htl.html`<div style="display:flex;flex-direction:column;gap:2px;min-width:240px;font-family:sans-serif;position:relative;">
+    <div style="font-size:0.75em;font-weight:600;color:#333;text-transform:uppercase;letter-spacing:0.02em;">Admin1 filter</div>
+  </div>`;
+  const btn      = htl.html`<button style="width:100%;text-align:left;padding:6px 10px;border:1px solid #aaa;background:#fff;cursor:pointer;border-radius:3px;font-size:0.88em;min-height:30px;">All admin1s ▼</button>`;
   const dropdown = htl.html`<div style="display:none;position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:280px;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.18);padding:8px;">`;
   const search   = htl.html`<input type="text" placeholder="Search…" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:3px;box-sizing:border-box;margin-bottom:6px;font-size:0.86em;">`;
   const actRow   = htl.html`<div style="display:flex;gap:6px;margin-bottom:6px;">`;
@@ -812,18 +821,29 @@ viewof p1_controls = {
   const _var     = Inputs.select(["TAVG","TMAX","TMIN","PTOT"],
                      { label: "Variable", value: "TAVG" });
   const _anomaly = Inputs.toggle({ label: "Show as anomaly", value: true });
-  const _pctAnom = Inputs.toggle({ label: "PTOT anomaly as % (only when PTOT + anomaly)", value: false });
+  // PTOT %-anomaly toggle is only meaningful when variable === "PTOT".
+  // The wrapping div toggles visibility via JS when the variable changes,
+  // so the control disappears for TAVG / TMAX / TMIN and the label can stay
+  // short.
+  const _pctAnom = Inputs.toggle({ label: "PTOT anomaly as %", value: false });
   const { _preset, _sStart, _sEnd } = seasonControls();
   const _band    = Inputs.toggle({ label: "Decade mean ± σ band", value: false });
   const _decade  = Inputs.checkbox(["1980s","1990s","2000s","2010s","2020s"],
                      { label: "Highlight decades + mean lines" });
 
   // Consistent ordering across P1 / P3 / P4 / P5:
-  // Variable → Anomaly → (PTOT %) → Season preset → Custom start → Custom end → section-specific extras.
+  // Variable → Anomaly → (PTOT %) → Season preset → Start → End → section-specific extras.
+  const pctWrap = htl.html`<div data-pct-wrap style="min-width:200px;flex:1 1 200px;">${_pctAnom}</div>`;
+  const updatePctVisibility = () => {
+    pctWrap.style.display = _var.value === "PTOT" ? "" : "none";
+  };
+  updatePctVisibility();
+  _var.addEventListener("input", updatePctVisibility);
+
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
     <div style="min-width:160px;flex:1 1 160px;">${_var}</div>
     <div style="min-width:160px;flex:1 1 160px;">${_anomaly}</div>
-    <div style="min-width:240px;flex:1 1 240px;">${_pctAnom}</div>
+    ${pctWrap}
     <div style="min-width:160px;flex:1 1 160px;">${_preset}</div>
     <div style="min-width:180px;flex:1 1 180px;">${_sStart}</div>
     <div style="min-width:180px;flex:1 1 180px;">${_sEnd}</div>
@@ -879,22 +899,23 @@ seasonPresetMap = ({
 ```
 
 ```{ojs}
-// Resolve preset + start + end month numbers to an ordered month list.
-// Returns null when the active range is "all months" so callers can
-// skip the highlight band / season filter. Handles wrap-around (DJF
-// start=12, end=2 → [12, 1, 2]).
-seasonMonthRange = (preset, start, end) => {
-  const resolved = preset === "Custom" ? [start, end] : (seasonPresetMap[preset] ?? [0, 0]);
-  const [s, e] = resolved;
-  if (s === 0 || e === 0) return null;
-  if (s <= e) {
+// Resolve start + end month numbers to an ordered month list.
+// Returns null when the active range is "all months" (start/end = 0) so
+// callers can skip the highlight band / season filter. Handles wrap-
+// around (DJF start=12, end=2 → [12, 1, 2]).
+// `preset` is accepted (legacy callers) but no longer consulted — the
+// preset selector now just populates start / end which is the
+// single source of truth.
+seasonMonthRange = (_preset, start, end) => {
+  if (start === 0 || end === 0) return null;
+  if (start <= end) {
     const out = [];
-    for (let m = s; m <= e; m++) out.push(m);
+    for (let m = start; m <= end; m++) out.push(m);
     return out;
   }
   const out = [];
-  for (let m = s; m <= 12; m++) out.push(m);
-  for (let m = 1; m <= e; m++) out.push(m);
+  for (let m = start; m <= 12; m++) out.push(m);
+  for (let m = 1; m <= end; m++) out.push(m);
   return out;
 }
 ```
@@ -909,10 +930,27 @@ seasonControls = ({ defaultPreset = "All months" } = {}) => {
   const moNames = ["—","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const moFmt   = v => moNames[v] ?? "—";
   const moOpts  = [0,1,2,3,4,5,6,7,8,9,10,11,12];
+  const initial = seasonPresetMap[defaultPreset] ?? [0, 0];
   const _preset = Inputs.select(Object.keys(seasonPresetMap),
                     { label: "Season preset", value: defaultPreset });
-  const _sStart = Inputs.select(moOpts, { label: "Custom start (preset=Custom)", value: 0, format: moFmt });
-  const _sEnd   = Inputs.select(moOpts, { label: "Custom end (preset=Custom)",   value: 0, format: moFmt });
+  const _sStart = Inputs.select(moOpts, { label: "Start", value: initial[0], format: moFmt });
+  const _sEnd   = Inputs.select(moOpts, { label: "End",   value: initial[1], format: moFmt });
+  // Preset → populate start / end. User can then override start / end
+  // directly (which is what "Custom" already does); preset stays as a
+  // quick way to jump to a known season range.
+  _preset.addEventListener("input", () => {
+    const range = seasonPresetMap[_preset.value];
+    if (!range) return;  // "Custom" — leave start/end alone
+    const [s, e] = range;
+    if (_sStart.value !== s) {
+      _sStart.value = s;
+      _sStart.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    if (_sEnd.value !== e) {
+      _sEnd.value = e;
+      _sEnd.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  });
   return { _preset, _sStart, _sEnd };
 }
 ```
@@ -3705,7 +3743,8 @@ loaderDiv("plotCR097")
       const svg = d3.create("svg")
         .attr("viewBox", `0 0 ${facetW} ${facetH}`)
         .attr("width", facetW).attr("height", facetH)
-        .style("border", "1px solid #eee");
+        .style("border", "1px solid #888")
+        .style("background", "#fff");
       const g = svg.append("g").attr("transform", "translate(6, 4)");
 
       // Pass 1: all country admin1 boundaries as grey outlines (always visible).
