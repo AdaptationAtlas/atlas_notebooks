@@ -1036,14 +1036,18 @@ obsQueryFragment = ({ iso3, variableFilter, extraSelect = "", extraGroup = "", e
   const adm1Where = useAdm1
     ? `AND admin1_name IN (${globalAdmin1.map(a => `'${a.replace(/'/g, "''")}'`).join(",")})`
     : "";
+  // When admin1s are selected we keep admin1_name in the result so callers
+  // can facet by admin1 (per main notebook). Without admin1s the column is
+  // absent (admin0 path = single country, single series).
+  const adm1Select = useAdm1 ? "admin1_name, " : "";
   return {
     sql: `
-      SELECT year, month${extraSelect ? `, ${extraSelect}` : ""}, AVG(value_mean) AS value_mean
+      SELECT ${adm1Select}year, month${extraSelect ? `, ${extraSelect}` : ""}, AVG(value_mean) AS value_mean
       FROM read_parquet('${url}')
       WHERE iso3 = '${iso3}' AND ${variableFilter} ${adm1Where}
         AND value_mean IS NOT NULL
-      GROUP BY ${extraGroup ? `${extraGroup}, ` : ""}year, month
-      ORDER BY ${extraOrder ? `${extraOrder}, ` : ""}year, month
+      GROUP BY ${adm1Select}${extraGroup ? `${extraGroup}, ` : ""}year, month
+      ORDER BY ${adm1Select}${extraOrder ? `${extraOrder}, ` : ""}year, month
     `,
     useAdm1,
   };
@@ -1074,16 +1078,20 @@ overlay_raw = {
 
 ```{ojs}
 // Per-month baseline means over the selected period.
+// When admin1s are selected each admin1 needs its OWN baseline so the
+// anomaly facets aren't all centred on a region-wide mean. The map is
+// keyed by `${admin1_name ?? "_admin0"}|${month}`; the lookup helper at
+// the bottom of this cell hides the key shape from callers.
 overlay_baseline = {
   const [lo, hi] = sandbox_baseline === "1991-2020" ? [1991, 2020] : [1995, 2014];
-  const byMonth = d3.group(
-    overlay_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi),
-    d => Number(d.month)
-  );
+  const baselineRows = overlay_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi);
   const m = new Map();
-  for (const [mo, rows] of byMonth) {
-    m.set(mo, d3.mean(rows, d => d.value_mean));
+  const byKey = d3.group(baselineRows,
+    d => `${d.admin1_name ?? "_admin0"}|${Number(d.month)}`);
+  for (const [key, rows] of byKey) {
+    m.set(key, d3.mean(rows, d => d.value_mean));
   }
+  m._get = (admin1_name, month) => m.get(`${admin1_name ?? "_admin0"}|${month}`);
   return m;
 }
 ```
@@ -1094,13 +1102,15 @@ overlay_baseline = {
 // PTOT % anomaly mode: (value - base) / base * 100 — only when PTOT + anomaly toggle on.
 // Coerce BigInt year/month to Number so d3 arithmetic and equality checks work.
 overlay_rows = overlay_raw.map(d => {
-  const year  = Number(d.year);
-  const month = Number(d.month);
-  const base  = overlay_baseline.get(month) ?? 0;
-  const anom  = d.value_mean - base;
+  const year   = Number(d.year);
+  const month  = Number(d.month);
+  const admin  = d.admin1_name ?? null;
+  const base   = overlay_baseline._get(admin, month) ?? 0;
+  const anom   = d.value_mean - base;
   const isPTOTpct = sandbox_variable === "PTOT" && sandbox_anomaly && p1_pct_anomaly && base > 0;
   return {
     year, month,
+    admin1_name: admin,
     value_mean: d.value_mean,
     anomaly:    anom,
     value_plot: isPTOTpct ? (anom / base) * 100
@@ -1194,10 +1204,25 @@ loaderDiv("plotP1")
 
   const rows = overlay_rows.map(d => ({ ...d, yearStr: String(d.year) }));
 
+  // Facet by admin1 when the global admin1 popup has selections. One
+  // sub-plot per admin1, stacked vertically — matches main notebook's
+  // recentChanges fy-facet pattern (notebook.qmd ~line 2042).
+  const isFaceted   = rows.length > 0 && rows[0].admin1_name != null;
+  const admin1Names = isFaceted
+    ? [...new Set(rows.map(d => d.admin1_name).filter(Boolean))].sort()
+    : null;
+  const nFacets     = isFaceted ? admin1Names.length : 1;
+  const facetH      = isFaceted ? Math.max(180, Math.round(340 / Math.min(3, nFacets))) : 340;
+  const chartHeight = isFaceted ? facetH * nFacets + 40 : 340;
+  const titleStr    = isFaceted
+    ? `${countryNames[sandbox_iso3] ?? sandbox_iso3} — ${varNames[sandbox_variable] ?? sandbox_variable}, ${yearMin}–${yearMax} · ${nFacets} admin1${nFacets === 1 ? "" : "s"}`
+    : `${countryNames[sandbox_iso3] ?? sandbox_iso3} — ${varNames[sandbox_variable] ?? sandbox_variable}, ${yearMin}–${yearMax}`;
+  const fyConfig    = isFaceted ? { label: null, domain: admin1Names } : undefined;
+
   const chart = Plot.plot({
-    title: `${countryNames[sandbox_iso3] ?? sandbox_iso3} — ${varNames[sandbox_variable] ?? sandbox_variable}, ${yearMin}–${yearMax}`,
+    title: titleStr,
     width: width,
-    height: 340,
+    height: chartHeight,
     marginLeft: 70,
     marginBottom: 44,
     marginTop: 36,
@@ -1209,6 +1234,7 @@ loaderDiv("plotP1")
       tickFormat: mo => monthNames[mo - 1],
     },
     y: { label: yLabel, grid: true, nice: true },
+    ...(isFaceted ? { fy: fyConfig, facet: { data: rows, y: "admin1_name" } } : {}),
     marks: [
       // Season highlight band — soft blue, not yellow.
       ...(activeMos ? activeMos.map(mo =>
