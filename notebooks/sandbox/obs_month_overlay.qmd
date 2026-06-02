@@ -1015,7 +1015,39 @@ obs_country_labels = ({
 ```
 
 ```{ojs}
-monthlyURL = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-monthly/variable=adm0_obs.parquet"
+monthlyURL    = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-monthly/variable=adm0_obs.parquet"
+```
+
+```{ojs}
+adm1MonthlyURL = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-monthly/variable=adm1_obs.parquet"
+```
+
+```{ojs}
+// Helper: build the FROM / WHERE / GROUP BY fragments for P1-P5 obs queries.
+// When the global admin1 popup has no items selected → use adm0_obs (one
+// row per (year, month) per country, fastest path).
+// When admin1s are selected → switch to adm1_obs + filter by admin1_name +
+// AVG across the selected admin1s so the chart sees a single value per
+// (year, month). Variable filter is parameterised so P5 can query multiple
+// variables in a single statement (it passes `variable IN ('TAVG',...)`).
+obsQueryFragment = ({ iso3, variableFilter, extraSelect = "", extraGroup = "", extraOrder = "" }) => {
+  const useAdm1 = globalAdmin1 && globalAdmin1.length > 0;
+  const url     = useAdm1 ? adm1MonthlyURL : monthlyURL;
+  const adm1Where = useAdm1
+    ? `AND admin1_name IN (${globalAdmin1.map(a => `'${a.replace(/'/g, "''")}'`).join(",")})`
+    : "";
+  return {
+    sql: `
+      SELECT year, month${extraSelect ? `, ${extraSelect}` : ""}, AVG(value_mean) AS value_mean
+      FROM read_parquet('${url}')
+      WHERE iso3 = '${iso3}' AND ${variableFilter} ${adm1Where}
+        AND value_mean IS NOT NULL
+      GROUP BY ${extraGroup ? `${extraGroup}, ` : ""}year, month
+      ORDER BY ${extraOrder ? `${extraOrder}, ` : ""}year, month
+    `,
+    useAdm1,
+  };
+}
 ```
 
 ```{ojs}
@@ -1024,15 +1056,12 @@ db_overlay = DuckDBClient.of()
 
 ```{ojs}
 overlay_raw = {
-  const rows = await db_overlay.query(`
-    SELECT year, month, AVG(value_mean) AS value_mean
-    FROM read_parquet('${monthlyURL}')
-    WHERE iso3 = '${sandbox_iso3}'
-      AND variable = '${sandbox_variable}'
-      AND value_mean IS NOT NULL
-    GROUP BY year, month
-    ORDER BY year, month
-  `);
+  globalAdmin1;  // dep — re-fire when admin1 popup changes
+  const { sql } = obsQueryFragment({
+    iso3: sandbox_iso3,
+    variableFilter: `variable = '${sandbox_variable}'`,
+  });
+  const rows = await db_overlay.query(sql);
   return Array.from(rows);
 }
 ```
@@ -1297,9 +1326,13 @@ captionDetails(htl.html`
 `)
 ```
 
-::: {.callout-tip title="Quick insight"}
-`{ojs} mdInsight(quickInsightP1)`
-:::
+```{ojs}
+md`### ${_lang(nbText.sections.quickInsightLabel)}`
+```
+
+```{ojs}
+mdInsight(quickInsightP1)
+```
 
 ```{ojs}
 // Quick insight — template-driven body for P1.
@@ -1402,15 +1435,12 @@ p3_anomaly  = p3_controls.anomaly
 
 ```{ojs}
 p3_raw = {
-  const rows = await db_overlay.query(`
-    SELECT year, month, AVG(value_mean) AS value_mean
-    FROM read_parquet('${monthlyURL}')
-    WHERE iso3 = '${p3_iso3}'
-      AND variable = '${p3_variable}'
-      AND value_mean IS NOT NULL
-    GROUP BY year, month
-    ORDER BY year, month
-  `);
+  globalAdmin1;  // dep — re-fire when admin1 popup changes
+  const { sql } = obsQueryFragment({
+    iso3: p3_iso3,
+    variableFilter: `variable = '${p3_variable}'`,
+  });
+  const rows = await db_overlay.query(sql);
   return Array.from(rows);
 }
 ```
@@ -1622,9 +1652,13 @@ htl.html`<div style="display:flex;gap:12px;flex-wrap:wrap;
 </div>`
 ```
 
-::: {.callout-tip title="Quick insight"}
-`{ojs} mdInsight(quickInsightP3)`
-:::
+```{ojs}
+md`### ${_lang(nbText.sections.quickInsightLabel)}`
+```
+
+```{ojs}
+mdInsight(quickInsightP3)
+```
 
 ```{ojs}
 // Quick insight — template-driven body for P3.
@@ -1730,15 +1764,12 @@ p2_seasonLabel = p2_controls.seasonPreset === "Custom"
 
 ```{ojs}
 p2_raw = {
-  const rows = await db_overlay.query(`
-    SELECT year, month, AVG(value_mean) AS value_mean
-    FROM read_parquet('${monthlyURL}')
-    WHERE iso3 = '${p2_iso3}'
-      AND variable = '${p2_variable}'
-      AND value_mean IS NOT NULL
-    GROUP BY year, month
-    ORDER BY year, month
-  `);
+  globalAdmin1;  // dep — re-fire when admin1 popup changes
+  const { sql } = obsQueryFragment({
+    iso3: p2_iso3,
+    variableFilter: `variable = '${p2_variable}'`,
+  });
+  const rows = await db_overlay.query(sql);
   return Array.from(rows);
 }
 ```
@@ -2057,9 +2088,13 @@ captionDetails(htl.html`
 `)
 ```
 
-::: {.callout-tip title="Quick insight"}
-`{ojs} mdInsight(quickInsightP2)`
-:::
+```{ojs}
+md`### ${_lang(nbText.sections.quickInsightLabel)}`
+```
+
+```{ojs}
+mdInsight(quickInsightP2)
+```
 
 ```{ojs}
 // Quick insight — template-driven body for P2.
@@ -2158,15 +2193,12 @@ viewof p4_controls = {
 
 ```{ojs}
 p4_raw = {
-  const rows = await db_overlay.query(`
-    SELECT year, month, AVG(value_mean) AS value_mean
-    FROM read_parquet('${monthlyURL}')
-    WHERE iso3 = '${globalSingleCountry}'
-      AND variable = '${p4_controls.variable}'
-      AND value_mean IS NOT NULL
-    GROUP BY year, month
-    ORDER BY year, month
-  `);
+  globalAdmin1;  // dep — re-fire when admin1 popup changes
+  const { sql } = obsQueryFragment({
+    iso3: globalSingleCountry,
+    variableFilter: `variable = '${p4_controls.variable}'`,
+  });
+  const rows = await db_overlay.query(sql);
   return Array.from(rows);
 }
 ```
@@ -2387,9 +2419,13 @@ captionDetails(htl.html`
 `)
 ```
 
-::: {.callout-tip title="Quick insight"}
-`{ojs} mdInsight(quickInsightP4)`
-:::
+```{ojs}
+md`### ${_lang(nbText.sections.quickInsightLabel)}`
+```
+
+```{ojs}
+mdInsight(quickInsightP4)
+```
 
 ```{ojs}
 // Quick insight — template-driven body for P4.
@@ -2480,15 +2516,15 @@ viewof p5_controls = {
 
 ```{ojs}
 p5_raw = {
-  const rows = await db_overlay.query(`
-    SELECT year, month, variable, AVG(value_mean) AS value_mean
-    FROM read_parquet('${monthlyURL}')
-    WHERE iso3 = '${globalSingleCountry}'
-      AND variable IN ('TAVG','TMAX','TMIN','PTOT')
-      AND value_mean IS NOT NULL
-    GROUP BY variable, year, month
-    ORDER BY variable, year, month
-  `);
+  globalAdmin1;  // dep — re-fire when admin1 popup changes
+  const { sql } = obsQueryFragment({
+    iso3: globalSingleCountry,
+    variableFilter: `variable IN ('TAVG','TMAX','TMIN','PTOT')`,
+    extraSelect: "variable",
+    extraGroup:  "variable",
+    extraOrder:  "variable",
+  });
+  const rows = await db_overlay.query(sql);
   return Array.from(rows);
 }
 ```
@@ -2757,9 +2793,13 @@ loaderDiv("plotP5Table")
 }
 ```
 
-::: {.callout-tip title="Quick insight"}
-`{ojs} mdInsight(quickInsightP5)`
-:::
+```{ojs}
+md`### ${_lang(nbText.sections.quickInsightLabel)}`
+```
+
+```{ojs}
+mdInsight(quickInsightP5)
+```
 
 ```{ojs}
 // Quick insight — template-driven body for P5.
@@ -2917,7 +2957,12 @@ p6_obs_raw = {
   if (!p6Visible) return [];
   const { iso3List } = globalScopeInfo;
   const { variable, season, level } = p6_controls;
+  // iso3 = '<X>' beats IN ('<X>') for parquet row-group stats pushdown
+  // when there's only one country (single-country path is the common one).
   const iso3In = iso3List.map(c => `'${c}'`).join(",");
+  const iso3Where = iso3List.length === 1
+    ? `iso3 = '${iso3List[0]}'`
+    : `iso3 IN (${iso3In})`;
   const url = level === "admin1"
     ? "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm1_obs.parquet"
     : "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet";
@@ -2925,7 +2970,7 @@ p6_obs_raw = {
   const rows = await db_p6.query(`
     SELECT ${keyCol}, year, AVG(value_mean) AS value_mean
     FROM read_parquet('${url}')
-    WHERE iso3 IN (${iso3In}) AND variable = '${variable}' AND period = '${season}'
+    WHERE ${iso3Where} AND variable = '${variable}' AND period = '${season}'
       AND value_mean IS NOT NULL
     GROUP BY ${keyCol}, year
     ORDER BY iso3, ${level === "admin1" ? "admin1_name," : ""} year
@@ -3385,9 +3430,13 @@ captionDetails(htl.html`
 `)
 ```
 
-::: {.callout-tip title="Quick insight"}
-`{ojs} mdInsight(quickInsightP6)`
-:::
+```{ojs}
+md`### ${_lang(nbText.sections.quickInsightLabel)}`
+```
+
+```{ojs}
+mdInsight(quickInsightP6)
+```
 
 ```{ojs}
 // Quick insight — template-driven body for P6.
@@ -3560,6 +3609,14 @@ cr097_data = {
 
   // Always query admin1 rows (IS NOT NULL) — national-level rows may not exist.
   // Admin0 aggregation done client-side in chart cell.
+  // Single-country path: use `iso3 = '<X>'` (not `IN (...)`) so DuckDB-WASM
+  // can use parquet row-group stats pushdown. `iso3 IN (single-value)`
+  // defeats the optimisation and forces a full-parquet scan — verified to
+  // 10× the load time on single-country queries (per the duckdb-wasm
+  // parquet pushdown notes in memory).
+  const iso3Where = iso3List.length === 1
+    ? `iso3 = '${iso3List[0]}'`
+    : `iso3 IN (${iso3In})`;
   const periods = ["2021-2040","2041-2060","2061-2080","2081-2100"];
   const urls = periods.map(p =>
     `${cr097_base}/period=${p}/baseline=1995-2014/variable=ensemble_season_timeseries.parquet`);
@@ -3567,7 +3624,7 @@ cr097_data = {
   const makeUnion = (url, period) => `
     SELECT admin1_name, iso3, scenario, '${period}' AS period, mean_anomaly
     FROM read_parquet('${url}')
-    WHERE iso3 IN (${iso3In}) AND hazard = '${variable}' AND season = '${season}' AND admin1_name IS NOT NULL`;
+    WHERE ${iso3Where} AND hazard = '${variable}' AND season = '${season}' AND admin1_name IS NOT NULL`;
 
   const sql = `
     WITH combined AS (
@@ -3852,9 +3909,13 @@ captionDetails(htl.html`
 `)
 ```
 
-::: {.callout-tip title="Quick insight"}
-`{ojs} mdInsight(quickInsightCR097)`
-:::
+```{ojs}
+md`### ${_lang(nbText.sections.quickInsightLabel)}`
+```
+
+```{ojs}
+mdInsight(quickInsightCR097)
+```
 
 ```{ojs}
 // Quick insight — template-driven body for CR097.
