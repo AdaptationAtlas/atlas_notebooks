@@ -1188,15 +1188,25 @@ captionDetails(htl.html`
 
 ```{ojs}
 // Quick insight — template-driven body for P1.
+// Compares the earliest and latest COMPLETE decades (≥10 years of data)
+// rather than the first vs last year. Year-to-year comparisons are noisy
+// and the last year of the dataset is often partial (e.g. 2026 has only
+// Jan–Jun), which biased the headline number significantly.
 quickInsightP1 = (() => {
   const t = nbText.sections.p1.quickInsight;
   if (!overlay_rows || !overlay_rows.length) return _lang(t.nodata);
-  const yrs = overlay_years;
-  const yMin = yrs[0], yMax = yrs[yrs.length - 1];
-  const earlyMean = d3.mean(overlay_rows.filter(d => d.year === yMin), d => d.anomaly);
-  const lateMean  = d3.mean(overlay_rows.filter(d => d.year === yMax), d => d.anomaly);
-  if (earlyMean == null || lateMean == null) return _lang(t.needTwo);
-  const delta  = lateMean - earlyMean;
+  const decadeOf = y => `${Math.floor(y / 10) * 10}s`;
+  const byDec = d3.group(overlay_rows, d => decadeOf(d.year));
+  const decadeStats = [...byDec.entries()].map(([dec, rows]) => ({
+    dec,
+    yrs:  new Set(rows.map(d => d.year)).size,
+    mean: d3.mean(rows, d => d.anomaly),
+  })).filter(d => d.yrs >= 10 && d.mean != null);
+  if (decadeStats.length < 2) return _lang(t.needTwo);
+  decadeStats.sort((a, b) => parseInt(a.dec) - parseInt(b.dec));
+  const early  = decadeStats[0];
+  const late   = decadeStats[decadeStats.length - 1];
+  const delta  = late.mean - early.mean;
   const isPTOT = sandbox_variable === "PTOT";
   const unit   = isPTOT ? (p1_pct_anomaly ? "%" : "mm") : "°C";
   const verb   = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
@@ -1207,8 +1217,8 @@ quickInsightP1 = (() => {
     { name: "delta",    value: Math.abs(delta).toFixed(2) },
     { name: "unit",     value: unit },
     { name: "verb",     value: verb },
-    { name: "yMin",     value: yMin },
-    { name: "yMax",     value: yMax },
+    { name: "yMin",     value: early.dec },
+    { name: "yMax",     value: late.dec },
     { name: "variable", value: sandbox_variable },
     { name: "baseline", value: sandbox_baseline.replace("-","–") },
   ]);
