@@ -1844,16 +1844,24 @@ loaderDiv("plotP2")
   const unit2 = isTavg ? "°C" : "mm";
   const dirHot = isTavg ? "Warmest" : "Wettest";
   const dirCold = isTavg ? "Coolest" : "Driest";
-  const allRows = [...byYear.values()].flat();
-  const warmest = allRows.reduce((a, b) => b.anomaly > a.anomaly ? b : a, allRows[0]);
-  const coolest = allRows.reduce((a, b) => b.anomaly < a.anomaly ? b : a, allRows[0]);
-  const yearMeans = [...byYear].map(([y, rs]) => ({ year: y, mean: d3.mean(rs, d => d.anomaly) }))
+  // Stats respect the "Highlight decade" control — when a decade is selected
+  // the legend / stats reflect only that decade. yMin / yMax in this block
+  // become the range of years inside the active decade so the "1980 mean" /
+  // "2026 mean" rows show the decade endpoints, not the full-record endpoints.
+  const allRows  = [...byYear.values()].flat().filter(d => inDecade(d.year));
+  const warmest  = allRows.reduce((a, b) => b.anomaly > a.anomaly ? b : a, allRows[0]);
+  const coolest  = allRows.reduce((a, b) => b.anomaly < a.anomaly ? b : a, allRows[0]);
+  const yearMeans = [...byYear].filter(([y]) => inDecade(y))
+    .map(([y, rs]) => ({ year: y, mean: d3.mean(rs, d => d.anomaly) }))
     .filter(d => d.mean != null);
-  const warmYr = yearMeans.reduce((a, b) => b.mean > a.mean ? b : a, yearMeans[0]);
-  const coolYr = yearMeans.reduce((a, b) => b.mean < a.mean ? b : a, yearMeans[0]);
-  const latestRows = byYear.get(yMax) ?? [];
+  const warmYr   = yearMeans.reduce((a, b) => b.mean > a.mean ? b : a, yearMeans[0]);
+  const coolYr   = yearMeans.reduce((a, b) => b.mean < a.mean ? b : a, yearMeans[0]);
+  const scopedYears = yearMeans.map(d => d.year).sort((a, b) => a - b);
+  const yLo  = scopedYears.length ? scopedYears[0] : yMin;
+  const yHi  = scopedYears.length ? scopedYears[scopedYears.length - 1] : yMax;
+  const latestRows = byYear.get(yHi) ?? [];
   const latestMean = d3.mean(latestRows, d => d.anomaly);
-  const oldestRows = byYear.get(yMin) ?? [];
+  const oldestRows = byYear.get(yLo) ?? [];
   const oldestMean = d3.mean(oldestRows, d => d.anomaly);
   const sgn = v => v > 0 ? "+" : "";
   const statsTxt = "#555";
@@ -1864,8 +1872,9 @@ loaderDiv("plotP2")
     <span>🔵 ${dirCold} month: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> (${sgn(coolest.anomaly)}${coolest.anomaly.toFixed(2)}${unit2})</span>
     <span>🔥 ${dirHot} year: <strong>${warmYr?.year}</strong> (${sgn(warmYr?.mean ?? 0)}${(warmYr?.mean ?? 0).toFixed(2)}${unit2})</span>
     <span>❄️ ${dirCold} year: <strong>${coolYr?.year}</strong> (${sgn(coolYr?.mean ?? 0)}${(coolYr?.mean ?? 0).toFixed(2)}${unit2})</span>
-    <span>📅 ${yMin} mean: <strong>${oldestMean != null ? sgn(oldestMean) + oldestMean.toFixed(2) : "–"}${unit2}</strong></span>
-    <span>📅 ${yMax} mean: <strong>${latestMean != null ? sgn(latestMean) + latestMean.toFixed(2) : "–"}${unit2}</strong></span>
+    <span>📅 ${yLo} mean: <strong>${oldestMean != null ? sgn(oldestMean) + oldestMean.toFixed(2) : "–"}${unit2}</strong></span>
+    <span>📅 ${yHi} mean: <strong>${latestMean != null ? sgn(latestMean) + latestMean.toFixed(2) : "–"}${unit2}</strong></span>
+    ${selDec !== null ? htl.html`<span style="color:#888;">↳ scoped to <strong>${selDec}s</strong></span>` : ""}
   </div>`;
 
   const caveatEl = htl.html`<div style="font-size:0.78em;color:#888;font-style:italic;
@@ -2319,7 +2328,7 @@ viewof p5_controls = {
   const _anomaly= Inputs.toggle({ label: "Anomaly mode", value: true });
   const _summary  = Inputs.toggle({ label: "Show annual/season summary row", value: true });
   const _view    = Inputs.radio(["Heatmap", "Table", "Both"],
-                     { label: "View", value: "Both" });
+                     { label: "View", value: "Heatmap" });
 
   const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
     <div style="min-width:140px;flex:1 1 140px;">${_sStart}</div>
@@ -2977,14 +2986,17 @@ loaderDiv("plotP6")
       ? (isWetVar ? "wetter →" : "warmer →")
       : stat === "Variability (σ)" ? "volatile →" : null;
     const varNote = stat === "Variability (σ)" ? "· inter-annual std. dev." : null;
-    const legEl = htl.html`<div style="margin:2px 0 4px ${labelW}px;font-size:9px;color:#666;">
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        ${dirLoGrid ? htl.html`<span style="font-style:italic;color:#999;white-space:nowrap;">${dirLoGrid}</span>` : ""}
-        <span>${lo.toFixed(1)}</span>
-        <span style="display:inline-block;width:100px;height:8px;background:linear-gradient(to right,${stops});border-radius:2px;border:1px solid #ddd;flex-shrink:0;"></span>
-        <span>${hi.toFixed(1)} ${unit[stat]}</span>
-        ${dirHiGrid ? htl.html`<span style="font-style:italic;color:#999;white-space:nowrap;">${dirHiGrid}</span>` : ""}
-        ${varNote ? htl.html`<span style="color:#aaa;">${varNote}</span>` : ""}
+    // Legend sized to match the grid width — gradient swatch spans the
+    // full row, value labels sit either side, direction labels italic outside.
+    const gridFullW = facetW * nCols + (nCols - 1) * 4;
+    const legEl = htl.html`<div style="margin:4px 0 6px ${labelW}px;font-size:11px;color:#555;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        ${dirLoGrid ? htl.html`<span style="font-style:italic;color:#888;white-space:nowrap;">${dirLoGrid}</span>` : ""}
+        <span style="font-weight:600;">${lo.toFixed(1)}</span>
+        <span style="display:inline-block;width:${Math.max(220, Math.floor(gridFullW * 0.45))}px;height:12px;background:linear-gradient(to right,${stops});border-radius:2px;border:1px solid #ccc;flex-shrink:0;"></span>
+        <span style="font-weight:600;">${hi.toFixed(1)} ${unit[stat]}</span>
+        ${dirHiGrid ? htl.html`<span style="font-style:italic;color:#888;white-space:nowrap;">${dirHiGrid}</span>` : ""}
+        ${varNote ? htl.html`<span style="color:#888;font-style:italic;">${varNote}</span>` : ""}
       </div>
     </div>`;
 
