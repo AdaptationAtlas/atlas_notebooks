@@ -1428,33 +1428,52 @@ mdInsight(quickInsightP1)
 quickInsightP1 = (() => {
   const t = nbText.sections.p1.quickInsight;
   if (!overlay_rows || !overlay_rows.length) return _lang(t.nodata);
-  const decadeOf = y => `${Math.floor(y / 10) * 10}s`;
-  const byDec = d3.group(overlay_rows, d => decadeOf(d.year));
-  const decadeStats = [...byDec.entries()].map(([dec, rows]) => ({
-    dec,
-    yrs:  new Set(rows.map(d => d.year)).size,
-    mean: d3.mean(rows, d => d.anomaly),
-  })).filter(d => d.yrs >= 10 && d.mean != null);
-  if (decadeStats.length < 2) return _lang(t.needTwo);
-  decadeStats.sort((a, b) => parseInt(a.dec) - parseInt(b.dec));
-  const early  = decadeStats[0];
-  const late   = decadeStats[decadeStats.length - 1];
-  const delta  = late.mean - early.mean;
   const isPTOT = sandbox_variable === "PTOT";
   const unit   = isPTOT ? (p1_pct_anomaly ? "%" : "mm") : "°C";
-  const verb   = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
   const cName  = obs_country_labels[globalSingleCountry] ?? globalSingleCountry;
-  return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
-    { name: "country",  value: cName },
-    { name: "iso3",     value: globalSingleCountry },
-    { name: "delta",    value: Math.abs(delta).toFixed(2) },
-    { name: "unit",     value: unit },
-    { name: "verb",     value: verb },
-    { name: "yMin",     value: early.dec },
-    { name: "yMax",     value: late.dec },
-    { name: "variable", value: sandbox_variable },
-    { name: "baseline", value: sandbox_baseline.replace("-","–") },
-  ]);
+  const decadeOf = y => `${Math.floor(y / 10) * 10}s`;
+
+  // Compute one insight line per scope. `scope` is either an admin1
+  // name (faceted mode) or null (whole country).
+  const lineFor = (scope) => {
+    const scopeRows = scope == null
+      ? overlay_rows
+      : overlay_rows.filter(d => d.admin1_name === scope);
+    if (!scopeRows.length) return null;
+    const byDec = d3.group(scopeRows, d => decadeOf(d.year));
+    const decadeStats = [...byDec.entries()].map(([dec, rows]) => ({
+      dec,
+      yrs:  new Set(rows.map(d => d.year)).size,
+      mean: d3.mean(rows, d => d.anomaly),
+    })).filter(d => d.yrs >= 10 && d.mean != null);
+    if (decadeStats.length < 2) return null;
+    decadeStats.sort((a, b) => parseInt(a.dec) - parseInt(b.dec));
+    const early = decadeStats[0];
+    const late  = decadeStats[decadeStats.length - 1];
+    const delta = late.mean - early.mean;
+    const verb  = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
+    const filled = Lang.reduceReplaceTemplateItems(_lang(t.ok), [
+      { name: "country",  value: scope ?? cName },
+      { name: "iso3",     value: scope == null ? globalSingleCountry : `${globalSingleCountry} · ${scope}` },
+      { name: "delta",    value: Math.abs(delta).toFixed(2) },
+      { name: "unit",     value: unit },
+      { name: "verb",     value: verb },
+      { name: "yMin",     value: early.dec },
+      { name: "yMax",     value: late.dec },
+      { name: "variable", value: sandbox_variable },
+      { name: "baseline", value: sandbox_baseline.replace("-","–") },
+    ]);
+    return filled;
+  };
+
+  const admin1s = [...new Set(overlay_rows.map(d => d.admin1_name).filter(Boolean))].sort();
+  if (admin1s.length === 0) {
+    return lineFor(null) ?? _lang(t.needTwo);
+  }
+  // Per-admin1 insight lines — one bullet per selected admin1.
+  const lines = admin1s.map(a => lineFor(a)).filter(Boolean);
+  if (!lines.length) return _lang(t.needTwo);
+  return lines.map(l => `- ${l}`).join("\n");
 })();
 ```
 
@@ -1521,6 +1540,8 @@ p3_anomaly  = p3_controls.anomaly
 ```{ojs}
 p3_raw = {
   globalAdmin1;  // dep — re-fire when admin1 popup changes
+  const _div = document.getElementById("plotP3");
+  if (_div) _div.replaceChildren(loaderContent("Fetching observational data…"));
   const { sql } = obsQueryFragment({
     iso3: p3_iso3,
     variableFilter: `variable = '${p3_variable}'`,
@@ -1533,12 +1554,12 @@ p3_raw = {
 ```{ojs}
 p3_base = {
   const [lo, hi] = p3_baseline === "1991-2020" ? [1991, 2020] : [1995, 2014];
-  const byMonth = d3.group(
-    p3_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi),
-    d => Number(d.month)
-  );
+  const baselineRows = p3_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi);
   const m = new Map();
-  for (const [mo, rows] of byMonth) m.set(mo, d3.mean(rows, d => d.value_mean));
+  const byKey = d3.group(baselineRows,
+    d => `${d.admin1_name ?? "_admin0"}|${Number(d.month)}`);
+  for (const [k, rs] of byKey) m.set(k, d3.mean(rs, d => d.value_mean));
+  m._get = (admin1_name, month) => m.get(`${admin1_name ?? "_admin0"}|${month}`);
   return m;
 }
 ```
@@ -1548,8 +1569,9 @@ p3_base = {
 p3_rows = p3_raw.map(d => {
   const year    = Number(d.year);
   const month   = Number(d.month);
-  const anomaly = d.value_mean - (p3_base.get(month) ?? 0);
-  return { year, month, value_mean: d.value_mean, anomaly,
+  const admin   = d.admin1_name ?? null;
+  const anomaly = d.value_mean - (p3_base._get(admin, month) ?? 0);
+  return { year, month, admin1_name: admin, value_mean: d.value_mean, anomaly,
            value_plot: p3_anomaly ? anomaly : d.value_mean };
 })
 ```
@@ -1585,24 +1607,34 @@ p3_kde = {
     return Math.max(bw, bwFloor);
   };
 
-  const byDecade = d3.group(augmented, d => Math.floor(d.year / 10) * 10);
-  const rows = [];
-  for (const [dec, drows] of byDecade) {
-    const values = drows.map(d => d.value_plot);
-    const label  = `${dec}s`;
-    const bw     = silverman(values);
-    const k      = kernel(bw);
-    const kde    = thresh.map(x => ({
-      x, decade: label, dec,
-      density: d3.mean(values, v => k(x - v)),
-      n: values.length,
-      bw,
-    }));
-    const maxD = d3.max(kde, d => d.density);
-    kde.forEach(d => { d.density_norm = maxD > 0 ? d.density / maxD : 0; });
-    rows.push(...kde);
-  }
-  return rows;
+  // Build KDE rows for one (admin1_name OR null) scope.
+  const buildKdeFor = (scope) => {
+    const scopeRows = scope == null ? augmented : augmented.filter(d => d.admin1_name === scope);
+    const byDecade = d3.group(scopeRows, d => Math.floor(d.year / 10) * 10);
+    const out = [];
+    for (const [dec, drows] of byDecade) {
+      const values = drows.map(d => d.value_plot);
+      const label  = `${dec}s`;
+      const bw     = silverman(values);
+      const k      = kernel(bw);
+      const kde    = thresh.map(x => ({
+        x, decade: label, dec,
+        admin1_name: scope,
+        density: d3.mean(values, v => k(x - v)),
+        n: values.length,
+        bw,
+      }));
+      const maxD = d3.max(kde, d => d.density);
+      kde.forEach(d => { d.density_norm = maxD > 0 ? d.density / maxD : 0; });
+      out.push(...kde);
+    }
+    return out;
+  };
+
+  const admin1s = [...new Set(augmented.map(d => d.admin1_name).filter(Boolean))].sort();
+  if (admin1s.length === 0) return buildKdeFor(null);
+  // Per-admin1: emit rows tagged with admin1_name so the chart can facet.
+  return admin1s.flatMap(a => buildKdeFor(a));
 }
 ```
 
@@ -1617,8 +1649,8 @@ loaderDiv("plotP3")
 ```{ojs}
 //| output: false
 {
-  [globalSingleCountry, globalBaseline, p3_variable, p3_season, p3_anomaly,
-   p3_kde, p3_decades, cbMode, width];
+  [globalSingleCountry, globalBaseline, globalAdmin1, p3_variable, p3_season, p3_anomaly,
+   p3_kde, p3_decades, cbMode, facetCols, width];
   renderToDiv("plotP3", () => {
   const spacing   = 0.78;  // < 1 → ridges overlap
   const decadeIdx = Object.fromEntries(p3_decades.map((d, i) => [d, i]));
@@ -1637,55 +1669,119 @@ loaderDiv("plotP3")
   const _pad = (_p98 - _p02) * 0.15;
   const xDomain = [Math.floor((_p02 - _pad) * 2) / 2, Math.ceil((_p98 + _pad) * 2) / 2];
 
+  // Facet detection — p3_kde carries admin1_name when admin1 popup active.
+  const admin1Names = [...new Set(p3_kde.map(d => d.admin1_name).filter(Boolean))].sort();
+  const isFaceted   = admin1Names.length > 0;
+  const nCols       = isFaceted ? Math.max(1, Math.min(facetCols, admin1Names.length)) : 1;
+  const nRows       = isFaceted ? Math.ceil(admin1Names.length / nCols) : 1;
+  const adminFP     = isFaceted
+    ? new Map(admin1Names.map((a, i) => [a, { _fx: i % nCols, _fy: Math.floor(i / nCols) }]))
+    : null;
+  const fxOf = a => adminFP?.get(a)?._fx ?? 0;
+  const fyOf = a => adminFP?.get(a)?._fy ?? 0;
+
   const ridgeData = p3_kde.map(d => ({
     ...d,
     y1: decadeIdx[d.decade] * spacing,
     y2: decadeIdx[d.decade] * spacing + d.density_norm,
+    _fx: isFaceted ? fxOf(d.admin1_name) : 0,
+    _fy: isFaceted ? fyOf(d.admin1_name) : 0,
   }));
 
-  const labelData = p3_decades.map(d => ({
-    decade: d,
-    y: decadeIdx[d] * spacing + 0.05,
-  }));
+  const labelData = isFaceted
+    ? admin1Names.flatMap(a => p3_decades.map(d => ({
+        decade: d,
+        y: decadeIdx[d] * spacing + 0.05,
+        admin1_name: a,
+        _fx: fxOf(a), _fy: fyOf(a),
+      })))
+    : p3_decades.map(d => ({ decade: d, y: decadeIdx[d] * spacing + 0.05 }));
+
+  // ruleY data per facet (one rule per decade per facet).
+  const ruleYData = isFaceted
+    ? admin1Names.flatMap(a => p3_decades.map((d, i) => ({
+        y: i * spacing, _fx: fxOf(a), _fy: fyOf(a),
+      })))
+    : p3_decades.map((d, i) => ({ y: i * spacing }));
+  const ruleX0Data = isFaceted
+    ? admin1Names.map(a => ({ _fx: fxOf(a), _fy: fyOf(a) }))
+    : [{}];
+  const adminLabelData = isFaceted
+    ? admin1Names.map(a => ({ admin1_name: a, _fx: fxOf(a), _fy: fyOf(a) }))
+    : [];
+
+  const facetH    = isFaceted ? Math.max(180, Math.round(320 / Math.min(2, nRows))) : 320;
+  const chartHeight = isFaceted ? facetH * nRows + 60 : 320;
 
   const p3Chart = Plot.plot({
-    title: `${p3_iso3} — ${p3_variable} anomaly distribution by decade (vs ${p3_baseline.replace("-","–")})`,
+    title: isFaceted
+      ? `${p3_iso3} — ${p3_variable} anomaly distribution by decade · ${admin1Names.length} admin1${admin1Names.length === 1 ? "" : "s"}`
+      : `${p3_iso3} — ${p3_variable} anomaly distribution by decade (vs ${p3_baseline.replace("-","–")})`,
     width: width,
-    height: 320,
+    height: chartHeight,
     marginLeft: 60,
     marginBottom: 44,
     marginRight: 60,
     marginTop: 36,
     x: { label: xLabel, grid: true, domain: xDomain },
     y: { axis: null, domain: [-0.1, p3_decades.length * spacing] },
+    ...(isFaceted ? {
+      fx: { axis: null, domain: d3.range(nCols) },
+      fy: { axis: null, domain: d3.range(nRows) },
+    } : {}),
     marks: [
-      Plot.ruleY(p3_decades.map((d, i) => ({ y: i * spacing })), {
+      Plot.ruleY(ruleYData, {
         y: "y", stroke: "#ddd", strokeWidth: 0.8,
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
       }),
       Plot.areaY(ridgeData, {
         x: "x", y1: "y1", y2: "y2",
-        fill: turboFor, fillOpacity: 0.6, z: "decade",
+        fill: turboFor, fillOpacity: 0.6,
+        z: isFaceted ? d => `${d.admin1_name}_${d.decade}` : "decade",
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
       }),
       Plot.line(ridgeData, {
         x: "x", y: "y2",
-        stroke: turboFor, strokeWidth: 1.5, z: "decade",
+        stroke: turboFor, strokeWidth: 1.5,
+        z: isFaceted ? d => `${d.admin1_name}_${d.decade}` : "decade",
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
         tip: true,
         channels: {
           decade: "decade",
+          admin1: "admin1_name",
           anomaly: d => `${d.x > 0 ? "+" : ""}${d.x.toFixed(2)} ${isPTOT ? "mm" : "°C"}`,
           density: d => d.density_norm.toFixed(2),
           n: "n",
         },
       }),
-      Plot.ruleX([0], { stroke: "#444", strokeDasharray: "3 2", strokeOpacity: 0.6 }),
+      Plot.ruleX(ruleX0Data, {
+        x: 0, stroke: "#444", strokeDasharray: "3 2", strokeOpacity: 0.6,
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
+      }),
       Plot.text(labelData, {
         x: xDomain[1] * 0.95, y: "y",
-        text: "decade", fontSize: 11,
+        text: "decade", fontSize: 10,
         fill: d => cbMode
           ? okabeIto[decadeIdx[d.decade] % okabeIto.length]
           : d3.interpolateTurbo(decadeIdx[d.decade] / nDec),
         fontWeight: "bold", textAnchor: "end",
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
       }),
+      // Per-facet admin1 label in the top-left.
+      ...(isFaceted ? [
+        Plot.text(adminLabelData, {
+          fx: "_fx", fy: "_fy",
+          text: "admin1_name",
+          frameAnchor: "top-left",
+          dx: 6, dy: 4,
+          fontSize: 11, fontWeight: 600, fill: "#444",
+        })
+      ] : []),
     ],
   });
   return chartDownloadMenu(p3Chart, { filename: `p3_ridge_plot_${p3_iso3}_${p3_variable}` });
@@ -1750,24 +1846,38 @@ mdInsight(quickInsightP3)
 quickInsightP3 = (() => {
   const t = nbText.sections.p3.quickInsight;
   if (!p3_kde || !p3_decades || p3_decades.length < 2) return _lang(t.needTwo);
-  const decs = [...p3_decades].sort();
-  const first = decs[0], last = decs[decs.length - 1];
-  const meanOf = dec => d3.mean(p3_rows.filter(d => `${Math.floor(d.year / 10) * 10}s` === dec), d => d.anomaly);
-  const mFirst = meanOf(first), mLast = meanOf(last);
-  if (mFirst == null || mLast == null) return _lang(t.noPerDec);
-  const shift = mLast - mFirst;
+  const decs   = [...p3_decades].sort();
   const isPTOT = p3_variable === "PTOT";
-  const unit = isPTOT ? "mm" : "°C";
-  const dir = isPTOT ? (shift > 0 ? "wetter" : "drier") : (shift > 0 ? "warmer" : "cooler");
-  return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
-    { name: "variable", value: p3_variable },
-    { name: "delta",    value: Math.abs(shift).toFixed(2) },
-    { name: "unit",     value: unit },
-    { name: "dir",      value: dir },
-    { name: "first",    value: first },
-    { name: "last",     value: last },
-    { name: "baseline", value: p3_baseline.replace("-","–") },
-  ]);
+  const unit   = isPTOT ? "mm" : "°C";
+
+  const lineFor = (scope) => {
+    const scopeRows = scope == null
+      ? p3_rows
+      : p3_rows.filter(d => d.admin1_name === scope);
+    if (!scopeRows.length) return null;
+    const first = decs[0], last = decs[decs.length - 1];
+    const meanOf = dec => d3.mean(scopeRows.filter(d => `${Math.floor(d.year / 10) * 10}s` === dec), d => d.anomaly);
+    const mFirst = meanOf(first), mLast = meanOf(last);
+    if (mFirst == null || mLast == null) return null;
+    const shift = mLast - mFirst;
+    const dir = isPTOT ? (shift > 0 ? "wetter" : "drier") : (shift > 0 ? "warmer" : "cooler");
+    const body = Lang.reduceReplaceTemplateItems(_lang(t.ok), [
+      { name: "variable", value: p3_variable },
+      { name: "delta",    value: Math.abs(shift).toFixed(2) },
+      { name: "unit",     value: unit },
+      { name: "dir",      value: dir },
+      { name: "first",    value: first },
+      { name: "last",     value: last },
+      { name: "baseline", value: p3_baseline.replace("-","–") },
+    ]);
+    return scope == null ? body : `**${scope}** — ${body}`;
+  };
+
+  const admin1s = [...new Set(p3_rows.map(d => d.admin1_name).filter(Boolean))].sort();
+  if (admin1s.length === 0) return lineFor(null) ?? _lang(t.noPerDec);
+  const lines = admin1s.map(a => lineFor(a)).filter(Boolean);
+  if (!lines.length) return _lang(t.noPerDec);
+  return lines.map(l => `- ${l}`).join("\n");
 })();
 ```
 
@@ -1958,9 +2068,12 @@ loaderDiv("plotP2")
   const adminFromRows = [...new Set(p2_rows.map(d => d.admin1_name).filter(Boolean))].sort();
   const isFaceted   = adminFromRows.length > 0;
   const admin1Names = isFaceted ? adminFromRows : [null];
-  const nCols       = isFaceted ? Math.max(1, Math.min(facetCols, admin1Names.length)) : 1;
+  // Cap P2 nCols at 2 — spirals are dense; 3+ columns squashes the rings to
+  // an illegible size even on wide viewports. Overrides the sidebar
+  // facetCols control for this chart only.
+  const nCols       = isFaceted ? Math.max(1, Math.min(2, facetCols, admin1Names.length)) : 1;
   // Faceted SVGs scale down via viewBox; outer container uses CSS grid.
-  const facetW      = isFaceted ? Math.max(220, Math.floor(width / nCols - 18)) : W;
+  const facetW      = isFaceted ? Math.max(280, Math.floor(width / nCols - 18)) : W;
 
   // Build one SVG. When `adminLabel` is null we draw the original country-
   // wide spiral; otherwise we filter p2_rows to that admin1.
@@ -2099,11 +2212,14 @@ loaderDiv("plotP2")
     return svg.node();
   };  // end buildSpiral
 
-  // Build the spiral element(s). Faceted mode lays them out in a CSS grid;
-  // single mode returns one SVG.
+  // Build the spiral element(s). Faceted mode lays each (spiral + per-
+  // admin1 caption) in a CSS grid cell; single mode returns one SVG.
   const spiralEl = isFaceted
     ? htl.html`<div style="display:grid;grid-template-columns:repeat(${nCols}, 1fr);gap:14px;align-items:start;">
-        ${admin1Names.map(a => buildSpiral(a))}
+        ${admin1Names.map(a => htl.html`<div>
+          ${buildSpiral(a)}
+          ${buildStats(p2_rows.filter(d => d.admin1_name === a))}
+        </div>`)}
       </div>`
     : buildSpiral(null);
 
@@ -2137,50 +2253,56 @@ loaderDiv("plotP2")
     </div>
   </div>`;
 
-  // Stats summary.
-  // - "Warmest/Coolest month": single extreme month-of-record.
-  // - "Warmest/Coolest year": annual-mean extremes (more meaningful for trend storytelling).
+  // Stats summary helper — computes from the supplied rows so we can
+  // generate a per-admin1 caption in faceted mode (or one country-wide
+  // caption in single-spiral mode). Same numbers as before.
   const unit2 = isTavg ? "°C" : "mm";
   const dirHot = isTavg ? "Warmest" : "Wettest";
   const dirCold = isTavg ? "Coolest" : "Driest";
-  // Stats respect the "Highlight decade" control — when a decade is selected
-  // the legend / stats reflect only that decade. yMin / yMax in this block
-  // become the range of years inside the active decade so the "1980 mean" /
-  // "2026 mean" rows show the decade endpoints, not the full-record endpoints.
   const inSeasonStat = mo => !p2_season || p2_season.includes(mo);
-  const allRows  = [...byYear.values()].flat()
-    .filter(d => inDecade(d.year) && inSeasonStat(d.month));
-  const warmest  = allRows.reduce((a, b) => b.anomaly > a.anomaly ? b : a, allRows[0]);
-  const coolest  = allRows.reduce((a, b) => b.anomaly < a.anomaly ? b : a, allRows[0]);
-  const yearMeans = [...byYear].filter(([y]) => inDecade(y))
-    .map(([y, rs]) => ({
-      year: y,
-      mean: d3.mean(rs.filter(d => inSeasonStat(d.month)), d => d.anomaly),
-    }))
-    .filter(d => d.mean != null);
-  const warmYr   = yearMeans.reduce((a, b) => b.mean > a.mean ? b : a, yearMeans[0]);
-  const coolYr   = yearMeans.reduce((a, b) => b.mean < a.mean ? b : a, yearMeans[0]);
-  const scopedYears = yearMeans.map(d => d.year).sort((a, b) => a - b);
-  const yLo  = scopedYears.length ? scopedYears[0] : yMin;
-  const yHi  = scopedYears.length ? scopedYears[scopedYears.length - 1] : yMax;
-  const latestRows = byYear.get(yHi) ?? [];
-  const latestMean = d3.mean(latestRows, d => d.anomaly);
-  const oldestRows = byYear.get(yLo) ?? [];
-  const oldestMean = d3.mean(oldestRows, d => d.anomaly);
   const sgn = v => v > 0 ? "+" : "";
   const statsTxt = "#555";
-  const statsEl = htl.html`<div style="font-size:0.82em;color:${statsTxt};
-      padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
-      display:flex;gap:18px;flex-wrap:wrap;">
-    <span>🔴 ${dirHot} month: <strong>${warmest.year} ${monthNames[warmest.month-1]}</strong> (${sgn(warmest.anomaly)}${warmest.anomaly.toFixed(2)}${unit2})</span>
-    <span>🔵 ${dirCold} month: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> (${sgn(coolest.anomaly)}${coolest.anomaly.toFixed(2)}${unit2})</span>
-    <span>🔥 ${dirHot} year: <strong>${warmYr?.year}</strong> (${sgn(warmYr?.mean ?? 0)}${(warmYr?.mean ?? 0).toFixed(2)}${unit2})</span>
-    <span>❄️ ${dirCold} year: <strong>${coolYr?.year}</strong> (${sgn(coolYr?.mean ?? 0)}${(coolYr?.mean ?? 0).toFixed(2)}${unit2})</span>
-    <span>📅 ${yLo} mean: <strong>${oldestMean != null ? sgn(oldestMean) + oldestMean.toFixed(2) : "–"}${unit2}</strong></span>
-    <span>📅 ${yHi} mean: <strong>${latestMean != null ? sgn(latestMean) + latestMean.toFixed(2) : "–"}${unit2}</strong></span>
-    ${selDec !== null ? htl.html`<span style="color:#888;">↳ scoped to <strong>${selDec}s</strong></span>` : ""}
-    ${p2_season ? htl.html`<span style="color:#888;">↳ season: <strong>${p2_seasonLabel}</strong></span>` : ""}
-  </div>`;
+
+  const buildStats = (rowsArg) => {
+    const byYearLocal = d3.group(rowsArg, d => d.year);
+    const allRowsLocal = [...byYearLocal.values()].flat()
+      .filter(d => inDecade(d.year) && inSeasonStat(d.month));
+    if (!allRowsLocal.length) return htl.html`<div style="font-size:0.8em;color:#888;font-style:italic;">No data for selected scope.</div>`;
+    const warmest = allRowsLocal.reduce((a, b) => b.anomaly > a.anomaly ? b : a, allRowsLocal[0]);
+    const coolest = allRowsLocal.reduce((a, b) => b.anomaly < a.anomaly ? b : a, allRowsLocal[0]);
+    const yearMeans = [...byYearLocal].filter(([y]) => inDecade(y))
+      .map(([y, rs]) => ({
+        year: y,
+        mean: d3.mean(rs.filter(d => inSeasonStat(d.month)), d => d.anomaly),
+      }))
+      .filter(d => d.mean != null);
+    const warmYr = yearMeans.length ? yearMeans.reduce((a, b) => b.mean > a.mean ? b : a) : null;
+    const coolYr = yearMeans.length ? yearMeans.reduce((a, b) => b.mean < a.mean ? b : a) : null;
+    const scopedYears = yearMeans.map(d => d.year).sort((a, b) => a - b);
+    const yLoLocal = scopedYears.length ? scopedYears[0] : yMin;
+    const yHiLocal = scopedYears.length ? scopedYears[scopedYears.length - 1] : yMax;
+    const latestRows = byYearLocal.get(yHiLocal) ?? [];
+    const latestMean = d3.mean(latestRows, d => d.anomaly);
+    const oldestRows = byYearLocal.get(yLoLocal) ?? [];
+    const oldestMean = d3.mean(oldestRows, d => d.anomaly);
+    return htl.html`<div style="font-size:0.78em;color:${statsTxt};
+        padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
+        display:flex;gap:14px;flex-wrap:wrap;">
+      <span>🔴 ${dirHot} month: <strong>${warmest.year} ${monthNames[warmest.month-1]}</strong> (${sgn(warmest.anomaly)}${warmest.anomaly.toFixed(2)}${unit2})</span>
+      <span>🔵 ${dirCold} month: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> (${sgn(coolest.anomaly)}${coolest.anomaly.toFixed(2)}${unit2})</span>
+      <span>🔥 ${dirHot} year: <strong>${warmYr?.year ?? "–"}</strong> (${sgn(warmYr?.mean ?? 0)}${(warmYr?.mean ?? 0).toFixed(2)}${unit2})</span>
+      <span>❄️ ${dirCold} year: <strong>${coolYr?.year ?? "–"}</strong> (${sgn(coolYr?.mean ?? 0)}${(coolYr?.mean ?? 0).toFixed(2)}${unit2})</span>
+      <span>📅 ${yLoLocal} mean: <strong>${oldestMean != null ? sgn(oldestMean) + oldestMean.toFixed(2) : "–"}${unit2}</strong></span>
+      <span>📅 ${yHiLocal} mean: <strong>${latestMean != null ? sgn(latestMean) + latestMean.toFixed(2) : "–"}${unit2}</strong></span>
+      ${selDec !== null ? htl.html`<span style="color:#888;">↳ scoped to <strong>${selDec}s</strong></span>` : ""}
+      ${p2_season ? htl.html`<span style="color:#888;">↳ season: <strong>${p2_seasonLabel}</strong></span>` : ""}
+    </div>`;
+  };
+
+  // Country-wide stats panel kept for single-spiral mode AND as a summary
+  // panel beneath the faceted grid (in faceted mode each cell also gets
+  // its own per-admin1 stats — see spiralEl below).
+  const statsEl = buildStats(p2_rows);
 
   const caveatEl = htl.html`<div style="font-size:0.78em;color:#888;font-style:italic;
       padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
@@ -2235,36 +2357,47 @@ quickInsightP2 = (() => {
   if (!p2_rows || !p2_rows.length) return _lang(t.nodata);
   const isPTOT = p2_variable === "PTOT";
   const unit = isPTOT ? "mm" : "°C";
-  // Decade comparison (same approach as P1) — first vs latest COMPLETE
-  // decades only, so the partial latest year (e.g. 2026 Jan-Jun) doesn't
-  // skew the headline.
-  const decadeOf = y => `${Math.floor(y / 10) * 10}s`;
-  const byDec = d3.group(p2_rows, d => decadeOf(d.year));
-  const decadeStats = [...byDec.entries()].map(([dec, rows]) => ({
-    dec,
-    yrs:  new Set(rows.map(d => d.year)).size,
-    mean: d3.mean(rows, d => d.anomaly),
-  })).filter(d => d.yrs >= 10 && d.mean != null);
-  if (decadeStats.length < 2) return _lang(t.noYears);
-  decadeStats.sort((a, b) => parseInt(a.dec) - parseInt(b.dec));
-  const early = decadeStats[0];
-  const late  = decadeStats[decadeStats.length - 1];
-  const delta = late.mean - early.mean;
-  const extreme = isPTOT
-    ? p2_rows.reduce((a, b) => Math.abs(b.anomaly) > Math.abs(a.anomaly) ? b : a, p2_rows[0])
-    : p2_rows.reduce((a, b) => b.anomaly > a.anomaly ? b : a, p2_rows[0]);
   const moNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const dir = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
-  return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
-    { name: "yMin",    value: early.dec },
-    { name: "yMax",    value: late.dec },
-    { name: "delta",   value: Math.abs(delta).toFixed(2) },
-    { name: "unit",    value: unit },
-    { name: "dir",     value: dir },
-    { name: "exYear",  value: extreme.year },
-    { name: "exMonth", value: moNames[extreme.month - 1] },
-    { name: "exAnom",  value: (extreme.anomaly > 0 ? "+" : "") + extreme.anomaly.toFixed(2) },
-  ]);
+  const decadeOf = y => `${Math.floor(y / 10) * 10}s`;
+
+  const lineFor = (scope) => {
+    const scopeRows = scope == null
+      ? p2_rows
+      : p2_rows.filter(d => d.admin1_name === scope);
+    if (!scopeRows.length) return null;
+    const byDec = d3.group(scopeRows, d => decadeOf(d.year));
+    const decadeStats = [...byDec.entries()].map(([dec, rows]) => ({
+      dec,
+      yrs:  new Set(rows.map(d => d.year)).size,
+      mean: d3.mean(rows, d => d.anomaly),
+    })).filter(d => d.yrs >= 10 && d.mean != null);
+    if (decadeStats.length < 2) return null;
+    decadeStats.sort((a, b) => parseInt(a.dec) - parseInt(b.dec));
+    const early = decadeStats[0];
+    const late  = decadeStats[decadeStats.length - 1];
+    const delta = late.mean - early.mean;
+    const extreme = isPTOT
+      ? scopeRows.reduce((a, b) => Math.abs(b.anomaly) > Math.abs(a.anomaly) ? b : a, scopeRows[0])
+      : scopeRows.reduce((a, b) => b.anomaly > a.anomaly ? b : a, scopeRows[0]);
+    const dir = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
+    const body = Lang.reduceReplaceTemplateItems(_lang(t.ok), [
+      { name: "yMin",    value: early.dec },
+      { name: "yMax",    value: late.dec },
+      { name: "delta",   value: Math.abs(delta).toFixed(2) },
+      { name: "unit",    value: unit },
+      { name: "dir",     value: dir },
+      { name: "exYear",  value: extreme.year },
+      { name: "exMonth", value: moNames[extreme.month - 1] },
+      { name: "exAnom",  value: (extreme.anomaly > 0 ? "+" : "") + extreme.anomaly.toFixed(2) },
+    ]);
+    return scope == null ? body : `**${scope}** — ${body}`;
+  };
+
+  const admin1s = [...new Set(p2_rows.map(d => d.admin1_name).filter(Boolean))].sort();
+  if (admin1s.length === 0) return lineFor(null) ?? _lang(t.noYears);
+  const lines = admin1s.map(a => lineFor(a)).filter(Boolean);
+  if (!lines.length) return _lang(t.noYears);
+  return lines.map(l => `- ${l}`).join("\n");
 })();
 ```
 
