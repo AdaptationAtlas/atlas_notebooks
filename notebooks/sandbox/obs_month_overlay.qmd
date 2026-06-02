@@ -47,13 +47,17 @@ hr.section-divider {
   margin: 2.5rem 0 1.5rem;
 }
 
-/* Sticky Global controls — same `.global-admin-selectors` class + CSS as
+/* Sticky Global controls — same `.global-admin-selectors` class as
    notebook.qmd:710. Pins the Country / Baseline / cbMode strip just below the
    Quarto navbar so any country change reflows every section beneath without
-   the user having to scroll back up. */
+   the user having to scroll back up.
+   `top` uses a CSS variable set at runtime by a JS measurement of the
+   actual navbar height (different Quarto themes / viewports produce
+   different heights — main notebook hardcodes 56 px, sandbox measures). */
 .global-admin-selectors {
+  position: -webkit-sticky;
   position: sticky;
-  top: 56px; /* sits just below the always-visible Quarto navbar */
+  top: var(--cr-nav-h, 56px);
   z-index: 1019;
   background: #fff;
   padding: 0.5rem 0;
@@ -62,8 +66,21 @@ hr.section-divider {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
-/* Disable Quarto's headroom hide-on-scroll so navbar stays pinned — sticky
-   `top: 56px` math depends on the navbar always occupying that strip. */
+/* Override Quarto / Bootstrap overflow settings on article-body ancestors
+   so `position: sticky` propagates down to .global-admin-selectors. Any
+   `overflow: hidden|auto|scroll` on an ancestor traps the sticky element
+   inside that ancestor's box. The page viewport must be the scrolling
+   container. */
+html, body { overflow-x: clip; }
+main.content,
+#quarto-document-content,
+.quarto-grid-container,
+.page-columns,
+.column-page,
+.column-body { overflow: visible !important; }
+
+/* Disable Quarto's headroom hide-on-scroll so navbar stays pinned — the
+   sticky `top` math depends on the navbar always occupying its strip. */
 header#quarto-header.headroom--unpinned,
 .navbar.headroom--unpinned,
 .headroom--unpinned {
@@ -402,6 +419,27 @@ document.documentElement.style.setProperty("--plot-text-weight", plotTextBold ? 
     navEnd.parentNode.insertBefore(wrap, navEnd);
   }
   NavbarAckLogos();
+}
+```
+
+```{ojs}
+//| output: false
+// Measure the real Quarto navbar height + push it onto :root as a CSS variable
+// (--cr-nav-h). The .global-admin-selectors `top` reads this variable so the
+// sticky strip pins flush against the navbar regardless of theme/viewport.
+// Re-measures on viewport resize.
+{
+  const setNavH = () => {
+    const navEl = document.querySelector("header#quarto-header") || document.querySelector(".navbar");
+    const h = navEl?.offsetHeight ?? 56;
+    document.documentElement.style.setProperty("--cr-nav-h", `${h}px`);
+  };
+  setNavH();
+  window.addEventListener("resize", setNavH);
+  // Also re-measure once the page finishes laying out (atlasTOC + navbar logos
+  // alter navbar height after first paint).
+  setTimeout(setNavH, 250);
+  setTimeout(setNavH, 1000);
 }
 ```
 
