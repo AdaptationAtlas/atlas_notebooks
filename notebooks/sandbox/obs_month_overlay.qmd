@@ -280,6 +280,7 @@ import { atlasTOC } from "/helpers/toc.ojs";
 
 ```{ojs}
 atlasTOC({
+  selector: "h1, h2",
   skip: ["notebook-title", "source-code"],
   heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
 });
@@ -293,6 +294,7 @@ atlasTOC({
 viewof plotTextSize  = Inputs.input(10);
 viewof plotTextBold  = Inputs.input(false);
 viewof plotLineWidth = Inputs.input(1.5);
+viewof facetCols     = Inputs.input(5);
 ```
 
 ```{ojs}
@@ -319,11 +321,16 @@ viewof plotLineWidth = Inputs.input(1.5);
       Inputs.range([0.5, 4], { step: 0.5, value: plotLineWidth, label: "Line / point size" }),
       viewof plotLineWidth,
     );
+    const facetColsSelect = Inputs.bind(
+      Inputs.select([1, 2, 3, 4, 5], { label: "Facet columns (P6)", value: facetCols }),
+      viewof facetCols,
+    );
     const wrapper = html`<div class="atlas-toc-extras">
       <div class="atlas-toc-extras-heading">All plots</div>
       ${slider}
       ${boldToggle}
       ${lineWidthSlider}
+      ${facetColsSelect}
     </div>`;
     toc.appendChild(wrapper);
   }
@@ -2803,7 +2810,7 @@ loaderDiv("plotP6")
 //| output: false
 {
   [globalBaseline, p6_controls, globalScopeInfo, p6_obs_raw, p6_base_means, p6_stats,
-   globalTopoA1, globalTopoA0, cbMode, width];
+   globalTopoA1, globalTopoA0, cbMode, facetCols, width];
   renderToDiv("plotP6", () => {
   if (!p6_obs_raw.length) return htl.html`<p style="color:#888;font-style:italic;">⏳ Loading observational data…</p>`;
 
@@ -2879,21 +2886,30 @@ loaderDiv("plotP6")
   const gridStats = stats.filter(s => s !== "Trend (per decade)");
 
   const labelW = 130;
-  const facetW = Math.max(180, Math.floor((width - labelW - decades.length * 4) / decades.length));
+  // facetCols (from sidebar) chunks decades into multiple physical rows per stat.
+  // Default 5 = single-row layout (preserves old behaviour when decades.length <= 5).
+  const nCols   = Math.max(1, Math.min(facetCols, decades.length));
+  const chunks  = [];
+  for (let i = 0; i < decades.length; i += nCols) chunks.push(decades.slice(i, i + nCols));
+  const facetW = Math.max(180, Math.floor((width - labelW - nCols * 4) / nCols));
   const facetH = Math.round(facetW * 1.1);  // taller ratio to avoid southern truncation
 
   const proj0 = d3.geoMercator().fitSize([facetW - 8, facetH - 8], { type:"FeatureCollection", features });
   const path0 = d3.geoPath().projection(proj0);
 
-  // Column headers
+  // Column headers — rendered per chunk inline inside each stat block below.
+  // Empty placeholder kept so the existing ${colH}${gridRows} template still
+  // type-checks; chunk headers live inside gridRows.
   const colH = htl.html`<div style="display:flex;gap:4px;margin-left:${labelW}px;margin-bottom:2px;">
-    ${decades.map(d => htl.html`<div style="width:${facetW}px;text-align:center;font-size:10px;font-weight:bold;color:#333;">${d}</div>`)}
+    ${chunks[0].map(d => htl.html`<div style="width:${facetW}px;text-align:center;font-size:10px;font-weight:bold;color:#333;">${d}</div>`)}
   </div>`;
 
-  // Grid rows — excludes Trend (shown separately below as full-record map)
+  // Grid rows — excludes Trend (shown separately below as full-record map).
+  // Each stat now renders chunks.length physical rows so the layout wraps when
+  // decades.length > facetCols.
   const gridRows = gridStats.map(stat => {
     const extent = statExtent.get(stat);
-    const cells = decades.map(dec => {
+    const allCells = decades.map(dec => {
       const crossingMap = byStatDecade.get(stat)?.get(dec) ?? new Map();
       const svg = d3.create("svg")
         .attr("viewBox", `0 0 ${facetW} ${facetH}`)
@@ -2927,7 +2943,6 @@ loaderDiv("plotP6")
     const isSymm = SYMM_STATS.has(stat);
     const nStops = 10;
     const stops = d3.range(nStops).map(i => colourFn(stat, lo + i / (nStops-1) * (hi - lo), extent)).join(",");
-    const legW = facetW * decades.length + (decades.length - 1) * 4;
     const dirLoGrid = stat === "Mean anomaly"
       ? (isWetVar ? "← drier" : "← cooler")
       : stat === "Variability (σ)" ? "← stable" : null;
@@ -2946,11 +2961,20 @@ loaderDiv("plotP6")
       </div>
     </div>`;
 
+    // Chunk cells to match decade chunks so wide layouts wrap.
+    const cellChunks = [];
+    for (let i = 0; i < allCells.length; i += nCols) cellChunks.push(allCells.slice(i, i + nCols));
+
     return htl.html`<div style="margin-bottom:8px;">
-      <div style="display:flex;gap:4px;align-items:flex-start;">
-        <div style="width:${labelW}px;font-size:10px;font-weight:bold;color:#555;padding-top:4px;text-align:right;padding-right:8px;">${stat}</div>
-        ${cells}
-      </div>
+      ${cellChunks.map((chunkCells, ci) => htl.html`<div>
+        ${ci > 0 ? htl.html`<div style="display:flex;gap:4px;margin-left:${labelW}px;margin-top:6px;margin-bottom:2px;">
+          ${chunks[ci].map(d => htl.html`<div style="width:${facetW}px;text-align:center;font-size:10px;font-weight:bold;color:#333;">${d}</div>`)}
+        </div>` : ""}
+        <div style="display:flex;gap:4px;align-items:flex-start;margin-bottom:${ci < cellChunks.length - 1 ? 4 : 0}px;">
+          <div style="width:${labelW}px;font-size:10px;font-weight:bold;color:#555;padding-top:4px;text-align:right;padding-right:8px;">${ci === 0 ? stat : ""}</div>
+          ${chunkCells}
+        </div>
+      </div>`)}
       ${legEl}
     </div>`;
   });
