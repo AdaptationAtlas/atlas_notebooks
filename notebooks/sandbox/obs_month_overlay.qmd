@@ -620,6 +620,35 @@ loaderDiv("plotP1")
 }
 ```
 
+```{ojs}
+// Quick insight — auto-generated one-liner that summarises the active view.
+md`::: {.callout-tip}
+**Quick insight.** ${(() => {
+  if (!overlay_rows || !overlay_rows.length) return "No data for the selected country / variable.";
+  const yrs = overlay_years;
+  const yMin = yrs[0], yMax = yrs[yrs.length - 1];
+  const earlyRows = overlay_rows.filter(d => d.year === yMin);
+  const lateRows  = overlay_rows.filter(d => d.year === yMax);
+  const earlyMean = d3.mean(earlyRows, d => d.anomaly);
+  const lateMean  = d3.mean(lateRows,  d => d.anomaly);
+  if (earlyMean == null || lateMean == null) return "Need at least two years of data.";
+  const delta = lateMean - earlyMean;
+  const isPTOT = sandbox_variable === "PTOT";
+  const unit = isPTOT ? (p1_pct_anomaly ? "%" : "mm") : "°C";
+  const verb = isPTOT
+    ? (delta > 0 ? "wetter" : "drier")
+    : (delta > 0 ? "warmer" : "cooler");
+  const cName = ({ AGO:"Angola", BWA:"Botswana", BEN:"Benin", BFA:"Burkina Faso", CIV:"Côte d'Ivoire",
+    CMR:"Cameroon", COD:"DR Congo", ETH:"Ethiopia", GHA:"Ghana", GIN:"Guinea", KEN:"Kenya",
+    MDG:"Madagascar", MLI:"Mali", MOZ:"Mozambique", MRT:"Mauritania", MWI:"Malawi", NAM:"Namibia",
+    NER:"Niger", NGA:"Nigeria", RWA:"Rwanda", SDN:"Sudan", SEN:"Senegal", SLE:"Sierra Leone",
+    SOM:"Somalia", SSD:"South Sudan", TGO:"Togo", TZA:"Tanzania", UGA:"Uganda", ZAF:"South Africa",
+    ZMB:"Zambia", ZWE:"Zimbabwe" })[globalCountry] ?? globalCountry;
+  return `${cName} (${globalCountry}) is roughly **${Math.abs(delta).toFixed(2)} ${unit} ${verb}** in ${yMax} than in ${yMin} on average for ${sandbox_variable} (vs the ${sandbox_baseline.replace("-","–")} baseline).`;
+})()}
+:::`
+```
+
 <hr class="section-divider" />
 
 # P3 — Decadal distribution shift (ridge plot) {#p3}
@@ -892,6 +921,28 @@ htl.html`<div style="display:flex;gap:12px;flex-wrap:wrap;
       : ""}
   </span>
 </div>`
+```
+
+```{ojs}
+// Quick insight — mean-anomaly shift between oldest and newest decade.
+md`::: {.callout-tip}
+**Quick insight.** ${(() => {
+  if (!p3_kde || !p3_decades || p3_decades.length < 2) return "Need at least two decades of data.";
+  const decs = [...p3_decades].sort();
+  const first = decs[0], last = decs[decs.length - 1];
+  const meanOf = dec => {
+    const rows = p3_rows.filter(d => `${Math.floor(d.year / 10) * 10}s` === dec);
+    return d3.mean(rows, d => d.anomaly);
+  };
+  const mFirst = meanOf(first), mLast = meanOf(last);
+  if (mFirst == null || mLast == null) return "Insufficient data per decade.";
+  const shift = mLast - mFirst;
+  const isPTOT = p3_variable === "PTOT";
+  const unit = isPTOT ? "mm" : "°C";
+  const dir = isPTOT ? (shift > 0 ? "wetter" : "drier") : (shift > 0 ? "warmer" : "cooler");
+  return `Mean ${p3_variable} anomaly distribution shifted **${Math.abs(shift).toFixed(2)} ${unit} ${dir}** from the ${first} to the ${last} (anomaly relative to the ${p3_baseline.replace("-","–")} baseline).`;
+})()}
+:::`
 ```
 
 <hr class="section-divider" />
@@ -1265,6 +1316,30 @@ loaderDiv("plotP2")
 }
 ```
 
+```{ojs}
+// Quick insight — extreme month + year, plus latest-vs-oldest annual mean shift.
+md`::: {.callout-tip}
+**Quick insight.** ${(() => {
+  if (!p2_rows || !p2_rows.length) return "No data for selected country / variable.";
+  const isPTOT = p2_variable === "PTOT";
+  const unit = isPTOT ? "mm" : "°C";
+  const byYear = d3.group(p2_rows, d => d.year);
+  const years  = p2_years;
+  const yMin   = years[0], yMax = years[years.length - 1];
+  const oldMean = d3.mean((byYear.get(yMin) ?? []), d => d.anomaly);
+  const newMean = d3.mean((byYear.get(yMax) ?? []), d => d.anomaly);
+  if (oldMean == null || newMean == null) return "Insufficient year coverage.";
+  const delta = newMean - oldMean;
+  const extreme = isPTOT
+    ? p2_rows.reduce((a, b) => Math.abs(b.anomaly) > Math.abs(a.anomaly) ? b : a, p2_rows[0])
+    : p2_rows.reduce((a, b) => b.anomaly > a.anomaly ? b : a, p2_rows[0]);
+  const moNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const dir = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
+  return `${yMax} annual mean is **${Math.abs(delta).toFixed(2)} ${unit} ${dir}** than ${yMin}. Single most extreme month: **${extreme.year} ${moNames[extreme.month-1]}** (${extreme.anomaly > 0 ? "+" : ""}${extreme.anomaly.toFixed(2)} ${unit} anomaly).`;
+})()}
+:::`
+```
+
 <hr class="section-divider" />
 
 # P4 — Monthly climate clock (polar heatmap) {#p4}
@@ -1559,6 +1634,28 @@ loaderDiv("plotP4")
   );
   });
 }
+```
+
+```{ojs}
+// Quick insight — hottest / coldest (or wettest / driest) month over the full record.
+md`::: {.callout-tip}
+**Quick insight.** ${(() => {
+  if (!p4_rows || !p4_rows.length) return "No data.";
+  const moNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const isPTOT = p4_controls.variable === "PTOT";
+  const u = isPTOT ? "mm" : "°C";
+  const byMo = d3.group(p4_rows, d => d.month);
+  const moStats = [...byMo].map(([mo, rs]) => ({
+    mo, mean: d3.mean(rs, d => d.value_mean),
+  })).filter(d => d.mean != null);
+  if (!moStats.length) return "Insufficient data.";
+  const high = moStats.reduce((a, b) => b.mean > a.mean ? b : a);
+  const low  = moStats.reduce((a, b) => b.mean < a.mean ? b : a);
+  const dirH = isPTOT ? "Wettest" : "Hottest";
+  const dirL = isPTOT ? "Driest"  : "Coolest";
+  return `${dirH} month on record (1980–): **${moNames[high.mo-1]} (mean ${high.mean.toFixed(1)} ${u})**. ${dirL}: **${moNames[low.mo-1]} (mean ${low.mean.toFixed(1)} ${u})**. Inner ring of the polar = oldest year; outer ring = most recent.`;
+})()}
+:::`
 ```
 
 <hr class="section-divider" />
@@ -1893,6 +1990,34 @@ loaderDiv("plotP5Table")
   </div>`;
   });
 }
+```
+
+```{ojs}
+// Quick insight — selected variable, latest vs oldest decade.
+md`::: {.callout-tip}
+**Quick insight.** ${(() => {
+  if (!p5_raw || !p5_raw.length) return "No data.";
+  const selVar = p5_controls.variable;
+  const isPTOT = selVar === "PTOT";
+  const u = isPTOT ? "mm" : "°C";
+  const rows = p5_raw
+    .filter(d => d.variable === selVar && d.value_mean != null)
+    .map(d => ({ year: Number(d.year), month: Number(d.month), value_mean: d.value_mean }));
+  const yearAgg = [...d3.group(rows, d => d.year)].map(([y, rs]) => ({
+    year: y, val: isPTOT ? d3.sum(rs, d => d.value_mean) : d3.mean(rs, d => d.value_mean),
+  })).filter(d => d.val != null);
+  if (yearAgg.length < 2) return "Need at least two years of data.";
+  const byDec = d3.group(yearAgg, d => `${Math.floor(d.year / 10) * 10}s`);
+  const decs = [...byDec.keys()].sort();
+  const first = decs[0], last = decs[decs.length - 1];
+  const mFirst = d3.mean(byDec.get(first), d => d.val);
+  const mLast  = d3.mean(byDec.get(last),  d => d.val);
+  if (mFirst == null || mLast == null) return "Insufficient data per decade.";
+  const delta = mLast - mFirst;
+  const dir = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
+  return `${selVar} ${isPTOT ? "annual total" : "annual mean"} shifted by **${delta > 0 ? "+" : ""}${delta.toFixed(2)} ${u}** (${dir}) from the ${first} to the ${last}.`;
+})()}
+:::`
 ```
 
 <hr class="section-divider" />
@@ -2367,6 +2492,34 @@ loaderDiv("plotCR097")
   );
   });
 }
+```
+
+```{ojs}
+// Quick insight — fraction of admin1s crossing +1.5 °C by 2060 under SSP2-4.5 (or whatever
+// SSP / threshold combination is active). Falls back to a stub if no SSP × threshold is selected.
+md`::: {.callout-tip}
+**Quick insight.** ${(() => {
+  if (!cr097_data || !cr097_data.length) return "Data not yet loaded.";
+  const ssps = Array.isArray(cr097_controls.ssp) && cr097_controls.ssp.length ? cr097_controls.ssp : ["ssp245"];
+  const thresholds = Array.isArray(cr097_controls.threshold) && cr097_controls.threshold.length ? cr097_controls.threshold : [1.5];
+  const ssp = ssps.includes("ssp245") ? "ssp245" : ssps[0];
+  const thr = thresholds.includes(1.5) ? 1.5 : thresholds[0];
+  const sspLab = ({ ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" })[ssp] ?? ssp;
+  const byKey = d3.group(cr097_data.filter(d => d.scenario === ssp), d => d.admin1_name);
+  const total = byKey.size;
+  if (!total) return `No admin1s for the selected scope under ${sspLab}.`;
+  let early = 0, mid = 0, late = 0, never = 0;
+  for (const [, rs] of byKey) {
+    const sorted = [...rs].sort((a, b) => a.period.localeCompare(b.period));
+    const cross = sorted.find(d => Number(d.pmean) >= thr)?.period ?? null;
+    if (cross == null) never++;
+    else if (cross === "2021-2040") early++;
+    else if (cross === "2041-2060") mid++;
+    else late++;
+  }
+  return `Under **${sspLab}** at the **+${thr} °C** threshold: ${early + mid} of ${total} admin1s in scope cross by 2060 (${((early+mid)/total*100).toFixed(0)} %). ${never} admin1s never cross within this century.`;
+})()}
+:::`
 ```
 
 <hr class="section-divider" />
@@ -2923,6 +3076,37 @@ loaderDiv("plotP6")
   );
   });
 }
+```
+
+```{ojs}
+// Quick insight — fraction of admin1s in scope with a statistically significant warming/wetting trend.
+md`::: {.callout-tip}
+**Quick insight.** ${(() => {
+  if (!p6_obs_raw || !p6_obs_raw.length) return "Data not yet loaded.";
+  const isPTOT = p6_controls.variable === "PTOT";
+  const isSPEI = p6_controls.variable.startsWith("SPEI");
+  const u = isPTOT ? "mm" : isSPEI ? "σ" : "°C";
+  const byKey = d3.group(p6_obs_raw, d => d.join_key);
+  let sigPos = 0, sigNeg = 0, ns = 0, total = 0;
+  for (const [, rs] of byKey) {
+    total++;
+    const sorted = rs.sort((a,b) => a.year - b.year);
+    const vals = sorted.map(d => d.value_mean);
+    const years = sorted.map(d => d.year);
+    if (vals.length < 15) { ns++; continue; }
+    const mk = mannKendall(vals, { xValues: years, minN: 15 });
+    if (mk?.significant5pct) {
+      if ((mk.slopePerDecade ?? 0) > 0) sigPos++; else sigNeg++;
+    } else {
+      ns++;
+    }
+  }
+  if (!total) return "No admin1s for the selected scope.";
+  const posLabel = isPTOT || isSPEI ? "wetting" : "warming";
+  const negLabel = isPTOT || isSPEI ? "drying"  : "cooling";
+  return `**${sigPos} of ${total}** admin1s show a **significant ${posLabel} trend** (Theil-Sen + Mann-Kendall, p &lt; 0.05) in ${p6_controls.variable} (${p6_controls.season} season). ${sigNeg} show a significant ${negLabel} trend; ${ns} are non-significant or have &lt; 15 years of data.`;
+})()}
+:::`
 ```
 
 <hr class="section-divider" />
