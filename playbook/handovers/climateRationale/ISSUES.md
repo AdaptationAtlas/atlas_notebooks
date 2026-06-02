@@ -2719,6 +2719,27 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 ---
 
+## CR-109 — Sandbox: hoist Country + Baseline to a global sticky controls bar
+
+- **type:** ux
+- **severity:** med
+- **where:** `notebooks/sandbox/obs_month_overlay.qmd` — affects all seven section control cells (`p1_controls`, `p2_controls`, `p3_controls`, `p4_controls`, `p5_controls`, `cr097_controls`, `p6_controls`).
+- **what-users-see:** Each section currently carries its own Country picker and Baseline picker. Changing country requires re-clicking 7 times to keep all sections in sync. Main notebook's pattern is a single sticky global control bar at the top that drives every section — sandbox should match.
+- **scaffolding parity context:** Page-scaffolding pass (commit `<after-this-one>`) landed Quarto-callout → `<details class="alert alert-info help-callout">` conversion, `<p class="below-h1-methods-link">` methods links, h1 + anchor per section, controls-row CSS — matching `notebooks/climateRationale/notebook.qmd` conventions. **Global control hoist is the next pass and was deferred from that commit because it touches every section's downstream chart cell.**
+- **proposed-change:**
+  1. Add a `# Global controls {#globals}` section at the top of the doc (between the intro and P1) containing two new viewof cells: `viewof globalCountry` (single-country `Inputs.select` from `obs_country_codes`) and `viewof globalBaseline` (1991-2020 / 1995-2014 with WMO / Atlas formatting). Wrap them in `::: {.controls-row .cols-3}` along with the existing `viewof cbMode` cell.
+  2. For each per-section controls cell (P1 → P6), **delete** the local `_iso3` and `_baseline` (`_base`) `Inputs.select` widgets, drop their entries from the form's flex-grid HTML, and remove `iso3` / `baseline` from the `Object.defineProperty(form, "value", ...)` getter. Each section keeps only section-specific extras (variable, decade, season, palette, dark, anomaly, band toggle, etc.).
+  3. For each chart cell that reads `pN_controls.iso3` / `pN_controls.baseline`, switch the reference to `globalCountry` / `globalBaseline` directly. (P1's accessor-alias cell already uses `sandbox_iso3 = p1_controls.iso3`; rewrite to `sandbox_iso3 = globalCountry` and similarly for `sandbox_baseline`.)
+  4. **EXCEPTION (per Pete's CR-097-style admin-selection instruction):** CR-097 and P6 keep their own **Country / Region** scope selectors locally because they support region scopes (R:WAF / R:EAF / etc.) that the single-country global cannot express. They should default their local scope to `globalCountry` on init but stay independently overridable. The popup multi-select for admin1 within those sections stays as-is — that's the improvement CR-106 will promote back to the main notebook.
+
+- **acceptance:** Each P1–P5 section's controls panel shows ≤ 5 inputs (variable + section-specific extras). Changing the top-of-page **Country** drives all five and seeds the default for CR-097 / P6. Page is visually closer to the main notebook's sticky-controls pattern. Fence balance preserved.
+
+- **risk:** Touches every chart cell's data accessors → if mis-wired, charts go blank. Smoke-test each section after the swap by reloading the sandbox preview and clicking through every country in `obs_country_codes`.
+
+- **STATUS (2026-06-02):** Open, unblocked. Deferred from scaffolding-parity commit (sized to fit in a single careful pass). Pete sign-off on scaffolding parity before tackling this.
+
+---
+
 ## Proposed PR groupings
 
 Ordered by Pete's stated priorities. Each PR is independent; do not block any one of them on any other.
