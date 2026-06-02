@@ -2962,4 +2962,29 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
 
 ---
 
+## CR-115 — Pipeline: `adm0_obs` (admin-monthly + admin-periods) ships duplicate rows per (iso3, variable, year, month) [NEW 2026-06-02]
+
+- **type:** bug (pipeline / data)
+- **severity:** high — every consumer that filters `WHERE iso3 = '<X>' AND variable = '<Y>'` on the CHIRPS-CHIRTS-ERA5 observational parquets gets two rows back per period and silently double-plots.
+- **where:**
+  - `domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-monthly/variable=adm0_obs.parquet`
+  - `domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet`
+- **what-users-see:** P1 Hawkins year-overlay rendered with apparent "vertical bars" at every month tick — overlapping lines from the two duplicate rows (~1 °C apart for KEN). Pete's verbatim: *"this chart is now messed up… those vertical bars for each month should not be there."*
+- **why-wrong:** Each (iso3, variable, year, month, period) tuple ships with **two rows** carrying different `gaul0_code` values (e.g. `KEN` has gaul0_code `135.0` and `137.0`). Both rows have `admin1_name = NULL` / `admin2_name = NULL` so a naive `iso3 = '…'` filter returns both. Verified with DuckDB CLI v1.5.2:
+
+  ```sql
+  SELECT * FROM read_parquet('…/adm0_obs.parquet')
+  WHERE iso3='KEN' AND variable='TAVG' AND year=2000 AND month=1;
+  -- 2 rows: gaul0_code 135.0 (value_mean 29.35) and 137.0 (value_mean 28.31)
+  ```
+
+  Same dupe present in the admin-periods variant. Likely caused by an upstream join introducing two GAUL geometries for the same iso3.
+
+- **client-side mitigation (committed 2026-06-02 in [obs_month_overlay.qmd](notebooks/sandbox/obs_month_overlay.qmd)):** SQL `GROUP BY year, month` + `AVG(value_mean)` on every obs query in the sandbox (P1 / P2 / P3 / P4 / P5 / P6). Collapses the two gaul-code duplicates into one averaged value. AVG is reasonable as a defensive collapse because the two `value_mean` figures only differ by ~1 °C (different geometry boundaries average out).
+- **main notebook (notebook.qmd) is also affected** — uses the same `adm0_obs` parquets via the `monthlyAdm0` / `periodsAdm0` keys in [data/climateRationale/nbData.json](data/climateRationale/nbData.json:144). Every observational chart there is silently averaging or double-plotting; needs the same `GROUP BY year, month / AVG(value_mean)` retrofit OR an upstream fix.
+- **proposed upstream fix:** track down the join in the R/2 pipeline that introduces two gaul0_code values for each iso3 and dedupe at bake time — pick the canonical GAUL geometry per country (likely the one matching `admin_gaul24_a0_africa` topojson). Then republish both `adm0_obs.parquet` variants. Client-side `GROUP BY` becomes redundant after that.
+- **STATUS (2026-06-02):** sandbox client-side mitigation FIXED. Upstream pipeline fix still required. Main notebook retrofit deferred until Pete confirms whether to wait for upstream or apply the same client-side patch.
+
+---
+
 *Pete: annotate this file directly — strike, edit, add. Once you sign it off, dispatch one PR at a time to Claude Code (or all at once). The Togo SAT report stays the visual reference for "what good looks like".*

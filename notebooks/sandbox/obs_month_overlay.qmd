@@ -896,11 +896,12 @@ db_overlay = DuckDBClient.of()
 ```{ojs}
 overlay_raw = {
   const rows = await db_overlay.query(`
-    SELECT year, month, value_mean
+    SELECT year, month, AVG(value_mean) AS value_mean
     FROM read_parquet('${monthlyURL}')
     WHERE iso3 = '${sandbox_iso3}'
       AND variable = '${sandbox_variable}'
       AND value_mean IS NOT NULL
+    GROUP BY year, month
     ORDER BY year, month
   `);
   return Array.from(rows);
@@ -1027,18 +1028,7 @@ loaderDiv("plotP1")
     return { dec, lo, hi, nYears, partial, meanRows, annMean, annStd, label, col: decadeColors[dec] ?? "#888" };
   });
 
-  // Data augmented with yearStr to prevent comma-formatted tooltip year.
-  // Defensive: explicit Number on year/month + drop null/undefined value_plot,
-  // then sort by (year, month) so Plot.line never connects across boundaries.
-  const rows = overlay_rows
-    .map(d => ({
-      ...d,
-      year:  Number(d.year),
-      month: Number(d.month),
-      yearStr: String(Number(d.year)),
-    }))
-    .filter(d => d.value_plot != null && Number.isFinite(d.value_plot))
-    .sort((a, b) => a.year - b.year || a.month - b.month);
+  const rows = overlay_rows.map(d => ({ ...d, yearStr: String(d.year) }));
 
   const chart = Plot.plot({
     title: `${countryNames[sandbox_iso3] ?? sandbox_iso3} — ${varNames[sandbox_variable] ?? sandbox_variable}, ${yearMin}–${yearMax}`,
@@ -1065,12 +1055,11 @@ loaderDiv("plotP1")
       sandbox_anomaly
         ? Plot.ruleY([0], { stroke: "#4682b4", strokeDasharray: "3 2", strokeOpacity: 0.55 })
         : null,
-      // All years except most recent. z grouped on string year to avoid any
-      // edge-case where numeric z values cluster ambiguously.
+      // All years except most recent.
       Plot.line(rows.filter(d => d.year !== yearMax), {
         x: "month", y: "value_plot",
         stroke: d => p1inDec(d.year) ? yColour(d.year) : (cbMode ? "#888" : "#bbb"),
-        z: "yearStr",
+        z: "year",
         strokeWidth: d => p1inDec(d.year) ? 1.2 : 0.5,
         strokeOpacity: d => p1inDec(d.year) ? (activeMos ? 0.35 : 0.5) : 0.15,
         channels: { year: "yearStr" },
@@ -1079,7 +1068,7 @@ loaderDiv("plotP1")
       // Most recent year — amber/gold, prominent.
       Plot.line(rows.filter(d => d.year === yearMax), {
         x: "month", y: "value_plot",
-        stroke: "#e8a000", z: "yearStr", strokeWidth: 3,
+        stroke: "#e8a000", z: "year", strokeWidth: 3,
         channels: { year: "yearStr" }, tip: true,
       }),
       // Season dots — coloured by year, sit on top of dimmed lines.
@@ -1269,11 +1258,12 @@ p3_anomaly  = p3_controls.anomaly
 ```{ojs}
 p3_raw = {
   const rows = await db_overlay.query(`
-    SELECT year, month, value_mean
+    SELECT year, month, AVG(value_mean) AS value_mean
     FROM read_parquet('${monthlyURL}')
     WHERE iso3 = '${p3_iso3}'
       AND variable = '${p3_variable}'
       AND value_mean IS NOT NULL
+    GROUP BY year, month
     ORDER BY year, month
   `);
   return Array.from(rows);
@@ -1581,11 +1571,12 @@ p2_decade   = p2_controls.decade
 ```{ojs}
 p2_raw = {
   const rows = await db_overlay.query(`
-    SELECT year, month, value_mean
+    SELECT year, month, AVG(value_mean) AS value_mean
     FROM read_parquet('${monthlyURL}')
     WHERE iso3 = '${p2_iso3}'
       AND variable = '${p2_variable}'
       AND value_mean IS NOT NULL
+    GROUP BY year, month
     ORDER BY year, month
   `);
   return Array.from(rows);
@@ -1998,11 +1989,12 @@ viewof p4_controls = {
 ```{ojs}
 p4_raw = {
   const rows = await db_overlay.query(`
-    SELECT year, month, value_mean
+    SELECT year, month, AVG(value_mean) AS value_mean
     FROM read_parquet('${monthlyURL}')
     WHERE iso3 = '${globalSingleCountry}'
       AND variable = '${p4_controls.variable}'
       AND value_mean IS NOT NULL
+    GROUP BY year, month
     ORDER BY year, month
   `);
   return Array.from(rows);
@@ -2317,11 +2309,12 @@ viewof p5_controls = {
 ```{ojs}
 p5_raw = {
   const rows = await db_overlay.query(`
-    SELECT year, month, variable, value_mean
+    SELECT year, month, variable, AVG(value_mean) AS value_mean
     FROM read_parquet('${monthlyURL}')
     WHERE iso3 = '${globalSingleCountry}'
       AND variable IN ('TAVG','TMAX','TMIN','PTOT')
       AND value_mean IS NOT NULL
+    GROUP BY variable, year, month
     ORDER BY variable, year, month
   `);
   return Array.from(rows);
@@ -2732,10 +2725,11 @@ p6_obs_raw = {
     : "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=admin-periods/variable=adm0_obs.parquet";
   const keyCol = level === "admin1" ? "admin1_name, iso3" : "iso3";
   const rows = await db_p6.query(`
-    SELECT ${keyCol}, year, value_mean
+    SELECT ${keyCol}, year, AVG(value_mean) AS value_mean
     FROM read_parquet('${url}')
     WHERE iso3 IN (${iso3In}) AND variable = '${variable}' AND period = '${season}'
       AND value_mean IS NOT NULL
+    GROUP BY ${keyCol}, year
     ORDER BY iso3, ${level === "admin1" ? "admin1_name," : ""} year
   `);
   return Array.from(rows).map(d => ({
