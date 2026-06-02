@@ -1,10 +1,7 @@
 ---
 pagetitle: "Climate Rationale — Sandbox: observational + projection views"
 date-created: "2026-05-29"
-toc: true
-toc-location: left
-toc-depth: 2
-toc-title: "On this page"
+toc: false
 ---
 
 ```{=html}
@@ -49,6 +46,56 @@ hr.section-divider {
   border: 0; border-top: 1px solid #e0e0e0;
   margin: 2.5rem 0 1.5rem;
 }
+
+/* === Floating atlasTOC + plot-text-controls panel — same look as main notebook === */
+.atlas-toc-extras {
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px solid rgba(0,0,0,0.1);
+  font-size: 11px;
+}
+.atlas-toc-extras-heading {
+  font-size: 10px; font-weight: 698;
+  text-transform: uppercase; color: #331;
+  margin-bottom: 4px;
+}
+.atlas-toc-extras form          { font-size: 11px; min-height: 0; margin: 0; }
+.atlas-toc-extras form > label  { font-size: 10.5px; }
+.atlas-toc-extras input[type="range"] { width: 100%; }
+.atlas-toc-extras form input[type="number"] { display: none; }
+.atlas-toc {
+  max-height: 92vh;
+  scrollbar-width: none; -ms-overflow-style: none;
+  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
+}
+.atlas-toc::-webkit-scrollbar { display: none; }
+.atlas-toc-toggle {
+  position: fixed; top: 80px; left: 24px;
+  width: 28px; height: 28px;
+  border: 1px solid rgba(0,0,0,0.18); border-radius: 4px;
+  background: rgba(255,255,255,0.96);
+  color: #442; cursor: pointer;
+  font-size: 15px; line-height: 1;
+  z-index: 12;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  padding: 0;
+}
+.atlas-toc-toggle:hover { color: #d2a017; border-color: rgba(210,160,23,0.5); }
+body:not(.atlas-toc-collapsed) .atlas-toc { padding-top: 36px; }
+body.atlas-toc-collapsed .atlas-toc { opacity: 0; transform: translateX(-20px); pointer-events: none; }
+
+/* Plot-text CSS variables applied via the sidebar controls. */
+[id^="plot"] text,
+[id^="plot"] tspan {
+  font-size: var(--plot-text-size, 10px) !important;
+  font-weight: var(--plot-text-weight, 400) !important;
+}
+[id^="plot"] [class*="-swatches"],
+[id^="plot"] [class*="-swatches"] span {
+  font-size: var(--plot-text-size, 10px) !important;
+  font-weight: var(--plot-text-weight, 400) !important;
+}
+
 
 /* === Hero — warming-stripes background + eyebrow + title + chips.
    Copied from notebooks/climateRationale/notebook.qmd, scoped to .cr-hero. === */
@@ -142,6 +189,137 @@ html`<div class="cr-hero">
 // Mirrors the main notebook's data/climateRationale/nbText.json shape.
 // FR strings will be filled in once Pete signs off the EN copy.
 nbText = await FileAttachment("/data/sandbox/obs_month_overlay_nbText.json").json();
+```
+
+```{ojs}
+// Floating atlasTOC panel — replaces the default Quarto left-TOC. Same helper +
+// options as the main notebook so the "On this page" experience is identical.
+import { atlasTOC } from "/helpers/toc.ojs";
+```
+
+```{ojs}
+atlasTOC({
+  skip: ["notebook-title", "source-code"],
+  heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
+});
+```
+
+```{ojs}
+// Hidden state inputs backing the sidebar plot-text controls. Declared
+// separately from the visible inputs (which live inside the floating
+// .atlas-toc panel) so they can be referenced from anywhere via OJS
+// reactivity. Controls apply to every plot container in the sandbox.
+viewof plotTextSize  = Inputs.input(10);
+viewof plotTextBold  = Inputs.input(false);
+viewof plotLineWidth = Inputs.input(1.5);
+```
+
+```{ojs}
+//| output: false
+// Inject the plot-text controls into the floating "In this notebook" TOC.
+// atlasTOC re-renders its container on every MutationObserver tick, so we
+// observe for a fresh .atlas-toc node and re-append the controls into it
+// whenever it's recreated. The inputs are bound to viewof plotTextSize /
+// plotTextBold / plotLineWidth so values flow through OJS reactivity.
+{
+  function injectPlotTextControls() {
+    const toc = document.querySelector(".atlas-toc");
+    if (!toc) return;
+    if (toc.querySelector(".atlas-toc-extras")) return;
+    const slider = Inputs.bind(
+      Inputs.range([8, 20], { step: 1, value: plotTextSize, label: "Plot text size" }),
+      viewof plotTextSize,
+    );
+    const boldToggle = Inputs.bind(
+      Inputs.toggle({ label: "Bold plot text", value: plotTextBold }),
+      viewof plotTextBold,
+    );
+    const lineWidthSlider = Inputs.bind(
+      Inputs.range([0.5, 4], { step: 0.5, value: plotLineWidth, label: "Line / point size" }),
+      viewof plotLineWidth,
+    );
+    const wrapper = html`<div class="atlas-toc-extras">
+      <div class="atlas-toc-extras-heading">All plots</div>
+      ${slider}
+      ${boldToggle}
+      ${lineWidthSlider}
+    </div>`;
+    toc.appendChild(wrapper);
+  }
+  injectPlotTextControls();
+  const observer = new MutationObserver(() => injectPlotTextControls());
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+```
+
+```{ojs}
+//| output: false
+// Floating-TOC show/hide toggle. The TOC (.atlas-toc) is fixed to the
+// top-right of the viewport and overlaps the content column when the
+// viewport is narrow. Adds a small button that toggles a body class which
+// CSS uses to fade the TOC out of view. Initial state is collapsed below
+// 1480 px viewport width.
+{
+  const NARROW = 1480;
+  if (
+    !document.body.classList.contains("atlas-toc-collapsed") &&
+    !document.body.dataset.atlasTocUserChose &&
+    window.innerWidth < NARROW
+  ) {
+    document.body.classList.add("atlas-toc-collapsed");
+  }
+  if (!document.querySelector(".atlas-toc-toggle")) {
+    const btn = document.createElement("button");
+    btn.className = "atlas-toc-toggle";
+    btn.setAttribute("aria-label", "Toggle table of contents");
+    btn.setAttribute("title", "Show/hide table of contents");
+    const render = () => {
+      btn.textContent = document.body.classList.contains("atlas-toc-collapsed") ? "☰" : "×";
+    };
+    btn.addEventListener("click", () => {
+      document.body.classList.toggle("atlas-toc-collapsed");
+      document.body.dataset.atlasTocUserChose = "1";
+      render();
+    });
+    render();
+    document.body.appendChild(btn);
+  }
+}
+```
+
+```{ojs}
+//| output: false
+// Apply the slider + toggle values as CSS variables on the document root.
+// Every plot container ([id^="plot"]) inherits font-size and font-weight
+// from these variables via the rule in the global <style> block.
+document.documentElement.style.setProperty("--plot-text-size",   `${plotTextSize}px`);
+document.documentElement.style.setProperty("--plot-text-weight", plotTextBold ? "700" : "400");
+```
+
+```{ojs}
+//| output: false
+// Re-mount the masterLanguage radio into the Quarto navbar so the EN/FR
+// toggle sits at the top-right of the page (same UX as the main notebook).
+// Same helper-shaped function inlined — idempotent on re-evaluation.
+{
+  function NavbarLangSelector(languages_obj, masterLanguage) {
+    const navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
+    if (!navEnd) return;
+    if (document.getElementById("nav-lang-selector")) return;
+    const langSel = Inputs.bind(
+      Inputs.radio(languages_obj, { label: "", format: d => d.label }),
+      viewof masterLanguage,
+    );
+    langSel.id = "nav-lang-selector";
+    langSel.style.display = "flex";
+    langSel.style.alignItems = "center";
+    langSel.style.marginLeft = "10px";
+    const langDiv = langSel.querySelector("div");
+    if (langDiv) { langDiv.style.display = "flex"; langDiv.style.flexDirection = "column"; }
+    navEnd.parentNode.appendChild(langSel);
+  }
+  NavbarLangSelector(languages, masterLanguage);
+}
 ```
 
 ```{ojs}
