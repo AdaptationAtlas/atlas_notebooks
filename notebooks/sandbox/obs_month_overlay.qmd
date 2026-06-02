@@ -133,6 +133,47 @@ html`<div class="cr-hero">
 </div>`
 ```
 
+```{ojs}
+// Loader helpers — same chrome as the main notebook (animated indeterminate
+// bar + italic stage label). loaderDiv() returns a placeholder div; renderToDiv()
+// is the one-shot render hook for chart cells.
+import { loaderDiv, loaderContent, setLoaderStage } from "/helpers/uiComponents.ojs";
+```
+
+```{ojs}
+renderToDiv = (id, render) => {
+  const div = document.getElementById(id);
+  if (!div) return;
+  const viz = render();
+  div.replaceChildren(viz);
+};
+```
+
+```{ojs}
+// Section-gate factory — fires once a placeholder div scrolls within `margin` of the viewport.
+// Returns a generator: `yield false` until scroll-near, then `yield true` forever. Cells that
+// depend on the gate stay parked on the loader spinner ("Waiting for scroll…") until the gate
+// flips, then progress to "Loading data…" and onward. Same idea as the main notebook's
+// section-visible reactive cells but compressed into a single factory.
+sectionVisible = function* sectionVisible(loaderId, margin = "200px") {
+  if (typeof IntersectionObserver === "undefined") { yield true; return; }
+  let resolved = false; let resolve;
+  const ready = new Promise(r => { resolve = r; });
+  const tryAttach = () => {
+    const el = document.getElementById(loaderId);
+    if (!el) { requestAnimationFrame(tryAttach); return; }
+    const obs = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting) && !resolved) { resolved = true; obs.disconnect(); resolve(); }
+    }, { rootMargin: margin });
+    obs.observe(el);
+  };
+  tryAttach();
+  yield false;
+  await ready;
+  yield true;
+};
+```
+
 Sandbox for proposed additions to the **Climate Rationale** notebook. Views **P1–P6** and
 **CR-097** sit on top of the existing observational (CHIRPS-CHIRTS-ERA5) and CMIP6 future-
 projection parquets — no pipeline changes required. Each section has a collapsible
@@ -374,7 +415,17 @@ overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) 
 ## Chart
 
 ```{ojs}
+loaderDiv("plotP1")
+```
+
+```{ojs}
+//| output: false
 {
+  // Dep trigger — re-run this render cell when any input changes.
+  [globalCountry, globalBaseline, sandbox_iso3, sandbox_variable, sandbox_baseline,
+   sandbox_anomaly, p1_pct_anomaly, p1_band, p1_season, p1_decade,
+   overlay_rows, cbMode, width];
+  renderToDiv("plotP1", () => {
   const [yearMin, yearMax] = [overlay_years[0], overlay_years[overlay_years.length - 1]];
   const interp  = cbMode ? d3.interpolateCividis : d3.interpolateTurbo;
   const yColour = year => interp((year - yearMin) / Math.max(yearMax - yearMin, 1));
@@ -554,6 +605,7 @@ overlay_years = [...new Set(overlay_rows.map(d => Number(d.year)))].sort((a, b) 
   </div>`;
 
   return htl.html`<div>${chart}${statsBlock ?? ""}${legend}</div>`;
+  });
 }
 ```
 
@@ -722,7 +774,15 @@ p3_decades = [...new Set(p3_kde.map(d => d.decade))].sort()
 ```
 
 ```{ojs}
+loaderDiv("plotP3")
+```
+
+```{ojs}
+//| output: false
 {
+  [globalCountry, globalBaseline, p3_variable, p3_season, p3_anomaly,
+   p3_kde, p3_decades, cbMode, width];
+  renderToDiv("plotP3", () => {
   const spacing   = 0.78;  // < 1 → ridges overlap
   const decadeIdx = Object.fromEntries(p3_decades.map((d, i) => [d, i]));
   // Palette: Turbo (default, pretty) or Okabe-Ito sequential (CB-safe).
@@ -790,6 +850,7 @@ p3_decades = [...new Set(p3_kde.map(d => d.decade))].sort()
         fontWeight: "bold", textAnchor: "end",
       }),
     ],
+  });
   });
 }
 ```
@@ -940,9 +1001,16 @@ p2_rows = p2_raw.map(d => {
 p2_years = [...new Set(p2_rows.map(d => d.year))].sort((a, b) => a - b)
 ```
 
+```{ojs}
+loaderDiv("plotP2")
+```
 
 ```{ojs}
+//| output: false
 {
+  [globalCountry, globalBaseline, p2_variable, p2_dark, p2_palette, p2_decade,
+   p2_rows, p2_years, cbMode, width];
+  renderToDiv("plotP2", () => {
   const W = 600, H = 600;
   const cx = W / 2, cy = H / 2;
   const rBase  = 140;  // radius for 0°C anomaly (baseline ring)
@@ -1178,6 +1246,7 @@ p2_years = [...new Set(p2_rows.map(d => d.year))].sort((a, b) => a - b)
     comparable across countries with different rainfall regimes.
   </div>`;
   return htl.html`<div>${svg.node()}${statsEl}${legend}${caveatEl}</div>`;
+  });
 }
 ```
 
@@ -1307,7 +1376,14 @@ p4_years = [...new Set(p4_rows.map(d => d.year))].sort((a, b) => a - b)
 ```
 
 ```{ojs}
+loaderDiv("plotP4")
+```
+
+```{ojs}
+//| output: false
 {
+  [globalCountry, globalBaseline, p4_controls, p4_rows, p4_years, cbMode, width];
+  renderToDiv("plotP4", () => {
   const W = 580, H = 580;
   const cx = W / 2, cy = H / 2;
   const rInner = 40;   // innermost year ring
@@ -1463,6 +1539,7 @@ p4_years = [...new Set(p4_rows.map(d => d.year))].sort((a, b) => a - b)
 
   // Stats table — one row per month + Annual + Season (if set).
   return htl.html`<div>${svg.node()}${legend}</div>`;
+  });
 }
 ```
 
@@ -1556,8 +1633,15 @@ p5_raw = {
 ```
 
 ```{ojs}
+loaderDiv("plotP5Heatmap")
+```
+
+```{ojs}
+//| output: false
 // Heatmap — year × month for selected variable.
 {
+  [globalCountry, globalBaseline, p5_controls, p5_raw, cbMode, width];
+  renderToDiv("plotP5Heatmap", () => {
   if (p5_controls.view === "Table") return htl.html`<div></div>`;
   const selVar = p5_controls.variable;
   const isPTOT = selVar === "PTOT";
@@ -1659,6 +1743,7 @@ p5_raw = {
       })() : []),
     ],
   });
+  });
 }
 ```
 
@@ -1682,7 +1767,14 @@ viewof p5_table_controls = {
 ```
 
 ```{ojs}
+loaderDiv("plotP5Table")
+```
+
+```{ojs}
+//| output: false
 {
+  [globalCountry, globalBaseline, p5_controls, p5_table_controls, p5_raw, width];
+  renderToDiv("plotP5Table", () => {
   if (p5_controls.view === "Heatmap") return htl.html`<div></div>`;
   const vars    = ["TAVG","TMAX","TMIN","PTOT"];
   // Clear column headers: TMAX/TMIN are mean-daily-max/min, not absolute extremes.
@@ -1780,6 +1872,7 @@ viewof p5_table_controls = {
       </tbody>
     </table>
   </div>`;
+  });
 }
 ```
 
@@ -2050,7 +2143,15 @@ viewof cr097_admin1 = {
 ```
 
 ```{ojs}
+loaderDiv("plotCR097")
+```
+
+```{ojs}
+//| output: false
 {
+  [cr097_controls, cr097_scope_info, cr097_map_level, cr097_admin1, cr097_data,
+   cr097_topo, cr097_topo_a0, width];
+  renderToDiv("plotCR097", () => {
   const { variable, season, showTable } = cr097_controls;
   const { isCountry, iso3List, scope }  = cr097_scope_info;
   const mapLevel   = cr097_map_level;
@@ -2242,6 +2343,7 @@ viewof cr097_admin1 = {
       map shows <em>first</em>, not <em>sustained</em>, exceedance.
     </p>
   </div>`;
+  });
 }
 ```
 
@@ -2470,7 +2572,15 @@ p6_stats = {
 ```
 
 ```{ojs}
+loaderDiv("plotP6")
+```
+
+```{ojs}
+//| output: false
 {
+  [globalBaseline, p6_controls, p6_scope_info, p6_obs_raw, p6_base_means, p6_stats,
+   cr097_topo, cr097_topo_a0, cbMode, width];
+  renderToDiv("plotP6", () => {
   if (!p6_obs_raw.length) return htl.html`<p style="color:#888;font-style:italic;">⏳ Loading observational data…</p>`;
 
   const { scope, variable, season, stats, level } = p6_controls;
@@ -2786,6 +2896,7 @@ p6_stats = {
       for regional views with &gt;80 features, non-significant admin1s are faded instead.
     </p>
   </div>`;
+  });
 }
 ```
 
