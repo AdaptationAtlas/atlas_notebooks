@@ -2278,6 +2278,41 @@ loaderDiv("plotP2")
   const sgn = v => v > 0 ? "+" : "";
   const statsTxt = "#555";
 
+  // Decade-to-decade comparison helper. Replaces the old "yLo mean vs yHi
+  // mean" line — Pete: "never show year vs year, especially with 2026
+  // incomplete; decade to decade (1980s vs 2015-25 acceptable)".
+  // Picks earliest vs latest COMPLETE decade. If the latest decade is
+  // partial, falls back to a rolling 10-year window ending at the latest
+  // year on record (label "${start}-${endShort}", e.g. "2015-25").
+  const decadeCompare = (rowsArg) => {
+    if (!rowsArg.length) return null;
+    const decadeOf = y => Math.floor(y / 10) * 10;
+    const byDec = d3.group(rowsArg, d => decadeOf(d.year));
+    const stats = [...byDec.entries()].map(([dec, rs]) => ({
+      dec, yrs: new Set(rs.map(d => d.year)).size,
+      mean: d3.mean(rs, d => d.anomaly),
+    })).filter(d => d.yrs >= 10 && d.mean != null);
+    if (stats.length >= 2) {
+      stats.sort((a, b) => a.dec - b.dec);
+      const e = stats[0], l = stats[stats.length - 1];
+      return { earlyLabel: `${e.dec}s`, lateLabel: `${l.dec}s`, delta: l.mean - e.mean };
+    }
+    // Fallback: rolling last-10-years window vs earliest decade.
+    const maxYr = d3.max(rowsArg, d => d.year);
+    const minYr = d3.min(rowsArg, d => d.year);
+    const earlyDec = decadeOf(minYr);
+    const earlyRows = rowsArg.filter(d => d.year >= earlyDec && d.year < earlyDec + 10);
+    const lateRows  = rowsArg.filter(d => d.year >= maxYr - 9 && d.year <= maxYr);
+    if (!earlyRows.length || !lateRows.length) return null;
+    const earlyMean = d3.mean(earlyRows, d => d.anomaly);
+    const lateMean  = d3.mean(lateRows, d => d.anomaly);
+    return {
+      earlyLabel: `${earlyDec}s`,
+      lateLabel:  `${maxYr - 9}-${String(maxYr).slice(2)}`,
+      delta:      lateMean - earlyMean,
+    };
+  };
+
   const buildStats = (rowsArg) => {
     const byYearLocal = d3.group(rowsArg, d => d.year);
     const allRowsLocal = [...byYearLocal.values()].flat()
@@ -2293,24 +2328,20 @@ loaderDiv("plotP2")
       .filter(d => d.mean != null);
     const warmYr = yearMeans.length ? yearMeans.reduce((a, b) => b.mean > a.mean ? b : a) : null;
     const coolYr = yearMeans.length ? yearMeans.reduce((a, b) => b.mean < a.mean ? b : a) : null;
-    const scopedYears = yearMeans.map(d => d.year).sort((a, b) => a - b);
-    const yLoLocal = scopedYears.length ? scopedYears[0] : yMin;
-    const yHiLocal = scopedYears.length ? scopedYears[scopedYears.length - 1] : yMax;
-    const latestRows = byYearLocal.get(yHiLocal) ?? [];
-    const latestMean = d3.mean(latestRows, d => d.anomaly);
-    const oldestRows = byYearLocal.get(yLoLocal) ?? [];
-    const oldestMean = d3.mean(oldestRows, d => d.anomaly);
+    const dCmp = decadeCompare(allRowsLocal);
+    const verb = isTavg
+      ? (dCmp && dCmp.delta > 0 ? "warmer" : "cooler")
+      : (dCmp && dCmp.delta > 0 ? "wetter" : "drier");
+    // 3-row compact layout: 2 cols × 2 rows of extremes + 1 row decade
+    // delta spanning both cols. nowrap on each cell keeps it 3 lines max.
     return htl.html`<div style="font-size:0.78em;color:${statsTxt};
         padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
-        display:flex;gap:14px;flex-wrap:wrap;">
-      <span>🔴 ${dirHot} month: <strong>${warmest.year} ${monthNames[warmest.month-1]}</strong> (${sgn(warmest.anomaly)}${warmest.anomaly.toFixed(2)}${unit2})</span>
-      <span>🔵 ${dirCold} month: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> (${sgn(coolest.anomaly)}${coolest.anomaly.toFixed(2)}${unit2})</span>
-      <span>🔥 ${dirHot} year: <strong>${warmYr?.year ?? "–"}</strong> (${sgn(warmYr?.mean ?? 0)}${(warmYr?.mean ?? 0).toFixed(2)}${unit2})</span>
-      <span>❄️ ${dirCold} year: <strong>${coolYr?.year ?? "–"}</strong> (${sgn(coolYr?.mean ?? 0)}${(coolYr?.mean ?? 0).toFixed(2)}${unit2})</span>
-      <span>📅 ${yLoLocal} mean: <strong>${oldestMean != null ? sgn(oldestMean) + oldestMean.toFixed(2) : "–"}${unit2}</strong></span>
-      <span>📅 ${yHiLocal} mean: <strong>${latestMean != null ? sgn(latestMean) + latestMean.toFixed(2) : "–"}${unit2}</strong></span>
-      ${selDec !== null ? htl.html`<span style="color:#888;">↳ scoped to <strong>${selDec}s</strong></span>` : ""}
-      ${p2_season ? htl.html`<span style="color:#888;">↳ season: <strong>${p2_seasonLabel}</strong></span>` : ""}
+        display:grid;grid-template-columns:1fr 1fr;gap:3px 18px;">
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔴 ${dirHot} mo: <strong>${warmest.year} ${monthNames[warmest.month-1]}</strong> (${sgn(warmest.anomaly)}${warmest.anomaly.toFixed(2)}${unit2})</span>
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔵 ${dirCold} mo: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> (${sgn(coolest.anomaly)}${coolest.anomaly.toFixed(2)}${unit2})</span>
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔥 ${dirHot} yr: <strong>${warmYr?.year ?? "–"}</strong> (${sgn(warmYr?.mean ?? 0)}${(warmYr?.mean ?? 0).toFixed(2)}${unit2})</span>
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">❄️ ${dirCold} yr: <strong>${coolYr?.year ?? "–"}</strong> (${sgn(coolYr?.mean ?? 0)}${(coolYr?.mean ?? 0).toFixed(2)}${unit2})</span>
+      ${dCmp ? htl.html`<span style="grid-column:1 / -1;white-space:nowrap;color:#444;">📈 ${dCmp.earlyLabel} → ${dCmp.lateLabel}: <strong>${sgn(dCmp.delta)}${dCmp.delta.toFixed(2)}${unit2} ${verb}</strong>${selDec !== null ? ` · scoped to ${selDec}s` : ""}${p2_season ? ` · ${p2_seasonLabel}` : ""}</span>` : ""}
     </div>`;
   };
 
@@ -2647,7 +2678,6 @@ loaderDiv("plotP4")
       min:  d3.min(vals),
     }];
   }));
-  const dimCol = p4_controls.dark ? "#888" : "#777";
   for (let mo = 1; mo <= 12; mo++) {
     const midAngle = (θStart(mo) + θEnd(mo)) / 2;
     const lx = cx + (rOuter + 18) * Math.sin(midAngle);
@@ -2655,21 +2685,19 @@ loaderDiv("plotP4")
     const st = moStats.get(mo);
     const sgn = v => v > 0 && isAnomaly ? "+" : "";
     const f   = v => v != null ? `${sgn(v)}${v.toFixed(1)}` : "–";
-    // 2-line label: month name + condensed stats (mean · max [· min for PTOT]).
-    // Unit shown once at end to save horizontal space.
-    const statsLine = isPTOT
-      ? `μ${f(st.mean)}·↑${f(st.max)}·↓${f(st.min)}${u}`
-      : `μ${f(st.mean)}·↑${f(st.max)}${u}`;
-    svg.append("text")
-      .attr("x", lx).attr("y", ly - 4)
+    // Stats line moved into a <title> tooltip — hover the month name to see
+    // mean / max / (min for PTOT) without crowding the outer ring with
+    // condensed text that fights for space in faceted layouts.
+    const tipText = isPTOT
+      ? `${monthNames[mo - 1]} · mean ${f(st.mean)}${u} · max ${f(st.max)}${u} · min ${f(st.min)}${u}`
+      : `${monthNames[mo - 1]} · mean ${f(st.mean)}${u} · max ${f(st.max)}${u}`;
+    const moLabel = svg.append("text")
+      .attr("x", lx).attr("y", ly)
       .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
       .attr("font-size", 11).attr("font-weight", "bold").attr("fill", txtCol)
+      .style("cursor", "help")
       .text(monthNames[mo - 1]);
-    svg.append("text")
-      .attr("x", lx).attr("y", ly + 9)
-      .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
-      .attr("font-size", 8).attr("fill", dimCol)
-      .text(statsLine);
+    moLabel.append("title").text(tipText);
   }
 
   // Decade ring labels at Jan wedge (outer edge of decade boundary)
@@ -2873,6 +2901,10 @@ viewof p5_controls = {
 ```{ojs}
 p5_raw = {
   globalAdmin1;  // dep — re-fire when admin1 popup changes
+  const _hm = document.getElementById("plotP5Heatmap");
+  if (_hm) _hm.replaceChildren(loaderContent("Fetching observational data…"));
+  const _tb = document.getElementById("plotP5Table");
+  if (_tb) _tb.replaceChildren(loaderContent("Fetching observational data…"));
   const { sql } = obsQueryFragment({
     iso3: globalSingleCountry,
     variableFilter: `variable IN ('TAVG','TMAX','TMIN','PTOT')`,
@@ -2893,7 +2925,7 @@ loaderDiv("plotP5Heatmap")
 //| output: false
 // Heatmap — year × month for selected variable.
 {
-  [globalSingleCountry, globalBaseline, p5_controls, p5_raw, cbMode, width];
+  [globalSingleCountry, globalBaseline, globalAdmin1, p5_controls, p5_raw, cbMode, facetCols, width];
   renderToDiv("plotP5Heatmap", () => {
   if (p5_controls.view === "Table") return htl.html`<div></div>`;
   const selVar = p5_controls.variable;
@@ -2901,15 +2933,25 @@ loaderDiv("plotP5Heatmap")
   const isAnom = p5_controls.anomaly;
   const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-  // Compute baseline means for selected variable.
+  // Compute baseline means for selected variable. Per-admin1 baselines when
+  // the admin1 popup is non-empty so each facet's anomaly is computed
+  // against its local climatology.
   const [blo, bhi] = globalBaseline === "1991-2020" ? [1991,2020] : [1995,2014];
   const vRows = p5_raw
     .filter(d => d.variable === selVar)
-    .map(d => ({ year: Number(d.year), month: Number(d.month), value_mean: d.value_mean }));
-  const baseMo = new Map([1,2,3,4,5,6,7,8,9,10,11,12].map(mo => {
+    .map(d => ({
+      year: Number(d.year),
+      month: Number(d.month),
+      admin1_name: d.admin1_name ?? null,
+      value_mean: d.value_mean,
+    }));
+  const baseMo = new Map();
+  for (const mo of [1,2,3,4,5,6,7,8,9,10,11,12]) {
     const subset = vRows.filter(d => d.year >= blo && d.year <= bhi && d.month === mo);
-    return [mo, d3.mean(subset, d => d.value_mean)];
-  }));
+    const byAdm = d3.group(subset, d => d.admin1_name ?? "_admin0");
+    for (const [a, rs] of byAdm) baseMo.set(`${a}|${mo}`, d3.mean(rs, d => d.value_mean));
+  }
+  const baseLookup = (admin, month) => baseMo.get(`${admin ?? "_admin0"}|${month}`);
   // Season filter
   const sS5 = p5_controls.seasonStart, sE5 = p5_controls.seasonEnd;
   const hasSeason5 = sS5 > 0 && sE5 > 0;
@@ -2919,9 +2961,21 @@ loaderDiv("plotP5Heatmap")
   };
   const activeMos5 = [1,2,3,4,5,6,7,8,9,10,11,12].filter(inSeason5);
 
+  // Facet detection: per-admin1 grid. Cap at 2 cols per Pete's brief.
+  const adminFromRows = [...new Set(vRows.map(d => d.admin1_name).filter(Boolean))].sort();
+  const isFaceted   = adminFromRows.length > 0;
+  const admin1Names = isFaceted ? adminFromRows : [null];
+  const nCols       = isFaceted ? Math.max(1, Math.min(2, facetCols, admin1Names.length)) : 1;
+  const nRows       = isFaceted ? Math.ceil(admin1Names.length / nCols) : 1;
+  const adminFP     = new Map(admin1Names.map((a, i) => [a, { _fx: i % nCols, _fy: Math.floor(i / nCols) }]));
+  const fxOf        = a => adminFP.get(a)?._fx ?? 0;
+  const fyOf        = a => adminFP.get(a)?._fy ?? 0;
+
   const allRows = vRows.map(d => ({
     ...d, mo: monthNames[d.month - 1],
-    value_plot: isAnom ? d.value_mean - (baseMo.get(d.month) ?? 0) : d.value_mean,
+    value_plot: isAnom ? d.value_mean - (baseLookup(d.admin1_name, d.month) ?? 0) : d.value_mean,
+    _fx: isFaceted ? fxOf(d.admin1_name) : 0,
+    _fy: isFaceted ? fyOf(d.admin1_name) : 0,
   }));
   const hmRows = allRows.filter(d => inSeason5(d.month));
 
@@ -2930,12 +2984,25 @@ loaderDiv("plotP5Heatmap")
   const summaryLabel = hasSeason5
     ? `${monthNames[sS5-1]}–${monthNames[sE5-1]}`
     : "Annual";
+  // Summary row computed per-admin1 so each facet's annual row reflects
+  // its own data, not the cross-admin average.
   const summaryRows = p5_controls.showSummary
-    ? [...d3.group(hmRows, d => d.year)].map(([y, rs]) => ({
-        year: y, month: -1, mo: summaryLabel,
-        value_mean: d3.mean(rs, d => d.value_mean),
-        value_plot: d3.mean(rs, d => d.value_plot),
-      }))
+    ? (isFaceted
+        ? admin1Names.flatMap(a => {
+            const adminRows = hmRows.filter(d => d.admin1_name === a);
+            return [...d3.group(adminRows, d => d.year)].map(([y, rs]) => ({
+              year: y, month: -1, mo: summaryLabel,
+              admin1_name: a,
+              value_mean: d3.mean(rs, d => d.value_mean),
+              value_plot: d3.mean(rs, d => d.value_plot),
+              _fx: fxOf(a), _fy: fyOf(a),
+            }));
+          })
+        : [...d3.group(hmRows, d => d.year)].map(([y, rs]) => ({
+            year: y, month: -1, mo: summaryLabel,
+            value_mean: d3.mean(rs, d => d.value_mean),
+            value_plot: d3.mean(rs, d => d.value_plot),
+          })))
     : [];
 
   const allHmRows = [...hmRows, ...summaryRows];
@@ -2950,50 +3017,92 @@ loaderDiv("plotP5Heatmap")
   ];
   const hmHeight = Math.max(150, (moOrder.length) * 18 + 64);
 
+  // Faceted layout uses fx/_fx + fy/_fy with nCols capped at 2 (Pete).
+  // chartHeight scales with nRows so multi-row stacks have room.
+  const chartHeight = isFaceted ? hmHeight * nRows + 40 : hmHeight;
+  const adminLabelRows = isFaceted
+    ? admin1Names.map(a => ({ admin1_name: a, _fx: fxOf(a), _fy: fyOf(a) }))
+    : [];
+
   const p5HmChart = Plot.plot({
-    title: `${globalSingleCountry} — ${selVar}: monthly ${isAnom ? "anomaly" : "value"}${isAnom && !isPTOT ? " (● ≥ +1°C  ◉ ≥ +1.5°C)" : ""}${isAnom && isPTOT ? " (● wet >+1σ  ○ dry <−1σ, σ per-month)" : ""}`,
-    width: width, height: hmHeight,
+    title: isFaceted
+      ? `${globalSingleCountry} — ${selVar}: monthly ${isAnom ? "anomaly" : "value"} · ${admin1Names.length} admin1${admin1Names.length === 1 ? "" : "s"}`
+      : `${globalSingleCountry} — ${selVar}: monthly ${isAnom ? "anomaly" : "value"}${isAnom && !isPTOT ? " (● ≥ +1°C  ◉ ≥ +1.5°C)" : ""}${isAnom && isPTOT ? " (● wet >+1σ  ○ dry <−1σ, σ per-month)" : ""}`,
+    width: width, height: chartHeight,
     marginLeft: 60, marginBottom: 34, marginTop: 30, marginRight: 10,
     x: { label: "Year", domain: allYears, tickFormat: y => y % 5 === 0 ? String(y) : "" },
     y: { label: null, domain: moOrder },
     color: { type: "diverging", scheme: cbMode ? "PRGn" : "RdBu", reverse: true,
              domain: [-maxAnom, maxAnom], label: unit, legend: true },
+    ...(isFaceted ? {
+      fx: { axis: null, domain: d3.range(nCols) },
+      fy: { axis: null, domain: d3.range(nRows) },
+    } : {}),
     marks: [
       // Monthly rows
       Plot.cell(hmRows, {
         x: "year", y: "mo", fill: "value_plot", inset: 0.5, tip: true,
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
         channels: { year: d => String(d.year), month: "mo",
+                    admin1: "admin1_name",
                     value: d => `${d.value_plot > 0 && isAnom ? "+" : ""}${d.value_plot.toFixed(2)} ${unit}` },
       }),
       // Summary row — insetTop gap creates visual separation from monthly rows
       ...(summaryRows.length ? [Plot.cell(summaryRows, {
         x: "year", y: "mo", fill: "value_plot",
         inset: 0.5, insetTop: 6,
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
         tip: true,
         channels: { year: d => String(d.year), period: "mo",
+                    admin1: "admin1_name",
                     value: d => `${d.value_plot > 0 && isAnom ? "+" : ""}${d.value_plot.toFixed(2)} ${unit}` },
       })] : []),
       // Temperature: dots mark warm anomalies ≥ +1°C and ≥ +1.5°C.
       ...(isAnom && !isPTOT ? [Plot.dot(hmRows.filter(d => d.value_plot >= 1), {
         x: "year", y: "mo", fill: "white", r: 2, fillOpacity: 0.8,
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
       })] : []),
       ...(isAnom && !isPTOT ? [Plot.dot(hmRows.filter(d => d.value_plot >= 1.5), {
         x: "year", y: "mo", fill: "none", stroke: "white", strokeWidth: 1.5, r: 3.5, strokeOpacity: 0.9,
+        fx: isFaceted ? "_fx" : undefined,
+        fy: isFaceted ? "_fy" : undefined,
       })] : []),
       // PTOT: dots mark monthly anomalies > 1σ (wet, white) and < -1σ (dry, black ring).
       // σ computed per-month over the full record to normalise across wet/dry seasons.
+      // In faceted mode we compute σ per (admin1, month) so each panel uses its own scale.
       ...(isAnom && isPTOT ? (() => {
-        const σByMo = new Map([1,2,3,4,5,6,7,8,9,10,11,12].map(mo => {
-          const moRows = hmRows.filter(d => d.month === mo);
-          return [mo, d3.deviation(moRows, d => d.value_plot) || 1];
-        }));
-        const wetRows = hmRows.filter(d => d.value_plot >  (σByMo.get(d.month) ?? 0) * 1.0);
-        const dryRows = hmRows.filter(d => d.value_plot < -(σByMo.get(d.month) ?? 0) * 1.0);
+        const sigKey = isFaceted
+          ? d => `${d.admin1_name}|${d.month}`
+          : d => `_admin0|${d.month}`;
+        const σMap = new Map();
+        for (const r of hmRows) {
+          const k = sigKey(r);
+          if (!σMap.has(k)) σMap.set(k, []);
+          σMap.get(k).push(r.value_plot);
+        }
+        const σByKey = new Map([...σMap].map(([k, vals]) => [k, d3.deviation(vals) || 1]));
+        const wetRows = hmRows.filter(d => d.value_plot >  (σByKey.get(sigKey(d)) ?? 0));
+        const dryRows = hmRows.filter(d => d.value_plot < -(σByKey.get(sigKey(d)) ?? 0));
         return [
-          Plot.dot(wetRows, { x: "year", y: "mo", fill: "white", r: 2, fillOpacity: 0.85 }),
-          Plot.dot(dryRows, { x: "year", y: "mo", fill: "none", stroke: "#222", strokeWidth: 1.2, r: 2.2, strokeOpacity: 0.85 }),
+          Plot.dot(wetRows, { x: "year", y: "mo", fill: "white", r: 2, fillOpacity: 0.85,
+            fx: isFaceted ? "_fx" : undefined, fy: isFaceted ? "_fy" : undefined }),
+          Plot.dot(dryRows, { x: "year", y: "mo", fill: "none", stroke: "#222", strokeWidth: 1.2, r: 2.2, strokeOpacity: 0.85,
+            fx: isFaceted ? "_fx" : undefined, fy: isFaceted ? "_fy" : undefined }),
         ];
       })() : []),
+      // Per-facet admin1 label in the top-left of each panel.
+      ...(isFaceted ? [
+        Plot.text(adminLabelRows, {
+          fx: "_fx", fy: "_fy",
+          text: "admin1_name",
+          frameAnchor: "top-left",
+          dx: 4, dy: 2,
+          fontSize: 11, fontWeight: 600, fill: "#444",
+        })
+      ] : []),
     ],
   });
   return chartDownloadMenu(p5HmChart, { filename: `p5_heatmap_${globalSingleCountry}_${selVar}` });
@@ -3026,14 +3135,37 @@ captionDetails(htl.html`
 viewof p5_table_controls = {
   const _minmax = Inputs.toggle({ label: "Show min / max", value: true });
   const _uncert = Inputs.toggle({ label: "Show uncertainty (±σ)", value: false });
-  const form = htl.html`<div style="display:flex;gap:12px;align-items:center;
+  // When the global admin1 popup has selections we expose two table modes:
+  // - "By admin1": one admin1 picked at a time, standard 4-variable table.
+  // - "Pivot (variable × admin1)": fix one variable, rows = months,
+  //   columns = selected admin1s. Best for comparing admin1s side by side.
+  const adminList = (globalAdmin1 && globalAdmin1.length > 0) ? globalAdmin1 : [];
+  const _mode = adminList.length > 0
+    ? Inputs.radio(["By admin1", "Pivot (variable × admin1)"], { label: "Table mode", value: "By admin1" })
+    : null;
+  const _pickAdmin = adminList.length > 0
+    ? Inputs.select(adminList, { label: "Admin1 to view", value: adminList[0] })
+    : null;
+  const _pickVar = adminList.length > 0
+    ? Inputs.select(["TAVG","TMAX","TMIN","PTOT"], { label: "Variable (pivot mode)", value: "TAVG" })
+    : null;
+  const form = htl.html`<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;
       padding:6px 0;border-top:1px solid #ddd;margin-top:8px;display:${p5_controls.view === "Heatmap" ? "none" : "flex"};">
     <strong style="font-size:0.82em;color:#666;">Table options:</strong>
     <div>${_minmax}</div>
     <div>${_uncert}</div>
+    ${_mode ? htl.html`<div>${_mode}</div>` : ""}
+    ${_pickAdmin ? htl.html`<div>${_pickAdmin}</div>` : ""}
+    ${_pickVar ? htl.html`<div>${_pickVar}</div>` : ""}
   </div>`;
   Object.defineProperty(form, "value", {
-    get: () => ({ showMinMax: _minmax.value, showUncert: _uncert.value }),
+    get: () => ({
+      showMinMax: _minmax.value,
+      showUncert: _uncert.value,
+      mode:       _mode ? _mode.value : "By admin1",
+      pickAdmin:  _pickAdmin ? _pickAdmin.value : null,
+      pickVar:    _pickVar ? _pickVar.value : "TAVG",
+    }),
   });
   return form;
 }
@@ -3046,7 +3178,7 @@ loaderDiv("plotP5Table")
 ```{ojs}
 //| output: false
 {
-  [globalSingleCountry, globalBaseline, p5_controls, p5_table_controls, p5_raw, width];
+  [globalSingleCountry, globalBaseline, globalAdmin1, p5_controls, p5_table_controls, p5_raw, width];
   renderToDiv("plotP5Table", () => {
   if (p5_controls.view === "Heatmap") return htl.html`<div></div>`;
   const vars    = ["TAVG","TMAX","TMIN","PTOT"];
@@ -3071,10 +3203,21 @@ loaderDiv("plotP5Table")
   };
   const activeMos = [1,2,3,4,5,6,7,8,9,10,11,12].filter(inSeason);
 
-  const byVar = d3.group(
-    p5_raw.map(d => ({ ...d, year: Number(d.year), month: Number(d.month) })),
-    d => d.variable
-  );
+  // Filter raw rows by the admin1 picked in p5_table_controls (or keep the
+  // full country-wide stream when no admin1 popup selection is active).
+  // Pivot mode is handled in the rendering branch below; both modes share
+  // the same per-variable stats helper.
+  const tableMode  = p5_table_controls.mode;
+  const tablePickA = p5_table_controls.pickAdmin;
+  const tablePickV = p5_table_controls.pickVar;
+  const hasAdmin1Selection = (globalAdmin1 && globalAdmin1.length > 0);
+  const tableRowsBase = p5_raw.map(d => ({ ...d, year: Number(d.year), month: Number(d.month), admin1_name: d.admin1_name ?? null }));
+  // In "By admin1" mode the table shows ONE admin1; in pivot mode the
+  // table shows ALL selected admin1s for the chosen variable.
+  const byVarBase = (!hasAdmin1Selection || tableMode === "By admin1")
+    ? tableRowsBase.filter(d => !hasAdmin1Selection || d.admin1_name === tablePickA)
+    : tableRowsBase;  // pivot mode uses tableRowsBase directly
+  const byVar = d3.group(byVarBase, d => d.variable);
 
   const rowStats = (vrows) => {
     if (!vrows?.length) return null;
@@ -3114,9 +3257,49 @@ loaderDiv("plotP5Table")
     </td>`;
   };
 
+  // PIVOT mode — rows = months, columns = selected admin1s (one variable).
+  if (hasAdmin1Selection && tableMode === "Pivot (variable × admin1)") {
+    const v = tablePickV;
+    const vrowsAll = byVar.get(v) ?? [];
+    const adminCols = globalAdmin1;
+    return htl.html`
+    <p style="font-size:0.83em;color:#777;margin:2px 0 6px;">
+      ${globalSingleCountry} · ${headers[v]} · Baseline: ${globalBaseline}
+      ${hasSeason ? ` · ${moNames[sS]}–${moNames[sE]}` : " · All months"}
+      ${showMM ? " · ↓ min year / ↑ max year" : ""}${showU ? " · ± σy = inter-annual std. dev." : ""}
+    </p>
+    <div style="overflow-x:auto;">
+      <table style="border-collapse:collapse;width:100%;background:#fff;">
+        <thead><tr>
+          <th style="${th}">Period</th>
+          ${adminCols.map(a => htl.html`<th style="${th}">${a}</th>`)}
+        </tr></thead>
+        <tbody>
+          ${periodRows.map(({ label, mo }) => {
+            const isSummary = mo === "summary";
+            const sep = isSummary ? "border-top:2px solid #999;" : "";
+            const fw  = isSummary ? "bold" : "normal";
+            const stats = adminCols.map(a => {
+              const arows = vrowsAll.filter(d => d.admin1_name === a);
+              if (isSummary) return rowStats(yearAggRows(hasSeason ? arows.filter(d => inSeason(d.month)) : arows, v === "PTOT"));
+              return rowStats(arows.filter(d => d.month === mo));
+            });
+            return htl.html`<tr style="${sep}">
+              <td style="${tdLbl}${fw};${sep}">${label}</td>
+              ${stats.map(s => cell(s, units[v]))}
+            </tr>`;
+          })}
+        </tbody>
+      </table>
+    </div>`;
+  }
+
+  // "By admin1" / country-wide mode — original 4-variable layout. byVar
+  // already filtered to the picked admin1 (or full country if no admin1
+  // popup selection).
   return htl.html`
   <p style="font-size:0.83em;color:#777;margin:2px 0 6px;">
-    ${globalSingleCountry} · Baseline: ${globalBaseline}
+    ${globalSingleCountry}${hasAdmin1Selection ? ` · ${tablePickA}` : ""} · Baseline: ${globalBaseline}
     ${hasSeason ? ` · ${moNames[sS]}–${moNames[sE]}` : " · All months"}
     ${showMM ? " · ↓ min year / ↑ max year" : ""}${showU ? " · ± σy = inter-annual std. dev." : ""}
   </p>
@@ -3165,30 +3348,42 @@ quickInsightP5 = (() => {
   const selVar = p5_controls.variable;
   const isPTOT = selVar === "PTOT";
   const u = isPTOT ? "mm" : "°C";
-  const rows = p5_raw
-    .filter(d => d.variable === selVar && d.value_mean != null)
-    .map(d => ({ year: Number(d.year), month: Number(d.month), value_mean: d.value_mean }));
-  const yearAgg = [...d3.group(rows, d => d.year)].map(([y, rs]) => ({
-    year: y, val: isPTOT ? d3.sum(rs, d => d.value_mean) : d3.mean(rs, d => d.value_mean),
-  })).filter(d => d.val != null);
-  if (yearAgg.length < 2) return _lang(t.needTwo);
-  const byDec = d3.group(yearAgg, d => `${Math.floor(d.year / 10) * 10}s`);
-  const decs = [...byDec.keys()].sort();
-  const first = decs[0], last = decs[decs.length - 1];
-  const mFirst = d3.mean(byDec.get(first), d => d.val);
-  const mLast  = d3.mean(byDec.get(last),  d => d.val);
-  if (mFirst == null || mLast == null) return _lang(t.noPerDec);
-  const delta = mLast - mFirst;
-  const dir = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
-  return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
-    { name: "variable",     value: selVar },
-    { name: "aggKind",      value: isPTOT ? "annual total" : "annual mean" },
-    { name: "deltaSigned",  value: (delta > 0 ? "+" : "") + delta.toFixed(2) },
-    { name: "unit",         value: u },
-    { name: "dir",          value: dir },
-    { name: "first",        value: first },
-    { name: "last",         value: last },
-  ]);
+
+  const lineFor = (scope) => {
+    const rows = p5_raw
+      .filter(d => d.variable === selVar && d.value_mean != null)
+      .filter(d => scope == null || (d.admin1_name ?? null) === scope)
+      .map(d => ({ year: Number(d.year), month: Number(d.month), value_mean: d.value_mean }));
+    if (!rows.length) return null;
+    const yearAgg = [...d3.group(rows, d => d.year)].map(([y, rs]) => ({
+      year: y, val: isPTOT ? d3.sum(rs, d => d.value_mean) : d3.mean(rs, d => d.value_mean),
+    })).filter(d => d.val != null);
+    if (yearAgg.length < 2) return null;
+    const byDec = d3.group(yearAgg, d => `${Math.floor(d.year / 10) * 10}s`);
+    const decs = [...byDec.keys()].sort();
+    const first = decs[0], last = decs[decs.length - 1];
+    const mFirst = d3.mean(byDec.get(first), d => d.val);
+    const mLast  = d3.mean(byDec.get(last),  d => d.val);
+    if (mFirst == null || mLast == null) return null;
+    const delta = mLast - mFirst;
+    const dir = isPTOT ? (delta > 0 ? "wetter" : "drier") : (delta > 0 ? "warmer" : "cooler");
+    const body = Lang.reduceReplaceTemplateItems(_lang(t.ok), [
+      { name: "variable",     value: selVar },
+      { name: "aggKind",      value: isPTOT ? "annual total" : "annual mean" },
+      { name: "deltaSigned",  value: (delta > 0 ? "+" : "") + delta.toFixed(2) },
+      { name: "unit",         value: u },
+      { name: "dir",          value: dir },
+      { name: "first",        value: first },
+      { name: "last",         value: last },
+    ]);
+    return scope == null ? body : `**${scope}** — ${body}`;
+  };
+
+  const admin1s = [...new Set(p5_raw.map(d => d.admin1_name).filter(Boolean))].sort();
+  if (admin1s.length === 0) return lineFor(null) ?? _lang(t.needTwo);
+  const lines = admin1s.map(a => lineFor(a)).filter(Boolean);
+  if (!lines.length) return _lang(t.needTwo);
+  return lines.map(l => `- ${l}`).join("\n");
 })();
 ```
 
