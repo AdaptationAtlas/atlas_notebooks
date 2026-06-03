@@ -349,9 +349,20 @@ viewof facetCols     = Inputs.input(5);
       viewof plotLineWidth,
     );
     const facetColsSelect = Inputs.bind(
-      Inputs.select([1, 2, 3, 4, 5], { label: "Facet columns (P1 + P6)", value: facetCols }),
+      Inputs.select([1, 2, 3, 4, 5], { label: "Max facet cols", value: facetCols }),
       viewof facetCols,
     );
+    // Tooltip: not all charts honour this control fully — P2 caps at 2
+    // (dense spirals), P4 caps at 3 (polar clocks lose detail under 3),
+    // CR-097 uses its own grid. Hover the ⓘ icon for the explanation.
+    {
+      const lbl = facetColsSelect.querySelector("label");
+      if (lbl && !lbl.querySelector(".cr-tooltip-icon-fc")) {
+        const tip = html`<span class="cr-tooltip-icon-fc" style="margin-left:4px;color:#2563eb;cursor:help;font-size:1.05em;"
+          title="Maximum number of facet columns when admin1 selections produce per-admin charts. Doesn't apply to every plot — some sections cap lower (P2 spiral: 2, P4 polar clock: 3, CR-097: own grid).">ⓘ</span>`;
+        lbl.appendChild(tip);
+      }
+    }
     const wrapper = html`<div class="atlas-toc-extras">
       <div class="atlas-toc-extras-heading">All plots</div>
       ${slider}
@@ -727,10 +738,14 @@ viewof globalAdmin1 = {
     return f;
   }
   let selected = [];
-  const wrap     = htl.html`<div style="display:flex;flex-direction:column;gap:2px;min-width:240px;font-family:sans-serif;position:relative;">
-    <div style="font-size:0.75em;font-weight:600;color:#333;text-transform:uppercase;letter-spacing:0.02em;">Admin1 filter</div>
-  </div>`;
-  const btn      = htl.html`<button style="width:100%;text-align:left;padding:6px 10px;border:1px solid #aaa;background:#fff;cursor:pointer;border-radius:3px;font-size:0.88em;min-height:30px;">All admin1s ▼</button>`;
+  // Style to match Quarto / Bootstrap form-controls (the surrounding
+  // Inputs.select selectors set the visual baseline). Label = Inputs'
+  // uppercase 9pt heading; button = bootstrap form-control with same
+  // padding / border / radius as a native <select>.
+  const wrap     = htl.html`<form style="display:flex;flex-direction:column;gap:0.2rem;min-width:240px;font-family:inherit;position:relative;">
+    <label style="font: 700 9pt sans-serif; letter-spacing: 0.5px; color: #1d1d1d;">ADMIN1 FILTER</label>
+  </form>`;
+  const btn      = htl.html`<button type="button" style="width:100%;text-align:left;padding:0.375rem 0.75rem;border:1px solid #ced4da;background:#fff;cursor:pointer;border-radius:0.25rem;font:14px/1.5 sans-serif;color:#212529;min-height:38px;">All admin1s ▼</button>`;
   const dropdown = htl.html`<div style="display:none;position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:280px;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.18);padding:8px;">`;
   const search   = htl.html`<input type="text" placeholder="Search…" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:3px;box-sizing:border-box;margin-bottom:6px;font-size:0.86em;">`;
   const actRow   = htl.html`<div style="display:flex;gap:6px;margin-bottom:6px;">`;
@@ -758,6 +773,13 @@ viewof globalAdmin1 = {
     ? (dropdown.style.display = "block", search.value = "", renderList(), search.focus())
     : (dropdown.style.display = "none");
   closeBtn.onclick = () => dropdown.style.display = "none";
+  // Outside-click closes the popup (mousedown beats blur for reliability
+  // with the search input still receiving focus).
+  document.addEventListener("mousedown", (e) => {
+    if (dropdown.style.display === "none") return;
+    if (wrap.contains(e.target)) return;
+    dropdown.style.display = "none";
+  });
   search.oninput   = () => renderList(search.value);
   selAll.onclick   = () => { selected = [...names]; renderList(search.value); update(); };
   clrBtn.onclick   = () => { selected = []; renderList(search.value); update(); };
@@ -2212,16 +2234,9 @@ loaderDiv("plotP2")
     return svg.node();
   };  // end buildSpiral
 
-  // Build the spiral element(s). Faceted mode lays each (spiral + per-
-  // admin1 caption) in a CSS grid cell; single mode returns one SVG.
-  const spiralEl = isFaceted
-    ? htl.html`<div style="display:grid;grid-template-columns:repeat(${nCols}, 1fr);gap:14px;align-items:start;">
-        ${admin1Names.map(a => htl.html`<div>
-          ${buildSpiral(a)}
-          ${buildStats(p2_rows.filter(d => d.admin1_name === a))}
-        </div>`)}
-      </div>`
-    : buildSpiral(null);
+  // spiralEl built BELOW (after buildStats is defined). Earlier ordering
+  // referenced buildStats before its const declaration — TDZ error left
+  // the loader spinning forever (Pete reload screenshot 2026-06-03).
 
   // Legend
   // Reversed: left = cool end (t=1), right = warm end (t=0) — matches "Cooler → Warmer" label.
@@ -2303,6 +2318,19 @@ loaderDiv("plotP2")
   // panel beneath the faceted grid (in faceted mode each cell also gets
   // its own per-admin1 stats — see spiralEl below).
   const statsEl = buildStats(p2_rows);
+
+  // Build the spiral element(s). Faceted mode lays each (spiral + per-
+  // admin1 caption) in a CSS grid cell; single mode returns one SVG.
+  // Defined AFTER buildStats so the per-cell `buildStats(...)` call inside
+  // the htl.html template resolves correctly.
+  const spiralEl = isFaceted
+    ? htl.html`<div style="display:grid;grid-template-columns:repeat(${nCols}, 1fr);gap:14px;align-items:start;">
+        ${admin1Names.map(a => htl.html`<div>
+          ${buildSpiral(a)}
+          ${buildStats(p2_rows.filter(d => d.admin1_name === a))}
+        </div>`)}
+      </div>`
+    : buildSpiral(null);
 
   const caveatEl = htl.html`<div style="font-size:0.78em;color:#888;font-style:italic;
       padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
@@ -2459,6 +2487,8 @@ viewof p4_controls = {
 ```{ojs}
 p4_raw = {
   globalAdmin1;  // dep — re-fire when admin1 popup changes
+  const _div = document.getElementById("plotP4");
+  if (_div) _div.replaceChildren(loaderContent("Fetching observational data…"));
   const { sql } = obsQueryFragment({
     iso3: globalSingleCountry,
     variableFilter: `variable = '${p4_controls.variable}'`,
@@ -2471,12 +2501,12 @@ p4_raw = {
 ```{ojs}
 p4_base = {
   const [lo, hi] = globalBaseline === "1991-2020" ? [1991, 2020] : [1995, 2014];
-  const byMonth = d3.group(
-    p4_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi),
-    d => Number(d.month)
-  );
+  const baselineRows = p4_raw.filter(d => Number(d.year) >= lo && Number(d.year) <= hi);
   const m = new Map();
-  for (const [mo, rows] of byMonth) m.set(mo, d3.mean(rows, d => d.value_mean));
+  const byKey = d3.group(baselineRows,
+    d => `${d.admin1_name ?? "_admin0"}|${Number(d.month)}`);
+  for (const [k, rs] of byKey) m.set(k, d3.mean(rs, d => d.value_mean));
+  m._get = (admin1_name, month) => m.get(`${admin1_name ?? "_admin0"}|${month}`);
   return m;
 }
 ```
@@ -2485,8 +2515,9 @@ p4_base = {
 p4_rows = p4_raw.map(d => {
   const year  = Number(d.year);
   const month = Number(d.month);
-  const anomaly = d.value_mean - (p4_base.get(month) ?? 0);
-  return { year, month, value_mean: d.value_mean, anomaly,
+  const admin = d.admin1_name ?? null;
+  const anomaly = d.value_mean - (p4_base._get(admin, month) ?? 0);
+  return { year, month, admin1_name: admin, value_mean: d.value_mean, anomaly,
            value_plot: p4_controls.anomaly ? anomaly : d.value_mean };
 })
 ```
@@ -2502,7 +2533,7 @@ loaderDiv("plotP4")
 ```{ojs}
 //| output: false
 {
-  [globalSingleCountry, globalBaseline, p4_controls, p4_rows, p4_years, cbMode, width];
+  [globalSingleCountry, globalBaseline, globalAdmin1, p4_controls, p4_rows, p4_years, cbMode, facetCols, width];
   renderToDiv("plotP4", () => {
   const W = 580, H = 580;
   const cx = W / 2, cy = H / 2;
@@ -2561,13 +2592,34 @@ loaderDiv("plotP4")
   const txtCol = p4_controls.dark ? "#ccc" : "#333";
   const arc    = d3.arc();
 
+  // Facet detection: per-admin1 polar clock grid. Cap nCols at 3 per
+  // Pete's brief — denser layouts squash the polar wedges.
+  const adminFromRows = [...new Set(p4_rows.map(d => d.admin1_name).filter(Boolean))].sort();
+  const isFaceted   = adminFromRows.length > 0;
+  const admin1Names = isFaceted ? adminFromRows : [null];
+  const nCols       = isFaceted ? Math.max(1, Math.min(3, facetCols, admin1Names.length)) : 1;
+  const facetW      = isFaceted ? Math.max(260, Math.floor(width / nCols - 18)) : W;
+
+  // Build one polar clock for the supplied admin1 (null = country-wide).
+  const buildClock = (adminLabel) => {
+    const adminRows = adminLabel == null ? p4_rows : p4_rows.filter(d => d.admin1_name === adminLabel);
+    if (!adminRows.length) return null;
+    const adminYears = [...new Set(adminRows.map(d => d.year))].sort((a, b) => a - b);
+    // Locally re-bind the year scaffolding so the existing geometry code
+    // below uses admin-scoped extents.
+    const years  = adminYears;
+    const yMin   = years[0], yMax = years[years.length - 1];
+    const nYears = Math.max(yMax - yMin, 1);
+    const ringW  = (rOuter - rInner) / nYears;
+
   const svg = d3.create("svg")
     .attr("viewBox", `0 0 ${W} ${H}`)
-    .attr("width", W).attr("height", H)
-    .style("background", bg).style("font-family", "sans-serif");
+    .attr("width",  facetW).attr("height", facetW)
+    .style("background", bg).style("font-family", "sans-serif")
+    .style("display", "block").style("max-width", "100%");
 
   // Draw one arc cell per (year, month)
-  const byYear = d3.group(p4_rows, d => d.year);
+  const byYear = d3.group(adminRows, d => d.year);
   for (const y of years) {
     const yRows = (byYear.get(y) ?? []).sort((a, b) => a.month - b.month);
     const rI = rInner + (y - yMin) * ringW;
@@ -2587,7 +2639,7 @@ loaderDiv("plotP4")
 
   // Month labels: name + mean + max (temp) or max+min (PTOT).
   const moStats = new Map([1,2,3,4,5,6,7,8,9,10,11,12].map(mo => {
-    const moRows = p4_rows.filter(d => d.month === mo);
+    const moRows = adminRows.filter(d => d.month === mo);
     const vals = moRows.map(d => d.value_plot);
     return [mo, {
       mean: d3.mean(vals),
@@ -2630,12 +2682,25 @@ loaderDiv("plotP4")
       .text(y);
   }
 
-  // Title
+  // Title — admin1 name in faceted mode, country+variable otherwise.
+  const titleText = adminLabel != null
+    ? `${adminLabel}`
+    : `${countryNames[globalSingleCountry] ?? globalSingleCountry} — ${varNames[p4_controls.variable] ?? p4_controls.variable}${isAnomaly ? " anomaly" : ""}`;
   svg.append("text")
     .attr("x", cx).attr("y", 15)
     .attr("text-anchor", "middle").attr("font-size", 13).attr("font-weight", "bold")
     .attr("fill", txtCol)
-    .text(`${countryNames[globalSingleCountry] ?? globalSingleCountry} — ${varNames[p4_controls.variable] ?? p4_controls.variable}${isAnomaly ? " anomaly" : ""}`);
+    .text(titleText);
+
+    return svg.node();
+  };  // end buildClock
+
+  // Build chart element: single SVG (no admin1 popup) or grid of SVGs.
+  const chartGrid = isFaceted
+    ? htl.html`<div style="display:grid;grid-template-columns:repeat(${nCols}, 1fr);gap:14px;align-items:start;">
+        ${admin1Names.map(a => buildClock(a)).filter(Boolean)}
+      </div>`
+    : buildClock(null);
 
   // Colour legend (gradient bar below chart)
   const nStops = 20;
@@ -2659,7 +2724,7 @@ loaderDiv("plotP4")
 
   // Stats table — one row per month + Annual + Season (if set).
   return chartDownloadMenu(
-    htl.html`<div>${svg.node()}${legend}</div>`,
+    htl.html`<div>${chartGrid}${legend}</div>`,
     { filename: `p4_polar_${globalSingleCountry}_${p4_controls.variable}` }
   );
   });
@@ -2700,24 +2765,50 @@ quickInsightP4 = (() => {
   const moNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const isPTOT = p4_controls.variable === "PTOT";
   const u = isPTOT ? "mm" : "°C";
-  const byMo = d3.group(p4_rows, d => d.month);
-  const moStats = [...byMo].map(([mo, rs]) => ({
-    mo, mean: d3.mean(rs, d => d.value_mean),
-  })).filter(d => d.mean != null);
-  if (!moStats.length) return _lang(t.insufficient);
-  const high = moStats.reduce((a, b) => b.mean > a.mean ? b : a);
-  const low  = moStats.reduce((a, b) => b.mean < a.mean ? b : a);
-  const dirH = isPTOT ? "Wettest" : "Hottest";
-  const dirL = isPTOT ? "Driest"  : "Coolest";
-  return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
-    { name: "dirH",   value: dirH },
-    { name: "dirL",   value: dirL },
-    { name: "hiMo",   value: moNames[high.mo - 1] },
-    { name: "hiMean", value: high.mean.toFixed(1) },
-    { name: "loMo",   value: moNames[low.mo - 1] },
-    { name: "loMean", value: low.mean.toFixed(1) },
-    { name: "unit",   value: u },
-  ]);
+  const dirH = isPTOT ? "wettest" : "hottest";
+  const dirL = isPTOT ? "driest"  : "coolest";
+
+  const lineFor = (scope) => {
+    const scopeRows = scope == null ? p4_rows : p4_rows.filter(d => d.admin1_name === scope);
+    if (!scopeRows.length) return null;
+    // Climatological extremes: which calendar month is hottest / coolest on average?
+    const byMo = d3.group(scopeRows, d => d.month);
+    const moStats = [...byMo].map(([mo, rs]) => ({
+      mo, mean: d3.mean(rs, d => d.value_mean),
+    })).filter(d => d.mean != null);
+    if (!moStats.length) return null;
+    const highMo = moStats.reduce((a, b) => b.mean > a.mean ? b : a);
+    const lowMo  = moStats.reduce((a, b) => b.mean < a.mean ? b : a);
+    // Year-of-record extremes: which year had the highest / lowest annual mean?
+    const byYear = d3.group(scopeRows, d => d.year);
+    const yrStats = [...byYear].map(([yr, rs]) => ({
+      yr, mean: isPTOT
+        ? d3.sum(rs, d => d.value_mean)   // annual TOTAL for PTOT
+        : d3.mean(rs, d => d.value_mean), // annual MEAN for temp
+    })).filter(d => d.mean != null);
+    const highYear = yrStats.reduce((a, b) => b.mean > a.mean ? b : a, yrStats[0]);
+    const lowYear  = yrStats.reduce((a, b) => b.mean < a.mean ? b : a, yrStats[0]);
+    const body = Lang.reduceReplaceTemplateItems(_lang(t.ok), [
+      { name: "dirH",       value: dirH },
+      { name: "dirL",       value: dirL },
+      { name: "hiMo",       value: moNames[highMo.mo - 1] },
+      { name: "hiMean",     value: highMo.mean.toFixed(1) },
+      { name: "loMo",       value: moNames[lowMo.mo - 1] },
+      { name: "loMean",     value: lowMo.mean.toFixed(1) },
+      { name: "hiYear",     value: highYear.yr },
+      { name: "hiYearMean", value: highYear.mean.toFixed(1) },
+      { name: "loYear",     value: lowYear.yr },
+      { name: "loYearMean", value: lowYear.mean.toFixed(1) },
+      { name: "unit",       value: u },
+    ]);
+    return scope == null ? body : `**${scope}** — ${body}`;
+  };
+
+  const admin1s = [...new Set(p4_rows.map(d => d.admin1_name).filter(Boolean))].sort();
+  if (admin1s.length === 0) return lineFor(null) ?? _lang(t.insufficient);
+  const lines = admin1s.map(a => lineFor(a)).filter(Boolean);
+  if (!lines.length) return _lang(t.insufficient);
+  return lines.map(l => `- ${l}`).join("\n");
 })();
 ```
 
