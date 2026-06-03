@@ -524,27 +524,36 @@ document.documentElement.style.setProperty("--plot-text-weight", plotTextBold ? 
 // `.plot-footer-row` once both have rendered. MutationObserver retriggers
 // the move when a chart re-renders (admin1 change, variable change, etc.).
 {
+  // For each NEW .cdm-row, walk FORWARD through following cells until we
+  // find the next .plot-footer-row (the captionDetails block for the same
+  // chart). Append the .cdm-row inside that footer. Mark as merged via
+  // dataset so the MutationObserver doesn't repeat-move the same row.
+  // Pair-by-direction (forward from cdm) is more reliable than
+  // pair-by-direction (backward from footer) because it doesn't steal
+  // another section's cdm-row when an earlier merge already consumed
+  // the predecessor.
   function mergeDownloadIntoFooter() {
-    document.querySelectorAll(".plot-footer-row").forEach(footer => {
-      // Already merged? skip.
-      if (footer.querySelector(".cdm-row")) return;
-      // Walk previous siblings up the cell tree to find the .cdm-row that
-      // belongs to the chart immediately above this footer.
-      let node = footer.parentElement;
+    document.querySelectorAll(".cdm-row").forEach(cdm => {
+      if (cdm.dataset.crMerged === "1") return;
+      let node = cdm.closest(".cdm-wrapper")?.parentElement;
       while (node) {
-        const candidate = node.previousElementSibling;
+        const candidate = node.nextElementSibling;
         if (!candidate) { node = node.parentElement; continue; }
-        const cdm = candidate.querySelector?.(".cdm-row");
-        if (cdm) {
-          // Push to the right edge of the footer row.
+        const footer = candidate.querySelector?.(".plot-footer-row");
+        if (footer) {
+          // Drop any STALE cdm-row already in this footer (e.g. left
+          // behind by a previous merge before the chart re-rendered).
+          footer.querySelectorAll(".cdm-row[data-cr-merged='1']").forEach(old => old.remove());
           cdm.style.marginLeft = "auto";
           footer.appendChild(cdm);
-          // chartDownloadMenu installs a document-level click handler that
-          // closes the dropdown whenever the click target isn't inside its
-          // original .cdm-wrapper. After we move the .cdm-row out of that
-          // wrapper, every click on the dropdown items registers as
-          // "outside" and the menu hides instantly. Stop the click from
-          // bubbling past .cdm-row so the document listener never sees it.
+          cdm.dataset.crMerged = "1";
+          // chartDownloadMenu installs a document-level click handler
+          // that closes the dropdown whenever the click target isn't
+          // inside its original .cdm-wrapper. After we move the
+          // .cdm-row out of that wrapper, every click on the dropdown
+          // items registers as "outside" and the menu hides instantly.
+          // Stop the click from bubbling past .cdm-row so the document
+          // listener never sees it.
           if (!cdm.dataset.crStopBound) {
             cdm.addEventListener("click", (e) => e.stopPropagation());
             cdm.dataset.crStopBound = "1";
@@ -2337,9 +2346,14 @@ loaderDiv("plotP2")
   // caveat stay light so callouts and text remain legible against the page.
   const legendBg  = "#f8f8f8";
   const legendTxt = "#333";
+  // Width = total grid width (matches plot width). In single mode = W;
+  // faceted = facetW × nCols + (nCols-1) × gap. Wrapped via max-width
+  // so the legend never stretches past the plot.
+  const legendMaxW = isFaceted ? (facetW * nCols + (nCols - 1) * 14) : W;
   const legend = htl.html`<div style="display:flex;flex-wrap:wrap;gap:16px;
       align-items:center;padding:8px 12px;background:${legendBg};
-      border-radius:4px;margin-top:6px;font-size:0.82em;color:${legendTxt};">
+      border-radius:4px;margin-top:6px;font-size:0.82em;color:${legendTxt};
+      max-width:${legendMaxW}px;">
     <div style="display:flex;align-items:center;gap:8px;">
       <span>Cooler ←</span>
       <span style="display:inline-block;width:140px;height:10px;
@@ -2440,24 +2454,14 @@ loaderDiv("plotP2")
       </div>`
     : buildSpiral(null);
 
-  const caveatEl = htl.html`<div style="font-size:0.78em;color:#888;font-style:italic;
-      padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
-      line-height:1.4;max-width:980px;">
-    <strong>Reading note:</strong>
-    Reference rings at ±1°C / +1.5°C / +2°C show statistical context — they are <em>not</em>
-    equivalent to Paris Agreement targets (those are relative to 1850–1900 pre-industrial; this
-    spiral uses ${p2_baseline.replace("-","–")} as baseline). Colour saturates at ~1 SD above/below
-    baseline (cFactor = 0.45) — extreme months hit the palette limits even if values are larger.
-    For PTOT, ring radius is scaled per-country by inter-annual σ — radii are <em>not</em>
-    comparable across countries with different rainfall regimes.
-  </div>`;
+  // Reading note moved into the captionDetails "About this plot"
+  // disclosure below (Pete: "P2 reading note should go into about this plot").
   // In faceted mode each facet already carries its own per-admin1 stats
-  // panel — Pete: "what is the 4th legend in addition to the 3 admin areas
-  // selected? should this be here?". Drop the country-wide rollup so the
-  // user sees only N admin-scoped panels, not N+1.
+  // panel — drop the country-wide rollup so the user sees only N admin-
+  // scoped panels, not N+1.
   const showCountryStats = !isFaceted;
   return chartDownloadMenu(
-    htl.html`<div>${spiralEl}${showCountryStats ? statsEl : ""}${legend}${caveatEl}</div>`,
+    htl.html`<div>${spiralEl}${showCountryStats ? statsEl : ""}${legend}</div>`,
     { filename: `p2_spiral_${p2_iso3}_${p2_variable}` }
   );
   });
@@ -2479,6 +2483,15 @@ captionDetails(htl.html`
     Radius = monthly anomaly from baseline; colour = same. Reference rings at −1°C / 0 / +1°C /
     +1.5°C / +2°C illustrate statistical context (not Paris-equivalent thresholds — baseline
     here is recent, not 1850–1900 pre-industrial). PTOT radius adaptive per inter-annual σ.
+  </p>
+  <p style="margin:6px 0 0;font-size:0.88em;color:#666;font-style:italic;line-height:1.45;">
+    <strong>Reading note:</strong>
+    Reference rings at ±1°C / +1.5°C / +2°C show statistical context — they are <em>not</em>
+    equivalent to Paris Agreement targets (those are relative to 1850–1900 pre-industrial; this
+    spiral uses ${p2_baseline.replace("-","–")} as baseline). Colour saturates at ~1 SD above/below
+    baseline (cFactor = 0.45) — extreme months hit the palette limits even if values are larger.
+    For PTOT, ring radius is scaled per-country by inter-annual σ — radii are <em>not</em>
+    comparable across countries with different rainfall regimes.
   </p>
 `)
 ```
@@ -2820,9 +2833,12 @@ loaderDiv("plotP4")
   const dirHintCol = p4_controls.dark ? "#888" : "#999";
   const dirLo4 = isAnomaly ? (isPTOT ? "← drier" : "← cooler") : null;
   const dirHi4 = isAnomaly ? (isPTOT ? "wetter →" : "warmer →") : null;
+  // Legend width matches chart-grid width — facetW × nCols + gaps in
+  // faceted mode, W in single mode.
+  const p4LegendMaxW = isFaceted ? (facetW * nCols + (nCols - 1) * 14) : W;
   const legend = htl.html`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;
       font-size:0.82em;color:${legendTxt};padding:6px 12px;background:${legendBg};
-      border-radius:4px;margin-top:4px;">
+      border-radius:4px;margin-top:4px;max-width:${p4LegendMaxW}px;">
     ${dirLo4 ? htl.html`<span style="font-style:italic;color:${dirHintCol};white-space:nowrap;">${dirLo4}</span>` : ""}
     <span>${vMin.toFixed(1)}</span>
     <span style="display:inline-block;width:160px;height:10px;
