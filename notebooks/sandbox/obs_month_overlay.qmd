@@ -539,6 +539,16 @@ document.documentElement.style.setProperty("--plot-text-weight", plotTextBold ? 
           // Push to the right edge of the footer row.
           cdm.style.marginLeft = "auto";
           footer.appendChild(cdm);
+          // chartDownloadMenu installs a document-level click handler that
+          // closes the dropdown whenever the click target isn't inside its
+          // original .cdm-wrapper. After we move the .cdm-row out of that
+          // wrapper, every click on the dropdown items registers as
+          // "outside" and the menu hides instantly. Stop the click from
+          // bubbling past .cdm-row so the document listener never sees it.
+          if (!cdm.dataset.crStopBound) {
+            cdm.addEventListener("click", (e) => e.stopPropagation());
+            cdm.dataset.crStopBound = "1";
+          }
           return;
         }
         node = candidate;
@@ -1240,9 +1250,14 @@ loaderDiv("plotP1")
     : [0.5, 12.5];
   const xTicks      = sortedMos ?? [1,2,3,4,5,6,7,8,9,10,11,12];
 
-  // Decade mean lines — driven by checkbox selection.
-  const decMean = (lo, hi) => {
-    const by = d3.group(overlay_rows.filter(d => d.year >= lo && d.year <= hi), d => d.month);
+  // Decade mean lines — driven by checkbox selection. When `scope` is
+  // non-null we restrict to one admin1 so faceted layouts get the
+  // matching local decade-mean line / band per facet.
+  const decMean = (lo, hi, scope = null) => {
+    const baseRows = scope == null
+      ? overlay_rows
+      : overlay_rows.filter(d => d.admin1_name === scope);
+    const by = d3.group(baseRows.filter(d => d.year >= lo && d.year <= hi), d => d.month);
     return [1,2,3,4,5,6,7,8,9,10,11,12].map(m => {
       const vals = (by.get(m) ?? []).map(d => d.value_plot).filter(v => v != null);
       return { month: m, value_plot: d3.mean(vals), std: d3.deviation(vals) ?? 0 };
@@ -1388,25 +1403,54 @@ loaderDiv("plotP1")
           fontSize: 11, fontWeight: 600, fill: "#444",
         })
       ] : []),
-      // Decade band / decade-mean overlays — only render in non-faceted
-      // mode for now. Per-admin1 decade means require per-(admin1, decade)
-      // aggregation which would inflate this cell; deferred.
-      ...(!isFaceted && p1_band ? decadeData.map(({ meanRows, col }) =>
-        Plot.areaY(meanRows.map(r => ({
-          month: r.month,
-          y1: r.value_plot - (r.std ?? 0),
-          y2: r.value_plot + (r.std ?? 0),
-        })), {
-          x: "month", y1: "y1", y2: "y2",
-          fill: col, fillOpacity: 0.12, curve: "monotone-x",
-        })
-      ) : []),
-      ...(!isFaceted ? decadeData.map(({ meanRows, col }) =>
-        Plot.line(meanRows, {
-          x: "month", y: "value_plot",
-          stroke: col, strokeWidth: 2.2, strokeDasharray: "5 3",
-        })
-      ) : []),
+      // Decade band / decade-mean overlays.
+      // - Single-country mode: one ± σ band + one mean line per selected
+      //   decade, computed cross-admin (country-wide).
+      // - Faceted mode: per-admin1 ± σ band + per-admin1 mean line,
+      //   routed into each facet via _fx / _fy.
+      ...(p1_band ? activeDecs.flatMap(dec => {
+        const lo = parseInt(dec);
+        const hi = Math.min(lo + 9, yearMax);
+        const col = decadeColors[dec] ?? "#888";
+        if (!isFaceted) {
+          const m = decMean(lo, hi);
+          return [Plot.areaY(m.map(r => ({
+            month: r.month, y1: r.value_plot - (r.std ?? 0), y2: r.value_plot + (r.std ?? 0),
+          })), { x: "month", y1: "y1", y2: "y2", fill: col, fillOpacity: 0.12, curve: "monotone-x" })];
+        }
+        return admin1Names.map(a => {
+          const m = decMean(lo, hi, a);
+          const bandRows = m.map(r => ({
+            month: r.month, y1: r.value_plot - (r.std ?? 0), y2: r.value_plot + (r.std ?? 0),
+            _fx: fxOf(a), _fy: fyOf(a),
+          }));
+          return Plot.areaY(bandRows, {
+            x: "month", y1: "y1", y2: "y2",
+            fill: col, fillOpacity: 0.12, curve: "monotone-x",
+            fx: "_fx", fy: "_fy",
+          });
+        });
+      }) : []),
+      ...activeDecs.flatMap(dec => {
+        const lo = parseInt(dec);
+        const hi = Math.min(lo + 9, yearMax);
+        const col = decadeColors[dec] ?? "#888";
+        if (!isFaceted) {
+          const m = decMean(lo, hi);
+          return [Plot.line(m, {
+            x: "month", y: "value_plot",
+            stroke: col, strokeWidth: 2.2, strokeDasharray: "5 3",
+          })];
+        }
+        return admin1Names.map(a => {
+          const m = decMean(lo, hi, a).map(r => ({ ...r, _fx: fxOf(a), _fy: fyOf(a) }));
+          return Plot.line(m, {
+            x: "month", y: "value_plot",
+            stroke: col, strokeWidth: 2.2, strokeDasharray: "5 3",
+            fx: "_fx", fy: "_fy",
+          });
+        });
+      }),
     ].filter(m => m !== null),
   });
 
