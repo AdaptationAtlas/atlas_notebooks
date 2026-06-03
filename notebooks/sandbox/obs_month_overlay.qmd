@@ -2249,10 +2249,17 @@ loaderDiv("plotP2")
   // `p2_season`; out-of-season months are skipped so the season is
   // visible as a sweep arc instead of a closed ring.
   const inSeasonP2 = mo => !p2_season || p2_season.includes(mo);
+  // Sort rows by SEASON ORDER (not numeric month) so wrap-around presets
+  // like DJF ([12, 1, 2]) draw as a clean Dec→Jan→Feb arc instead of
+  // jumping Jan→Feb→Dec across the chart centre.
+  const seasonIdx = p2_season ? new Map(p2_season.map((m, i) => [m, i])) : null;
+  const sortRowsBySeason = seasonIdx
+    ? (a, b) => (seasonIdx.get(a.month) ?? 99) - (seasonIdx.get(b.month) ?? 99)
+    : (a, b) => a.month - b.month;
 
   // Draw each year's ring — oldest first, newest on top.
   for (const y of years) {
-    const rows = (byYear.get(y) ?? []).filter(d => inSeasonP2(d.month)).sort((a, b) => a.month - b.month);
+    const rows = (byYear.get(y) ?? []).filter(d => inSeasonP2(d.month)).sort(sortRowsBySeason);
     if (rows.length < 2) continue;
     const pts = rows.map(d => {
       const v = d.anomaly;
@@ -2424,9 +2431,13 @@ loaderDiv("plotP2")
     // 3-row compact layout: 2 cols × 2 rows of extremes + 1 row decade
     // delta spanning both cols. Pete: drop emoji symbols, drop parens,
     // colour the text instead — warm = red, cool = blue.
+    // Width pinned to the chart it labels (W in single mode, facetW per
+    // facet) so the caption bar never stretches past the spiral.
     const warmTxt = "#b22222", coolTxt = "#3a6fbf";
+    const statsMaxW = isFaceted ? facetW : W;
     return htl.html`<div style="font-size:0.78em;color:${statsTxt};
         padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
+        max-width:${statsMaxW}px;
         display:grid;grid-template-columns:1fr 1fr;gap:3px 18px;">
       <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${warmTxt};">${dirHot} mo: <strong>${warmest.year} ${monthNames[warmest.month-1]}</strong> ${sgn(warmest.anomaly)}${warmest.anomaly.toFixed(2)}${unit2}</span>
       <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${coolTxt};">${dirCold} mo: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> ${sgn(coolest.anomaly)}${coolest.anomaly.toFixed(2)}${unit2}</span>
