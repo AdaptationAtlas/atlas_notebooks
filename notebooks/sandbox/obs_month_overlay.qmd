@@ -318,7 +318,7 @@ atlasTOC({
 // separately from the visible inputs (which live inside the floating
 // .atlas-toc panel) so they can be referenced from anywhere via OJS
 // reactivity. Controls apply to every plot container in the sandbox.
-viewof plotTextSize  = Inputs.input(10);
+viewof plotTextSize  = Inputs.input(12);
 viewof plotTextBold  = Inputs.input(false);
 viewof plotLineWidth = Inputs.input(1.5);
 viewof facetCols     = Inputs.input(5);
@@ -507,6 +507,47 @@ document.documentElement.style.setProperty("--plot-text-weight", plotTextBold ? 
     navEnd.parentNode.insertBefore(wrap, navEnd);
   }
   NavbarAckLogos();
+}
+```
+
+```{ojs}
+//| output: false
+// CR-114: merge each chart's download split-button row into the sibling
+// `.plot-footer-row` (captionDetails block) so "About this plot" + the
+// Download PNG split-button sit on the same line, matching main notebook.
+// Pete: "about this plot and download still not on the same line, I
+// believe this is addressed in the main notebook".
+//
+// chartDownloadMenu builds a `.cdm-wrapper > [chart] + .cdm-row` per chart;
+// captionDetails builds the `.plot-footer-row > details.plot-caption-details`
+// in a sibling cell. We move each `.cdm-row` into its nearest FOLLOWING
+// `.plot-footer-row` once both have rendered. MutationObserver retriggers
+// the move when a chart re-renders (admin1 change, variable change, etc.).
+{
+  function mergeDownloadIntoFooter() {
+    document.querySelectorAll(".plot-footer-row").forEach(footer => {
+      // Already merged? skip.
+      if (footer.querySelector(".cdm-row")) return;
+      // Walk previous siblings up the cell tree to find the .cdm-row that
+      // belongs to the chart immediately above this footer.
+      let node = footer.parentElement;
+      while (node) {
+        const candidate = node.previousElementSibling;
+        if (!candidate) { node = node.parentElement; continue; }
+        const cdm = candidate.querySelector?.(".cdm-row");
+        if (cdm) {
+          // Push to the right edge of the footer row.
+          cdm.style.marginLeft = "auto";
+          footer.appendChild(cdm);
+          return;
+        }
+        node = candidate;
+      }
+    });
+  }
+  mergeDownloadIntoFooter();
+  const observer = new MutationObserver(() => mergeDownloadIntoFooter());
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 ```
 
@@ -2150,15 +2191,22 @@ loaderDiv("plotP2")
       .text(monthNames[mo - 1]);
   }
 
+  // Season filter applied to the spiral path itself — when a season
+  // preset / custom range is active, rings draw only the months in
+  // `p2_season`; out-of-season months are skipped so the season is
+  // visible as a sweep arc instead of a closed ring.
+  const inSeasonP2 = mo => !p2_season || p2_season.includes(mo);
+
   // Draw each year's ring — oldest first, newest on top.
   for (const y of years) {
-    const rows = (byYear.get(y) ?? []).sort((a, b) => a.month - b.month);
+    const rows = (byYear.get(y) ?? []).filter(d => inSeasonP2(d.month)).sort((a, b) => a.month - b.month);
     if (rows.length < 2) continue;
     const pts = rows.map(d => {
       const v = d.anomaly;
       const r = rFor(v);
       return { x: cx + r * Math.cos(θ(d.month)), y: cy + r * Math.sin(θ(d.month)), a: v };
     });
+    // Close the path only when ALL 12 months drew (full ring).
     if (rows.length === 12) pts.push(pts[0]);
     const isLatest   = y === yMax;
     const highlighted = inDecade(y);
@@ -2278,12 +2326,10 @@ loaderDiv("plotP2")
   const sgn = v => v > 0 ? "+" : "";
   const statsTxt = "#555";
 
-  // Decade-to-decade comparison helper. Replaces the old "yLo mean vs yHi
-  // mean" line — Pete: "never show year vs year, especially with 2026
-  // incomplete; decade to decade (1980s vs 2015-25 acceptable)".
-  // Picks earliest vs latest COMPLETE decade. If the latest decade is
-  // partial, falls back to a rolling 10-year window ending at the latest
-  // year on record (label "${start}-${endShort}", e.g. "2015-25").
+  // Decade-to-decade comparison helper. Pete: "should be 1980s to most
+  // recent past decade (complete years)". Compares earliest complete
+  // decade vs latest complete decade only — returns null if fewer than
+  // two complete decades (>= 10 distinct years) of data are available.
   const decadeCompare = (rowsArg) => {
     if (!rowsArg.length) return null;
     const decadeOf = y => Math.floor(y / 10) * 10;
@@ -2292,25 +2338,10 @@ loaderDiv("plotP2")
       dec, yrs: new Set(rs.map(d => d.year)).size,
       mean: d3.mean(rs, d => d.anomaly),
     })).filter(d => d.yrs >= 10 && d.mean != null);
-    if (stats.length >= 2) {
-      stats.sort((a, b) => a.dec - b.dec);
-      const e = stats[0], l = stats[stats.length - 1];
-      return { earlyLabel: `${e.dec}s`, lateLabel: `${l.dec}s`, delta: l.mean - e.mean };
-    }
-    // Fallback: rolling last-10-years window vs earliest decade.
-    const maxYr = d3.max(rowsArg, d => d.year);
-    const minYr = d3.min(rowsArg, d => d.year);
-    const earlyDec = decadeOf(minYr);
-    const earlyRows = rowsArg.filter(d => d.year >= earlyDec && d.year < earlyDec + 10);
-    const lateRows  = rowsArg.filter(d => d.year >= maxYr - 9 && d.year <= maxYr);
-    if (!earlyRows.length || !lateRows.length) return null;
-    const earlyMean = d3.mean(earlyRows, d => d.anomaly);
-    const lateMean  = d3.mean(lateRows, d => d.anomaly);
-    return {
-      earlyLabel: `${earlyDec}s`,
-      lateLabel:  `${maxYr - 9}-${String(maxYr).slice(2)}`,
-      delta:      lateMean - earlyMean,
-    };
+    if (stats.length < 2) return null;
+    stats.sort((a, b) => a.dec - b.dec);
+    const e = stats[0], l = stats[stats.length - 1];
+    return { earlyLabel: `${e.dec}s`, lateLabel: `${l.dec}s`, delta: l.mean - e.mean };
   };
 
   const buildStats = (rowsArg) => {
@@ -2333,15 +2364,17 @@ loaderDiv("plotP2")
       ? (dCmp && dCmp.delta > 0 ? "warmer" : "cooler")
       : (dCmp && dCmp.delta > 0 ? "wetter" : "drier");
     // 3-row compact layout: 2 cols × 2 rows of extremes + 1 row decade
-    // delta spanning both cols. nowrap on each cell keeps it 3 lines max.
+    // delta spanning both cols. Pete: drop emoji symbols, drop parens,
+    // colour the text instead — warm = red, cool = blue.
+    const warmTxt = "#b22222", coolTxt = "#3a6fbf";
     return htl.html`<div style="font-size:0.78em;color:${statsTxt};
         padding:6px 10px;background:${legendBg};border-radius:4px;margin-top:4px;
         display:grid;grid-template-columns:1fr 1fr;gap:3px 18px;">
-      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔴 ${dirHot} mo: <strong>${warmest.year} ${monthNames[warmest.month-1]}</strong> (${sgn(warmest.anomaly)}${warmest.anomaly.toFixed(2)}${unit2})</span>
-      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔵 ${dirCold} mo: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> (${sgn(coolest.anomaly)}${coolest.anomaly.toFixed(2)}${unit2})</span>
-      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🔥 ${dirHot} yr: <strong>${warmYr?.year ?? "–"}</strong> (${sgn(warmYr?.mean ?? 0)}${(warmYr?.mean ?? 0).toFixed(2)}${unit2})</span>
-      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">❄️ ${dirCold} yr: <strong>${coolYr?.year ?? "–"}</strong> (${sgn(coolYr?.mean ?? 0)}${(coolYr?.mean ?? 0).toFixed(2)}${unit2})</span>
-      ${dCmp ? htl.html`<span style="grid-column:1 / -1;white-space:nowrap;color:#444;">📈 ${dCmp.earlyLabel} → ${dCmp.lateLabel}: <strong>${sgn(dCmp.delta)}${dCmp.delta.toFixed(2)}${unit2} ${verb}</strong>${selDec !== null ? ` · scoped to ${selDec}s` : ""}${p2_season ? ` · ${p2_seasonLabel}` : ""}</span>` : ""}
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${warmTxt};">${dirHot} mo: <strong>${warmest.year} ${monthNames[warmest.month-1]}</strong> ${sgn(warmest.anomaly)}${warmest.anomaly.toFixed(2)}${unit2}</span>
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${coolTxt};">${dirCold} mo: <strong>${coolest.year} ${monthNames[coolest.month-1]}</strong> ${sgn(coolest.anomaly)}${coolest.anomaly.toFixed(2)}${unit2}</span>
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${warmTxt};">${dirHot} yr: <strong>${warmYr?.year ?? "–"}</strong> ${sgn(warmYr?.mean ?? 0)}${(warmYr?.mean ?? 0).toFixed(2)}${unit2}</span>
+      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${coolTxt};">${dirCold} yr: <strong>${coolYr?.year ?? "–"}</strong> ${sgn(coolYr?.mean ?? 0)}${(coolYr?.mean ?? 0).toFixed(2)}${unit2}</span>
+      ${dCmp ? htl.html`<span style="grid-column:1 / -1;white-space:nowrap;color:#444;">${dCmp.earlyLabel} → ${dCmp.lateLabel}: <strong>${sgn(dCmp.delta)}${dCmp.delta.toFixed(2)}${unit2} ${verb}</strong>${selDec !== null ? ` · ${selDec}s` : ""}${p2_season ? ` · ${p2_seasonLabel}` : ""}</span>` : ""}
     </div>`;
   };
 
@@ -2374,8 +2407,13 @@ loaderDiv("plotP2")
     For PTOT, ring radius is scaled per-country by inter-annual σ — radii are <em>not</em>
     comparable across countries with different rainfall regimes.
   </div>`;
+  // In faceted mode each facet already carries its own per-admin1 stats
+  // panel — Pete: "what is the 4th legend in addition to the 3 admin areas
+  // selected? should this be here?". Drop the country-wide rollup so the
+  // user sees only N admin-scoped panels, not N+1.
+  const showCountryStats = !isFaceted;
   return chartDownloadMenu(
-    htl.html`<div>${spiralEl}${statsEl}${legend}${caveatEl}</div>`,
+    htl.html`<div>${spiralEl}${showCountryStats ? statsEl : ""}${legend}${caveatEl}</div>`,
     { filename: `p2_spiral_${p2_iso3}_${p2_variable}` }
   );
   });
