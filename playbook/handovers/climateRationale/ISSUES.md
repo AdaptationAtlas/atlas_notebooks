@@ -282,6 +282,45 @@ See "Strategy: R/2.1 parquet pushdown + notebook optimization" section below (af
 
 ---
 
+## Decisions applied — 2026-06-03 (R/2.1 rerun: CR-060 + CR-094 + section controls + 12 bug fixes)
+
+Single extended debugging session fixing latent R/2.1 bugs exposed by `FORCE_OVERWRITE=1` generating fresh parquets for the first time. All commits in `hazards_prototype/develop`. R/2.1 rerun still in progress on CGlabs.
+
+### What was shipped (code, not yet in canonical outputs)
+
+| Commit | Change |
+|---|---|
+| `f42d720` | **CR-060**: q5/q17/q50/q83/q95 + n_models in sec 3.3 ensemble stats |
+| `9923942` | **CR-094**: Yue 2002 TFPW pre-whitening in sec 3.4; validated 4/4 against Python reference |
+| `e7eed37` | FORCE_OVERWRITE + SKIP_R2_1_3_4 env var support for R/2.1 |
+| `638e727` | Section-level SKIP_R2_1_SEC* controls — resume from any section after crash |
+| `67dde01` | Critical review fixes: run_sec3_4 OR→AND logic; baseline_timeframe_map scope; version=version1 |
+
+### Latent bugs fixed (were hidden because FORCE_OVERWRITE was never used before)
+
+12 bugs fixed across 8 debug runs. Key patterns:
+- `arrow::read_parquet()` returns tibble in arrow 22.0.0 — all calls needed `data.table()` wrapper
+- `baseline_names[j]` (undefined variable × 6 locations) → `baseline_name`
+- `vars <- unique(vars)` (non-existent column) → `unique(hazard)`
+- `season_name` undefined in sec 3.1 inner lapply scope
+- `get(func_name, envir=parent.frame())` fails in nested lapply → `match.fun(func_name)`
+- `baselines` grep used scenario name ("historic") but filenames use timeframe ("historical") → `baseline_timeframe_map`
+- `data[,]` used outside scope where `data_ex_ss` or `data_ex_season` was the correct variable
+- `models = models` undefined in sec 3.2 JSON → inline computation
+- `version = version` (undefined) → `version = version1`
+
+### Current status
+
+R/2.1 is running with `SKIP_R2_1_SEC2=1 SKIP_R2_1_SEC3_1=1` (resuming at sec 3.2 — earlier sections already have valid outputs). Estimated remaining: sec 3.2 (~hours) + sec 3.3 (~hours) + sec 3.4 (~18h). Once complete: publish to `domain=climate/...` canonical paths, then CR-061 (ribbon swap) and CR-095 (trend overlay) are dispatchable.
+
+### Conventions established
+
+- **Section-level env var controls** for pipeline scripts: `SKIP_SCRIPT_SECN=1` pattern. Applied to R/2.1; should be applied to any new long-running script.
+- **Preemptive cavecrew review** after major script edits — catches scope/variable bugs before whack-a-mole debug runs. The 8 debug runs here each took 1-2h; one review at `7889aa8` caught 8 bugs at once.
+- See new memory entries: `feedback_section_run_controls.md`, `feedback_preemptive_script_review.md`.
+
+---
+
 ## Issues
 
 ### CR-001 — Future Projections quick-insight reports physically impossible warming
