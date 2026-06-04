@@ -3026,4 +3026,110 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
 
 ---
 
+## CR-116 — Sandbox Future Projections: 3 new sub-sections (Period maps + Period ridges + numerical-summary table) on shared CMIP6 cache [NEW 2026-06-04]
+
+### CR-116 — Sandbox Future Projections expansion [NEW 2026-06-04 · shipped]
+
+- **id:** CR-116
+- **title:** Sandbox Future Projections section grew from one panel (CR-097 Time-to-warming map) to three analytical views, all reading from a single shared CMIP6 in-memory cache. Implements the period-map / period-ridge / period-table trio from the 2026-06-03 reuse-map session.
+- **type:** notebook (new feature, consumer-only — no pipeline change)
+- **severity:** low (additive — no existing functionality at stake; high narrative-impact)
+- **where:** [`notebooks/sandbox/obs_month_overlay.qmd`](notebooks/sandbox/obs_month_overlay.qmd) — sub-sections inserted between CR-097 ("Time to warming") and the Methods H1.
+
+- **what shipped:**
+  1. **Period maps** (`#period-maps`) — admin1 choropleth grid. **Rows = SSP scenarios**, **columns = the 4 CMIP6 20-year future windows** (2021-2040 / 2041-2060 / 2061-2080 / 2081-2100). Cell colour = ensemble-mean anomaly (or inter-model SD). Adaptive-domain palette: signed/positive/negative branches based on actual data range; sequential warm/cool half-palettes for one-sided cases. **Fade overlay** for `|mean| < sd_anomaly` (signal-to-noise robustness diagnostic per Knutti & Sedláček 2013 — Gaussian-derived proxy for AR6 sign-agreement, see About-this-section disclosure). Replaces an earlier stipple-dot pass that was hard to read at country scale.
+  2. **Period ridges** (`#period-ridges`) — 5-row KDE ridge plot: 1995-2014 baseline (grey) at the bottom, then 4 future windows. Within each row, overlaid translucent ridges per selected SSP (multi-SSP checkbox default = SSP1-2.6 + SSP2-4.5 + SSP5-8.5). SSP-keyed colour palette (IPCC AR6 convention: navy / orange / red / maroon; Okabe-Ito in CB mode). Coloured median tick (with white halo) per ridge. Roughly square aspect ratio (rowH derived from innerW / havePeriods.length).
+  3. **Numerical-summary table** (folded into Period maps as `showTable` toggle on 2026-06-04 — see consolidation entry below). Wide-format table: rows = SSP × season, columns = 1995-2014 baseline + 4 future windows, cells = spatial-mean of admin1 mean ± inter-model SD. Bold cells = robust (`|mean| ≥ inter-model SD`). **Heat-map shading** added 2026-06-04 — see CR-116-shading entry.
+
+- **shared CMIP6 cache architecture (the core win):**
+  - **One** `DuckDBClient.of()` (`db_cmip6_future`) shared by every Future Projections sub-section. Replaces the original per-section client pattern.
+  - **One** fetch cell (`cmip6_future_data`) gated on `futureProjectionsVisible = cr097Visible || periodMapsVisible || periodRidgesVisible`. Pulls every (admin1 × variable × season × scenario × period) row in scope ONCE per scope change. Re-runs only when `globalScopeInfo` changes — never on variable / season / SSP toggle.
+  - **Variable filter at SQL level**, not client. `WHERE hazard IN (...)` driven by `cmip6_active_variables` cell, a union of `cmip6_core_variables = ["TAVG","TMAX","TMIN","PTOT"]` plus whatever extras each sub-section currently has selected. Core 4 always cached; extras (SPEI-03/12, NTx35/40, NDWS, NDWL0, THI-max, NDD) opt-in — picking one triggers a re-fetch under the widened hazard set.
+  - **Historic 1995-2014 parquet** included via a separate try/catch'd query so a missing/broken historic file doesn't kill the rest of the section (CR-097 + Period maps don't need it; ridges + table gracefully drop the baseline ridge/col if unavailable).
+  - **Row-volume math:** SSA worst case ≈ 192k rows / 10-15 MB on default variables; KEN single-country ≈ 6k rows / <1 MB. Well within DuckDB-WASM + browser comfort.
+
+- **raw / anomaly toggle:** added to all three sub-sections (`Show as anomaly` toggle, default ON). Reads `mean` column instead of `mean_anomaly` for raw view — both ship in the same parquet rows, zero new bandwidth. Fade-low-agreement disabled in raw view (`|raw| < sd_anomaly` is trivially false at climatological values). Adaptive palette swaps to sequential warm (temp) / sequential blues (PTOT) in raw mode.
+
+- **consolidation (Period table folded into Period maps as showTable toggle, 2026-06-04):**
+  Pete flagged the table as a view-toggle of the map data (same controls, same scope, same cache). Folded — Period table section deleted; `Show as table (numerical summary)` toggle added to Period maps controls. Matches CR-097's `Show table instead of map` idiom. Removed: `## headingPeriodTable` section, hero chip, heading var, `nbText.sections.periodTable`, `periodTableVisible` gate. Net: one fewer section in the TOC, shared state, no parallel cache logic.
+
+- **heat-map shading on the numerical table (2026-06-04 dispatch):**
+  Cells in the 4 future-period columns tinted by signed anomaly magnitude (rgba alpha-over-surface, adapts to light/dark Quarto themes). Two-axis variable-awareness:
+    1. `SCALE_FLOOR` lookup keyed by variable (TAVG 2.0, TMAX/TMIN 2.5, PTOT 100 mm, SPEI 1.0, NTx35/40 15 days, NDD 30, NDWS 30, NDWL0 15, THI-max 5). Actual `scaleMax = max(data_max, floor)` — data-driven so PTOT cells running ±300 mm span the full palette while weak-signal tables stay pale instead of falsely saturated.
+    2. `SHADE_PALETTE` keyed by variable. Temperatures: coral-warming / teal-cooling. PTOT + SPEI: teal-wetter / amber-drier (flipped). Heat-day / water-stress / flood indices: coral-more / teal-less. NDD (dry-day count): amber-more (drying) / teal-less.
+  Dead zone at `|mean| < scaleMax × 0.02`. `alphaMax = 0.55` (lowered from 0.82 after Pete flagged unreadable text on saturated cells). Tinted cells force dark text (`#111`) + darker `±SD` suffix (`#333`) for legibility.
+
+- **deferred / not implemented:**
+  - Decadal-ring spiral (P2-shape comms layer for future projections) — flagged as comms-grade, low analytical value. Pete deferred.
+  - Multi-season rows in the period table — Pete chose single-season dropdown (matches other sections' convention) over multi-season checkbox. User flips season to compare seasonal behaviour rather than stacking.
+  - LRU cache of recently-fetched variables — pure UX-saving optimisation, not yet warranted at current scope sizes.
+
+- **acceptance (all satisfied on 2026-06-04):**
+  - One DuckDB client + one query per scope change across all three Future Projections sub-sections.
+  - Variable / season / SSP toggles trigger zero network — pure in-memory filter.
+  - Map mode + table mode + ridge mode all render in <2s after the initial parquet fetch.
+  - Raw / anomaly toggle works for all three sub-sections; CR-097 unaffected (Time-to-warming is anomaly-only by definition).
+  - Heat-map shading visible in light mode; preserved in download-PNG export; bold-for-robust styling intact.
+  - Period maps fade-overlay matches P6's non-significance fade convention (`fillOpacity: 0.22`).
+
+- **about-this-section bodies + Quick Insights:** EN written for all three sub-sections; FR shortened (carries the technical core + citation list, defers narrative-grade FR translation until Pete signs off the EN). Citations include Knutti & Sedláček (2013), AR6 WG1 Ch. 4/10, Cross-Chapter Box Atlas.1, Thrasher et al. (2022), Lange (2019), Hempel et al. (2013).
+
+- **dependencies:** Builds on CR-097 (Time-to-warming map) data layer. Heat-map shading independent. Per-GCM data not used (would require CR-060 for likely-range percentiles or [[CR-117]] for quantile-trend slopes).
+
+- **STATUS (2026-06-04):** **SHIPPED on `dev/climateRationale`.** Live in sandbox. Pete using for proposal-writing tests. Promotion to main notebook deferred pending broader sign-off + parity work in [`sandbox-vs-notebook-parity.md`](playbook/handovers/climateRationale/sandbox-vs-notebook-parity.md).
+
+- **see also:** [[CR-097]] (parent: Time-to-warming map; shares parquet); [[CR-060]] (pending: per-GCM percentile columns — would replace SNR proxy with calibrated AR6 likely-range); [[CR-117]] (pending: pipeline-side per-GCM quantile-trend slopes — separate output, different statistic).
+
+---
+
+## CR-117 — Pipeline: per-GCM quantile-trend slopes (`quantile_trends.parquet`) [NEW 2026-06-04 · pipeline-side]
+
+- **id:** CR-117
+- **title:** Add a pipeline output that exposes **per-GCM quantile-regression trend slopes** at q10 / q50 / q90 (and optionally q95) for each (admin1 × variable × season × SSP). The notebook's Future Projections section could then render a "Quantile-trend ladder" showing whether the upper tail is warming/wetting/drying faster than the median — a question the current ensemble-mean trend can't answer.
+- **type:** pipeline (new output file; not a notebook change)
+- **severity:** med (analytical depth — without it, the Climate Rationale notebook can't distinguish "the mean is shifting" from "the extremes are shifting faster than the mean")
+- **where:** `hazards_prototype` repo, likely `R/2.1_create_monthly_haz_tables.R` or a sibling sec under `R/2.*` that already holds the per-GCM annual time series before ensembling.
+
+- **why-this-matters:** Quantile regression (Koenker & Bassett 1978; published practice in climate-extreme detection — Barbosa et al. 2011; Bárdossy & Pegram 2014; cited in IPCC AR6 WG1 Ch. 11 Seneviratne et al. 2021) answers a question ensemble-mean trends cannot: **is the upper tail of the distribution intensifying faster than the median?** Distinguishes a "uniformly warmer climate" from "more frequent extremes". Pete asked this during the 2026-06-04 dispatch review; the sandbox can't render the answer without pipeline data.
+
+- **methodological constraint (matches `feedback_ensembling-is-always-last.md`):** QR must be computed **per GCM × admin1 × variable × season**, THEN ensembled. Running QR on a pre-ensembled mean smooths away the tail variability the method is meant to detect. The current `ensemble_season_timeseries.parquet` ships ONLY ensemble-mean values at 20-year-period grain — that's 4 numbers per (admin1, scenario, variable, season). QR on 4 points is meaningless. **Per-GCM annual series (≥ 30 years per fit) is required.**
+
+- **data input the pipeline already has:** Per-GCM monthly values at `/common_data/nex-gddp-cmip6/{var}/{ssp}/{gcm}/` (referenced in [`hazards_prototype/R/0_server_setup.R`](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/R/0_server_setup.R:50-51) and [`hazards_prototype/R/2.1_create_monthly_haz_tables.R`](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/R/2.1_create_monthly_haz_tables.R:121)). Already aggregated to admin1 monthly per GCM in the producer chain.
+
+- **proposed producer steps:**
+  1. For each (GCM × admin1 × variable × season), build an **annual series** (1981-2100) — sum/mean monthly values into seasonal totals/means.
+  2. Compute **quantile regression slopes** for each quantile τ ∈ {0.10, 0.50, 0.90} (consider 0.95 if the team wants the rarer-extreme tail). Use `quantreg::rq` in R (Koenker's canonical implementation). Output: `slope_per_decade_q{tau}` per GCM.
+  3. Ensemble across GCMs: `mean_slope_q{tau}`, `sd_slope_q{tau}`, `pct_gcms_sign_positive_q{tau}` (sign-agreement count — the AR6 Method A diagnostic).
+  4. Write `quantile_trends.parquet` next to `ensemble_season_timeseries.parquet`.
+
+- **proposed schema:**
+  ```
+  admin1_name      VARCHAR
+  iso3             VARCHAR
+  scenario         VARCHAR    -- ssp126 / ssp245 / ssp370 / ssp585
+  variable         VARCHAR    -- TAVG / TMAX / TMIN / PTOT / SPEI-* / NTx* / ...
+  season           VARCHAR    -- annual / JFM / FMA / ... / DJF
+  quantile         DOUBLE     -- 0.10 / 0.50 / 0.90 (or 0.95)
+  slope_mean       DOUBLE     -- ensemble-mean slope per decade
+  slope_sd         DOUBLE     -- inter-model SD of slope
+  pct_sign_pos     DOUBLE     -- 0..1 — fraction of GCMs whose slope is > 0
+  n_gcms           INTEGER    -- always 18 in v2 (sanity check)
+  ```
+
+- **notebook-side use (after CR-117 lands):** New sandbox sub-section "Quantile-trend ladder" — for each admin1 (or scope-aggregated), bar chart per SSP showing q10 / q50 / q90 slopes side-by-side with sign-agreement annotation. If q90 ≫ q50, surface as "upper tail accelerating" with the canonical AR6 caveat. Renders directly from `quantile_trends.parquet` — no additional client-side regression.
+
+- **independent of CR-060:** CR-060 plans `q17_anomaly` / `q83_anomaly` percentile *levels* on the existing parquet (likely-range framing of the projection itself). This ticket is *trend slopes* of those quantiles — orthogonal output, different statistical question. Both could land independently.
+
+- **dependencies:** R/2.1 ingest chain (already produces per-GCM annual values upstream of ensembling); `quantreg` R package (well-established, MIT-licensed). No upstream NEX-GDDP changes required — uses existing v2 release files.
+
+- **acceptance:** `quantile_trends.parquet` published to `s3://digital-atlas/.../source=nex-gddp-cmip6/.../variable=quantile_trends.parquet`. Schema matches the proposal above. Pipeline doc updated. Sandbox can then file a follow-up CR (rendering only) referencing this output.
+
+- **discovered:** 2026-06-04, Pete asked during the period-table heat-map dispatch review: "what's the verdict on looking at trends in quantile-regressed CMIP6 data?". My response: methodologically sound but requires pipeline data not currently exposed. This ticket files the producer-side request.
+
+- **STATUS (2026-06-04):** Open. Awaiting pipeline-team triage. Notebook-side dependency.
+
+- **see also:** [[CR-060]] (level percentiles — separate stat); [[CR-093]] (R/2.2 ensemble-change info already in pipeline — different but adjacent surface); [[CR-094]] (TFPW alignment for ensemble-mean trend, also pipeline-side).
+
+---
+
 *Pete: annotate this file directly — strike, edit, add. Once you sign it off, dispatch one PR at a time to Claude Code (or all at once). The Togo SAT report stays the visual reference for "what good looks like".*

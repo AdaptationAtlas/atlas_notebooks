@@ -251,3 +251,38 @@ Per Pete's "use our controls from the sandbox instead of the climate rationale n
 6. Pete francophone-review the FR drafts in `data/sandbox/obs_month_overlay_nbText.json`.
 
 Once items 1-4 land, sandbox + main notebook should be technically + visually + narratively indistinguishable apart from Pete's deliberate sandbox-specific control improvements (CR-097 popup, P4 preset, etc., all destined for CR-106 / CR-107 promotion).
+
+---
+
+## Addendum — 2026-06-04 sandbox Future Projections expansion (CR-116)
+
+Two new analytical sub-sections + one consolidated view-toggle landed in the Future Projections section. Filed as [[CR-116]] in `ISSUES.md`. Parity implications below.
+
+**New sub-sections (sandbox-only):**
+- `#period-maps` — admin1 choropleth grid × SSP rows × 4 future-window cols. Anomaly view + raw view. Adaptive palette (diverging / one-sided sequential / data-range raw). Fade-low-agreement overlay using SNR proxy (Knutti & Sedláček 2013 — see [[CR-117]] for the canonical AR6 sign-agreement test pending pipeline-side per-GCM data).
+- `#period-ridges` — KDE ridge plot across 5 reference windows. Multi-SSP overlay per row, SSP-keyed colour, coloured median tick.
+- Period-table view (now folded into `#period-maps` as `showTable` toggle on 2026-06-04) — wide numerical table with **heat-map shading** (per-variable scale floor + per-variable palette).
+
+**Shared CMIP6 cache (the architectural change worth promoting to main notebook):**
+- One `DuckDBClient.of()` per Future Projections section.
+- One `cmip6_future_data` fetch cell gated on `cr097Visible || periodMapsVisible || periodRidgesVisible`.
+- Variable filter at SQL level via `cmip6_active_variables` (union of core 4 + currently-selected extras across all sub-sections).
+- Re-fetch only on scope change OR variable-set widening. Toggle variable/season/SSP → zero network.
+
+**Parity implications:**
+- The main notebook's Future Projections section currently does NOT have an equivalent shared cache — each panel queries the parquet independently. After Pete signs off the sandbox pattern, this is a candidate for promotion (new CR alongside CR-106 / CR-107).
+- Period maps + ridges + table are pure additions — no equivalent in the main notebook today. If they promote, they need methods-anchor entries in the main notebook's `methods` section.
+- Heat-map shading helper (`periodCellShade` + `SCALE_FLOOR` + `SHADE_PALETTE`) is currently inlined inside the table render branch. If multiple notebooks want it, extract to `helpers/cellShading.ojs`.
+
+**Updated parity table (Future Projections section):**
+
+| Aspect | Main notebook | Sandbox | Gap |
+|---|---|---|---|
+| Future-projection sub-panels | 2 (timeseries + summary chart) | 3 (Time-to-warming + Period maps + Period ridges; numerical table via Period maps view-toggle) | Sandbox-only. Decide which (if any) to promote. |
+| CMIP6 parquet client | Per-section `DuckDBClient` | Shared `db_cmip6_future` across 3 sub-sections | Architectural promotion candidate. |
+| Variable-set filtering | Hard-coded per panel | `cmip6_active_variables` union with SQL `WHERE hazard IN (...)` + opt-in extras (SPEI / NTx35 / etc.) | Same. |
+| Raw / anomaly toggle | Anomaly-only | Toggle in all 3 sandbox sub-sections | Same. Worth offering in main notebook for the timeseries panel. |
+| Sign-agreement test | None | SNR proxy (Knutti & Sedláček 2013) via fade overlay | Pending [[CR-060]] (level percentiles) + [[CR-117]] (trend percentiles). |
+| Heat-map shaded table | None | `Show as table` view-toggle with adaptive per-variable shading | Sandbox-only. |
+
+Action: revisit this addendum when Pete schedules the promotion pass.
