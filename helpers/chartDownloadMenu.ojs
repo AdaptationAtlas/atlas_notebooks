@@ -82,6 +82,83 @@ function _chartDownloadMenu_findSvg(chartElement) {
 
 
 /**
+ * True when the chartElement is a "composite" — either multiple SVGs
+ * (facet grid, small multiples), an SVG plus HTML siblings (legend,
+ * caption, ranking panel), or pure HTML (heat-mapped table). For these
+ * shapes the legacy serialise-first-SVG PNG path drops content; we route
+ * PNG through html-to-image and disable the lossy single-SVG export.
+ *
+ * Returns false only for true single-SVG / single-figure roots whose
+ * existing fast-path PNG is correct.
+ */
+function _chartDownloadMenu_isComposite(el) {
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toLowerCase();
+  if (tag === "svg") return false;
+  if (tag === "figure") {
+    // Plot.plot's <figure> with exactly one <svg> child and no other
+    // meaningful element children (only <style> or whitespace) is the
+    // single-svg fast path; anything else is composite.
+    const directChildren = Array.from(el.children);
+    const svgs = directChildren.filter(c => c.tagName && c.tagName.toLowerCase() === "svg");
+    const others = directChildren.filter(c => {
+      if (!c.tagName) return false;
+      const t = c.tagName.toLowerCase();
+      return t !== "svg" && t !== "style";
+    });
+    return svgs.length !== 1 || others.length > 0;
+  }
+  return true;
+}
+
+
+/**
+ * Lazy-load html-to-image (MIT, ~30 KB ESM from esm.sh). Cached on the
+ * function itself so subsequent calls reuse the same promise — first
+ * PNG click on a composite chart pays the import latency, the rest are
+ * instant. Top-level `await import()` would block every dependent cell
+ * until the CDN responds; the lazy form keeps cell evaluation snappy.
+ */
+function _chartDownloadMenu_loadHtmlToImage() {
+  if (!_chartDownloadMenu_loadHtmlToImage._pending) {
+    _chartDownloadMenu_loadHtmlToImage._pending =
+      import("https://esm.sh/html-to-image@1.11.13");
+  }
+  return _chartDownloadMenu_loadHtmlToImage._pending;
+}
+
+
+/**
+ * Build an async PNG capture function for a composite element. Returns
+ * `() => Promise<Blob>` suitable for the `pngOverride` hook below.
+ *
+ * Block-container quirk: any block-level wrapper around a Plot.plot
+ * chart inflates to its parent column (Plot.plot's `title:` renders as
+ * an <h2> whose bottom-border anchors at the parent's full width), so
+ * html-to-image would otherwise capture the empty page column. We
+ * temporarily force the rootElement to display:inline-block so layout
+ * shrinks to the chart's content width, capture, then restore in
+ * `finally` so the live page doesn't reflow visibly.
+ */
+function compositePng(rootElement) {
+  return async () => {
+    const lib = await _chartDownloadMenu_loadHtmlToImage();
+    const prevDisplay = rootElement.style.display;
+    rootElement.style.display = "inline-block";
+    try {
+      return await lib.toBlob(rootElement, {
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
+        cacheBust: true,
+      });
+    } finally {
+      rootElement.style.display = prevDisplay;
+    }
+  };
+}
+
+
+/**
  * Serialise an SVG element so it renders standalone (in Illustrator
  * or via <img>.src). Ensures xmlns + xmlns:xlink + width + height
  * attributes are set on the clone. Doesn't mutate the live SVG.
@@ -414,8 +491,14 @@ function chartDownloadMenu(chartElement, opts) {
   const data = o.data;
   const csvColumns = o.csvColumns;
   const hasData = Array.isArray(data) && data.length > 0;
-  const pngOverride = o.pngOverride;
-  const disableSvg = !!o.disableSvg;
+  // Auto-detect composite shapes (multi-SVG grids, SVG + HTML legend
+  // wrappers, pure HTML tables). For these the legacy first-SVG path
+  // drops content, so we route PNG through html-to-image (via
+  // compositePng) and suppress the lossy single-SVG menu item. Callers
+  // can still force explicit values via opts.pngOverride / opts.disableSvg.
+  const composite = _chartDownloadMenu_isComposite(chartElement);
+  const pngOverride = o.pngOverride || (composite ? compositePng(chartElement) : null);
+  const disableSvg = o.disableSvg !== undefined ? !!o.disableSvg : composite;
 
   // Find the SVG for PNG/SVG export. CSV doesn't need it.
   const svg = _chartDownloadMenu_findSvg(chartElement);
@@ -505,8 +588,11 @@ function chartDownloadButton(chartElement, opts) {
   const data = o.data;
   const csvColumns = o.csvColumns;
   const hasData = Array.isArray(data) && data.length > 0;
-  const pngOverride = o.pngOverride;
-  const disableSvg = !!o.disableSvg;
+  // Same composite auto-detection as chartDownloadMenu — keeps the
+  // button variant consistent with the wrapper variant.
+  const composite = _chartDownloadMenu_isComposite(chartElement);
+  const pngOverride = o.pngOverride || (composite ? compositePng(chartElement) : null);
+  const disableSvg = o.disableSvg !== undefined ? !!o.disableSvg : composite;
 
   const svg = _chartDownloadMenu_findSvg(chartElement);
   const pngAvailable = !!svg || typeof pngOverride === "function";
