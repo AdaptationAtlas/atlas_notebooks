@@ -2803,13 +2803,32 @@ loaderDiv("plotP4")
   const vMax = (!isAnomaly && isPTOT) ? (pct(0.95) ?? vMaxFull) : vMaxFull;
   const clip = v => Math.max(vMin, Math.min(vMax, v));
 
-  // Colour scale — diverging (anomaly) or sequential (absolute)
+  // Colour scale — variable-aware so PTOT honours the **hot = dry /
+  // cool = wet** convention shared across the notebook (temperatures
+  // keep warm-for-warm). Diverging in anomaly mode, sequential in raw.
+  const symHalf = Math.max(Math.abs(vMin), vMax, 1) * 2.2;
   const colourFn = isAnomaly
-    ? (v => cbMode ? d3.interpolatePuOr(0.5 - v / (Math.max(Math.abs(vMin), vMax, 1) * 2.2))
-                   : d3.interpolateRdBu(0.5 - v / (Math.max(Math.abs(vMin), vMax, 1) * 2.2)))
-    : (v => { const c = clip(v); return cbMode
-                   ? d3.interpolatePlasma(0.1 + 0.8 * (c - vMin) / (vMax - vMin || 1))
-                   : d3.interpolateInferno(0.05 + 0.9 * (c - vMin) / (vMax - vMin || 1)); });
+    ? (isPTOT
+        // BrBG: t=0 → brown (dry), t=1 → teal (wet). Positive PTOT
+        // anomaly maps to teal end (cool / wetter). PuOr (CB mode)
+        // reversed so blue end = wetter.
+        ? (v => cbMode
+            ? d3.interpolatePuOr(1 - (0.5 + v / symHalf))
+            : d3.interpolateBrBG(0.5 + v / symHalf))
+        // Temperature anomaly: RdBu reversed (positive = red = warm).
+        : (v => cbMode
+            ? d3.interpolatePuOr(0.5 - v / symHalf)
+            : d3.interpolateRdBu(0.5 - v / symHalf)))
+    : (isPTOT
+        // Raw PTOT: RdYlBu (low = red = dry, high = blue = wet);
+        // PuBu in CB mode keeps blue = wet.
+        ? (v => { const c = clip(v); const t = (c - vMin) / (vMax - vMin || 1);
+            return cbMode ? d3.interpolatePuBu(0.05 + 0.9 * t)
+                          : d3.interpolateRdYlBu(t); })
+        // Raw temperature: Inferno / Plasma (high temp = hot).
+        : (v => { const c = clip(v); const t = (c - vMin) / (vMax - vMin || 1);
+            return cbMode ? d3.interpolatePlasma(0.1 + 0.8 * t)
+                          : d3.interpolateInferno(0.05 + 0.9 * t); }));
 
   // Month angle: Jan at top (−π/2), clockwise, each wedge = 2π/12
   const wedge  = 2 * Math.PI / 12;
@@ -3876,10 +3895,14 @@ loaderDiv("plotP6")
         // Neutral palette so darker = more variable, never confused with wet/warm conventions.
         return cbMode ? d3.interpolateViridis(0.15 + 0.7 * t) : d3.interpolatePurples(0.15 + 0.7 * t);
       }
-      // Sequential Mean/Min/Max: for PTOT use BuGn (blue=wet), for temp Inferno (bright=hot)
+      // Sequential Mean/Min/Max — variable-aware palette per the
+      // notebook-wide **hot = dry / cool = wet** convention:
+      //   Wet variable (PTOT / SPEI) → RdYlBu / PuBu-CB: low=red=dry=hot,
+      //     high=blue=wet=cool.
+      //   Temperature → Inferno / Plasma-CB: high=bright=hot.
       return cbMode
-        ? d3.interpolatePlasma(t)
-        : isWetVar ? d3.interpolateBuGn(t) : d3.interpolateInferno(0.1 + 0.85 * t);
+        ? (isWetVar ? d3.interpolatePuBu(0.05 + 0.9 * t) : d3.interpolatePlasma(t))
+        : (isWetVar ? d3.interpolateRdYlBu(t) : d3.interpolateInferno(0.1 + 0.85 * t));
     }
     // Diverging direction by stat/variable:
     // temp: warm=red (1-t), wetvar: wet=blue (t)
@@ -5136,8 +5159,11 @@ loaderDiv("plotPeriodMaps")
       TAVG: { positive: "216, 90, 48",  negative: "29, 158, 117" },
       TMAX: { positive: "216, 90, 48",  negative: "29, 158, 117" },
       TMIN: { positive: "216, 90, 48",  negative: "29, 158, 117" },
-      // Precipitation: positive = wetter → teal; negative = drier → amber.
-      PTOT:      { positive: "29, 158, 117", negative: "186, 117, 23" },
+      // Precipitation: positive = wetter → teal (cool); negative = drier
+      // → coral (hot). Same coral used for temperature warming so the
+      // **hot = dry / cool = wet** convention reads visually consistent
+      // across the notebook (variable is read from the row label).
+      PTOT:      { positive: "29, 158, 117", negative: "216, 90, 48" },
       // Heat / water-stress / flood indices: more = bad → coral.
       NTx35:     { positive: "216, 90, 48",  negative: "29, 158, 117" },
       NTx40:     { positive: "216, 90, 48",  negative: "29, 158, 117" },
@@ -5331,14 +5357,18 @@ loaderDiv("plotPeriodMaps")
     : /* pos / sd */  [0, maxAbs];
   // Interpolator selection.
   //   SD view:     sequential warm (Reds / Viridis-CB).
-  //   Raw mean:    sequential — warm for temperature, blues for precipitation;
-  //                Viridis / Inferno in CB mode. NO diverging here because
-  //                raw values have no semantic zero crossing.
-  //   Anomaly:     diverging RdBu / BrBG, or warm/cool half when one-signed.
+  //   Raw mean:    sequential, variable-aware so the **hot = dry / cool =
+  //                wet** convention holds across the notebook.
+  //                  - Temperature → Inferno / OrRd (high temp = hot).
+  //                  - Precipitation → RdYlBu (low PTOT = red = dry,
+  //                    high PTOT = blue = wet); PuBu in CB mode.
+  //   Anomaly:     diverging — RdBu (temp; positive = red = warm) or
+  //                BrBG (PTOT; positive = teal = wet = cool). Half-
+  //                palette when the visible range is one-signed.
   const interp = (() => {
     if (stat !== "mean") return cbMode ? d3.interpolateViridis : d3.interpolateReds;
     if (isRawMode) {
-      if (isPTOT) return cbMode ? d3.interpolateViridis : d3.interpolateBlues;
+      if (isPTOT) return cbMode ? d3.interpolatePuBu : d3.interpolateRdYlBu;
       return cbMode ? d3.interpolateInferno : d3.interpolateOrRd;
     }
     if (isPTOT) {
@@ -6259,16 +6289,37 @@ loaderDiv("plotPeriodPolar")
   const rawDomHi = visibleVals.length ? Math.max(...visibleVals) : 1;
   const domLo = isRawMode ? rawDomLo : anomDomLo;
   const domHi = isRawMode ? rawDomHi : anomDomHi;
+  // Variable-aware palette so PTOT (and other wet-vs-dry variables in
+  // the future) honours the **hot = dry / cool = wet** convention Pete
+  // standardised across the notebook. Temperature stays warm-for-warm.
+  //   Anomaly:
+  //     - Temp: RdBu reversed → positive = red (warming).
+  //     - PTOT: BrBG (brown → teal) → positive = teal (wetter / cool),
+  //             negative = brown (drier / warm).
+  //   Raw (sequential):
+  //     - Temp: Inferno (low = dark / cool, high = yellow / hot).
+  //     - PTOT: RdYlBu (low = red / dry / hot, high = blue / wet / cool).
   const colourFn = isRawMode
     ? (v => {
         if (v == null || !Number.isFinite(v)) return "#eee";
         const t = (v - rawDomLo) / (rawDomHi - rawDomLo || 1);
+        if (isPTOT) {
+          // RdYlBu: t=0 → red (dry), t=1 → blue (wet). Already in the
+          // right direction. PuBu used in CB mode to keep blue=wet.
+          return cbMode ? d3.interpolatePuBu(0.05 + 0.9 * t) : d3.interpolateRdYlBu(t);
+        }
         return cbMode ? d3.interpolatePlasma(0.1 + 0.8 * t)
                       : d3.interpolateInferno(0.05 + 0.9 * t);
       })
     : (v => {
         if (v == null || !Number.isFinite(v)) return "#eee";
-        // Map v into [0, 1] then invert (RdBu has blue at 1, red at 0).
+        if (isPTOT) {
+          // BrBG: t=0 → brown (dry), t=0.5 → white (no change), t=1 → teal (wet).
+          // Map positive anomaly → teal end → cool. PuOr in CB mode.
+          const t = 0.5 + v / (scaleMax * 2.2);
+          return cbMode ? d3.interpolatePuOr(1 - t) : d3.interpolateBrBG(t);
+        }
+        // Temperature anomaly — RdBu reversed (positive = red = warm).
         const t = 0.5 - v / (scaleMax * 2.2);
         return cbMode ? d3.interpolatePuOr(t) : d3.interpolateRdBu(t);
       });
