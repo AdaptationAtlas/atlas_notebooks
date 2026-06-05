@@ -241,167 +241,18 @@ dom-to-image, MIT-licensed, ~30 KB ESM from Skypack). Better-tested
 foreignObject + computed-style handling, plus an `onclone` hook that
 lets us patch Plot's figure-with-style oddity before rasterise.
 
-All helpers live in a single OJS cell as a `chartExport` object. This avoids the "invalid binding" failure mode we hit when splitting per-binding fences — OJS / Quarto OJS cell-detection is fussy about which forms register as module-scope bindings.
+All helpers live in `helpers/chartExportV2.ojs` as a standalone OJS module — same import pattern as the existing `chartDownloadMenu.ojs`. Multi-statement bodies inside a single notebook ```{ojs}``` fence didn't reliably register their bindings (the "invalid binding" loop we kept hitting), so the helper code lives in a `.ojs` module file and the notebook just imports the names it needs.
 
 ```{ojs}
 //| output: false
-chartExport = {
-  // -------- Lazy CDN load of html-to-image ------------------------
-  // Top-level `await import()` would block every dependent cell until
-  // the CDN responds. Lazy form: the binding is available immediately;
-  // the actual fetch fires on first composite export click. State held
-  // on a mutable object so the cell body can stay `const`-only (some
-  // OJS-cell forms reject `let` at the top of a block-expression cell).
-  const cache = { lib: null, pending: null };
-  const loadLib = async () => {
-    if (cache.lib) return cache.lib;
-    if (!cache.pending) cache.pending = import("https://esm.sh/html-to-image@1.11.13");
-    cache.lib = await cache.pending;
-    return cache.lib;
-  };
-
-  // -------- Strategy detection ------------------------------------
-  // - bare <svg>                        → single-svg
-  // - <figure> with one inner <svg>     → plot-figure
-  //   (Plot.plot output — bake the figure's sibling <style> into the
-  //    SVG then route through the single-svg path so the export
-  //    bounds = SVG bounds, not figure bounds.)
-  // - everything else                   → composite-html2img
-  const detectStrategy = (rootElement) => {
-    if (!rootElement) return null;
-    if (rootElement.tagName?.toLowerCase() === "svg") return "single-svg";
-    if (rootElement.tagName?.toLowerCase() === "figure") {
-      const svgs = rootElement.querySelectorAll(":scope > svg");
-      if (svgs.length === 1) return "plot-figure";
-    }
-    return "composite-html2img";
-  };
-
-  // -------- Plot.plot figure-style bake ---------------------------
-  // Plot.plot wraps SVG inside <figure> with a sibling <style>. Inline-
-  // clone that style into the SVG so class-based fills survive a stand-
-  // alone export. Idempotent.
-  const bakeFigureStyles = (rootElement) => {
-    if (!rootElement || rootElement.tagName?.toLowerCase() !== "figure") return rootElement;
-    const svg = rootElement.querySelector(":scope > svg");
-    const styles = rootElement.querySelectorAll(":scope > style");
-    if (!svg || !styles.length) return rootElement;
-    for (const s of styles) {
-      if (svg.querySelector(":scope > style")) break;
-      svg.insertBefore(s.cloneNode(true), svg.firstChild);
-    }
-    return rootElement;
-  };
-
-  // -------- SVG serialise (xmlns + bbox sizing) -------------------
-  const serialiseSvg = (svg) => {
-    const clone = svg.cloneNode(true);
-    if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    if (!clone.getAttribute("xmlns:xlink")) clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-    const bbox = svg.getBoundingClientRect();
-    if (!clone.getAttribute("width"))  clone.setAttribute("width",  bbox.width);
-    if (!clone.getAttribute("height")) clone.setAttribute("height", bbox.height);
-    return new XMLSerializer().serializeToString(clone);
-  };
-
-  // -------- Resolve rootElement → SVG for single-svg paths -------
-  const resolveSvg = (rootElement) => {
-    bakeFigureStyles(rootElement);
-    if (rootElement.tagName?.toLowerCase() === "svg") return rootElement;
-    if (rootElement.tagName?.toLowerCase() === "figure") {
-      const inner = rootElement.querySelector(":scope > svg");
-      if (inner) return inner;
-    }
-    const fallback = rootElement.querySelector("svg");
-    if (fallback) return fallback;
-    throw new Error("No SVG found in rootElement for single-svg path");
-  };
-
-  // -------- Single-SVG fast PNG path ------------------------------
-  const singleSvgToPng = async (svg, scale) => {
-    const dpr = scale || 2;
-    const svgString = serialiseSvg(svg);
-    const bbox = svg.getBoundingClientRect();
-    const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    return new Promise((resolve, reject) => {
-      const im = new Image();
-      im.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width  = Math.max(1, Math.round(bbox.width  * dpr));
-        canvas.height = Math.max(1, Math.round(bbox.height * dpr));
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(im, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(b => {
-          URL.revokeObjectURL(url);
-          b ? resolve(b) : reject(new Error("canvas.toBlob returned null"));
-        }, "image/png");
-      };
-      im.onerror = e => { URL.revokeObjectURL(url); reject(new Error("Image() failed to parse single-svg payload")); };
-      im.src = url;
-    });
-  };
-
-  // -------- Public dispatchers ------------------------------------
-  const png = async (opts) => {
-    const { rootElement, scale, strategy } = opts || {};
-    const s = strategy || detectStrategy(rootElement);
-    if (s === "single-svg" || s === "plot-figure") {
-      return singleSvgToPng(resolveSvg(rootElement), scale);
-    }
-    const lib = await loadLib();
-    return lib.toBlob(rootElement, {
-      pixelRatio: scale || 2,
-      backgroundColor: "#ffffff",
-      cacheBust: true,
-    });
-  };
-
-  const svg = async (opts) => {
-    const { rootElement, strategy } = opts || {};
-    const s = strategy || detectStrategy(rootElement);
-    if (s === "single-svg" || s === "plot-figure") {
-      return serialiseSvg(resolveSvg(rootElement));
-    }
-    const lib = await loadLib();
-    const dataUrl = await lib.toSvg(rootElement, { backgroundColor: "#ffffff", cacheBust: true });
-    const prefix = "data:image/svg+xml;charset=utf-8,";
-    if (dataUrl.startsWith(prefix)) return decodeURIComponent(dataUrl.slice(prefix.length));
-    const b64Prefix = "data:image/svg+xml;base64,";
-    if (dataUrl.startsWith(b64Prefix)) return atob(dataUrl.slice(b64Prefix.length));
-    return dataUrl;
-  };
-
-  // CSV — RFC 4180-ish. UTF-8 BOM prefixed when written so Excel reads
-  // diacritics in admin names. Quotes fields containing commas / quotes
-  // / newlines.
-  const csv = (opts) => {
-    const { data, columns } = opts || {};
-    if (!Array.isArray(data) || data.length === 0) return "";
-    const cols = columns ?? Object.keys(data[0]);
-    const esc = v => {
-      if (v == null) return "";
-      const s = String(v);
-      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-      return s;
-    };
-    const header = cols.map(esc).join(",");
-    const body = data.map(row => cols.map(c => esc(row[c])).join(",")).join("\n");
-    return header + "\n" + body;
-  };
-
-  const triggerDownload = (blob, filename) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  return { detectStrategy, png, svg, csv, triggerDownload };
-}
+// Import the chart-export helpers from helpers/chartExportV2.ojs.
+import {
+  detectExportStrategyV2,
+  exportChartPngV2,
+  exportChartSvgV2,
+  exportDataCsvV2,
+  triggerDownloadV2,
+} from "/helpers/chartExportV2.ojs"
 ```
 
 ```{ojs}
@@ -412,7 +263,7 @@ chartExport = {
 // "Download ▾" while the dropdown lists the format choices. Click
 // outside closes the menu.
 exportBar = function({ rootElement, filename, data, csvColumns }) {
-  const strategy = chartExport.detectStrategy(rootElement);
+  const strategy = detectExportStrategyV2(rootElement);
   const badge = htl.html`<span style="
     font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
     padding:2px 6px;border-radius:3px;
@@ -467,8 +318,8 @@ exportBar = function({ rootElement, filename, data, csvColumns }) {
     closeMenu();
     setBusy("Rasterising…");
     try {
-      const blob = await chartExport.png({ rootElement, scale: 2 });
-      chartExport.triggerDownload(blob, `${filename}.png`);
+      const blob = await exportChartPngV2({ rootElement, scale: 2 });
+      triggerDownloadV2(blob, `${filename}.png`);
     } catch (e) {
       console.error("PNG export failed:", e);
       alert("PNG export failed: " + e.message);
@@ -481,9 +332,9 @@ exportBar = function({ rootElement, filename, data, csvColumns }) {
     closeMenu();
     setBusy("Serialising…");
     try {
-      const svgStr = await chartExport.svg({ rootElement });
+      const svgStr = await exportChartSvgV2({ rootElement });
       const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-      chartExport.triggerDownload(blob, `${filename}.svg`);
+      triggerDownloadV2(blob, `${filename}.svg`);
     } catch (e) {
       console.error("SVG export failed:", e);
       alert("SVG export failed: " + e.message);
@@ -495,10 +346,10 @@ exportBar = function({ rootElement, filename, data, csvColumns }) {
   csvItem.onclick = () => {
     if (!hasData) return;
     closeMenu();
-    const csvStr = chartExport.csv({ data, columns: csvColumns });
+    const csvStr = exportDataCsvV2({ data, columns: csvColumns });
     // UTF-8 BOM so Excel recognises diacritics.
     const blob = new Blob(["﻿", csvStr], { type: "text/csv;charset=utf-8" });
-    chartExport.triggerDownload(blob, `${filename}.csv`);
+    triggerDownloadV2(blob, `${filename}.csv`);
   };
 
   menu.append(pngItem, svgItem, csvItem);
