@@ -1,0 +1,184 @@
+// quickInsightExtremes — reusable Quick Insight panel that names the
+// top-N and bottom-N admin1s by signal magnitude. Replaces the prior
+// "country-wide central value + range" prose with the same prose PLUS
+// an explicit ranking panel below.
+//
+// Callers supply:
+//   cells:       array of { admin1_name, mean, sd?, robust? } objects.
+//                Only `admin1_name` and `mean` are required; the helper
+//                ignores nullable/NaN mean values (counted as excluded).
+//   variable:    "TAVG" / "TMAX" / "TMIN" / "PTOT" / etc. — drives the
+//                column labels ("Warmest"/"Coolest", "Wettest"/"Driest")
+//                and the dot colours (hot=dry / cool=wet convention for
+//                PTOT, warm-for-warm for temperature).
+//   unit:        "°C" / "mm" / etc. — appended to every value.
+//   topN:        default 5. Top-N highest + bottom-N lowest admin1s.
+//   proseLead:   optional prose paragraph supplied by the caller —
+//                context summary (scenario, period, scope-mean value,
+//                etc.). The helper appends a "Range across admin1s:…"
+//                clause and (when n ≤ 2) inlines the admin1 names.
+//   proseTail:   optional appended paragraph rendered between the
+//                prose and the ranking panel — typically the robustness
+//                / SNR count carried over from the existing Quick Insight.
+//   emptyMsg:    italic fallback when no valid cells.
+//
+// Degradation rules:
+//   - n ≥ 2 × topN  → two-column "Highest" / "Lowest" ranking panel.
+//   - 3 ≤ n < 2N    → single ranked list (no top/bottom split).
+//   - n ≤ 2         → ranking panel omitted; names inlined in prose.
+//   - n  = 0        → emptyMsg only.
+//   - Any cell with non-finite `mean` is excluded from ranking; the
+//     caption notes the excluded count.
+//
+// Returns a single `htl.html` block (the prose + the panel) suitable for
+// direct insertion into the section's display area. Callers do NOT pass
+// this through `md\`...\`` / `mdInsight()` — the helper already builds
+// the HTML structure.
+
+function quickInsightExtremes({
+  cells,
+  variable,
+  unit,
+  topN = 5,
+  proseLead = "",
+  proseTail = "",
+  emptyMsg = "No data.",
+} = {}) {
+  // ----- Variable-aware labels + dot palette -----
+  // Hot = dry / cool = wet for PTOT (and other wet variables when added);
+  // warm-for-warm for temperatures. Same dot colours used inline in the
+  // single-list case (positional split: top half uses `dotPos`, bottom
+  // half uses `dotNeg`).
+  const LABELS = {
+    TAVG: { top: "Warmest admin1s",  bottom: "Coolest admin1s",
+            dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
+    TMAX: { top: "Warmest admin1s",  bottom: "Coolest admin1s",
+            dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
+    TMIN: { top: "Warmest admin1s",  bottom: "Coolest admin1s",
+            dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
+    // PTOT: wettest = cool (positive) → top; driest = hot (negative) → bottom.
+    PTOT: { top: "Wettest admin1s",  bottom: "Driest admin1s",
+            dotPos: "rgba(29,158,117,0.85)", dotNeg: "rgba(216,90,48,0.85)" },
+    "SPEI-03": { top: "Wettest admin1s",  bottom: "Driest admin1s",
+                 dotPos: "rgba(29,158,117,0.85)", dotNeg: "rgba(216,90,48,0.85)" },
+    "SPEI-12": { top: "Wettest admin1s",  bottom: "Driest admin1s",
+                 dotPos: "rgba(29,158,117,0.85)", dotNeg: "rgba(216,90,48,0.85)" },
+    _default: { top: "Highest admin1s", bottom: "Lowest admin1s",
+                dotPos: "rgba(216,90,48,0.85)", dotNeg: "rgba(29,158,117,0.85)" },
+  };
+  const lbl = LABELS[variable] ?? LABELS._default;
+
+  // ----- Guard: no data -----
+  if (!Array.isArray(cells) || cells.length === 0) {
+    return htl.html`<p style="margin:0;color:#888;font-style:italic;">${emptyMsg}</p>`;
+  }
+
+  // ----- Filter to finite-mean cells, count exclusions -----
+  const valid = cells.filter(c => c && Number.isFinite(Number(c.mean)));
+  const excluded = cells.length - valid.length;
+  if (!valid.length) {
+    return htl.html`<p style="margin:0;color:#888;font-style:italic;">${emptyMsg}</p>`;
+  }
+
+  // Sort descending so [0] = highest, [n-1] = lowest.
+  const sorted = [...valid]
+    .map(c => ({ ...c, mean: Number(c.mean) }))
+    .sort((a, b) => b.mean - a.mean);
+  const n = sorted.length;
+
+  // ----- Range across admin1s -----
+  const meanVals = sorted.map(c => c.mean);
+  const vMin = d3.min(meanVals);
+  const vMax = d3.max(meanVals);
+
+  const isPTOT = variable === "PTOT";
+  // 2 dp for everything except large PTOT magnitudes (mm).
+  const fmt = v => {
+    if (v == null || !Number.isFinite(v)) return "—";
+    const absV = Math.abs(v);
+    const dp = (isPTOT && absV >= 10) ? 0 : 2;
+    const sign = v > 0 ? "+" : "";
+    return sign + Number(v).toFixed(dp);
+  };
+
+  // ----- Build the prose paragraph -----
+  // Caller's lead first; helper appends the range clause + (for n ≤ 2)
+  // the inlined names. proseTail rendered as a separate paragraph.
+  let prose = proseLead ? proseLead.trim() : "";
+  // Append range only if lead doesn't already include the phrase.
+  if (!/range across admin1s/i.test(prose)) {
+    prose += (prose ? " " : "") +
+      `Range across admin1s: ${fmt(vMin)} to ${fmt(vMax)} ${unit}.`;
+  }
+  if (n <= 2) {
+    const inline = sorted
+      .map(c => `${c.admin1_name} (${fmt(c.mean)} ${unit})`)
+      .join(", ");
+    prose += ` Selected admin1s: ${inline}.`;
+  }
+
+  // ----- Caption (data source / n / exclusions) -----
+  const captionN = excluded > 0
+    ? `ranked over ${n} of ${cells.length} admin1s; ${excluded} excluded for missing data`
+    : `ranked over ${n} admin1s`;
+  const captionStat = `statistic: ${variable}${unit ? ` (${unit})` : ""}`;
+
+  // ----- Row + header builders -----
+  const fmtCell = c => htl.html`<span style="flex:0 0 auto;color:#444;font-variant-numeric:tabular-nums;">${fmt(c.mean)} ${unit}</span>`;
+  const rowOf = (c, dotColour) => htl.html`<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:0.88em;line-height:1.4;">
+    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColour};flex:0 0 auto;"></span>
+    <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#222;">${c.admin1_name}</span>
+    ${fmtCell(c)}
+  </div>`;
+  const colHeader = (text) => htl.html`<div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.05em;padding-bottom:4px;border-bottom:1px solid #e8e8e8;margin-bottom:4px;">${text}</div>`;
+
+  // Render prose via `md` so caller-supplied markdown (e.g. **bold**) is
+  // honoured. proseLead / proseTail are plain strings on input.
+  const proseNode = md`${prose}`;
+  const tailNode  = proseTail ? md`${proseTail}` : null;
+
+  // ----- Render path A: n ≤ 2 (no panel; names inlined in prose) -----
+  if (n <= 2) {
+    return htl.html`<div>
+      <div style="margin:0 0 6px;color:#222;line-height:1.5;">${proseNode}</div>
+      ${tailNode ? htl.html`<div style="margin:0;color:#555;font-size:0.92em;line-height:1.5;">${tailNode}</div>` : ""}
+    </div>`;
+  }
+
+  // ----- Render path B: collapsed single ranked list (n ≤ 2 × topN) -----
+  if (n <= 2 * topN) {
+    const list = sorted.map((c, i) => {
+      const isTopHalf = i < n / 2;
+      return rowOf(c, isTopHalf ? lbl.dotPos : lbl.dotNeg);
+    });
+    const collapsedTitle = `${lbl.top.replace(" admin1s", "")} → ${lbl.bottom.replace(" admin1s", "")} · all ${n} ranked`;
+    return htl.html`<div>
+      <div style="margin:0 0 8px;color:#222;line-height:1.5;">${proseNode}</div>
+      ${tailNode ? htl.html`<div style="margin:0 0 8px;color:#555;font-size:0.92em;line-height:1.5;">${tailNode}</div>` : ""}
+      <div style="border:1px solid #eee;border-radius:4px;padding:8px 12px;background:#fafafa;max-width:380px;">
+        ${colHeader(collapsedTitle)}
+        ${list}
+      </div>
+      <p style="margin:6px 0 0;color:#888;font-style:italic;font-size:0.78em;">${captionN} · ${captionStat}</p>
+    </div>`;
+  }
+
+  // ----- Render path C: full two-column top-N + bottom-N panel -----
+  const top    = sorted.slice(0, topN);
+  const bottom = sorted.slice(-topN).reverse();   // ascending so lowest first
+  return htl.html`<div>
+    <div style="margin:0 0 8px;color:#222;line-height:1.5;">${proseNode}</div>
+    ${tailNode ? htl.html`<div style="margin:0 0 8px;color:#555;font-size:0.92em;line-height:1.5;">${tailNode}</div>` : ""}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:680px;">
+      <div style="border:1px solid #eee;border-radius:4px;padding:8px 12px;background:#fafafa;">
+        ${colHeader(lbl.top)}
+        ${top.map(c => rowOf(c, lbl.dotPos))}
+      </div>
+      <div style="border:1px solid #eee;border-radius:4px;padding:8px 12px;background:#fafafa;">
+        ${colHeader(lbl.bottom)}
+        ${bottom.map(c => rowOf(c, lbl.dotNeg))}
+      </div>
+    </div>
+    <p style="margin:6px 0 0;color:#888;font-style:italic;font-size:0.78em;">${captionN} · ${captionStat}</p>
+  </div>`;
+}

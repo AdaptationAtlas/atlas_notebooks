@@ -768,6 +768,7 @@ import { loaderDiv, loaderContent, setLoaderStage } from "/helpers/uiComponents.
 // Same helper used by the main notebook. Wrap a chart element via
 // `chartDownloadMenu(chartElement, { filename: "..." })`.
 import { chartDownloadMenu } from "/helpers/chartDownloadMenu.ojs";
+import { quickInsightExtremes } from "/helpers/quickInsightExtremes.ojs";
 ```
 
 ```{ojs}
@@ -4287,44 +4288,61 @@ md`### ${_lang(nbText.sections.quickInsightLabel)}`
 ```
 
 ```{ojs}
-mdInsight(quickInsightP6)
+quickInsightP6
 ```
 
 ```{ojs}
-// Quick insight — template-driven body for P6.
+// P6 Quick Insight via the shared `quickInsightExtremes` helper. Same
+// sig-trend counts as before live in the prose tail; the helper adds
+// a named ranking of the admin1s with the strongest +/- decadal trends
+// (Theil-Sen slope per decade, sign-tested by Mann-Kendall).
 quickInsightP6 = (() => {
   const t = nbText.sections.p6.quickInsight;
-  if (!p6_obs_raw || !p6_obs_raw.length) return _lang(t.loading);
+  if (!p6_obs_raw || !p6_obs_raw.length) return htl.html`<p style="margin:0;color:#888;font-style:italic;">${_lang(t.loading)}</p>`;
   const isPTOT = p6_controls.variable === "PTOT";
   const isSPEI = p6_controls.variable.startsWith("SPEI");
+  // Per-admin1 Theil-Sen slope + Mann-Kendall significance, mirroring
+  // the trend-map computation in the chart cell above.
   const byKey = d3.group(p6_obs_raw, d => d.join_key);
-  let sigPos = 0, sigNeg = 0, ns = 0, total = 0;
-  for (const [, rs] of byKey) {
-    total++;
+  let sigPos = 0, sigNeg = 0, ns = 0;
+  const cells = [];
+  for (const [name, rs] of byKey) {
     const sorted = rs.sort((a,b) => a.year - b.year);
     const vals = sorted.map(d => d.value_mean);
     const years = sorted.map(d => d.year);
     if (vals.length < 15) { ns++; continue; }
     const mk = mannKendall(vals, { xValues: years, minN: 15 });
+    const slope = mk?.slopePerDecade;
     if (mk?.significant5pct) {
-      if ((mk.slopePerDecade ?? 0) > 0) sigPos++; else sigNeg++;
+      if ((slope ?? 0) > 0) sigPos++; else sigNeg++;
     } else {
       ns++;
     }
+    if (Number.isFinite(slope)) {
+      cells.push({ admin1_name: name, mean: slope, robust: !!mk?.significant5pct });
+    }
   }
-  if (!total) return _lang(t.noScope);
+  const total = sigPos + sigNeg + ns;
+  if (!total || !cells.length) return htl.html`<p style="margin:0;color:#888;font-style:italic;">${_lang(t.noScope)}</p>`;
   const posLabel = isPTOT || isSPEI ? "wetting" : "warming";
   const negLabel = isPTOT || isSPEI ? "drying"  : "cooling";
-  return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
-    { name: "sigPos",   value: sigPos },
-    { name: "total",    value: total },
-    { name: "posLabel", value: posLabel },
-    { name: "variable", value: p6_controls.variable },
-    { name: "season",   value: p6_controls.season },
-    { name: "sigNeg",   value: sigNeg },
-    { name: "negLabel", value: negLabel },
-    { name: "ns",       value: ns },
-  ]);
+  // Unit for the trend stat — slope is per decade.
+  const unit = isPTOT
+    ? "mm/decade"
+    : isSPEI
+      ? "/decade"
+      : "°C/decade";
+  // Tail prose carries the existing significance summary.
+  const proseTail = `**${sigPos} of ${total} admin1s** show a significant ${posLabel} trend (Theil-Sen + Mann-Kendall, p < 0.05). **${sigNeg}** show a significant ${negLabel} trend; **${ns}** are non-significant or have <15 years of data.`;
+  const proseLead = `Decadal trend ranking for **${p6_controls.variable}** (${p6_controls.season} season) across **${cells.length} admin1s** in scope.`;
+  return quickInsightExtremes({
+    cells,
+    variable: p6_controls.variable,
+    unit,
+    topN: 5,
+    proseLead,
+    proseTail,
+  });
 })();
 ```
 
@@ -5624,57 +5642,58 @@ md`### ${_lang(nbText.sections.quickInsightLabel)}`
 ```
 
 ```{ojs}
-mdInsight(quickInsightPeriodMaps)
+quickInsightPeriodMaps
 ```
 
 ```{ojs}
+// Quick Insight now delegates the ranking + degradation logic to the
+// shared `quickInsightExtremes` helper. This cell builds the cells
+// array + the context-summary prose lead + the robustness paragraph,
+// then hands off to the helper for the prose + ranking panel.
 quickInsightPeriodMaps = (() => {
   const t = nbText.sections.periodMaps.quickInsight;
-  if (!periodMaps_data || !periodMaps_data.length) return _lang(t.loading);
+  if (!periodMaps_data || !periodMaps_data.length) return htl.html`<p style="margin:0;color:#888;font-style:italic;">${_lang(t.loading)}</p>`;
   const ssps   = Array.isArray(periodMaps_controls.ssp) && periodMaps_controls.ssp.length
     ? periodMaps_controls.ssp : ["ssp245"];
-  // Default insight focus: SSP2-4.5 mid-century (2041-2060) if available,
-  // else first selected SSP. Frames "what the mid-century looks like under
-  // the canonical scenario" — same framing as the main notebook.
+  // Insight focus: SSP2-4.5 mid-century (2041-2060) if available, else
+  // first selected SSP. Single season pulled from the section's dropdown.
   const ssp    = ssps.includes("ssp245") ? "ssp245" : ssps[0];
   const period = "2041-2060";
   const sspLab = ({ ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" })[ssp] ?? ssp;
-  // Insight prose uses the single selected season (controls is now a
-  // single-select dropdown — back-compat defaults to "annual" if missing).
   const seasonForInsight = typeof periodMaps_controls.season === "string"
     ? periodMaps_controls.season : "annual";
   const sel    = periodMaps_data.filter(d =>
     d.scenario === ssp && d.period === period && d.season === seasonForInsight);
-  if (!sel.length) return _lang(t.noData);
-  const isPTOT = periodMaps_controls.variable === "PTOT";
-  const unit   = isPTOT ? "mm" : "°C";
-  const rows   = sel
-    .map(d => ({ m: Number(d.mean_anomaly), s: Number(d.sd_anomaly) }))
-    .filter(r => Number.isFinite(r.m));
-  if (!rows.length) return _lang(t.noData);
-  const meanAvg = d3.mean(rows, r => r.m);
-  const meanMin = d3.min(rows,  r => r.m);
-  const meanMax = d3.max(rows,  r => r.m);
-  // Robustness counter under the |mean| ≥ SD criterion (SNR ≥ 1 ≈ ≥84% GCM
-  // sign-agreement under a Gaussian assumption — see About-this-section).
-  // Quick-insight reports the share that PASSES the test (positive framing)
-  // since the rendered choropleth fades the failing admin1s and this line
-  // sits directly below it.
-  const robustRows = rows.filter(r => Number.isFinite(r.s) && Math.abs(r.m) >= r.s);
-  const robustCount = robustRows.length;
-  const robustPct   = (robustCount / rows.length * 100).toFixed(0);
-  return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
-    { name: "ssp",        value: sspLab },
-    { name: "period",     value: period },
-    { name: "variable",   value: periodMaps_controls.variable },
-    { name: "total",      value: rows.length },
-    { name: "mean",       value: (meanAvg >= 0 ? "+" : "") + meanAvg.toFixed(2) },
-    { name: "unit",       value: unit },
-    { name: "min",        value: (meanMin >= 0 ? "+" : "") + meanMin.toFixed(2) },
-    { name: "max",        value: (meanMax >= 0 ? "+" : "") + meanMax.toFixed(2) },
-    { name: "robust",     value: robustCount },
-    { name: "robustPct",  value: robustPct },
-  ]);
+  if (!sel.length) return htl.html`<p style="margin:0;color:#888;font-style:italic;">${_lang(t.noData)}</p>`;
+  const isPTOT  = periodMaps_controls.variable === "PTOT";
+  const unit    = isPTOT ? "mm" : "°C";
+  // Build cells in the helper's contract: { admin1_name, mean, sd, robust }.
+  const cells = sel
+    .map(d => {
+      const m = Number(d.mean_anomaly);
+      const s = Number(d.sd_anomaly);
+      const robust = Number.isFinite(s) && Math.abs(m) >= s;
+      return { admin1_name: d.admin1_name, mean: m, sd: s, robust };
+    })
+    .filter(c => Number.isFinite(c.mean));
+  if (!cells.length) return htl.html`<p style="margin:0;color:#888;font-style:italic;">${_lang(t.noData)}</p>`;
+  const meanAvg = d3.mean(cells, c => c.mean);
+  const robustCount = cells.filter(c => c.robust).length;
+  const robustPct   = (robustCount / cells.length * 100).toFixed(0);
+  // Context-summary lead — preserves the existing wording from
+  // nbText.periodMaps.quickInsight.ok minus the (now-unused) min/max
+  // placeholders, which the helper renders as a "Range across admin1s"
+  // clause downstream.
+  const proseLead = `Under **${sspLab}** in **${period}** (${seasonForInsight} season), ensemble-mean ${periodMaps_controls.variable} anomaly across **${cells.length} admin1s** in scope: **${(meanAvg >= 0 ? "+" : "") + meanAvg.toFixed(2)} ${unit}**.`;
+  const proseTail = `**${robustCount} of ${cells.length} admin1s (${robustPct}%)** pass the signal-to-noise robustness test (|mean| ≥ inter-model SD ≈ ≥84% GCM sign-agreement); the rest are faded on the map above.`;
+  return quickInsightExtremes({
+    cells,
+    variable: periodMaps_controls.variable,
+    unit,
+    topN: 5,
+    proseLead,
+    proseTail,
+  });
 })();
 ```
 
