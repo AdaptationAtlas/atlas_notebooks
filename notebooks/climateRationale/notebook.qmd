@@ -4534,10 +4534,14 @@ dbHazardExposure = {
   // this gate. The sole consumer (hazardExposure_dataAll) already
   // returns [] while !hazardExposureVisible, so the sentinel is
   // belt-and-braces.
+  //
+  // CR-091: three severity-tier parquets are now on S3. Pick the path
+  // matching the current hazardSeverity from s3_paths; fall back to
+  // the legacy s3_path field for forward-compatibility.
   if (!hazardExposureVisible) return { query: async () => [] };
-  const _cleaned = data_obj
-    .filter((d) => d.key === "hazard_exposure")
-    .map((item) => ({ ...item, s3_path: patchWindowsCache(item.s3_path) }));
+  const _item = data_obj.find((d) => d.key === "hazard_exposure");
+  const _path = (_item.s3_paths?.[hazardSeverity]) ?? _item.s3_path;
+  const _cleaned = [{ ..._item, s3_path: patchWindowsCache(_path) }];
   return await generateDB(_cleaned);
 }
 ```
@@ -5115,7 +5119,16 @@ futureProjections_dataAll = {
     mean,
     mean_anomaly,
     sd,
-    sd_anomaly
+    sd_anomaly,
+    -- CR-060 percentile columns shipped 2026-06-01 (canonical 20/20 PASS).
+    -- 17–83 % inter-model range = AR6 'likely' calibrated-language band;
+    -- replaces the prior mean ± 1 σ ribbon in timeseries_futureProjections
+    -- and the dot-and-whisker bounds in summary_futureProjections.
+    q17,
+    q83,
+    q17_anomaly,
+    q83_anomaly,
+    n_models
   FROM futureProjections
     where 1=1
     ${iso3Predicate}
@@ -7478,16 +7491,23 @@ timeseries_futureProjections = () => {
     : "";
   const _mainTitle = `${_variableName}${_anomalyText} — Season: ${_season}`;
   const plotValue_mean = _showAnomaly ? "mean_anomaly" : "mean";
-  const plotValue_sd = _showAnomaly ? "sd_anomaly" : "sd";
+  // CR-060: ribbon uses the inter-model 17–83 % range (AR6 'likely')
+  // baked into the parquet, not a synthetic mean ± 1 σ. Anomaly toggle
+  // routes to anomaly-percentile columns; raw mode uses absolute
+  // percentile columns. Falls back to mean if the columns aren't
+  // present (defensive — they SHOULD be there per CR-060 canonical).
+  const plotValue_q17 = _showAnomaly ? "q17_anomaly" : "q17";
+  const plotValue_q83 = _showAnomaly ? "q83_anomaly" : "q83";
 
   const formatScenario = (d) => d?.toUpperCase();
   const scenariosInData = [
     ...new Set(_data.map((d) => formatScenario(d.scenario))),
   ];
 
-  // Ribbon bounds: ±1σ across the 18 CMIP6 GCMs.
-  const ribbonUpper = (d) => d[plotValue_mean] + (d[plotValue_sd] ?? 0);
-  const ribbonLower = (d) => d[plotValue_mean] - (d[plotValue_sd] ?? 0);
+  // Ribbon bounds: inter-model 17 % / 83 % percentiles across the
+  // ensemble (n_models per row, varies slightly across periods).
+  const ribbonUpper = (d) => d[plotValue_q83] ?? d[plotValue_mean];
+  const ribbonLower = (d) => d[plotValue_q17] ?? d[plotValue_mean];
 
   const yDataMin = d3.min(_data, ribbonLower);
   const yDataMax = d3.max(_data, ribbonUpper);
@@ -7675,6 +7695,22 @@ timeseries_futureProjections = () => {
                 label: _lang(general_translations.anomaly),
                 value: (d) => d.mean_anomaly,
               },
+              // CR-060 inter-model percentile band — shows the AR6 'likely'
+              // 17–83 % range alongside the mean. Hidden when the columns
+              // aren't present so older parquets don't break the tooltip.
+              q17_83: {
+                label: "Inter-model 17–83 %",
+                value: (d) => {
+                  const lo = d[plotValue_q17];
+                  const hi = d[plotValue_q83];
+                  return lo == null || hi == null ? "—" :
+                    `${d3.format(",.2f")(lo)} to ${d3.format(",.2f")(hi)}`;
+                },
+              },
+              n_models: {
+                label: "Ensemble size",
+                value: (d) => d.n_models ?? "—",
+              },
             },
             format: {
               Admin: true,
@@ -7682,6 +7718,8 @@ timeseries_futureProjections = () => {
               year: true,
               varMean: true,
               varMeanAnomaly: true,
+              q17_83: true,
+              n_models: true,
               x: false,
               y: false,
               fx: false,
@@ -7693,9 +7731,19 @@ timeseries_futureProjections = () => {
     });
   };
 
+  // CR-060 caption update: inter-model ribbon is now the calibrated
+  // 17–83 % percentile band straight from the parquet (no Gaussian
+  // approximation). The ensemble size varies slightly across periods
+  // because not every GCM produced every (scenario × variable ×
+  // season × year) row — surface the most common count below.
+  const nModelsCounts = d3.rollup(_data, v => v.length, d => d.n_models);
+  const nModelsMode = nModelsCounts.size > 0
+    ? d3.greatest([...nModelsCounts.entries()], ([, c]) => c)?.[0]
+    : null;
+  const nModelsText = nModelsMode != null ? ` (${nModelsMode}-member ensemble)` : "";
   const captionLines = [
     "Annual ensemble-mean values for the selected 20-year period (one year per dot), by admin1 region, under each chosen SSP scenario.",
-    "Line = mean across 18 NEX-GDDP-CMIP6 GCMs (r1i1p1f1 realization). Shaded ribbon = ensemble mean ± 1 standard deviation across the 18 models. Assuming an approximately-normal inter-model distribution, this band corresponds to the IPCC AR6 'likely' (17–83%) range.",
+    `Line = mean across the NEX-GDDP-CMIP6 GCMs (r1i1p1f1 realization). Shaded ribbon = inter-model 17–83 % range${nModelsText} — the IPCC AR6 'likely' calibrated-language band, computed directly from the per-GCM percentiles (no Gaussian approximation).`,
   ];
   if (_showAnomaly) {
     captionLines.push(
@@ -7744,7 +7792,11 @@ summary_futureProjections = () => {
     : "";
   const _mainTitle = `${_variableName}${_anomalyText} — Season: ${_season} — ${futurePeriodSelect}`;
   const plotValue_mean = _showAnomaly ? "mean_anomaly" : "mean";
-  const plotValue_sd = _showAnomaly ? "sd_anomaly" : "sd";
+  // CR-060: whiskers use the inter-model 17–83 % percentile range
+  // (AR6 'likely'), averaged across the years of the selected
+  // timeperiod. Falls back to the mean when columns are missing.
+  const plotValue_q17 = _showAnomaly ? "q17_anomaly" : "q17";
+  const plotValue_q83 = _showAnomaly ? "q83_anomaly" : "q83";
 
   // Canonical SSP ordering for the y-axis (top-to-bottom).
   const canonicalOrder = ["ssp126", "ssp245", "ssp370", "ssp585"];
@@ -7760,20 +7812,24 @@ summary_futureProjections = () => {
     scenariosInData.map((s, i) => [s, paletteColors[i % paletteColors.length]]),
   );
 
-  // Aggregate per (admin × scenario): mean of annual `mean` and mean of
-  // annual `sd`. Plot.js doesn't need a separate groupBy mark — we
-  // pre-aggregate into one row per (admin, scenario).
+  // Aggregate per (admin × scenario): mean of annual `mean` plus the
+  // mean-of-annual q17 / q83 percentiles. Plot.js doesn't need a
+  // separate groupBy mark — we pre-aggregate into one row per (admin,
+  // scenario). Averaging the per-year inter-model percentiles is the
+  // right shape for a 20-year-window dot-and-whisker: each row is "the
+  // average year's 17–83 % spread", not "the spread of multi-year
+  // means" (which would shrink the band toward the central tendency).
   const groups = d3.group(
     _data,
     (d) => d.adminName,
     (d) => d.scenario.toLowerCase(),
   );
   const summary = [];
-  // Baseline row per admin: 1995–2014 mean ± interannual σ. In anomaly
-  // mode the centre is zero by definition; in absolute mode it sits at the
-  // per-admin baselineMean. Rendered as a distinct grey whisker above the
-  // SSP rows so the future projections can be compared to "where the
-  // recent past sat" inside the same chart.
+  // Baseline row per admin: 1995–2014 mean ± interannual σ. This row
+  // shows interannual variability (within the observed period), not
+  // inter-model spread — different concept from the SSP whiskers,
+  // intentionally kept so the reader can compare the future model
+  // uncertainty against the historical interannual swing.
   const baselineLabel = "1995–2014";
   const adminsInData = [...new Set(_data.map((d) => d.adminName))];
   for (const a of adminsInData) {
@@ -7785,7 +7841,8 @@ summary_futureProjections = () => {
       scenario: "baseline",
       scenarioUpper: baselineLabel,
       mean: _showAnomaly ? 0 : m,
-      sd: s ?? 0,
+      low: (_showAnomaly ? 0 : m) - (s ?? 0),
+      high: (_showAnomaly ? 0 : m) + (s ?? 0),
     });
   }
   for (const [adminName, byScen] of groups) {
@@ -7793,16 +7850,21 @@ summary_futureProjections = () => {
       const meanVals = scenRows
         .map((r) => r[plotValue_mean])
         .filter((v) => v != null);
-      const sdVals = scenRows
-        .map((r) => r[plotValue_sd])
+      const q17Vals = scenRows
+        .map((r) => r[plotValue_q17])
+        .filter((v) => v != null);
+      const q83Vals = scenRows
+        .map((r) => r[plotValue_q83])
         .filter((v) => v != null);
       if (meanVals.length === 0) continue;
+      const meanVal = d3.mean(meanVals);
       summary.push({
         adminName,
         scenario: scen,
         scenarioUpper: scen.toUpperCase(),
-        mean: d3.mean(meanVals),
-        sd: sdVals.length > 0 ? d3.mean(sdVals) : 0,
+        mean: meanVal,
+        low:  q17Vals.length > 0 ? d3.mean(q17Vals) : meanVal,
+        high: q83Vals.length > 0 ? d3.mean(q83Vals) : meanVal,
       });
     }
   }
@@ -7818,8 +7880,8 @@ summary_futureProjections = () => {
   ];
 
   // Shared x-axis across panels so visual comparison works.
-  const xMin = d3.min(summary, (d) => d.mean - d.sd);
-  const xMax = d3.max(summary, (d) => d.mean + d.sd);
+  const xMin = d3.min(summary, (d) => d.low);
+  const xMax = d3.max(summary, (d) => d.high);
   const xPad = (xMax - xMin) * 0.1 || Math.abs(xMax) * 0.1 || 1;
   const xExtent = _showAnomaly
     ? [Math.min(xMin - xPad, 0), Math.max(xMax + xPad, 0)]
@@ -7828,9 +7890,13 @@ summary_futureProjections = () => {
   const { chunks, cols } = adminGridSplit(_data, facetCols);
   const _unit = _lang(climateVarSelectFuture.unit) || "";
   const fmtSigned = d3.format("+,.1f");
-  const fmtAbs = d3.format(",.1f");
-  const labelFor = (d) =>
-    `${fmtSigned(d.mean)} ± ${fmtAbs(d.sd)}${_unit ? ` ${_unit}` : ""}`;
+  // Label: "+1.4 °C [17–83 %: +0.7 to +2.1]" — explicit about what the
+  // bracket means, so it's not mistaken for ±1 σ (the prior wording).
+  const labelFor = (d) => {
+    const centre = `${fmtSigned(d.mean)}${_unit ? ` ${_unit}` : ""}`;
+    const band = `${fmtSigned(d.low)} to ${fmtSigned(d.high)}`;
+    return `${centre} [17–83 %: ${band}]`;
+  };
 
   const renderRow = (rowAdmins, rowIdx, isFirst, isLast) => {
     const padded = padFxDomain(rowAdmins, cols, rowIdx);
@@ -7881,20 +7947,23 @@ summary_futureProjections = () => {
           stroke: "#666",
           strokeDasharray: [4, 4],
         }),
-        // Whisker body — horizontal rule from mean-sd to mean+sd.
+        // Whisker body — horizontal rule from low (q17) to high (q83).
+        // For the baseline row low/high carry interannual ±1 σ instead
+        // (different concept; the row's tooltip + label makes this
+        // explicit so the reader doesn't conflate the two).
         Plot.ruleY(rowData, {
-          x1: (d) => d.mean - d.sd,
-          x2: (d) => d.mean + d.sd,
+          x1: "low",
+          x2: "high",
           y: "scenarioUpper",
           stroke: "scenarioUpper",
           strokeWidth: plotLineWidth + 1,
         }),
         // End caps. Plot.tickX defaults to spanning the full y-band
-        // height — Pete read that as "wide ends". Small symmetric
-        // insetTop/insetBottom shorten the cap so it reads as a brief
-        // serif rather than a full bar, while staying clearly visible.
+        // height — small symmetric insetTop/insetBottom shorten the
+        // cap so it reads as a brief serif rather than a full bar,
+        // while staying clearly visible.
         Plot.tickX(rowData, {
-          x: (d) => d.mean - d.sd,
+          x: "low",
           y: "scenarioUpper",
           stroke: "scenarioUpper",
           strokeWidth: plotLineWidth + 1,
@@ -7902,7 +7971,7 @@ summary_futureProjections = () => {
           insetBottom: 10,
         }),
         Plot.tickX(rowData, {
-          x: (d) => d.mean + d.sd,
+          x: "high",
           y: "scenarioUpper",
           stroke: "scenarioUpper",
           strokeWidth: plotLineWidth + 1,
@@ -7923,7 +7992,7 @@ summary_futureProjections = () => {
         // whisker's data position, anchored to start so it spills into
         // the right margin).
         Plot.text(rowData, {
-          x: (d) => d.mean + d.sd,
+          x: "high",
           y: "scenarioUpper",
           text: labelFor,
           textAnchor: "start",
