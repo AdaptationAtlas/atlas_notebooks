@@ -2212,7 +2212,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **dependencies:** Tied to the Hazard Exposure pipeline. No notebook-side prerequisites.
 
-- **STATUS:** Open. Notebook UI shipped; awaiting pipeline publish to activate the moderate / extreme tiers. **2026-05-29 update:** Stage F complete (44,880/44,880 both timeframes). STAGE C not yet launched — once STAGE C finishes, the local moderate and extreme parquets will exist and only the publish step (a ~40-line script) is needed. CR-091 is therefore unblocked the moment STAGE C completes, **without a separate R/3 re-run**.
+- **STATUS:** ✓ **CLOSED 2026-06-05.** `scripts/r3_publish_moderate_extreme.R` uploaded both tiers. S3 confirmed: severe 58.8 MB, moderate 68.1 MB, extreme 46.5 MB. Notebook wired via `nbData.json` s3_paths + `dbHazardExposure` severity-path lookup (commit `83a89ca`). Dropdown fully functional on next cold-start.
 
 ---
 
