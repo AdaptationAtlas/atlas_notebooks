@@ -167,6 +167,42 @@ function compositePng(rootElement) {
 
 
 /**
+ * Composite-aware SVG export. Mirror of compositePng but emits an
+ * `<svg><foreignObject>` envelope via html-to-image's toSvg, so HTML
+ * legends + captions + multi-SVG facets all make it into the exported
+ * SVG — matching what compositePng captures for PNG. Returns a raw
+ * SVG string (caller wraps in a Blob).
+ *
+ * Caveat: the resulting SVG renders correctly in browsers + most
+ * preview tools but Illustrator's `<foreignObject>` support is patchy.
+ * For Illustrator-edit workflows, route through the legacy single-SVG
+ * serialise path on a non-composite rootElement (e.g. the inner SVG).
+ * The honest "PNG-equivalent SVG" is the right default for everyone
+ * else (Pete 2026-06-05).
+ */
+function compositeSvg(rootElement) {
+  return async () => {
+    const lib = await _chartDownloadMenu_loadHtmlToImage();
+    const prevDisplay = rootElement.style.display;
+    rootElement.style.display = "inline-block";
+    try {
+      const dataUrl = await lib.toSvg(rootElement, {
+        backgroundColor: "#ffffff",
+        cacheBust: true,
+      });
+      const prefix = "data:image/svg+xml;charset=utf-8,";
+      if (dataUrl.startsWith(prefix)) return decodeURIComponent(dataUrl.slice(prefix.length));
+      const b64Prefix = "data:image/svg+xml;base64,";
+      if (dataUrl.startsWith(b64Prefix)) return atob(dataUrl.slice(b64Prefix.length));
+      return dataUrl;
+    } finally {
+      rootElement.style.display = prevDisplay;
+    }
+  };
+}
+
+
+/**
  * Serialise an SVG element so it renders standalone (in Illustrator
  * or via <img>.src). Ensures xmlns + xmlns:xlink + width + height
  * attributes are set on the clone. Doesn't mutate the live SVG.
@@ -499,26 +535,23 @@ function chartDownloadMenu(chartElement, opts) {
   const data = o.data;
   const csvColumns = o.csvColumns;
   const hasData = Array.isArray(data) && data.length > 0;
-  // Auto-detect:
-  //  - needsCompositePng: route PNG through html-to-image so the title /
-  //    legend / additional facets are captured. Triggered by anything
-  //    that isn't a bare <svg> or single-svg-only <figure>.
-  //  - svgLossy: ONLY disable SVG export when there's no single inner
-  //    SVG to serialise (multi-SVG, or zero SVGs). A single inner SVG
-  //    + HTML siblings still allows an honest "chart-only SVG" export.
-  // Callers can override either via opts.pngOverride / opts.disableSvg.
-  const needsCompositePng = _chartDownloadMenu_needsCompositePng(chartElement);
-  const svgLossy = _chartDownloadMenu_isSvgLossy(chartElement);
-  const pngOverride = o.pngOverride || (needsCompositePng ? compositePng(chartElement) : null);
-  const disableSvg = o.disableSvg !== undefined ? !!o.disableSvg : svgLossy;
+  // Auto-detect composite shapes (multi-SVG grids, SVG + HTML legend
+  // wrappers, pure HTML tables). For these, route BOTH PNG and SVG
+  // through html-to-image so the exports match what's rendered — Pete
+  // 2026-06-05: legacy single-SVG SVG export dropped the legend +
+  // caption on the p4 polar plot. Callers override via opts.pngOverride
+  // / opts.svgOverride / opts.disableSvg as needed.
+  const needsComposite = _chartDownloadMenu_needsCompositePng(chartElement);
+  const pngOverride = o.pngOverride || (needsComposite ? compositePng(chartElement) : null);
+  const svgOverride = o.svgOverride || (needsComposite ? compositeSvg(chartElement) : null);
+  const disableSvg = !!o.disableSvg;
 
-  // Find the SVG for PNG/SVG export. CSV doesn't need it.
+  // Find the SVG for the legacy fast-path SVG export. CSV doesn't need it.
   const svg = _chartDownloadMenu_findSvg(chartElement);
-  // PNG is available whenever EITHER an SVG was found OR an override
-  // PNG handler was supplied. SVG menu item only when an SVG exists
-  // and the caller hasn't suppressed it.
-  const pngAvailable = !!svg || typeof pngOverride === "function";
-  const svgAvailable = !!svg && !disableSvg;
+  // PNG / SVG availability: an override handler always wins; otherwise
+  // we need a findable SVG in the rootElement.
+  const pngAvailable = typeof pngOverride === "function" || !!svg;
+  const svgAvailable = (typeof svgOverride === "function" || !!svg) && !disableSvg;
 
   // Export actions
   const onPng = async () => {
@@ -531,10 +564,16 @@ function chartDownloadMenu(chartElement, opts) {
       console.error("chartDownloadMenu PNG export failed", e);
     }
   };
-  const onSvg = () => {
-    const svgString = _chartDownloadMenu_serializeSvg(svg);
-    const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-    _chartDownloadMenu_triggerDownload(blob, baseName + ".svg");
+  const onSvg = async () => {
+    try {
+      const svgString = svgOverride
+        ? await svgOverride()
+        : _chartDownloadMenu_serializeSvg(svg);
+      const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+      _chartDownloadMenu_triggerDownload(blob, baseName + ".svg");
+    } catch (e) {
+      console.error("chartDownloadMenu SVG export failed", e);
+    }
   };
   const onCsv = () => {
     const csv = _chartDownloadMenu_toCsv(data, csvColumns);
@@ -602,14 +641,14 @@ function chartDownloadButton(chartElement, opts) {
   const hasData = Array.isArray(data) && data.length > 0;
   // Same composite auto-detection as chartDownloadMenu — keeps the
   // button variant consistent with the wrapper variant.
-  const needsCompositePng = _chartDownloadMenu_needsCompositePng(chartElement);
-  const svgLossy = _chartDownloadMenu_isSvgLossy(chartElement);
-  const pngOverride = o.pngOverride || (needsCompositePng ? compositePng(chartElement) : null);
-  const disableSvg = o.disableSvg !== undefined ? !!o.disableSvg : svgLossy;
+  const needsComposite = _chartDownloadMenu_needsCompositePng(chartElement);
+  const pngOverride = o.pngOverride || (needsComposite ? compositePng(chartElement) : null);
+  const svgOverride = o.svgOverride || (needsComposite ? compositeSvg(chartElement) : null);
+  const disableSvg = !!o.disableSvg;
 
   const svg = _chartDownloadMenu_findSvg(chartElement);
-  const pngAvailable = !!svg || typeof pngOverride === "function";
-  const svgAvailable = !!svg && !disableSvg;
+  const pngAvailable = typeof pngOverride === "function" || !!svg;
+  const svgAvailable = (typeof svgOverride === "function" || !!svg) && !disableSvg;
 
   const onPng = async () => {
     try {
@@ -621,10 +660,16 @@ function chartDownloadButton(chartElement, opts) {
       console.error("chartDownloadButton PNG export failed", e);
     }
   };
-  const onSvg = () => {
-    const svgString = _chartDownloadMenu_serializeSvg(svg);
-    const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-    _chartDownloadMenu_triggerDownload(blob, baseName + ".svg");
+  const onSvg = async () => {
+    try {
+      const svgString = svgOverride
+        ? await svgOverride()
+        : _chartDownloadMenu_serializeSvg(svg);
+      const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+      _chartDownloadMenu_triggerDownload(blob, baseName + ".svg");
+    } catch (e) {
+      console.error("chartDownloadButton SVG export failed", e);
+    }
   };
   const onCsv = () => {
     const csv = _chartDownloadMenu_toCsv(data, csvColumns);
