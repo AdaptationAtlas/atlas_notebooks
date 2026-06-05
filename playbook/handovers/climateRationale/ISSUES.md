@@ -3132,4 +3132,54 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
 
 ---
 
+## CR-118 — Coordinated reactive-stability convention for control-derived cells [NEW 2026-06-05 · tech-debt]
+
+- **id:** CR-118
+- **title:** Establish (and document) a coordinated convention for keeping reactive control-derived cells **stable-by-content** so downstream expensive operations (DuckDB-WASM queries, large d3 renders) don't re-fire when a user toggles a control whose derived value is unchanged. Today this is fixed per-cell ad-hoc.
+- **type:** notebook (architecture / convention)
+- **severity:** med (correctness: the lag from spurious refetches is jarring; high-impact-low-effort to standardise)
+- **where:** All `notebooks/**/*.qmd` files that have control-derived cells feeding DuckDB queries or large d3 renders. Helper module candidate: `helpers/reactiveStable.ojs`.
+
+- **discovered:** 2026-06-05 — Pete reported lag toggling SSP / variable in Period polar section. Root cause: `cmip6_active_variables` returned a fresh sorted ARRAY on every variable change. OJS treats arrays as object references → new reference = "changed" → re-run downstream → `cmip6_future_data` re-queried DuckDB → 15–30 s lag.
+  - **Patch shipped 2026-06-05** in [`notebooks/sandbox/obs_month_overlay.qmd`](notebooks/sandbox/obs_month_overlay.qmd): switched `cmip6_active_variables` to return a stable `|`-joined STRING (primitives compare by value → no spurious downstream re-fire). `cmip6_future_data` splits the string back into an array for the SQL builder.
+  - That fix solved the lag in the Future Projections section but does NOT generalise — every other section's control-derived cells could exhibit the same pattern.
+
+- **why-this-matters:** Lag is the visible symptom; the deeper issue is that the codebase has no convention for stable-content-vs-stable-reference, so every new sub-section is a fresh chance to introduce the same bug. Brayden's existing helpers (`helpers/uiComponents.ojs` — atlasTOC, multiLineText, loaderDiv, etc., plus `helpers/enhancedMultiSelect.ojs`, `helpers/chartDownloadMenu.ojs`) are all UI-chrome utilities — none address reactivity-stability.
+
+- **audit risks (not yet done — recommended scope of any sister CR doing the audit):**
+  | Cell | Returns | Stable? |
+  |---|---|---|
+  | `globalScopeInfo` | new `{isCountry, iso3List, scope}` each change | New ref each cycle — but only triggers when `globalScope` changes; downstream re-fire is intentional. |
+  | `globalAdmin1` | array of selected admin1s | New ref each pick/unpick — intentional. |
+  | `cmip6_active_variables` | stable `\|`-joined string (**fixed 2026-06-05**) | ✓ stable |
+  | `cmip6_future_data` | parquet rows | Re-runs only when scope or `cmip6_active_variables` changes. ✓ |
+  | `p6_obs_raw` / `p1_rows` / `p2_rows` / `p3_rows` / `p4_rows` / `p5_raw` | rows arrays from per-section DuckDB queries | Untested for spurious refetch. Worth auditing for the main notebook's analogous cells too. |
+  | Main notebook's `hazards_obj`, `seasons`, `obsHazards` lookups | derived arrays | Untested. |
+
+- **proposed convention:**
+  1. **Any derived cell whose downstream consumer is a DuckDB query OR a large d3 render** MUST publish a PRIMITIVE value (string / number / boolean) — NOT a fresh array or object — when its CONTENT is unchanged.
+  2. **Helper module**: `helpers/reactiveStable.ojs` exporting:
+     - `stableKey(obj)` — deterministic JSON of a control-derived object, usable as the cell's return value when downstream needs a fingerprint.
+     - `stableArray(arr, prev)` — returns `prev` if shallow-equal, else `arr`. Useful when downstream needs the actual array; caller stores `prev` in a `Mutable`.
+     - `stableSetKey(values)` — sort + join pattern (the one applied to `cmip6_active_variables`).
+  3. **Documentation**: add a short rule to `CLAUDE.md` (or a dedicated `playbook/conventions/reactive-stability.md`) — "Any derived cell feeding parquet I/O or large d3 must be stable by content."
+
+- **acceptance:**
+  - `helpers/reactiveStable.ojs` module exists with the 3 helpers + JSDoc.
+  - Audit complete across both sandbox + main notebook; all candidate cells either use the helper or have a `// reactivity: intentional re-fire on every change` comment justifying why not.
+  - Convention documented in playbook.
+  - Side-effect: any per-cell hand-tuned fixes (like the `\|`-joined string for `cmip6_active_variables`) refactored to use the helper for consistency.
+
+- **out of scope (file as siblings if desired):**
+  - Broader control-form factory (the `controlPanel({variable, season, ssps, ...})` style abstraction Brayden was working towards). That's a UX-layer concern; this CR is purely the reactivity-correctness layer underneath.
+  - Per-plot DuckDB client management (already covered by [[duckdb-wasm-per-plot-clients]] memory).
+
+- **dependencies:** None. Helper module is pure utility; audit + refactor is mechanical.
+
+- **STATUS (2026-06-05):** Open. Patch shipped for the immediate Future Projections lag (in `cmip6_active_variables`). Broader audit + helper module deferred.
+
+- **see also:** [[duckdb-wasm-per-plot-clients]] (orthogonal — per-section client isolation vs reactive stability of the QUERY inputs); [[duckdb-wasm-parquet-pushdown]] (orthogonal — single-iso3 SQL idiom).
+
+---
+
 *Pete: annotate this file directly — strike, edit, add. Once you sign it off, dispatch one PR at a time to Claude Code (or all at once). The Togo SAT report stays the visual reference for "what good looks like".*

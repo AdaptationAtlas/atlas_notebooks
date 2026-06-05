@@ -356,6 +356,7 @@ html`<div class="cr-hero">
       <a class="cr-hero-chip" href="#cr-097">${_lang(nbText.sections.hero.chips.cr097)}</a>
       <a class="cr-hero-chip" href="#period-maps">${_lang(nbText.sections.hero.chips.periodMaps)}</a>
       <a class="cr-hero-chip" href="#period-ridges">${_lang(nbText.sections.hero.chips.periodRidges)}</a>
+      <a class="cr-hero-chip" href="#period-polar">${_lang(nbText.sections.hero.chips.periodPolar)}</a>
       <a class="cr-hero-chip" href="#methods">${_lang(nbText.sections.hero.chips.methods)}</a>
       <a class="cr-hero-chip" href="#references">${_lang(nbText.sections.hero.chips.references)}</a>
     </div>
@@ -740,6 +741,7 @@ headingP5         = _lang(nbText.sections.p5.title);
 headingCR097      = _lang(nbText.sections.cr097.title);
 headingPeriodMaps = _lang(nbText.sections.periodMaps.title);
 headingPeriodRidges = _lang(nbText.sections.periodRidges.title);
+headingPeriodPolar  = _lang(nbText.sections.periodPolar.title);
 headingP6         = _lang(nbText.sections.p6.title);
 headingHistoricalTrends  = _lang(nbText.sections.historicalTrends.title);
 headingFutureProjections = _lang(nbText.sections.futureProjections.title);
@@ -4337,7 +4339,7 @@ db_cmip6_future = DuckDBClient.of()
 // Section-gate for Future Projections — fires when ANY sub-section
 // scrolls into view. Sub-sections that land later (climatology table…)
 // should be OR'd in here too so they piggy-back on the same fetch.
-futureProjectionsVisible = (cr097Visible || periodMapsVisible || periodRidgesVisible)
+futureProjectionsVisible = (cr097Visible || periodMapsVisible || periodRidgesVisible || periodPolarVisible)
 ```
 
 ```{ojs}
@@ -4357,16 +4359,20 @@ cmip6_core_variables = ["TAVG","TMAX","TMIN","PTOT"]
 ```
 
 ```{ojs}
-// Full variable list shown in Period maps + Period ridges variable
-// selectors. Items outside `cmip6_core_variables` are "(opt-in)" —
-// selecting one triggers a re-fetch under a widened hazard filter.
-// Core 4 are always cached.
+// Full variable list shown in Period maps + Period ridges + Period
+// polar variable selectors. Items outside `cmip6_core_variables` are
+// "(opt-in)" — selecting one triggers a re-fetch under a widened
+// hazard filter. Core 4 are always cached.
+// SPEI is NOT here — SPEI is observational-only (CHIRPS-derived); the
+// CMIP6 projection parquet does not ship it. See main notebook's
+// `futureHazards = hazards_obj.filter(!startsWith SPEI)` for the
+// canonical filter. Use the P6 (observational decade maps) selector
+// to access SPEI.
 cmip6FutureVariableValues = [
   "TAVG","TMAX","TMIN","PTOT",
-  "SPEI-03","SPEI-12",
   "NTx35","NTx40",
   "NDWS","NDWL0",
-  "THI-max","NDD",
+  "THI-max","HSH-max",
 ]
 ```
 
@@ -4376,14 +4382,12 @@ cmip6FutureVariableFormat = v => ({
   TMAX:      "TMAX — mean daily max",
   TMIN:      "TMIN — mean daily min",
   PTOT:      "PTOT — precipitation",
-  "SPEI-03": "SPEI-03 — 3-mo drought (opt-in)",
-  "SPEI-12": "SPEI-12 — 12-mo drought (opt-in)",
   "NTx35":   "NTx35 — days > 35 °C (opt-in)",
   "NTx40":   "NTx40 — days > 40 °C (opt-in)",
   "NDWS":    "NDWS — water-stress days (opt-in)",
   "NDWL0":   "NDWL0 — waterlogging days (opt-in)",
   "THI-max": "THI-max — livestock heat-stress (opt-in)",
-  "NDD":     "NDD — dry days (opt-in)",
+  "HSH-max": "HSH-max — heat-stress hours (opt-in)",
 }[v] ?? v)
 ```
 
@@ -4392,6 +4396,13 @@ cmip6FutureVariableFormat = v => ({
 // asking for. Section-controls cells declare their default values up-front
 // so this never crashes on first run — the union just produces the core
 // set until any control resolves to an extra.
+//
+// Returns a stable `|`-separated string instead of an array so OJS sees
+// no change when the set's CONTENT is identical (toggling a variable
+// from one core member to another e.g. TAVG → PTOT). Arrays are object
+// references; OJS would treat every re-computation as a new value and
+// re-fetch the parquet cache. Strings compare by value → no spurious
+// refetch.
 cmip6_active_variables = {
   const set = new Set(cmip6_core_variables);
   const add = v => { if (typeof v === "string" && v.length) set.add(v); };
@@ -4399,7 +4410,8 @@ cmip6_active_variables = {
   try { add(cr097_controls?.variable); }       catch (e) { /* not visible yet */ }
   try { add(periodMaps_controls?.variable); }  catch (e) { /* not visible yet */ }
   try { add(periodRidges_controls?.variable); } catch (e) { /* not visible yet */ }
-  return [...set].sort();
+  try { add(periodPolar_controls?.variable); }  catch (e) { /* not visible yet */ }
+  return [...set].sort().join("|");
 }
 ```
 
@@ -4427,9 +4439,11 @@ cmip6_future_data = {
     : `iso3 IN (${iso3List.map(c => `'${c}'`).join(",")})`;
   // Variable filter: core 4 + any extras currently selected in sub-sections.
   // SQL-side filtering caps the byte volume — additional hazard variables
-  // (SPEI / heat-days / drought indices) cost zero bandwidth until a
-  // selector actually lands on them.
-  const hazardIn = cmip6_active_variables
+  // (heat-days / drought indices) cost zero bandwidth until a selector
+  // actually lands on them. `cmip6_active_variables` is now a stable
+  // pipe-joined string (so toggles within the cached set don't refetch);
+  // split back into an array for the SQL builder.
+  const hazardIn = cmip6_active_variables.split("|")
     .map(v => `'${v.replace(/'/g, "''")}'`)
     .join(",");
   // Broad SELECT — season + scenario filters stay client-side (cheap on
@@ -5100,19 +5114,22 @@ loaderDiv("plotPeriodMaps")
     //      amber-dry. Heat-day / water-stress / flooding indices use
     //      coral-more / teal-less (more = bad). NDD (dry-day count)
     //      flips: more dry days = drying = amber.
+    // Variable lookup tables — SPEI / NDD intentionally omitted because
+    // those don't ship in the CMIP6 future-projection parquet (SPEI is
+    // observational-only; NDD not in the main-notebook hazard list).
+    // See `cmip6FutureVariableValues` for the canonical projection-side
+    // variable set.
     const SCALE_FLOOR = {
       TAVG:      2.0,   // °C
       TMAX:      2.5,
       TMIN:      2.5,
       PTOT:      100,   // mm/month
-      "SPEI-03": 1.0,   // z-score
-      "SPEI-12": 1.0,
       NTx35:     15,    // days/yr
       NTx40:     15,
-      NDD:       30,
       NDWS:      30,
       NDWL0:     15,
       "THI-max": 5,
+      "HSH-max": 100,   // hours/yr (heat-stress hours — rough proposal floor)
     };
     const SHADE_PALETTE = {
       // Temperatures: positive = warming → coral; negative = cooling → teal.
@@ -5121,16 +5138,13 @@ loaderDiv("plotPeriodMaps")
       TMIN: { positive: "216, 90, 48",  negative: "29, 158, 117" },
       // Precipitation: positive = wetter → teal; negative = drier → amber.
       PTOT:      { positive: "29, 158, 117", negative: "186, 117, 23" },
-      "SPEI-03": { positive: "29, 158, 117", negative: "186, 117, 23" },
-      "SPEI-12": { positive: "29, 158, 117", negative: "186, 117, 23" },
       // Heat / water-stress / flood indices: more = bad → coral.
       NTx35:     { positive: "216, 90, 48",  negative: "29, 158, 117" },
       NTx40:     { positive: "216, 90, 48",  negative: "29, 158, 117" },
       NDWS:      { positive: "216, 90, 48",  negative: "29, 158, 117" },
       NDWL0:     { positive: "216, 90, 48",  negative: "29, 158, 117" },
       "THI-max": { positive: "216, 90, 48",  negative: "29, 158, 117" },
-      // NDD (dry-day count): positive = drier → amber; negative = wetter → teal.
-      NDD:       { positive: "186, 117, 23", negative: "29, 158, 117" },
+      "HSH-max": { positive: "216, 90, 48",  negative: "29, 158, 117" },
       _default:  { positive: "216, 90, 48",  negative: "29, 158, 117" },
     };
     const paletteFor = (v) => SHADE_PALETTE[v] ?? SHADE_PALETTE._default;
@@ -6044,6 +6058,487 @@ quickInsightPeriodRidges = (() => {
     { name: "iqrDir",   value: iqrDir },
     { name: "iqrBase",  value: bIQR.toFixed(2) },
     { name: "iqrLate",  value: lIQR.toFixed(2) },
+  ]);
+})();
+```
+
+
+<hr class="section-divider" />
+
+## `{ojs} headingPeriodPolar` {#period-polar data-toc-label="Polar clock"}
+
+```{ojs}
+md`<p class="below-h1-methods-link"><a href="#${_lang(nbText.sections.periodPolar.methodsAnchor)}">${_lang(nbText.sections.methodsLinkLabel)}</a></p>`
+```
+
+```{ojs}
+md`${_lang(nbText.sections.periodPolar.lead)}`
+```
+
+```{ojs}
+md`<details class="alert alert-info help-callout" role="note">
+<summary>${_lang(nbText.sections.aboutSectionLabel)}</summary>
+
+${_lang(nbText.sections.periodPolar.help.body)}
+
+</details>`
+```
+
+```{ojs}
+viewof periodPolar_controls = {
+  const sspLabels = { ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" };
+  // Multi-SSP — renders one polar-clock column per selected SSP.
+  // Default = canonical mitigation vs high-emission pair so the spread
+  // of futures is visible at first render. Admin1 rows come from the
+  // global Admin1 popup; >6 selected = first 6 alphabetically + a note.
+  const _ssp     = Inputs.checkbox(["ssp126","ssp245","ssp370","ssp585"],
+                     { label: "Scenarios (columns)", value: ["ssp126","ssp585"],
+                       format: v => sspLabels[v] });
+  const _var     = Inputs.select(cmip6FutureVariableValues,
+                     { label: "Variable", value: "TAVG",
+                       format: cmip6FutureVariableFormat });
+  const _showAnomaly = Inputs.toggle({
+    label: "Show as anomaly (vs 1995-2014 baseline)",
+    value: true });
+  const form = htl.html`<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;">
+    <div style="min-width:220px;flex:1 1 220px;">${_ssp}</div>
+    <div style="min-width:140px;flex:1 1 140px;">${_var}</div>
+    <div style="min-width:240px;flex:1 1 240px;">${_showAnomaly}</div>
+  </div>`;
+  Object.defineProperty(form, "value", {
+    get: () => ({ ssp: _ssp.value, variable: _var.value,
+                  valueMode: _showAnomaly.value ? "anomaly" : "raw" }),
+  });
+  // Explicit bubble — wrapping <div> doesn't always re-fire viewof on
+  // child input changes through htl.html's interpolated children. Force
+  // the form to dispatch on every child-input event.
+  const bubble = () => form.dispatchEvent(new Event("input", { bubbles: true }));
+  _ssp.addEventListener("input", bubble);
+  _var.addEventListener("input", bubble);
+  _showAnomaly.addEventListener("input", bubble);
+  return form;
+}
+```
+
+```{ojs}
+periodPolarVisible = sectionVisible("plotPeriodPolar", "300px");
+```
+
+```{ojs}
+// In-memory filter on the shared cache. Returns rows for the chosen
+// variable + selected SSPs (plus the historical baseline rows). The
+// render block groups by (ssp, admin1, season, period) to build the
+// per-cell polar-clock subplot.
+periodPolar_data = {
+  if (!periodPolarVisible) return [];
+  if (!cmip6_future_data.length) return [];
+  const { variable, ssp } = periodPolar_controls;
+  const ssps = Array.isArray(ssp) && ssp.length ? ssp : ["ssp245"];
+  const sspSet = new Set(ssps);
+  return cmip6_future_data.filter(d =>
+    d.variable === variable &&
+    (d.period === "1995-2014" ? d.scenario === "historical" : sspSet.has(d.scenario)));
+}
+```
+
+```{ojs}
+loaderDiv("plotPeriodPolar")
+```
+
+```{ojs}
+//| output: false
+{
+  [periodPolar_controls, periodPolar_data, globalScopeInfo, globalAdmin1, cbMode, width];
+  renderToDiv("plotPeriodPolar", () => {
+  const { variable, valueMode } = periodPolar_controls;
+  const isRawMode = valueMode === "raw";
+  const meanCol   = isRawMode ? "mean" : "mean_anomaly";
+  const { scope, isCountry } = globalScopeInfo;
+  const isPTOT = variable === "PTOT";
+  const unit   = isPTOT ? "mm" : "°C";
+  const sspLabels = { ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" };
+  // Canonical SSP order (low→high emissions).
+  const sspOrder = ["ssp126","ssp245","ssp370","ssp585"];
+  const ssps     = sspOrder.filter(s => (periodPolar_controls.ssp ?? []).includes(s));
+  const sspsForRender = ssps.length ? ssps : ["ssp245"];
+
+  if (!periodPolar_data.length) return htl.html`<p style="color:#888;font-style:italic;padding:12px 0;">
+    ⏳ Fetching CMIP6 parquets (shared cache — may take 15–30 s on first scroll into Future Projections)…
+  </p>`;
+
+  // Row policy: if user picked admin1s in the global popup, render up to
+  // MAX_ROWS facets (alphabetical). Otherwise render one scope-mean row.
+  const MAX_ROWS = 6;
+  const selAdmin1All = isCountry ? (globalAdmin1 ?? []) : [];
+  const overflow     = Math.max(0, selAdmin1All.length - MAX_ROWS);
+  const rowAdmin1s   = [...selAdmin1All].sort().slice(0, MAX_ROWS);
+  // Each row is either an admin1 name or null (= scope mean across all
+  // admin1s in scope). Default to a single scope-mean row when no admin1
+  // selection is active.
+  const rows = rowAdmin1s.length > 0
+    ? rowAdmin1s.map(a => ({ label: a,            admin1: a   }))
+    : [{                         label: "All admin1s", admin1: null }];
+
+  // Rolling 3-month season layout. Each wedge centred on its middle
+  // month — DJF at 12 o'clock (centred on Jan), JFM at 1 o'clock
+  // (Feb), …, NDJ at 11 o'clock (Dec). Labels show the season CODE
+  // (JFM / FMA / …) per Pete's preference over month abbreviations.
+  const seasonsClock = [
+    { key: "DJF", centerMonth: 0 },
+    { key: "JFM", centerMonth: 1 },
+    { key: "FMA", centerMonth: 2 },
+    { key: "MAM", centerMonth: 3 },
+    { key: "AMJ", centerMonth: 4 },
+    { key: "MJJ", centerMonth: 5 },
+    { key: "JJA", centerMonth: 6 },
+    { key: "JAS", centerMonth: 7 },
+    { key: "ASO", centerMonth: 8 },
+    { key: "SON", centerMonth: 9 },
+    { key: "OND", centerMonth: 10 },
+    { key: "NDJ", centerMonth: 11 },
+  ];
+  const ringPeriods = ["1995-2014","2021-2040","2041-2060","2061-2080","2081-2100"];
+
+  // Aggregate one bucket per (rowKey, ssp, period, season). rowKey =
+  // admin1 name for per-admin1 rows, "__scope__" for the scope-mean row.
+  const SCOPE = "__scope__";
+  const aggMap = new Map();
+  const rowKeys = new Set(rows.map(r => r.admin1));
+  const wantsScopeMean = rows.some(r => r.admin1 === null);
+  for (const d of periodPolar_data) {
+    const v = Number(d[meanCol]);
+    if (!Number.isFinite(v)) continue;
+    const sc = d.period === "1995-2014" ? "historical" : d.scenario;
+    // Per-admin1 row.
+    if (rowKeys.has(d.admin1_name)) {
+      const k = `${d.admin1_name}|${sc}|${d.period}|${d.season}`;
+      if (!aggMap.has(k)) aggMap.set(k, { sum: 0, n: 0 });
+      const e = aggMap.get(k); e.sum += v; e.n += 1;
+    }
+    // Scope-mean row (always also accumulates the data when needed).
+    if (wantsScopeMean) {
+      const k = `${SCOPE}|${sc}|${d.period}|${d.season}`;
+      if (!aggMap.has(k)) aggMap.set(k, { sum: 0, n: 0 });
+      const e = aggMap.get(k); e.sum += v; e.n += 1;
+    }
+  }
+  const cellOf = (rowKey, ssp, period, season) => {
+    const scKey = period === "1995-2014" ? "historical" : ssp;
+    const e = aggMap.get(`${rowKey ?? SCOPE}|${scKey}|${period}|${season}`);
+    if (!e || !e.n) return null;
+    return e.sum / e.n;
+  };
+
+  // --- Palette ----------------------------------------------------
+  // Anomaly mode: diverging blue→red (RdBu reversed so positive = red).
+  // Symmetric domain around 0; same convention as observational P4.
+  // Raw mode: sequential Inferno (matches observational P4 raw view).
+  // Both modes derive the domain from the visible-future-cells max.
+  const SCALE_FLOOR = {
+    TAVG: 2.0, TMAX: 2.5, TMIN: 2.5, PTOT: 100,
+    NTx35: 15, NTx40: 15, NDWS: 30, NDWL0: 15,
+    "THI-max": 5, "HSH-max": 100,
+  };
+  // Collect visible-future-cell values across every (row, ssp) pairing
+  // so the palette domain is shared across the whole grid (cross-cell
+  // comparison is the whole point of the small-multiples layout).
+  const futureRingPeriods = ringPeriods.filter(p => p !== "1995-2014");
+  const visibleVals = [];
+  for (const row of rows) for (const ssp of sspsForRender)
+    for (const p of futureRingPeriods) for (const s of seasonsClock) {
+      const v = cellOf(row.admin1, ssp, p, s.key);
+      if (Number.isFinite(v)) visibleVals.push(v);
+    }
+  const dataMax = Math.max(0, ...visibleVals.map(Math.abs));
+  const floor   = SCALE_FLOOR[variable] ?? 1;
+  const scaleMax = Math.max(dataMax, floor);
+  // Anomaly palette domain symmetric (Pete's directive: always blue-to-red
+  // diverging when in anomaly view, even if PTOT-style data is one-signed).
+  const anomDomLo = -scaleMax, anomDomHi = scaleMax;
+  const rawDomLo = visibleVals.length ? Math.min(...visibleVals) : 0;
+  const rawDomHi = visibleVals.length ? Math.max(...visibleVals) : 1;
+  const domLo = isRawMode ? rawDomLo : anomDomLo;
+  const domHi = isRawMode ? rawDomHi : anomDomHi;
+  const colourFn = isRawMode
+    ? (v => {
+        if (v == null || !Number.isFinite(v)) return "#eee";
+        const t = (v - rawDomLo) / (rawDomHi - rawDomLo || 1);
+        return cbMode ? d3.interpolatePlasma(0.1 + 0.8 * t)
+                      : d3.interpolateInferno(0.05 + 0.9 * t);
+      })
+    : (v => {
+        if (v == null || !Number.isFinite(v)) return "#eee";
+        // Map v into [0, 1] then invert (RdBu has blue at 1, red at 0).
+        const t = 0.5 - v / (scaleMax * 2.2);
+        return cbMode ? d3.interpolatePuOr(t) : d3.interpolateRdBu(t);
+      });
+
+  // --- Geometry ---------------------------------------------------
+  // Each cell = polar clock subplot. Cell width derived from available
+  // grid width; row labels take fixed left-margin; col header bar takes
+  // top space.
+  const nCols    = sspsForRender.length;
+  const nRows    = rows.length;
+  const leftLab  = 60;
+  const topLab   = 26;
+  const titleH   = 22;
+  const cellGap  = 10;
+  const cellW    = Math.max(220, Math.floor((width - leftLab - (nCols - 1) * cellGap) / nCols));
+  const cellH    = cellW + 26;  // +space for the season-code rim labels at bottom
+  const ringW    = Math.floor((cellW / 2 - 50) / ringPeriods.length);
+  const r0       = Math.max(18, Math.floor(cellW * 0.06));   // central hub
+  const rOuter   = r0 + ringPeriods.length * ringW;
+  const arc      = d3.arc().padAngle(0.005).cornerRadius(1);
+  const wedgeSpan = (2 * Math.PI) / 12;
+  const totalW   = leftLab + nCols * cellW + (nCols - 1) * cellGap + 12;
+  const legendH  = 90;  // colour ramp (56) + ring-period legend strip (34)
+  const totalH   = titleH + topLab + nRows * cellH + (nRows - 1) * cellGap + legendH + 12;
+
+  const svg = d3.create("svg")
+    .attr("viewBox", `0 0 ${totalW} ${totalH}`)
+    .attr("width", totalW).attr("height", totalH)
+    .style("font-family", "system-ui, sans-serif")
+    .style("max-width", "100%").style("height", "auto")
+    .attr("id", `plotPeriodPolarSvg`);
+
+  // Top-level title.
+  svg.append("text")
+    .attr("x", totalW / 2).attr("y", 16)
+    .attr("text-anchor", "middle")
+    .attr("font-size", 12).attr("font-weight", 600).attr("fill", "#222")
+    .text(`${scope} · ${variable} · ${isRawMode ? "raw value" : "anomaly vs 1995–2014"} (${unit})`);
+
+  // Column headers (SSP labels).
+  sspsForRender.forEach((s, ci) => {
+    const cx = leftLab + ci * (cellW + cellGap) + cellW / 2;
+    svg.append("text")
+      .attr("x", cx).attr("y", titleH + topLab - 8)
+      .attr("text-anchor", "middle")
+      .attr("font-size", 11).attr("font-weight", 700).attr("fill", "#222")
+      .text(sspLabels[s] ?? s);
+  });
+
+  // Show row labels only when there's an actual admin1 facet split
+  // (multiple rows OR a single user-picked admin1). The default
+  // scope-mean row hides its label — "All admin1s" was getting clipped
+  // and overlapping with the leftmost wedge labels.
+  const showRowLabels = !(rows.length === 1 && rows[0].admin1 === null);
+
+  // Build each (row, col) polar clock.
+  rows.forEach((row, ri) => {
+    const cyRow = titleH + topLab + ri * (cellH + cellGap) + cellH / 2;
+    // Row label on the left.
+    if (showRowLabels) svg.append("text")
+      .attr("x", leftLab - 8).attr("y", cyRow)
+      .attr("text-anchor", "end").attr("dominant-baseline", "middle")
+      .attr("font-size", 10).attr("font-weight", 600).attr("fill", "#222")
+      .text(row.label);
+    sspsForRender.forEach((ssp, ci) => {
+      const cxCell = leftLab + ci * (cellW + cellGap) + cellW / 2;
+      const g = svg.append("g").attr("transform", `translate(${cxCell}, ${cyRow})`);
+      // Wedges.
+      ringPeriods.forEach((period, ringIdx) => {
+        const innerR = r0 + ringIdx * ringW;
+        const outerR = innerR + ringW;
+        seasonsClock.forEach(s => {
+          const v = cellOf(row.admin1, ssp, period, s.key);
+          const centreAngle = (s.centerMonth / 12) * 2 * Math.PI;
+          const startA = centreAngle - wedgeSpan / 2;
+          const endA   = centreAngle + wedgeSpan / 2;
+          g.append("path")
+            .attr("d", arc({ innerRadius: innerR, outerRadius: outerR, startAngle: startA, endAngle: endA }))
+            .attr("fill", colourFn(v))
+            .attr("stroke", "#fff").attr("stroke-width", 0.5)
+            .append("title")
+            .text(`${row.label} · ${sspLabels[ssp] ?? ssp} · ${period} · ${s.key}\n${v != null ? v.toFixed(2) + " " + unit : "no data"}`);
+        });
+      });
+      // Season-code rim labels (12 labels, one per wedge centre).
+      seasonsClock.forEach(s => {
+        const angle = (s.centerMonth / 12) * 2 * Math.PI - Math.PI / 2;
+        const lr = rOuter + 14;
+        g.append("text")
+          .attr("x", Math.cos(angle) * lr).attr("y", Math.sin(angle) * lr)
+          .attr("text-anchor", "middle").attr("dominant-baseline", "middle")
+          .attr("font-size", 9).attr("font-weight", 500).attr("fill", "#444")
+          .text(s.key);
+      });
+      // Period labels removed from inside the clock — when the grid has
+      // multiple columns the per-ring text becomes unreadable at typical
+      // cell sizes. Ring → period mapping is rendered as a separate
+      // legend strip below the colour-ramp legend.
+    });
+  });
+
+  // Shared colour-ramp legend (bottom).
+  const rampW = Math.min(420, totalW - 80);
+  const rampH = 10;
+  const legendY = titleH + topLab + nRows * cellH + (nRows - 1) * cellGap + 22;
+  const legendG = svg.append("g").attr("transform", `translate(${(totalW - rampW) / 2}, ${legendY})`);
+  const rampId  = `polar-ramp-${Math.random().toString(36).slice(2, 7)}`;
+  const grad    = legendG.append("defs").append("linearGradient").attr("id", rampId)
+    .attr("x1","0%").attr("x2","100%");
+  const nStops = 32;
+  for (let i = 0; i <= nStops; i++) {
+    const t = i / nStops;
+    const v = domLo + t * (domHi - domLo);
+    grad.append("stop").attr("offset", `${t * 100}%`).attr("stop-color", colourFn(v));
+  }
+  legendG.append("rect")
+    .attr("x", 0).attr("y", 0).attr("width", rampW).attr("height", rampH)
+    .attr("fill", `url(#${rampId})`).attr("stroke", "#888").attr("stroke-width", 0.5);
+  const ticks = isRawMode
+    ? [domLo, (domLo + domHi) / 2, domHi]
+    : [domLo, domLo / 2, 0, domHi / 2, domHi];
+  const fmt = v => {
+    const dp = (isPTOT && Math.abs(v) >= 10) ? 0 : 1;
+    const sign = (!isRawMode && v > 0) ? "+" : "";
+    return sign + v.toFixed(dp);
+  };
+  ticks.forEach(v => {
+    const x = ((v - domLo) / (domHi - domLo || 1)) * rampW;
+    legendG.append("text")
+      .attr("x", x).attr("y", rampH + 12)
+      .attr("text-anchor", "middle").attr("font-size", 9).attr("fill", "#333")
+      .text(fmt(v));
+  });
+  legendG.append("text")
+    .attr("x", rampW + 6).attr("y", rampH - 1)
+    .attr("font-size", 10).attr("font-weight", 500).attr("fill", "#555")
+    .text(unit);
+  legendG.append("text")
+    .attr("x", 0).attr("y", -4)
+    .attr("font-size", 10).attr("font-weight", 600).attr("fill", "#333")
+    .text(isRawMode
+      ? `Ensemble-mean ${variable} (raw)`
+      : `Ensemble-mean anomaly vs 1995–2014 baseline`);
+
+  // Ring → period legend: a horizontal row of 5 nested-circle glyphs
+  // showing the inner-to-outer ring order, each labelled with its
+  // period. Sits below the colour ramp so the inside-the-clock text
+  // labels (removed for legibility) are replaced by an explicit legend.
+  const ringLegW = ringPeriods.length * 110;
+  const ringLegX = (totalW - ringLegW) / 2;
+  const ringLegY = legendY + rampH + 26;
+  const ringLegG = svg.append("g").attr("transform", `translate(${ringLegX}, ${ringLegY})`);
+  ringLegG.append("text")
+    .attr("x", 0).attr("y", 0)
+    .attr("font-size", 10).attr("font-weight", 600).attr("fill", "#333")
+    .text("Rings (inner → outer):");
+  ringPeriods.forEach((period, i) => {
+    const x = i * 110;
+    const y = 18;
+    // Tiny donut glyph — 5 concentric arcs with the current ring filled.
+    const glyphR0 = 4, glyphRW = 2;
+    const gArc = d3.arc();
+    for (let ri = 0; ri < ringPeriods.length; ri++) {
+      const innerR = glyphR0 + ri * glyphRW;
+      ringLegG.append("path")
+        .attr("transform", `translate(${x + 8}, ${y})`)
+        .attr("d", gArc({ innerRadius: innerR, outerRadius: innerR + glyphRW,
+                           startAngle: 0, endAngle: 2 * Math.PI }))
+        .attr("fill", ri === i ? "#222" : "#ccc")
+        .attr("stroke", "none");
+    }
+    ringLegG.append("text")
+      .attr("x", x + 22).attr("y", y + 3)
+      .attr("font-size", 9).attr("fill", "#333")
+      .text(period);
+  });
+
+  // Reactive note shown when the user has picked more admin1s than the
+  // grid renders. Goes above the SVG so it's noticed before the user
+  // scrolls past, but below the section controls.
+  const note = (overflow > 0)
+    ? htl.html`<div style="font-size:11px;color:#7a4f00;background:#fff7e6;border:1px solid #f5d57e;border-radius:3px;padding:4px 10px;margin-bottom:8px;">
+        Showing the first ${MAX_ROWS} of ${selAdmin1All.length} selected admin1s (alphabetical).
+        Polar clocks get cramped beyond ${MAX_ROWS} rows × ${nCols} columns; narrow your admin1 selection
+        in the global popup to see the others.
+      </div>`
+    : "";
+
+  return chartDownloadMenu(
+    htl.html`<div>${note}${svg.node()}</div>`,
+    { filename: `period_polar_${scope}_${variable}_${sspsForRender.join("-")}` }
+  );
+  });
+}
+```
+
+```{ojs}
+captionDetails(htl.html`
+  <p style="margin:0 0 4px;color:#444;">
+    <strong>${globalScopeInfo.scope}</strong>
+    · ${periodPolar_controls.variable}
+    · ${(periodPolar_controls.ssp ?? ["ssp245"]).map(s => ({ ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" })[s] ?? s).join(", ")}
+    · ${periodPolar_controls.valueMode === "raw" ? "raw" : "anomaly vs 1995–2014"}
+    · 12 rolling 3-month seasons × 5 reference windows
+    · ${(globalScopeInfo.isCountry && (globalAdmin1 ?? []).length > 0) ? `${(globalAdmin1 ?? []).length} admin1 row${(globalAdmin1 ?? []).length === 1 ? "" : "s"}` : "scope-mean row"}
+  </p>
+  <p style="margin:0;font-size:0.92em;color:#555;">
+    Cell = ensemble-mean per (season, period) for the row's admin1 (or admin1-mean over scope
+    when no admin1 selection is active). Wedges = 12 rolling 3-month seasons centred on each
+    season's middle month (DJF at 12 o'clock, MAM at 3 o'clock, JJA at 6 o'clock, SON at 9 o'clock).
+    Rings = chronological — 1995–2014 baseline innermost, 2081–2100 outermost. <strong>Anomaly
+    palette is diverging blue → red</strong> (blue = below baseline, red = above) regardless of
+    whether the variable is one-signed in this scope. <strong>Raw palette = Inferno</strong>
+    (matches the observational P4 polar clock). Rolling 3-month seasons overlap (JFM, FMA, MAM
+    all contain February) so the wedges are NOT independent samples — read the view as a
+    seasonality fingerprint, not a sample comparison.
+  </p>
+`)
+```
+
+```{ojs}
+md`### ${_lang(nbText.sections.quickInsightLabel)}`
+```
+
+```{ojs}
+mdInsight(quickInsightPeriodPolar)
+```
+
+```{ojs}
+quickInsightPeriodPolar = (() => {
+  const t = nbText.sections.periodPolar.quickInsight;
+  if (!periodPolar_data || !periodPolar_data.length) return _lang(t.loading);
+  const { variable, ssp: sspSel, valueMode } = periodPolar_controls;
+  const isRawMode = valueMode === "raw";
+  const meanCol   = isRawMode ? "mean" : "mean_anomaly";
+  const isPTOT = variable === "PTOT";
+  const unit   = isPTOT ? "mm" : "°C";
+  // Prose insight picks the highest-emission selected SSP for canonical
+  // worst-case framing — same convention as Period ridges + Period table.
+  const ssps   = Array.isArray(sspSel) && sspSel.length ? sspSel : ["ssp245"];
+  const ssp    = ["ssp585","ssp370","ssp245","ssp126"].find(s => ssps.includes(s)) ?? ssps[0];
+  const sspLab = ({ ssp126:"SSP1-2.6", ssp245:"SSP2-4.5", ssp370:"SSP3-7.0", ssp585:"SSP5-8.5" })[ssp] ?? ssp;
+  // End-century season values for the prose insight.
+  const late = "2081-2100";
+  const rows = periodPolar_data.filter(d => d.scenario === ssp && d.period === late);
+  if (!rows.length) return _lang(t.noData);
+  const byS  = new Map();
+  for (const d of rows) {
+    const v = Number(d[meanCol]);
+    if (!Number.isFinite(v)) continue;
+    if (!byS.has(d.season)) byS.set(d.season, []);
+    byS.get(d.season).push(v);
+  }
+  const seasonMeans = [...byS.entries()]
+    .filter(([k]) => k !== "annual")
+    .map(([k, vs]) => ({ k, m: d3.mean(vs) }))
+    .filter(d => Number.isFinite(d.m));
+  if (seasonMeans.length < 2) return _lang(t.noData);
+  const peak = seasonMeans.reduce((a, b) => Math.abs(b.m) > Math.abs(a.m) ? b : a);
+  const low  = seasonMeans.reduce((a, b) => Math.abs(b.m) < Math.abs(a.m) ? b : a);
+  const range = d3.max(seasonMeans, d => d.m) - d3.min(seasonMeans, d => d.m);
+  return Lang.reduceReplaceTemplateItems(_lang(t.ok), [
+    { name: "ssp",        value: sspLab },
+    { name: "variable",   value: variable },
+    { name: "unit",       value: unit },
+    { name: "peakSeason", value: peak.k },
+    { name: "peakVal",    value: (peak.m >= 0 && !isRawMode ? "+" : "") + peak.m.toFixed(2) },
+    { name: "lowSeason",  value: low.k },
+    { name: "lowVal",     value: (low.m >= 0 && !isRawMode ? "+" : "") + low.m.toFixed(2) },
+    { name: "range",      value: range.toFixed(2) },
   ]);
 })();
 ```
