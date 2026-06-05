@@ -40,6 +40,11 @@ function quickInsightExtremes({
   variable,
   unit,
   topN = 5,
+  mode = "absolute", // "absolute" | "change" — "change" picks directional
+                     //                          language (warming/wettening/
+                     //                          drying) for trend or anomaly
+                     //                          rankings where absolutes
+                     //                          like "warmest" make no sense.
   proseLead = "",
   proseTail = "",
   emptyMsg = "No data.",
@@ -49,14 +54,20 @@ function quickInsightExtremes({
   // warm-for-warm for temperatures. Same dot colours used inline in the
   // single-list case (positional split: top half uses `dotPos`, bottom
   // half uses `dotNeg`).
-  const LABELS = {
+  //
+  // Two label sets — "absolute" (Warmest/Coolest, Wettest/Driest) keeps
+  // the original wording for ranking by present-day temperature/
+  // precipitation magnitude. "change" swaps to directional language
+  // (Warming fastest/slowest, Wettening/Drying most) for ranking by
+  // trend or anomaly — Pete's call: "warmest/coolest is wrong when
+  // talking about anomalies; this is about change not absolutes."
+  const LABELS_ABSOLUTE = {
     TAVG: { top: "Warmest admin1s",  bottom: "Coolest admin1s",
             dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
     TMAX: { top: "Warmest admin1s",  bottom: "Coolest admin1s",
             dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
     TMIN: { top: "Warmest admin1s",  bottom: "Coolest admin1s",
             dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
-    // PTOT: wettest = cool (positive) → top; driest = hot (negative) → bottom.
     PTOT: { top: "Wettest admin1s",  bottom: "Driest admin1s",
             dotPos: "rgba(29,158,117,0.85)", dotNeg: "rgba(216,90,48,0.85)" },
     "SPEI-03": { top: "Wettest admin1s",  bottom: "Driest admin1s",
@@ -66,6 +77,31 @@ function quickInsightExtremes({
     _default: { top: "Highest admin1s", bottom: "Lowest admin1s",
                 dotPos: "rgba(216,90,48,0.85)", dotNeg: "rgba(29,158,117,0.85)" },
   };
+  // Change mode: top of the sorted ranking is always the most-positive
+  // (largest increase); bottom is most-negative (largest decrease). For
+  // temperature the dominant signal is warming everywhere, so we frame
+  // it as "Warming fastest / slowest" (negative slopes are still
+  // labelled relative to the warming direction). For precipitation the
+  // signal can be either direction, so we use "Wettening most" /
+  // "Drying most" which work whether the data is all-wetter, all-drier,
+  // or mixed.
+  const LABELS_CHANGE = {
+    TAVG: { top: "Warming fastest", bottom: "Warming slowest",
+            dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
+    TMAX: { top: "Warming fastest", bottom: "Warming slowest",
+            dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
+    TMIN: { top: "Warming fastest", bottom: "Warming slowest",
+            dotPos: "rgba(216,90,48,0.85)",  dotNeg: "rgba(29,158,117,0.85)" },
+    PTOT: { top: "Wettening most",  bottom: "Drying most",
+            dotPos: "rgba(29,158,117,0.85)", dotNeg: "rgba(216,90,48,0.85)" },
+    "SPEI-03": { top: "Wettening most",  bottom: "Drying most",
+                 dotPos: "rgba(29,158,117,0.85)", dotNeg: "rgba(216,90,48,0.85)" },
+    "SPEI-12": { top: "Wettening most",  bottom: "Drying most",
+                 dotPos: "rgba(29,158,117,0.85)", dotNeg: "rgba(216,90,48,0.85)" },
+    _default: { top: "Largest increase", bottom: "Largest decrease",
+                dotPos: "rgba(216,90,48,0.85)", dotNeg: "rgba(29,158,117,0.85)" },
+  };
+  const LABELS = mode === "change" ? LABELS_CHANGE : LABELS_ABSOLUTE;
   const lbl = LABELS[variable] ?? LABELS._default;
 
   // ----- Guard: no data -----
