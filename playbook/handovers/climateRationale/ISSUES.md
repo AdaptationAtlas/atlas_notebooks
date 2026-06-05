@@ -3039,6 +3039,23 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
 
 ## CR-116 — Sandbox Future Projections: 3 new sub-sections (Period maps + Period ridges + numerical-summary table) on shared CMIP6 cache [NEW 2026-06-04]
 
+### CR-119 — CR-060 canonical rebake regressed (iso3 dropped + thrift corruption + 14× size inflation) [NEW 2026-06-05 · blocking]
+
+- **id:** CR-119
+- **title:** The 2026-06-05 12:00 UTC rebake of the projections `ensemble_season_timeseries.parquet` shipped with three regressions that block every notebook reader of the Future Projections section
+- **type:** pipeline (canonical rollback + next-rebake fixes)
+- **severity:** **high — blocks the production climateRationale notebook AND the sandbox** (Binder Error on every cell that filters by iso3; Quick Insights also throw `TProtocolException: Invalid data` on any GROUP BY)
+- **where:** `s3://digital-atlas/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months/period={1995-2014,2021-2040,2041-2060,2061-2080,2081-2100}/baseline=1995-2014/variable=ensemble_season_timeseries.parquet`
+- **regressions** (full diagnostic in [`dispatches/2026-06-05_cr060-parquet-regression.md`](dispatches/2026-06-05_cr060-parquet-regression.md)):
+  1. **`iso3` column removed.** `DESCRIBE` confirms `admin0_name` + `admin1_name` are present but `iso3` is not. Every notebook fetch filters by `iso3` → instant Binder Error.
+  2. **Thrift corruption on aggregate scans.** `SELECT ... LIMIT 5` works; any `GROUP BY` / `DISTINCT` / `ORDER BY` over the full table throws `Invalid Error: TProtocolException: Invalid data`. Downloaded MD5 (`c231b3ce5bbee63873888c541e8f9a2b`) does not match the single-part S3 ETag (`d5e09bcf615fba2ee2753a93693c1e9f`) though byte count matches Content-Length — symptom is consistent with a corrupted row-group footer.
+  3. **File size inflated ~14×** — from ~20 MB per file to **294 MB per file**, ~1.18 GB cold fetch across four future periods. Suspect drivers: the per-row `models` varchar column added 2026-05-27 (probably not dictionary-encoded), encoding regression on other varchar columns, or row-group sizing.
+- **proposed-change:**
+  1. **Immediate:** restore the previous canonical via S3 versioning. HEAD shows the bucket has versioning enabled. `aws s3api list-object-versions --bucket digital-atlas --prefix domain=climate/.../variable=ensemble_season_timeseries.parquet` lists the prior version-ids; restore each by copying the previous version to the latest. Five files (4 futures + 1 historic). Unblocks every reader.
+  2. **Next pipeline rebake:** (a) restore `iso3` to the schema, (b) add `pyarrow.parquet.ParquetFile(...).read()` + a full-table `SELECT COUNT(*) ...` smoke test as a pre-publish gate, (c) audit dictionary encoding on varchar columns (especially `models` — a single header-level lookup table is likely a 10×+ size win over a per-row varchar), (d) target ~1M-row row-groups for the WASM reader.
+  3. **Notebook side:** Held the `futureProjections_dataAll` SELECT to the legacy column set (no q17/q83/n_models) so it works against the restored canonical. The CR-060 ribbon code's `?? d[plotValue_mean]` fallback means the inter-model ribbon silently collapses to the mean line until the new columns reappear in a clean rebake.
+- **STATUS:** 🔄 Dispatched 2026-06-05. Awaiting canonical rollback. Notebook SELECT defensively reverted to legacy columns.
+
 ### CR-116 — Sandbox Future Projections expansion [NEW 2026-06-04 · shipped]
 
 - **id:** CR-116
