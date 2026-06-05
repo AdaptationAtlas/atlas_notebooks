@@ -241,41 +241,32 @@ dom-to-image, MIT-licensed, ~30 KB ESM from Skypack). Better-tested
 foreignObject + computed-style handling, plus an `onclone` hook that
 lets us patch Plot's figure-with-style oddity before rasterise.
 
+**Note on cell structure**: each top-level OJS binding lives in its own ```{ojs}``` fence below. Stuffing multiple bindings (`function ...`, `name = expr`) into one fence only registers the first one with the runtime — the rest are syntactically valid but never bound, and downstream cells throw `invalid binding`. This was the v2-to-v3 fix.
+
 ```{ojs}
 //| output: false
-// Generalised chart-export helper. Pluggable into any plot section.
-//
-// Usage:
-//   exportChartPng({ rootElement, filename, scale })
-//   exportChartSvg({ rootElement, filename })
-//
-// Strategy auto-selection:
-//   - Single bare SVG → fast path: serialise + Image + canvas raster.
-//     Works without any external library.
-//   - Anything else (Plot.plot figure, multi-SVG grid, HTML legend +
-//     SVG, pure HTML table) → html-to-image library handles the
-//     foreignObject + computed-style pipeline.
-
-// html-to-image (MIT, ~30 KB ESM via Skypack). Modern fork of dom-to-
+// html-to-image (MIT, ~30 KB ESM via esm.sh). Modern fork of dom-to-
 // image; handles Plot.plot figure-with-style, multi-SVG composites,
-// computed-style inlining, pixel-true bounds capture for HTML, all of
-// the cases the v1 DIY foreignObject envelope choked on.
-// esm.sh — reliable ESM CDN. Skypack 404'd for some package paths in
-// the previous attempt. esm.sh resolves the package's "exports" field
-// and serves a browser-ready ESM bundle with no extra path quirks.
+// computed-style inlining, pixel-true bounds capture for HTML — all of
+// the cases the v1 DIY foreignObject envelope choked on. esm.sh
+// resolves the package's "exports" field and serves a browser-ready
+// ESM bundle (Skypack 404'd in the v2 attempt).
 htmlToImage = await import("https://esm.sh/html-to-image@1.11.13")
+```
 
+```{ojs}
+//| output: false
 // Detect export strategy from the rootElement's shape.
 //   - bare <svg>                              → single-svg
 //   - <figure> with one <svg> + <style>       → plot-figure
 //     (Plot.plot output — bake style into SVG then use single-svg path
 //      so the export bounds = SVG bounds, not figure bounds. The
-//      previous v2 path routed Plot figures through html-to-image and
+//      previous version routed Plot figures through html-to-image and
 //      produced trailing whitespace because <figure>'s bounding rect
 //      is wider than its inner SVG.)
 //   - anything else (multi-SVG grid, HTML legend wrapper, pure HTML) →
 //     composite-html2img (html-to-image library handles it).
-function _detectExportStrategy(rootElement) {
+detectExportStrategy = function(rootElement) {
   if (!rootElement) return null;
   if (rootElement.tagName?.toLowerCase() === "svg") return "single-svg";
   if (rootElement.tagName?.toLowerCase() === "figure") {
@@ -284,11 +275,14 @@ function _detectExportStrategy(rootElement) {
   }
   return "composite-html2img";
 }
+```
 
+```{ojs}
+//| output: false
 // Plot.plot wraps SVG inside <figure> with a sibling <style> element.
 // Inline-clone that style into the SVG before serialising so class-
 // based fills / strokes / fonts survive a standalone export. Idempotent.
-function _bakePlotFigureStyles(rootElement) {
+bakePlotFigureStyles = function(rootElement) {
   if (!rootElement || rootElement.tagName?.toLowerCase() !== "figure") return rootElement;
   const svg = rootElement.querySelector(":scope > svg");
   const styles = rootElement.querySelectorAll(":scope > style");
@@ -299,9 +293,12 @@ function _bakePlotFigureStyles(rootElement) {
   }
   return rootElement;
 }
+```
 
+```{ojs}
+//| output: false
 // Serialise a single SVG with xmlns + width/height set on the clone.
-function _serialiseSingleSvg(svg) {
+serialiseSingleSvg = function(svg) {
   const clone = svg.cloneNode(true);
   if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   if (!clone.getAttribute("xmlns:xlink")) clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
@@ -310,16 +307,33 @@ function _serialiseSingleSvg(svg) {
   if (!clone.getAttribute("height")) clone.setAttribute("height", bbox.height);
   return new XMLSerializer().serializeToString(clone);
 }
+```
 
-// Single-SVG fast path (PNG). No library round-trip needed — keeps PNG
-// files small + export deterministic for the simplest case.
-async function _singleSvgPng(rootElement, scale) {
+```{ojs}
+//| output: false
+// Resolve the rootElement to the actual SVG to serialise for the
+// single-SVG fast paths. Plot-figure: bake styles into inner SVG then
+// return it. Bare SVG: return as-is. Anything else throws.
+resolveSvgForExport = function(rootElement) {
+  bakePlotFigureStyles(rootElement);
+  if (rootElement.tagName?.toLowerCase() === "svg") return rootElement;
+  if (rootElement.tagName?.toLowerCase() === "figure") {
+    const inner = rootElement.querySelector(":scope > svg");
+    if (inner) return inner;
+  }
+  const fallback = rootElement.querySelector("svg");
+  if (fallback) return fallback;
+  throw new Error("No SVG found in rootElement for single-svg path");
+}
+```
+
+```{ojs}
+//| output: false
+// Single-SVG fast path (PNG). No library round-trip — keeps PNG files
+// small + export deterministic for the simplest case.
+singleSvgPng = async function(svg, scale) {
   const dpr = scale || 2;
-  const svg = rootElement.tagName?.toLowerCase() === "svg"
-    ? rootElement
-    : rootElement.querySelector("svg");
-  if (!svg) throw new Error("No SVG in rootElement for single-svg strategy");
-  const svgString = _serialiseSingleSvg(svg);
+  const svgString = serialiseSingleSvg(svg);
   const bbox = svg.getBoundingClientRect();
   const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -342,28 +356,16 @@ async function _singleSvgPng(rootElement, scale) {
     im.src = url;
   });
 }
+```
 
-// Resolve the rootElement to the actual SVG to serialise for the
-// single-SVG fast paths. Plot-figure: bake styles into inner SVG +
-// return it. Bare SVG: return as-is. Anything else throws.
-function _resolveSvgForExport(rootElement) {
-  _bakePlotFigureStyles(rootElement);
-  if (rootElement.tagName?.toLowerCase() === "svg") return rootElement;
-  if (rootElement.tagName?.toLowerCase() === "figure") {
-    const inner = rootElement.querySelector(":scope > svg");
-    if (inner) return inner;
-  }
-  const fallback = rootElement.querySelector("svg");
-  if (fallback) return fallback;
-  throw new Error("No SVG found in rootElement for single-svg path");
-}
-
+```{ojs}
+//| output: false
 // PNG dispatcher.
 exportChartPng = async function(opts) {
   const { rootElement, scale, strategy } = opts || {};
-  const s = strategy || _detectExportStrategy(rootElement);
+  const s = strategy || detectExportStrategy(rootElement);
   if (s === "single-svg" || s === "plot-figure") {
-    return _singleSvgPng(_resolveSvgForExport(rootElement), scale);
+    return singleSvgPng(resolveSvgForExport(rootElement), scale);
   }
   // html-to-image: returns a Blob of PNG bytes. `pixelRatio` controls
   // dpr; `backgroundColor` forces white background so the PNG pastes
@@ -374,15 +376,18 @@ exportChartPng = async function(opts) {
     backgroundColor: "#ffffff",
     cacheBust: true,
   });
-};
+}
+```
 
+```{ojs}
+//| output: false
 // SVG dispatcher. For the composite path html-to-image emits an SVG
 // data URL via toSvg → decode into a string for the download.
 exportChartSvg = async function(opts) {
   const { rootElement, strategy } = opts || {};
-  const s = strategy || _detectExportStrategy(rootElement);
+  const s = strategy || detectExportStrategy(rootElement);
   if (s === "single-svg" || s === "plot-figure") {
-    return _serialiseSingleSvg(_resolveSvgForExport(rootElement));
+    return serialiseSingleSvg(resolveSvgForExport(rootElement));
   }
   const dataUrl = await htmlToImage.toSvg(rootElement, {
     backgroundColor: "#ffffff",
@@ -393,12 +398,14 @@ exportChartSvg = async function(opts) {
   const b64Prefix = "data:image/svg+xml;base64,";
   if (dataUrl.startsWith(b64Prefix)) return atob(dataUrl.slice(b64Prefix.length));
   return dataUrl;
-};
+}
+```
 
-// CSV serialiser — RFC 4180-ish. Accepts an array of plain objects or
-// the caller-supplied (header, rows) tuple form. Quotes fields that
-// contain commas / newlines / quotes; UTF-8 BOM prefixed when written
-// so Excel recognises diacritics in admin names etc.
+```{ojs}
+//| output: false
+// CSV serialiser — RFC 4180-ish. Quotes fields that contain commas /
+// newlines / quotes; UTF-8 BOM prefixed when written so Excel recognises
+// diacritics in admin names etc.
 exportDataCsv = function(opts) {
   const { data, columns } = opts || {};
   if (!Array.isArray(data) || data.length === 0) return "";
@@ -412,15 +419,18 @@ exportDataCsv = function(opts) {
   const header = cols.map(esc).join(",");
   const body = data.map(row => cols.map(c => esc(row[c])).join(",")).join("\n");
   return header + "\n" + body;
-};
+}
+```
 
+```{ojs}
+//| output: false
 triggerDownload = function(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-};
+}
 ```
 
 ```{ojs}
@@ -431,7 +441,7 @@ triggerDownload = function(blob, filename) {
 // "Download ▾" while the dropdown lists the format choices. Click
 // outside closes the menu.
 exportBar = function({ rootElement, filename, data, csvColumns }) {
-  const strategy = _detectExportStrategy(rootElement);
+  const strategy = detectExportStrategy(rootElement);
   const badge = htl.html`<span style="
     font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
     padding:2px 6px;border-radius:3px;
