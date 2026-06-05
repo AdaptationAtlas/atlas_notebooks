@@ -2306,7 +2306,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **dependencies:** Could fold into the in-flight AC re-bake if implementation lands before jagermeyr sec 3.4 runs. Otherwise its own re-bake cycle for R/2.1 sec 3.4 only.
 
-- **STATUS:** 🔄 **Pipeline code SHIPPED 2026-06-01** (`hazards_prototype` commit `9923942`). `yue_tfpw()` function added to R/2.1 section 3.4; validated 4/4 against `05_trend-validation-reference.py` (zero diff on slope/AC/p for all test series including critical Series D where buggy gives p=0.232 vs correct p=0.002). `tfpw_applied` and `lag1_ac` columns added to `_trends.parquet` for auditing. Trends parquets on S3 still reflect old schema — will update on the upcoming R/2.1 rerun (section 3.4 no longer skipped). Once published, [[CR-095]] notebook overlay is dispatchable.
+- **STATUS:** ✓ **DELIVERED 2026-06-05.** `yue_tfpw()` shipped `9923942`; TFPW-corrected `_trends*.parquet` published to canonical S3 via `scripts/r21_publish_to_s3.R`. Validated 4/4 against reference. [[CR-095]] notebook overlay dispatchable.
 
 ---
 
@@ -2344,7 +2344,7 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 
 - **dependencies:** BLOCKED on [[CR-094]] (TFPW pipeline fix).
 
-- **STATUS:** Open, **unblocked as of 2026-06-01** (CR-094 TFPW shipped `9923942`). Dispatchable once R/2.1 rerun publishes TFPW-corrected `_trends*.parquet` to canonical S3.
+- **STATUS:** Open, **dispatchable as of 2026-06-05** — TFPW-corrected trend parquets now on canonical S3. Notebook-only change; no further pipeline work needed.
 
 ### CR-096 — Year-of-exceedance map (when does my country cross +1.5 / +2 / +3 °C?) [NEW 2026-05-29 · long-term dev]
 
@@ -2808,7 +2808,7 @@ These items live in the `hazards_prototype` repo (or the analogous FAOSTAT pre-f
 | # | Issue | Notebook follow-up | Status | Effort |
 |---|---|---|---|---|
 | **U-1** | [[CR-059]] — SPEI replaces raw-precip z-score for PTOT extreme-event classification | `bars_extremeEvents` reads SPEI for PTOT slice once schema lands | Open. Bundle with U-2 / U-3 in a single re-bake. | M (pipeline) |
-| **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | 🔄 **Pipeline code shipped** `f42d720` 2026-06-01. Parquets update on R/2.1 rerun + publish. Notebook CR-061 ribbon swap dispatchable once canonical live. | M (pipeline) |
+| **U-2** | [[CR-060]] — Bake `q5` / `q17` / `q50` / `q83` / `q95` / `n_models` into projections parquet | `timeseries_futureProjections` ribbon swaps to `q17_anomaly..q83_anomaly`; same swap propagates into PR-L (CR-061) for Recent Changes. | ✓ **DELIVERED 2026-06-05.** Canonical published (probe 20/20 PASS). CR-061 dispatchable now. | M (pipeline) |
 | **U-3** | [[CR-064]] — FAOSTAT QV + QCL pre-fetch into `s3://digital-atlas/.../adm0_faostat.parquet` | PR-N ([[CR-063]]) consumes the S3 path directly via the `production_timeseries` nbData entry. | ✓ FIXED 2026-05-15 by Brayden — parquet published; PR-N Phase A landed against it the same day. **2026-05-18 — Trade domain extension:** parquet republished with `export_quantity` + `export_value` added to the `variable` enum (6 levels total). Schema unchanged. Notebook side picks up via a future PR-N Phase B / C dispatch. | M (pipeline) |
 | **U-4** | [[CR-068]] — `hazard_exposure` parquet adds `hazard = "none"` / unexposed row per cell | PR-E (CR-049) Phase 1 drops the cross-table join and reads the denominator directly from `hazard_exposure`. | ✓ **DELIVERED 2026-05-30.** C/D/E complete. Canonical published (etag `4c6e822161edba3a90f28b4848197716`), +70,992 `none` rows confirmed. CR-049 Phase 1 unblocked. | M (pipeline) |
 | **U-5 (optional)** | [[CR-058]] Option 3 — partition the projections + extremes parquet by `iso3` instead of (or in addition to) by `period` | First-fetch latency drops from ~30 s to ~1 s on the Future Projections + Extreme Events sections; nbData entries gain per-country `s3_paths`. | Open. **Optional** — Brayden can decline if the pipeline pass is already heavy; defer until users actively complain about latency. Measured 2026-05-15 as the highest-leverage perf fix (96 MB period parquet → ~2 MB per-country, 96 / 54). | M–L (pipeline) |
@@ -2903,11 +2903,17 @@ These are explicitly out of scope for this round per Pete's "focus on immediate 
 | Stage 6 promotion | ✓ DONE | 5 CMIP6 `ensemble_season_timeseries.parquet` promoted sandbox → canonical. Backups at `.preFix.bak`. |
 | Stage 7 verify | ✓ PASS | 13,680 rows for AGO annual in <5s via HTTPS DuckDB. |
 | Sandbox cleanup | ✓ DONE | `aws s3 rm --recursive s3://digital-atlas/sandbox/parquet-pushdown/` (also removed 9 other sandbox files that were NOT promoted — see below). |
-| R/2.1 rerun | 🔜 NEXT | Code changes committed `e7eed37`. Awaiting CGlabs launch. |
+| R/2.1 rerun | ✓ DONE 2026-06-05 | Exit 0, 10:31 UTC. probe_r21_outputs.R 20/20 PASS. r21_publish_to_s3.R published to canonical. |
 
-### What's live now
+### What's live now (2026-06-05)
 
-The 5 canonical `ensemble_season_timeseries.parquet` files at `s3://digital-atlas/domain=climate/...` are the **pre-baked sandbox versions** (rg=50000, DuckDB-native, sorted). These are a stopgap — they work and deliver the WASM latency benefit, but they were generated from old code (2026-05-27 rebake, 5-GCM subset). R/2.1 rerun will replace them with fresh data from current source using the same pushdown layout.
+All 5 canonical `ensemble_season_timeseries.parquet` files published with:
+- **CR-060 quantiles**: q5/q17/q50/q83/q95/n_models confirmed present (probe check 2)
+- **CR-094 TFPW-corrected trends**: `_trends*.parquet` published alongside  
+- **Pushdown stats**: NULL stats fixed (probe check 3 PASS)
+- **write_parquet_pushdown layout**: DuckDB-native, rg=50000, sorted by iso3/hazard/scenario/season
+
+CR-061 (ribbon swap sd_anomaly → q17/q83) and CR-095 (trend overlay) are now **dispatchable**.
 
 ### Other sandbox files deleted without promoting (need fresh rebake later)
 
