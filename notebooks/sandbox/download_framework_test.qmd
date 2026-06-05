@@ -166,7 +166,17 @@ tc4 = {
 ```
 
 ```{ojs}
-exportBar({ rootElement: tc4, filename: "tc4_pure_html_table" })
+// Pass tc4's row-major data so the CSV menu item is enabled.
+exportBar({
+  rootElement: tc4,
+  filename: "tc4_pure_html_table",
+  data: (() => {
+    const rows = ["A","B","C","D"];
+    const cols = ["2021-2040","2041-2060","2061-2080","2081-2100"];
+    return rows.flatMap((r, ri) =>
+      cols.map((c, ci) => ({ row: r, period: c, value: Math.sin((ri + ci) / 3) * 2 })));
+  })(),
+})
 ```
 
 ## Test case 5 — SVG composite with d3 (polar-clock-shaped)
@@ -255,14 +265,23 @@ lets us patch Plot's figure-with-style oddity before rasterise.
 // and serves a browser-ready ESM bundle with no extra path quirks.
 htmlToImage = await import("https://esm.sh/html-to-image@1.11.13")
 
-// Detect export strategy from the rootElement's shape. v2 only
-// distinguishes between "bare SVG element" (use the existing DIY fast
-// path — small files, no library round-trip) and everything else
-// (delegate to html-to-image). The library handles its own internal
-// strategy selection.
+// Detect export strategy from the rootElement's shape.
+//   - bare <svg>                              → single-svg
+//   - <figure> with one <svg> + <style>       → plot-figure
+//     (Plot.plot output — bake style into SVG then use single-svg path
+//      so the export bounds = SVG bounds, not figure bounds. The
+//      previous v2 path routed Plot figures through html-to-image and
+//      produced trailing whitespace because <figure>'s bounding rect
+//      is wider than its inner SVG.)
+//   - anything else (multi-SVG grid, HTML legend wrapper, pure HTML) →
+//     composite-html2img (html-to-image library handles it).
 function _detectExportStrategy(rootElement) {
   if (!rootElement) return null;
-  if (rootElement.tagName && rootElement.tagName.toLowerCase() === "svg") return "single-svg";
+  if (rootElement.tagName?.toLowerCase() === "svg") return "single-svg";
+  if (rootElement.tagName?.toLowerCase() === "figure") {
+    const svgs = rootElement.querySelectorAll(":scope > svg");
+    if (svgs.length === 1) return "plot-figure";
+  }
   return "composite-html2img";
 }
 
@@ -324,14 +343,28 @@ async function _singleSvgPng(rootElement, scale) {
   });
 }
 
+// Resolve the rootElement to the actual SVG to serialise for the
+// single-SVG fast paths. Plot-figure: bake styles into inner SVG +
+// return it. Bare SVG: return as-is. Anything else throws.
+function _resolveSvgForExport(rootElement) {
+  _bakePlotFigureStyles(rootElement);
+  if (rootElement.tagName?.toLowerCase() === "svg") return rootElement;
+  if (rootElement.tagName?.toLowerCase() === "figure") {
+    const inner = rootElement.querySelector(":scope > svg");
+    if (inner) return inner;
+  }
+  const fallback = rootElement.querySelector("svg");
+  if (fallback) return fallback;
+  throw new Error("No SVG found in rootElement for single-svg path");
+}
+
 // PNG dispatcher.
 exportChartPng = async function(opts) {
   const { rootElement, scale, strategy } = opts || {};
-  // Bake Plot.plot figure-style sibling into the SVG up-front; safe
-  // for everything else (no-op when rootElement isn't a <figure>).
-  _bakePlotFigureStyles(rootElement);
   const s = strategy || _detectExportStrategy(rootElement);
-  if (s === "single-svg") return _singleSvgPng(rootElement, scale);
+  if (s === "single-svg" || s === "plot-figure") {
+    return _singleSvgPng(_resolveSvgForExport(rootElement), scale);
+  }
   // html-to-image: returns a Blob of PNG bytes. `pixelRatio` controls
   // dpr; `backgroundColor` forces white background so the PNG pastes
   // cleanly into docs / slides. `cacheBust` defeats stale Image cache
@@ -344,30 +377,41 @@ exportChartPng = async function(opts) {
 };
 
 // SVG dispatcher. For the composite path html-to-image emits an SVG
-// data URL via toSvg → fetch the data URL contents into a string for
-// the download.
+// data URL via toSvg → decode into a string for the download.
 exportChartSvg = async function(opts) {
   const { rootElement, strategy } = opts || {};
-  _bakePlotFigureStyles(rootElement);
   const s = strategy || _detectExportStrategy(rootElement);
-  if (s === "single-svg") {
-    const svg = rootElement.tagName?.toLowerCase() === "svg"
-      ? rootElement : rootElement.querySelector("svg");
-    if (!svg) throw new Error("No SVG to export");
-    return _serialiseSingleSvg(svg);
+  if (s === "single-svg" || s === "plot-figure") {
+    return _serialiseSingleSvg(_resolveSvgForExport(rootElement));
   }
-  // html-to-image returns a data: URL containing the SVG envelope.
   const dataUrl = await htmlToImage.toSvg(rootElement, {
     backgroundColor: "#ffffff",
     cacheBust: true,
   });
-  // Decode data URL into raw SVG string for the .svg download.
   const prefix = "data:image/svg+xml;charset=utf-8,";
   if (dataUrl.startsWith(prefix)) return decodeURIComponent(dataUrl.slice(prefix.length));
-  // Fall-back: html-to-image sometimes returns base64 form.
   const b64Prefix = "data:image/svg+xml;base64,";
   if (dataUrl.startsWith(b64Prefix)) return atob(dataUrl.slice(b64Prefix.length));
   return dataUrl;
+};
+
+// CSV serialiser — RFC 4180-ish. Accepts an array of plain objects or
+// the caller-supplied (header, rows) tuple form. Quotes fields that
+// contain commas / newlines / quotes; UTF-8 BOM prefixed when written
+// so Excel recognises diacritics in admin names etc.
+exportDataCsv = function(opts) {
+  const { data, columns } = opts || {};
+  if (!Array.isArray(data) || data.length === 0) return "";
+  const cols = columns ?? Object.keys(data[0]);
+  const esc = v => {
+    if (v == null) return "";
+    const s = String(v);
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const header = cols.map(esc).join(",");
+  const body = data.map(row => cols.map(c => esc(row[c])).join(",")).join("\n");
+  return header + "\n" + body;
 };
 
 triggerDownload = function(blob, filename) {
@@ -381,23 +425,66 @@ triggerDownload = function(blob, filename) {
 
 ```{ojs}
 //| output: false
-// Test-sandbox UI bar — renders side-by-side strategy badges + Download
-// PNG / Download SVG buttons that invoke the helper. Each test case
-// gets its own bar.
-exportBar = function({ rootElement, filename }) {
+// Combined Download ▾ split-button — single control offering PNG / SVG
+// / CSV. The CSV menu item only enables when the caller passes a
+// `data` array (or `csvColumns`). The button keeps its label as
+// "Download ▾" while the dropdown lists the format choices. Click
+// outside closes the menu.
+exportBar = function({ rootElement, filename, data, csvColumns }) {
   const strategy = _detectExportStrategy(rootElement);
   const badge = htl.html`<span style="
     font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
     padding:2px 6px;border-radius:3px;
-    background:${strategy === "single-svg" ? "#e5f3ff" : "#fff5e0"};
-    color:${strategy === "single-svg" ? "#1d3a5f" : "#7a4f00"};
-    border:1px solid ${strategy === "single-svg" ? "#7ab4e8" : "#f5b85e"};
+    background:${strategy === "composite-html2img" ? "#fff5e0" : "#e5f3ff"};
+    color:${strategy === "composite-html2img" ? "#7a4f00" : "#1d3a5f"};
+    border:1px solid ${strategy === "composite-html2img" ? "#f5b85e" : "#7ab4e8"};
   ">strategy: ${strategy ?? "(none)"}</span>`;
-  const btnStyle = "font-size:12px;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;cursor:pointer;color:#222;";
-  const pngBtn = htl.html`<button style="${btnStyle}">⬇ PNG</button>`;
-  pngBtn.onclick = async () => {
-    pngBtn.textContent = "Rasterising…";
-    pngBtn.disabled = true;
+
+  const hasData = Array.isArray(data) && data.length > 0;
+
+  // Style block — scoped to the wrapper.
+  const styleId = `exportbar-style-${Math.random().toString(36).slice(2, 7)}`;
+  const styleEl = htl.html`<style>
+    .${styleId}-row { display:flex; gap:8px; align-items:center; padding:6px 8px; border-top:1px solid #eee; background:#fafafa; margin-top:8px; }
+    .${styleId}-wrap { position:relative; display:inline-block; }
+    .${styleId}-btn { font-size:12px; padding:4px 10px; border:1px solid #888; border-radius:4px; background:#fff; cursor:pointer; color:#222; font-family:inherit; }
+    .${styleId}-btn:hover { background:#f0f0f0; }
+    .${styleId}-btn:disabled { opacity:0.5; cursor:wait; }
+    .${styleId}-menu { display:none; position:absolute; top:100%; left:0; margin-top:2px; background:#fff; border:1px solid #999; border-radius:4px; box-shadow:0 4px 14px rgba(0,0,0,0.18); padding:4px 0; min-width:160px; z-index:9999; }
+    .${styleId}-menu.open { display:block; }
+    .${styleId}-item { display:block; width:100%; padding:6px 14px; text-align:left; background:transparent; border:0; font-size:12px; color:#222; cursor:pointer; font-family:inherit; }
+    .${styleId}-item:hover:not(:disabled) { background:#f0f0f0; }
+    .${styleId}-item:disabled { color:#aaa; cursor:not-allowed; }
+    .${styleId}-item-hint { display:inline-block; margin-left:8px; font-size:10px; color:#888; }
+  </style>`;
+
+  const btn = htl.html`<button class="${styleId}-btn">⬇ Download ▾</button>`;
+  const menu = htl.html`<div class="${styleId}-menu"></div>`;
+  const wrap = htl.html`<div class="${styleId}-wrap">${btn}${menu}</div>`;
+
+  const closeMenu = () => menu.classList.remove("open");
+  const openMenu  = () => menu.classList.add("open");
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    menu.classList.toggle("open");
+  };
+  // Click-outside dismiss.
+  const docHandler = (e) => { if (!wrap.contains(e.target)) closeMenu(); };
+  document.addEventListener("click", docHandler);
+
+  const setBusy = (label) => {
+    btn.disabled = true;
+    btn.textContent = label;
+  };
+  const setReady = () => {
+    btn.disabled = false;
+    btn.textContent = "⬇ Download ▾";
+  };
+
+  const pngItem = htl.html`<button class="${styleId}-item">PNG <span class="${styleId}-item-hint">raster, white bg</span></button>`;
+  pngItem.onclick = async () => {
+    closeMenu();
+    setBusy("Rasterising…");
     try {
       const blob = await exportChartPng({ rootElement, scale: 2 });
       triggerDownload(blob, `${filename}.png`);
@@ -405,13 +492,13 @@ exportBar = function({ rootElement, filename }) {
       console.error("PNG export failed:", e);
       alert("PNG export failed: " + e.message);
     }
-    pngBtn.textContent = "⬇ PNG";
-    pngBtn.disabled = false;
+    setReady();
   };
-  const svgBtn = htl.html`<button style="${btnStyle}">⬇ SVG</button>`;
-  svgBtn.onclick = async () => {
-    svgBtn.textContent = "Serialising…";
-    svgBtn.disabled = true;
+
+  const svgItem = htl.html`<button class="${styleId}-item">SVG <span class="${styleId}-item-hint">vector, scalable</span></button>`;
+  svgItem.onclick = async () => {
+    closeMenu();
+    setBusy("Serialising…");
     try {
       const svgStr = await exportChartSvg({ rootElement });
       const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
@@ -420,13 +507,25 @@ exportBar = function({ rootElement, filename }) {
       console.error("SVG export failed:", e);
       alert("SVG export failed: " + e.message);
     }
-    svgBtn.textContent = "⬇ SVG";
-    svgBtn.disabled = false;
+    setReady();
   };
-  return htl.html`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;padding:6px 8px;border-top:1px solid #eee;background:#fafafa;">
+
+  const csvItem = htl.html`<button class="${styleId}-item" ${hasData ? "" : "disabled"}>CSV <span class="${styleId}-item-hint">${hasData ? `input data, ${data.length} rows` : "no input data"}</span></button>`;
+  csvItem.onclick = () => {
+    if (!hasData) return;
+    closeMenu();
+    const csv = exportDataCsv({ data, columns: csvColumns });
+    // UTF-8 BOM so Excel recognises diacritics.
+    const blob = new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" });
+    triggerDownload(blob, `${filename}.csv`);
+  };
+
+  menu.append(pngItem, svgItem, csvItem);
+
+  return htl.html`<div class="${styleId}-row">
+    ${styleEl}
     ${badge}
-    ${pngBtn}
-    ${svgBtn}
+    ${wrap}
     <span style="font-size:10px;color:#888;font-style:italic;">filename: ${filename}</span>
   </div>`;
 }
@@ -439,14 +538,16 @@ exportBar = function({ rootElement, filename }) {
 For each of the 5 test cases:
 
 1. **Strategy badge** —
-   - TC1 (Plot.plot figure) → `composite-html2img` (figure has sibling style).
+   - TC1 (Plot.plot figure, single inner SVG) → `plot-figure` (bakes sibling `<style>` into the SVG + uses the single-svg fast path → no trailing whitespace).
    - TC2 (multi-SVG facet grid) → `composite-html2img`.
    - TC3 (SVG + HTML legend wrapper) → `composite-html2img`.
    - TC4 (pure HTML table) → `composite-html2img`.
    - TC5 (single bare SVG with `<g>` subgraphs) → `single-svg`.
-2. **Click ⬇ PNG** — downloaded PNG should match the page including legends + all facets / cells / table rows.
-3. **Click ⬇ SVG** — downloaded SVG should render in a browser tab. (Illustrator support for foreignObject is patchy — that's a known caveat across all SVG-of-HTML approaches.)
-4. **Compare against the legacy `chartDownloadMenu`** in `obs_month_overlay.qmd` — TC2 / TC3 / TC4 should be visibly more-complete than the legacy single-SVG path.
+2. **Click ⬇ Download ▾** — one button now. Menu items: **PNG / SVG / CSV**. CSV is enabled only when the caller passes a `data` array (TC4 here).
+3. PNG output should match the page including legends + all facets / cells / table rows. No trailing whitespace on TC1 (regression vs prior version).
+4. SVG output should render in a browser tab. (Illustrator support for foreignObject is patchy — known caveat across all SVG-of-HTML approaches.)
+5. CSV output should be UTF-8 with BOM; opens cleanly in Excel + LibreOffice.
+6. Compare against the legacy `chartDownloadMenu` in `obs_month_overlay.qmd` — TC2 / TC3 / TC4 should be visibly more-complete than the legacy single-SVG path.
 
 If any case fails: open DevTools → console; html-to-image logs verbose errors there. Paste back here.
 
