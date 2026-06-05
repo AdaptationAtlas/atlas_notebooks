@@ -82,23 +82,16 @@ function _chartDownloadMenu_findSvg(chartElement) {
 
 
 /**
- * True when the chartElement is a "composite" — either multiple SVGs
- * (facet grid, small multiples), an SVG plus HTML siblings (legend,
- * caption, ranking panel), or pure HTML (heat-mapped table). For these
- * shapes the legacy serialise-first-SVG PNG path drops content; we route
- * PNG through html-to-image and disable the lossy single-SVG export.
- *
- * Returns false only for true single-SVG / single-figure roots whose
- * existing fast-path PNG is correct.
+ * True when PNG capture needs html-to-image — anything that isn't a
+ * bare <svg> or a figure containing exactly one <svg> and only
+ * <style> siblings. Plot.plot figures with `title:` (which renders an
+ * <h2>) fall into this bucket so the title text makes it into the PNG.
  */
-function _chartDownloadMenu_isComposite(el) {
+function _chartDownloadMenu_needsCompositePng(el) {
   if (!el || !el.tagName) return false;
   const tag = el.tagName.toLowerCase();
   if (tag === "svg") return false;
   if (tag === "figure") {
-    // Plot.plot's <figure> with exactly one <svg> child and no other
-    // meaningful element children (only <style> or whitespace) is the
-    // single-svg fast path; anything else is composite.
     const directChildren = Array.from(el.children);
     const svgs = directChildren.filter(c => c.tagName && c.tagName.toLowerCase() === "svg");
     const others = directChildren.filter(c => {
@@ -109,6 +102,21 @@ function _chartDownloadMenu_isComposite(el) {
     return svgs.length !== 1 || others.length > 0;
   }
   return true;
+}
+
+/**
+ * True when SVG export would be lossy — multiple SVGs inside (we'd
+ * serialise only the first), or zero SVGs (nothing to serialise).
+ * A single inner SVG with HTML siblings is NOT lossy: the user gets
+ * an honest "chart-only SVG" without the legend/caption, which is
+ * how vector exports work everywhere else.
+ */
+function _chartDownloadMenu_isSvgLossy(el) {
+  if (!el) return true;
+  if (el.tagName && el.tagName.toLowerCase() === "svg") return false;
+  if (typeof el.querySelectorAll !== "function") return true;
+  const allSvgs = el.querySelectorAll("svg");
+  return allSvgs.length !== 1;
 }
 
 
@@ -491,14 +499,18 @@ function chartDownloadMenu(chartElement, opts) {
   const data = o.data;
   const csvColumns = o.csvColumns;
   const hasData = Array.isArray(data) && data.length > 0;
-  // Auto-detect composite shapes (multi-SVG grids, SVG + HTML legend
-  // wrappers, pure HTML tables). For these the legacy first-SVG path
-  // drops content, so we route PNG through html-to-image (via
-  // compositePng) and suppress the lossy single-SVG menu item. Callers
-  // can still force explicit values via opts.pngOverride / opts.disableSvg.
-  const composite = _chartDownloadMenu_isComposite(chartElement);
-  const pngOverride = o.pngOverride || (composite ? compositePng(chartElement) : null);
-  const disableSvg = o.disableSvg !== undefined ? !!o.disableSvg : composite;
+  // Auto-detect:
+  //  - needsCompositePng: route PNG through html-to-image so the title /
+  //    legend / additional facets are captured. Triggered by anything
+  //    that isn't a bare <svg> or single-svg-only <figure>.
+  //  - svgLossy: ONLY disable SVG export when there's no single inner
+  //    SVG to serialise (multi-SVG, or zero SVGs). A single inner SVG
+  //    + HTML siblings still allows an honest "chart-only SVG" export.
+  // Callers can override either via opts.pngOverride / opts.disableSvg.
+  const needsCompositePng = _chartDownloadMenu_needsCompositePng(chartElement);
+  const svgLossy = _chartDownloadMenu_isSvgLossy(chartElement);
+  const pngOverride = o.pngOverride || (needsCompositePng ? compositePng(chartElement) : null);
+  const disableSvg = o.disableSvg !== undefined ? !!o.disableSvg : svgLossy;
 
   // Find the SVG for PNG/SVG export. CSV doesn't need it.
   const svg = _chartDownloadMenu_findSvg(chartElement);
@@ -590,9 +602,10 @@ function chartDownloadButton(chartElement, opts) {
   const hasData = Array.isArray(data) && data.length > 0;
   // Same composite auto-detection as chartDownloadMenu — keeps the
   // button variant consistent with the wrapper variant.
-  const composite = _chartDownloadMenu_isComposite(chartElement);
-  const pngOverride = o.pngOverride || (composite ? compositePng(chartElement) : null);
-  const disableSvg = o.disableSvg !== undefined ? !!o.disableSvg : composite;
+  const needsCompositePng = _chartDownloadMenu_needsCompositePng(chartElement);
+  const svgLossy = _chartDownloadMenu_isSvgLossy(chartElement);
+  const pngOverride = o.pngOverride || (needsCompositePng ? compositePng(chartElement) : null);
+  const disableSvg = o.disableSvg !== undefined ? !!o.disableSvg : svgLossy;
 
   const svg = _chartDownloadMenu_findSvg(chartElement);
   const pngAvailable = !!svg || typeof pngOverride === "function";
