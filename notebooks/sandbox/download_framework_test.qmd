@@ -30,12 +30,38 @@ execute:
 import { loaderDiv } from "/helpers/uiComponents.ojs";
 ```
 
+```{ojs}
+// chartDownloadMenu is the working PNG/SVG/CSV split-button from the
+// main sandbox. We reuse its UI verbatim and only extend its PNG path
+// for composite cases via the existing `pngOverride` hook.
+import { chartDownloadMenu } from "/helpers/chartDownloadMenu.ojs";
+```
+
+```{ojs}
+//| output: false
+// html-to-image lazy-loaded from esm.sh — used by composite test cases
+// via `pngOverride`. OJS awaits the import; `htmlToImageMod.toBlob` is
+// usable from any cell after this one resolves.
+htmlToImageMod = import("https://esm.sh/html-to-image@1.11.13")
+```
+
+```{ojs}
+//| output: false
+// Helper used by composite cases: rasterises the entire rootElement
+// (multi-SVG grid, SVG + HTML legend, pure-HTML table) via html-to-image.
+compositePng = (rootElement) => () => htmlToImageMod.toBlob(rootElement, {
+  pixelRatio: 2,
+  backgroundColor: "#ffffff",
+  cacheBust: true,
+})
+```
+
 ## Test case 1 — single Plot.plot chart (baseline / regression check)
 
 The simplest case. `chartDownloadMenu` already handles this. Verify the new helper produces the same output.
 
 ```{ojs}
-//| label: tc1-render
+//| output: false
 tc1 = {
   const data = d3.range(0, 50).map(i => ({ x: i, y: Math.sin(i / 5) + 0.02 * i }));
   return Plot.plot({
@@ -52,7 +78,9 @@ tc1 = {
 ```
 
 ```{ojs}
-exportBar({ rootElement: tc1, filename: "tc1_single_svg" })
+// TC1 — single Plot.plot output. chartDownloadMenu's default SVG path
+// handles it: PNG via SVG-rasterise, SVG via direct serialise.
+tc1_dl = chartDownloadMenu(tc1, { filename: "tc1_single_svg" })
 ```
 
 ## Test case 2 — multi-SVG facet grid
@@ -60,7 +88,7 @@ exportBar({ rootElement: tc1, filename: "tc1_single_svg" })
 Multiple SVGs inside a flexbox container. Current helper captures one cell only.
 
 ```{ojs}
-//| label: tc2-render
+//| output: false
 tc2 = {
   const data = d3.range(0, 50);
   const oneCell = (label, phase) => {
@@ -87,7 +115,14 @@ tc2 = {
 ```
 
 ```{ojs}
-exportBar({ rootElement: tc2, filename: "tc2_facet_grid_6_cells" })
+// TC2 — multi-SVG facet grid. Default findSvg() would grab only the
+// first cell; route PNG through html-to-image, suppress SVG (composite
+// SVG export not reliable enough for this shape).
+tc2_dl = chartDownloadMenu(tc2, {
+  filename: "tc2_facet_grid_6_cells",
+  pngOverride: compositePng(tc2),
+  disableSvg: true,
+})
 ```
 
 ## Test case 3 — SVG + HTML legend (Period-maps-shaped)
@@ -95,7 +130,7 @@ exportBar({ rootElement: tc2, filename: "tc2_facet_grid_6_cells" })
 A chart with an HTML legend below it (like Period maps' colour-ramp legend + stipple note). Current helper exports the chart SVG only; the legend goes missing.
 
 ```{ojs}
-//| label: tc3-render
+//| output: false
 tc3 = {
   const data = d3.range(0, 80).map(i => ({
     x: i % 20, y: Math.floor(i / 20),
@@ -130,7 +165,13 @@ tc3 = {
 ```
 
 ```{ojs}
-exportBar({ rootElement: tc3, filename: "tc3_chart_plus_html_legend" })
+// TC3 — SVG + HTML legend wrapper. Default path would export the SVG
+// only, dropping the legend. html-to-image PNG captures both.
+tc3_dl = chartDownloadMenu(tc3, {
+  filename: "tc3_chart_plus_html_legend",
+  pngOverride: compositePng(tc3),
+  disableSvg: true,
+})
 ```
 
 ## Test case 4 — pure HTML (Period-table-shaped)
@@ -138,7 +179,7 @@ exportBar({ rootElement: tc3, filename: "tc3_chart_plus_html_legend" })
 A heat-mapped table — no SVG anywhere. Must rasterise via foreignObject. Current helper fails entirely (no SVG → no PNG).
 
 ```{ojs}
-//| label: tc4-render
+//| output: false
 tc4 = {
   const rows = ["A","B","C","D"];
   const cols = ["2021-2040","2041-2060","2061-2080","2081-2100"];
@@ -166,16 +207,24 @@ tc4 = {
 ```
 
 ```{ojs}
-// Pass tc4's row-major data so the CSV menu item is enabled.
-exportBar({
-  rootElement: tc4,
+//| output: false
+// TC4's row-major data — enables the CSV menu item below.
+tc4_data = {
+  const rows = ["A","B","C","D"];
+  const cols = ["2021-2040","2041-2060","2061-2080","2081-2100"];
+  return rows.flatMap((r, ri) =>
+    cols.map((c, ci) => ({ row: r, period: c, value: Math.sin((ri + ci) / 3) * 2 })));
+}
+```
+
+```{ojs}
+// TC4 — pure HTML. No SVG → default chartDownloadMenu PNG would be
+// disabled; pngOverride wires html-to-image.
+tc4_dl = chartDownloadMenu(tc4, {
   filename: "tc4_pure_html_table",
-  data: (() => {
-    const rows = ["A","B","C","D"];
-    const cols = ["2021-2040","2041-2060","2061-2080","2081-2100"];
-    return rows.flatMap((r, ri) =>
-      cols.map((c, ci) => ({ row: r, period: c, value: Math.sin((ri + ci) / 3) * 2 })));
-  })(),
+  data: tc4_data,
+  pngOverride: compositePng(tc4),
+  disableSvg: true,
 })
 ```
 
@@ -184,7 +233,7 @@ exportBar({
 A single SVG, but containing multiple `<g>` subgraphs at calculated positions — mimics Period polar's grid-inside-one-SVG layout.
 
 ```{ojs}
-//| label: tc5-render
+//| output: false
 tc5 = {
   const cellW = 200, cellH = 200, nCols = 3, nRows = 2;
   const totalW = cellW * nCols + 30, totalH = cellH * nRows + 50;
@@ -218,150 +267,32 @@ tc5 = {
 ```
 
 ```{ojs}
-exportBar({ rootElement: tc5, filename: "tc5_single_svg_composite" })
+// TC5 — single bare SVG with internal <g> subgraphs. chartDownloadMenu's
+// default path serialises the whole SVG, so all subgraphs are kept.
+tc5_dl = chartDownloadMenu(tc5, { filename: "tc5_single_svg_composite" })
 ```
 
 ---
 
-## The helper (v2 — html-to-image rasteriser)
+## The framework — reuse the working `chartDownloadMenu`
 
-v1 used a DIY `<svg><foreignObject>` envelope. Three failure modes in
-the wild (Pete 2026-06-05 test run):
-- Plot.plot output is a `<figure>` containing `<svg>` PLUS a sibling
-  `<style>` element — single-SVG serialiser dropped the sibling style,
-  so the exported SVG had axes / text but no graphics.
-- foreignObject with nested SVG namespace can hang the `<img>`
-  rasterise step without firing `onload` OR `onerror` — PNG button
-  stuck on "Rasterising…" indefinitely.
-- Pure HTML rasterise via foreignObject truncated rows on TC4 (table
-  missing the last row).
+Earlier iterations tried to ship a parallel `exportBar` helper. Each
+form hit the same OJS-binding tarpit (`.ojs` module → "exportDataCsvV2
+is not defined"; in-cell function expression → "invalid binding";
+combined dropdown wired around dynamic `htl.html` buttons → same).
 
-v2 delegates the hard problems to `html-to-image` (modern fork of
-dom-to-image, MIT-licensed, ~30 KB ESM from Skypack). Better-tested
-foreignObject + computed-style handling, plus an `onclone` hook that
-lets us patch Plot's figure-with-style oddity before rasterise.
+Pete's correct call: the existing `chartDownloadMenu` already exposes a
+single split-button with **PNG / SVG / CSV** and is proven in the main
+sandbox. Its `pngOverride` hook is exactly the extension point this
+test sandbox needs — it lets composite cases route PNG through
+`html-to-image` while keeping the existing UI. `disableSvg` suppresses
+the SVG menu item for composites where a single-SVG serialisation
+would be lossy.
 
-All helpers live in `helpers/chartExportV2.js` as a plain ES module — `.js` instead of `.ojs` so the Observable Parser doesn't intercept and re-bind the cell content (the "invalid binding" / "exportDataCsvV2 is not defined" loop we kept hitting on the `.ojs` form). The OJS runtime can statically import named exports from a real ES module — same pattern as `helpers/data.js`.
-
-```{ojs}
-//| output: false
-// Static ES-module import — OJS runtime resolves named exports from .js.
-import {
-  detectExportStrategyV2,
-  exportChartPngV2,
-  exportChartSvgV2,
-  exportDataCsvV2,
-  triggerDownloadV2,
-} from "/helpers/chartExportV2.js"
-```
-
-```{ojs}
-//| output: false
-// Combined Download ▾ split-button — single control offering PNG / SVG
-// / CSV. The CSV menu item only enables when the caller passes a
-// `data` array (or `csvColumns`). The button keeps its label as
-// "Download ▾" while the dropdown lists the format choices. Click
-// outside closes the menu.
-exportBar = function({ rootElement, filename, data, csvColumns }) {
-  const strategy = detectExportStrategyV2(rootElement);
-  const badge = htl.html`<span style="
-    font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
-    padding:2px 6px;border-radius:3px;
-    background:${strategy === "composite-html2img" ? "#fff5e0" : "#e5f3ff"};
-    color:${strategy === "composite-html2img" ? "#7a4f00" : "#1d3a5f"};
-    border:1px solid ${strategy === "composite-html2img" ? "#f5b85e" : "#7ab4e8"};
-  ">strategy: ${strategy ?? "(none)"}</span>`;
-
-  const hasData = Array.isArray(data) && data.length > 0;
-
-  // Style block — scoped to the wrapper.
-  const styleId = `exportbar-style-${Math.random().toString(36).slice(2, 7)}`;
-  const styleEl = htl.html`<style>
-    .${styleId}-row { display:flex; gap:8px; align-items:center; padding:6px 8px; border-top:1px solid #eee; background:#fafafa; margin-top:8px; }
-    .${styleId}-wrap { position:relative; display:inline-block; }
-    .${styleId}-btn { font-size:12px; padding:4px 10px; border:1px solid #888; border-radius:4px; background:#fff; cursor:pointer; color:#222; font-family:inherit; }
-    .${styleId}-btn:hover { background:#f0f0f0; }
-    .${styleId}-btn:disabled { opacity:0.5; cursor:wait; }
-    .${styleId}-menu { display:none; position:absolute; top:100%; left:0; margin-top:2px; background:#fff; border:1px solid #999; border-radius:4px; box-shadow:0 4px 14px rgba(0,0,0,0.18); padding:4px 0; min-width:160px; z-index:9999; }
-    .${styleId}-menu.open { display:block; }
-    .${styleId}-item { display:block; width:100%; padding:6px 14px; text-align:left; background:transparent; border:0; font-size:12px; color:#222; cursor:pointer; font-family:inherit; }
-    .${styleId}-item:hover:not(:disabled) { background:#f0f0f0; }
-    .${styleId}-item:disabled { color:#aaa; cursor:not-allowed; }
-    .${styleId}-item-hint { display:inline-block; margin-left:8px; font-size:10px; color:#888; }
-  </style>`;
-
-  const btn = htl.html`<button class="${styleId}-btn">⬇ Download ▾</button>`;
-  const menu = htl.html`<div class="${styleId}-menu"></div>`;
-  const wrap = htl.html`<div class="${styleId}-wrap">${btn}${menu}</div>`;
-
-  const closeMenu = () => menu.classList.remove("open");
-  const openMenu  = () => menu.classList.add("open");
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    menu.classList.toggle("open");
-  };
-  // Click-outside dismiss.
-  const docHandler = (e) => { if (!wrap.contains(e.target)) closeMenu(); };
-  document.addEventListener("click", docHandler);
-
-  const setBusy = (label) => {
-    btn.disabled = true;
-    btn.textContent = label;
-  };
-  const setReady = () => {
-    btn.disabled = false;
-    btn.textContent = "⬇ Download ▾";
-  };
-
-  const pngItem = htl.html`<button class="${styleId}-item">PNG <span class="${styleId}-item-hint">raster, white bg</span></button>`;
-  pngItem.onclick = async () => {
-    closeMenu();
-    setBusy("Rasterising…");
-    try {
-      const blob = await exportChartPngV2({ rootElement, scale: 2 });
-      triggerDownloadV2(blob, `${filename}.png`);
-    } catch (e) {
-      console.error("PNG export failed:", e);
-      alert("PNG export failed: " + e.message);
-    }
-    setReady();
-  };
-
-  const svgItem = htl.html`<button class="${styleId}-item">SVG <span class="${styleId}-item-hint">vector, scalable</span></button>`;
-  svgItem.onclick = async () => {
-    closeMenu();
-    setBusy("Serialising…");
-    try {
-      const svgStr = await exportChartSvgV2({ rootElement });
-      const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-      triggerDownloadV2(blob, `${filename}.svg`);
-    } catch (e) {
-      console.error("SVG export failed:", e);
-      alert("SVG export failed: " + e.message);
-    }
-    setReady();
-  };
-
-  const csvItem = htl.html`<button class="${styleId}-item" ${hasData ? "" : "disabled"}>CSV <span class="${styleId}-item-hint">${hasData ? `input data, ${data.length} rows` : "no input data"}</span></button>`;
-  csvItem.onclick = () => {
-    if (!hasData) return;
-    closeMenu();
-    const csvStr = exportDataCsvV2({ data, columns: csvColumns });
-    // UTF-8 BOM so Excel recognises diacritics.
-    const blob = new Blob(["﻿", csvStr], { type: "text/csv;charset=utf-8" });
-    triggerDownloadV2(blob, `${filename}.csv`);
-  };
-
-  menu.append(pngItem, svgItem, csvItem);
-
-  return htl.html`<div class="${styleId}-row">
-    ${styleEl}
-    ${badge}
-    ${wrap}
-    <span style="font-size:10px;color:#888;font-style:italic;">filename: ${filename}</span>
-  </div>`;
-}
-```
+The test cases above call `chartDownloadMenu` directly — no new helper
+required. The only new code is the lazy `html-to-image` import and the
+`compositePng(rootElement)` factory near the top of the page, both of
+which sit in their own cells.
 
 ---
 
@@ -369,22 +300,17 @@ exportBar = function({ rootElement, filename, data, csvColumns }) {
 
 For each of the 5 test cases:
 
-1. **Strategy badge** —
-   - TC1 (Plot.plot figure, single inner SVG) → `plot-figure` (bakes sibling `<style>` into the SVG + uses the single-svg fast path → no trailing whitespace).
-   - TC2 (multi-SVG facet grid) → `composite-html2img`.
-   - TC3 (SVG + HTML legend wrapper) → `composite-html2img`.
-   - TC4 (pure HTML table) → `composite-html2img`.
-   - TC5 (single bare SVG with `<g>` subgraphs) → `single-svg`.
-2. **Click ⬇ Download ▾** — one button now. Menu items: **PNG / SVG / CSV**. CSV is enabled only when the caller passes a `data` array (TC4 here).
-3. PNG output should match the page including legends + all facets / cells / table rows. No trailing whitespace on TC1 (regression vs prior version).
-4. SVG output should render in a browser tab. (Illustrator support for foreignObject is patchy — known caveat across all SVG-of-HTML approaches.)
-5. CSV output should be UTF-8 with BOM; opens cleanly in Excel + LibreOffice.
-6. Compare against the legacy `chartDownloadMenu` in `obs_month_overlay.qmd` — TC2 / TC3 / TC4 should be visibly more-complete than the legacy single-SVG path.
+1. Each test case renders the chart followed by the standard `chartDownloadMenu` split-button (primary "Download PNG" + caret ▾ for "Download as SVG" / "Download data (CSV)").
+2. **TC1 (Plot.plot single SVG)** — PNG and SVG buttons both download a clean file matching the rendered figure. CSV disabled (no data passed).
+3. **TC2 (multi-SVG facet grid)** — PNG includes **all six cells**, not just the first. SVG button disabled (composite SVG not reliable). CSV disabled.
+4. **TC3 (SVG + HTML legend)** — PNG includes the **legend below the chart**, not just the heatmap SVG. SVG disabled. CSV disabled.
+5. **TC4 (pure HTML table)** — PNG renders the **full table** (heading, header row, all four data rows). SVG disabled (no source SVG). CSV **enabled** — downloads a 16-row UTF-8 BOM file.
+6. **TC5 (single SVG composite)** — PNG and SVG both capture all six `<g>` subgraphs.
 
-If any case fails: open DevTools → console; html-to-image logs verbose errors there. Paste back here.
+If any case fails: open DevTools → console; `html-to-image` logs verbose errors there. Paste back here.
 
-Once the five test cases pass, promote the helper:
+Once the five test cases pass, promote the pattern:
 
-1. Drop the export functions into `helpers/chartDownloadMenu.ojs`, replacing `_chartDownloadMenu_svgToPng` with the v2 dispatcher (single-svg fast path OR html-to-image composite). Keep the import at the top of `chartDownloadMenu.ojs` so callers don't change.
-2. Sweep `obs_month_overlay.qmd` sections that wrap their plots with `chartDownloadMenu`: **no change needed** — the v2 path is opaque to callers.
-3. Verify in the live notebook: Period maps, Period polar, Period table, P2 / P4 facets, P6 grid all export the full rendered figure.
+1. Add a real `compositePng` helper to `helpers/chartDownloadMenu.ojs` (named export) so callers don't reinvent the `htmlToImageMod.toBlob(…)` wrapper at every site.
+2. Sweep `obs_month_overlay.qmd` sections whose `chartDownloadMenu(…)` currently exports only the first inner SVG — Period maps, Period polar SSP grid, Period table, P2 / P4 facets, P6 grid — pass `pngOverride: compositePng(chart)` + `disableSvg: true` for the composite ones.
+3. Verify in the live notebook: PNG outputs match the rendered figures.
