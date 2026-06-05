@@ -1,0 +1,510 @@
+---
+title: "Download framework sandbox"
+format:
+  html:
+    self-contained: false
+    toc: true
+    code-fold: true
+execute:
+  echo: false
+---
+
+# Generalised chart-export framework — test sandbox
+
+**Goal.** Build one `exportChart(rootElement, opts)` helper that captures the **full** rendered figure — including HTML legends, captions, ranking panels, and multi-SVG facet grids — into either PNG or SVG. Then drop the existing `chartDownloadMenu` PNG path in favour of it.
+
+**Current pain (in `obs_month_overlay.qmd`):**
+
+- `_chartDownloadMenu_svgToPng` finds the *first* SVG inside the chartElement and serialises only that one. Multi-SVG grids (Period maps choropleth, Period polar SSP small-multiples, P2/P4 facets) export with only one cell visible.
+- HTML siblings (legends, captions, ranking panels) sit *next to* the SVG, not inside it → never appear in the export.
+- `chartDownloadMenu` doesn't auto-detect "composite element" vs "single SVG" — same code path for both.
+
+**Design.** Two strategies, picked automatically by the helper:
+
+1. **`composite-foreignObject`** (default for mixed-content / multi-SVG roots). Clone the entire `rootElement` (with computed styles inlined) into an `<svg><foreignObject>` envelope, then rasterise via `<img>` + `<canvas>` → PNG. SVG export emits the foreignObject SVG directly. Captures legends, multi-SVG grids, ranking panels, captions — anything the DOM contains.
+2. **`single-svg`** (when the root IS a single SVG or contains exactly one SVG with no HTML siblings of interest). Uses the existing serialise → image → canvas path; simpler + smaller files.
+
+**Acceptance**: the four test cases below all export PNG+SVG visibly identical to what the page shows.
+
+```{ojs}
+import { loaderDiv } from "/helpers/uiComponents.ojs";
+```
+
+## Test case 1 — single Plot.plot chart (baseline / regression check)
+
+The simplest case. `chartDownloadMenu` already handles this. Verify the new helper produces the same output.
+
+```{ojs}
+//| label: tc1-render
+tc1 = {
+  const data = d3.range(0, 50).map(i => ({ x: i, y: Math.sin(i / 5) + 0.02 * i }));
+  return Plot.plot({
+    width: 520,
+    height: 280,
+    title: "Single SVG — sin(x) with drift",
+    marks: [
+      Plot.ruleY([0], { stroke: "#999", strokeDasharray: "3 3" }),
+      Plot.line(data, { x: "x", y: "y", stroke: "#216" }),
+      Plot.dot(data, { x: "x", y: "y", r: 2, fill: "#216" }),
+    ],
+  });
+}
+```
+
+```{ojs}
+exportBar({ rootElement: tc1, filename: "tc1_single_svg" })
+```
+
+## Test case 2 — multi-SVG facet grid
+
+Multiple SVGs inside a flexbox container. Current helper captures one cell only.
+
+```{ojs}
+//| label: tc2-render
+tc2 = {
+  const data = d3.range(0, 50);
+  const oneCell = (label, phase) => {
+    const cell = Plot.plot({
+      width: 200, height: 140, marginLeft: 30,
+      title: label,
+      marks: [
+        Plot.ruleY([0], { stroke: "#999", strokeDasharray: "3 3" }),
+        Plot.line(data.map(i => ({ x: i, y: Math.sin(i / 5 + phase) })),
+                  { x: "x", y: "y", stroke: "#216" }),
+      ],
+    });
+    return cell;
+  };
+  return htl.html`<div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;background:#fff;padding:8px;">
+    ${oneCell("Cell 1 (phase 0)",   0)}
+    ${oneCell("Cell 2 (phase π/2)", Math.PI / 2)}
+    ${oneCell("Cell 3 (phase π)",   Math.PI)}
+    ${oneCell("Cell 4 (phase 3π/2)", 3 * Math.PI / 2)}
+    ${oneCell("Cell 5 (phase 2π)",  2 * Math.PI)}
+    ${oneCell("Cell 6 (phase 5π/2)", 5 * Math.PI / 2)}
+  </div>`;
+}
+```
+
+```{ojs}
+exportBar({ rootElement: tc2, filename: "tc2_facet_grid_6_cells" })
+```
+
+## Test case 3 — SVG + HTML legend (Period-maps-shaped)
+
+A chart with an HTML legend below it (like Period maps' colour-ramp legend + stipple note). Current helper exports the chart SVG only; the legend goes missing.
+
+```{ojs}
+//| label: tc3-render
+tc3 = {
+  const data = d3.range(0, 80).map(i => ({
+    x: i % 20, y: Math.floor(i / 20),
+    v: Math.sin(i / 5) + Math.cos(i / 7),
+  }));
+  const chart = Plot.plot({
+    width: 520, height: 240, marginLeft: 30,
+    title: "Heatmap with external HTML legend",
+    color: { scheme: "RdBu", reverse: true, domain: [-2, 2] },
+    marks: [
+      Plot.cell(data, { x: "x", y: "y", fill: "v" }),
+    ],
+  });
+  // Bespoke HTML legend — what would be lost from a single-SVG export.
+  const legendHtml = htl.html`<div style="margin-top:10px;font-size:11px;color:#444;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-weight:700;">Anomaly (units):</span>
+      <span style="display:inline-block;width:140px;height:10px;background:linear-gradient(to right, #2166ac, #f7f7f7, #b2182b);"></span>
+      <span>-2</span>
+      <span style="opacity:0.6;">0</span>
+      <span>+2</span>
+    </div>
+    <div style="margin-top:4px;color:#777;font-style:italic;">
+      Source: synthetic data for download-framework testing.
+    </div>
+  </div>`;
+  return htl.html`<div style="background:#fff;padding:8px;border:1px solid #eee;">
+    ${chart}
+    ${legendHtml}
+  </div>`;
+}
+```
+
+```{ojs}
+exportBar({ rootElement: tc3, filename: "tc3_chart_plus_html_legend" })
+```
+
+## Test case 4 — pure HTML (Period-table-shaped)
+
+A heat-mapped table — no SVG anywhere. Must rasterise via foreignObject. Current helper fails entirely (no SVG → no PNG).
+
+```{ojs}
+//| label: tc4-render
+tc4 = {
+  const rows = ["A","B","C","D"];
+  const cols = ["2021-2040","2041-2060","2061-2080","2081-2100"];
+  const cellVal = (r, c) => Math.sin((r + c) / 3) * 2;
+  const shade = v => {
+    const t = (v + 2) / 4;
+    return `rgba(${Math.round(216 * (1 - t) + 31 * t)}, 117, ${Math.round(48 * (1 - t) + 180 * t)}, 0.6)`;
+  };
+  const th = "padding:6px 12px;background:#f3f3f3;border-bottom:2px solid #888;font-size:0.85em;text-align:center;";
+  const td = "padding:6px 12px;border-bottom:1px solid #eee;font-size:0.9em;text-align:center;";
+  return htl.html`<div style="background:#fff;padding:8px;">
+    <p style="margin:0 0 6px;font-weight:600;color:#222;">Test 4: pure HTML heat-mapped table</p>
+    <table style="border-collapse:collapse;">
+      <thead><tr><th style="${th}">Row</th>${cols.map(c => htl.html`<th style="${th}">${c}</th>`)}</tr></thead>
+      <tbody>${rows.map((r, ri) => htl.html`<tr>
+        <td style="${td};font-weight:600;background:#f6f6f6;">${r}</td>
+        ${cols.map((c, ci) => {
+          const v = cellVal(ri, ci);
+          return htl.html`<td style="${td};background:${shade(v)};">${(v >= 0 ? "+" : "") + v.toFixed(2)}</td>`;
+        })}
+      </tr>`)}</tbody>
+    </table>
+  </div>`;
+}
+```
+
+```{ojs}
+exportBar({ rootElement: tc4, filename: "tc4_pure_html_table" })
+```
+
+## Test case 5 — SVG composite with d3 (polar-clock-shaped)
+
+A single SVG, but containing multiple `<g>` subgraphs at calculated positions — mimics Period polar's grid-inside-one-SVG layout.
+
+```{ojs}
+//| label: tc5-render
+tc5 = {
+  const cellW = 200, cellH = 200, nCols = 3, nRows = 2;
+  const totalW = cellW * nCols + 30, totalH = cellH * nRows + 50;
+  const svg = d3.create("svg")
+    .attr("viewBox", `0 0 ${totalW} ${totalH}`)
+    .attr("width", totalW).attr("height", totalH)
+    .style("font-family", "system-ui, sans-serif")
+    .style("background", "#fff");
+  svg.append("text").attr("x", totalW / 2).attr("y", 16)
+    .attr("text-anchor", "middle").attr("font-size", 12).attr("font-weight", 600)
+    .text("Test 5: 6-cell SVG composite (one root SVG, multiple <g> subgraphs)");
+  for (let r = 0; r < nRows; r++) for (let c = 0; c < nCols; c++) {
+    const cxCell = 15 + c * cellW + cellW / 2;
+    const cyCell = 30 + r * cellH + cellH / 2;
+    const g = svg.append("g").attr("transform", `translate(${cxCell}, ${cyCell})`);
+    // Radial bars per "month" with phase per cell.
+    for (let m = 0; m < 12; m++) {
+      const angle = (m / 12) * 2 * Math.PI - Math.PI / 2;
+      const v = 30 + 30 * Math.sin(m / 2 + r * 0.7 + c * 0.5);
+      g.append("line")
+        .attr("x1", 0).attr("y1", 0)
+        .attr("x2", Math.cos(angle) * v).attr("y2", Math.sin(angle) * v)
+        .attr("stroke", d3.interpolateInferno(0.2 + 0.7 * (m / 11)))
+        .attr("stroke-width", 4).attr("stroke-linecap", "round");
+    }
+    g.append("text").attr("y", -75).attr("text-anchor", "middle")
+      .attr("font-size", 10).attr("font-weight", 600).text(`Cell ${r * nCols + c + 1}`);
+  }
+  return svg.node();
+}
+```
+
+```{ojs}
+exportBar({ rootElement: tc5, filename: "tc5_single_svg_composite" })
+```
+
+---
+
+## The helper
+
+Pluggable, framework-agnostic. Auto-picks strategy based on the rootElement's shape.
+
+```{ojs}
+//| output: false
+// Generalised chart-export helper. Pluggable into any plot section.
+//
+// Usage:
+//   exportChartPng({ rootElement, filename, scale })
+//   exportChartSvg({ rootElement, filename })
+//
+// Strategy auto-selection:
+//   - rootElement is a single SVG → fast path: serialise + canvas-raster.
+//   - rootElement is composite (HTML wrapper containing SVGs + HTML
+//     siblings OR multiple SVGs) → foreignObject envelope rasterises
+//     the full subtree.
+//
+// What this fixes vs the legacy chartDownloadMenu PNG path:
+//   - Multi-SVG grids exported in full (not just the first cell).
+//   - HTML legends / captions / ranking panels included.
+//   - Pure-HTML elements (heat-mapped tables) exportable at all.
+//
+// Caveats:
+//   - foreignObject + external CSS: only inline styles + computed-style
+//     fallbacks make it across. Document fonts may fall back to system.
+//   - Live <canvas> contents won't render through foreignObject — extract
+//     pixels via drawImage and inline as an <img> first.
+//   - The clone walks the DOM once; very large grids (1000+ admin1s) may
+//     take a beat to clone + rasterise. Acceptable for the current scope
+//     (max ~600 admin1s for SSA).
+
+// Detect the export strategy from the rootElement's shape.
+function _detectExportStrategy(rootElement) {
+  if (!rootElement) return null;
+  // Single SVG passed directly.
+  if (rootElement.tagName && rootElement.tagName.toLowerCase() === "svg") {
+    return "single-svg";
+  }
+  // HTML wrapper — count descendant SVGs + check for HTML siblings.
+  const svgs = rootElement.querySelectorAll
+    ? Array.from(rootElement.querySelectorAll("svg"))
+    : [];
+  if (svgs.length === 0) {
+    // Pure HTML — must use foreignObject.
+    return "composite-foreignObject";
+  }
+  // If the rootElement is exactly the SVG's parent and the parent has
+  // no non-SVG content (no legend, no caption), the single-SVG path is
+  // sufficient. Otherwise force composite.
+  const hasHtmlSiblings = Array.from(rootElement.childNodes || [])
+    .some(n => n.nodeType === 1 && n.tagName.toLowerCase() !== "svg");
+  if (svgs.length === 1 && !hasHtmlSiblings) return "single-svg";
+  return "composite-foreignObject";
+}
+
+// Serialise a single SVG with xmlns + width/height set on the clone.
+function _serialiseSingleSvg(svg) {
+  const clone = svg.cloneNode(true);
+  if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  if (!clone.getAttribute("xmlns:xlink")) clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+  const bbox = svg.getBoundingClientRect();
+  if (!clone.getAttribute("width"))  clone.setAttribute("width",  bbox.width);
+  if (!clone.getAttribute("height")) clone.setAttribute("height", bbox.height);
+  return new XMLSerializer().serializeToString(clone);
+}
+
+// Inline computed styles on a clone subtree. Necessary for the
+// foreignObject path — external CSS isn't applied inside a foreignObject
+// during rasterisation, so styles must travel with the elements.
+// Walks both the source and the clone in lockstep.
+function _inlineComputedStyles(srcRoot, dstRoot) {
+  // Properties worth carrying — keeps the inlined-style payload smaller
+  // than copying every CSS property (which can blow up file size 10×).
+  const propsToInline = [
+    "color","background-color","background","background-image","background-size","background-position",
+    "font-family","font-size","font-weight","font-style","font-variant","letter-spacing","line-height","text-align","text-decoration","text-transform","white-space","word-wrap",
+    "padding","padding-top","padding-right","padding-bottom","padding-left",
+    "margin","margin-top","margin-right","margin-bottom","margin-left",
+    "border","border-top","border-right","border-bottom","border-left",
+    "border-radius","border-top-left-radius","border-top-right-radius","border-bottom-left-radius","border-bottom-right-radius",
+    "border-color","border-style","border-width",
+    "display","flex","flex-direction","flex-wrap","gap","grid-template-columns","grid-template-rows","grid-gap","grid-row-gap","grid-column-gap","align-items","justify-content","justify-items","align-self",
+    "width","height","min-width","min-height","max-width","max-height",
+    "opacity","visibility","overflow","overflow-x","overflow-y",
+    "stroke","fill","stroke-width","stroke-opacity","fill-opacity",
+    "box-shadow","filter",
+  ];
+  const walkSrc = document.createTreeWalker(srcRoot, NodeFilter.SHOW_ELEMENT);
+  const walkDst = document.createTreeWalker(dstRoot, NodeFilter.SHOW_ELEMENT);
+  let s = walkSrc.nextNode(), d = walkDst.nextNode();
+  while (s && d) {
+    const cs = window.getComputedStyle(s);
+    let inline = "";
+    for (const p of propsToInline) {
+      const v = cs.getPropertyValue(p);
+      if (v && v !== "auto" && v !== "normal" && v !== "none") inline += `${p}:${v};`;
+    }
+    // Preserve any explicit style attribute the source already had.
+    const existing = d.getAttribute("style") || "";
+    d.setAttribute("style", inline + existing);
+    s = walkSrc.nextNode(); d = walkDst.nextNode();
+  }
+}
+
+// Composite rasterisation via foreignObject. Captures whatever's in the
+// rootElement subtree (HTML + nested SVGs) into a single PNG. The clone
+// is style-inlined first so the rasteriser doesn't lose colour / layout.
+async function _compositeForeignObjectPng(rootElement, scale) {
+  const dpr = scale || 2;
+  const rect = rootElement.getBoundingClientRect();
+  const W = Math.max(1, Math.ceil(rect.width));
+  const H = Math.max(1, Math.ceil(rect.height));
+
+  const clone = rootElement.cloneNode(true);
+  _inlineComputedStyles(rootElement, clone);
+
+  // XHTML namespace + white background so transparent regions don't
+  // bleed through to whatever paste target the PNG lands in.
+  const xhtmlWrap = document.createElement("div");
+  xhtmlWrap.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  xhtmlWrap.style.background = "#ffffff";
+  xhtmlWrap.style.display = "inline-block";
+  xhtmlWrap.appendChild(clone);
+
+  const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"
+    viewBox="0 0 ${W} ${H}">
+    <foreignObject width="100%" height="100%">${xhtmlWrap.outerHTML}</foreignObject>
+  </svg>`;
+  const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width  = W * dpr;
+      canvas.height = H * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(im, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(b => {
+        URL.revokeObjectURL(url);
+        b ? resolve(b) : reject(new Error("canvas.toBlob returned null"));
+      }, "image/png");
+    };
+    im.onerror = e => {
+      URL.revokeObjectURL(url);
+      reject(new Error("foreignObject rasterise failed — see browser console for SVG parse errors"));
+    };
+    im.src = url;
+  });
+}
+
+// Single-SVG fast path.
+async function _singleSvgPng(rootElement, scale) {
+  const dpr = scale || 2;
+  const svg = rootElement.tagName && rootElement.tagName.toLowerCase() === "svg"
+    ? rootElement
+    : rootElement.querySelector("svg");
+  if (!svg) throw new Error("No SVG in rootElement for single-svg strategy");
+  const svgString = _serialiseSingleSvg(svg);
+  const bbox = svg.getBoundingClientRect();
+  const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width  = bbox.width  * dpr;
+      canvas.height = bbox.height * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(im, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(b => {
+        URL.revokeObjectURL(url);
+        b ? resolve(b) : reject(new Error("canvas.toBlob returned null"));
+      }, "image/png");
+    };
+    im.onerror = e => { URL.revokeObjectURL(url); reject(e); };
+    im.src = url;
+  });
+}
+
+exportChartPng = async function(opts) {
+  const { rootElement, scale, strategy } = opts || {};
+  const s = strategy || _detectExportStrategy(rootElement);
+  if (s === "single-svg") return _singleSvgPng(rootElement, scale);
+  return _compositeForeignObjectPng(rootElement, scale);
+};
+
+exportChartSvg = function(opts) {
+  const { rootElement, strategy } = opts || {};
+  const s = strategy || _detectExportStrategy(rootElement);
+  if (s === "single-svg") {
+    const svg = rootElement.tagName && rootElement.tagName.toLowerCase() === "svg"
+      ? rootElement : rootElement.querySelector("svg");
+    if (!svg) throw new Error("No SVG to export");
+    return _serialiseSingleSvg(svg);
+  }
+  // Composite — emit the foreignObject SVG envelope (renders in
+  // browsers, Illustrator handles foreignObject in modern versions
+  // but support varies). Document this caveat in the helper.
+  const rect = rootElement.getBoundingClientRect();
+  const W = Math.max(1, Math.ceil(rect.width));
+  const H = Math.max(1, Math.ceil(rect.height));
+  const clone = rootElement.cloneNode(true);
+  _inlineComputedStyles(rootElement, clone);
+  const xhtmlWrap = document.createElement("div");
+  xhtmlWrap.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  xhtmlWrap.style.background = "#ffffff";
+  xhtmlWrap.style.display = "inline-block";
+  xhtmlWrap.appendChild(clone);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"
+    viewBox="0 0 ${W} ${H}">
+    <foreignObject width="100%" height="100%">${xhtmlWrap.outerHTML}</foreignObject>
+  </svg>`;
+};
+
+triggerDownload = function(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+```
+
+```{ojs}
+//| output: false
+// Test-sandbox UI bar — renders side-by-side strategy badges + Download
+// PNG / Download SVG buttons that invoke the helper. Each test case
+// gets its own bar.
+exportBar = function({ rootElement, filename }) {
+  const strategy = _detectExportStrategy(rootElement);
+  const badge = htl.html`<span style="
+    font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;
+    padding:2px 6px;border-radius:3px;
+    background:${strategy === "single-svg" ? "#e5f3ff" : "#fff5e0"};
+    color:${strategy === "single-svg" ? "#1d3a5f" : "#7a4f00"};
+    border:1px solid ${strategy === "single-svg" ? "#7ab4e8" : "#f5b85e"};
+  ">strategy: ${strategy ?? "(none)"}</span>`;
+  const btnStyle = "font-size:12px;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;cursor:pointer;color:#222;";
+  const pngBtn = htl.html`<button style="${btnStyle}">⬇ PNG</button>`;
+  pngBtn.onclick = async () => {
+    pngBtn.textContent = "Rasterising…";
+    pngBtn.disabled = true;
+    try {
+      const blob = await exportChartPng({ rootElement, scale: 2 });
+      triggerDownload(blob, `${filename}.png`);
+    } catch (e) {
+      console.error("PNG export failed:", e);
+      alert("PNG export failed: " + e.message);
+    }
+    pngBtn.textContent = "⬇ PNG";
+    pngBtn.disabled = false;
+  };
+  const svgBtn = htl.html`<button style="${btnStyle}">⬇ SVG</button>`;
+  svgBtn.onclick = () => {
+    try {
+      const svgStr = exportChartSvg({ rootElement });
+      const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+      triggerDownload(blob, `${filename}.svg`);
+    } catch (e) {
+      console.error("SVG export failed:", e);
+      alert("SVG export failed: " + e.message);
+    }
+  };
+  return htl.html`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;padding:6px 8px;border-top:1px solid #eee;background:#fafafa;">
+    ${badge}
+    ${pngBtn}
+    ${svgBtn}
+    <span style="font-size:10px;color:#888;font-style:italic;">filename: ${filename}</span>
+  </div>`;
+}
+```
+
+---
+
+## What to verify in the rendered page
+
+For each of the 5 test cases:
+
+1. **Strategy badge** — TC1 should say `single-svg`; TC2-4 should say `composite-foreignObject`; TC5 depends — it's one root SVG with multiple `<g>` children, so should pick `single-svg`.
+2. **Click ⬇ PNG** — the downloaded PNG should match what's on screen, **including** legends + all facets / cells.
+3. **Click ⬇ SVG** — the downloaded SVG should render in a browser, ideally in Illustrator (foreignObject support varies in vector editors).
+4. **Compare against the legacy `chartDownloadMenu`** in `obs_month_overlay.qmd` — TC2 + TC3 should produce visibly more-complete PNGs than the legacy single-SVG path.
+
+Once the four test cases pass, promote the helper:
+
+1. Move the export functions into `helpers/chartDownloadMenu.ojs` (replacing `_chartDownloadMenu_svgToPng` with the dispatch-by-strategy path) — OR put them into a new `helpers/chartExport.ojs` and refactor `chartDownloadMenu` to call it.
+2. Sweep `obs_month_overlay.qmd` sections that wrap their plots with `chartDownloadMenu`: no change needed — the new helper is opaque to callers.
+3. Verify in the live notebook: Period maps, Period polar, Period table, P2/P4 facets, P6 grid all export the full rendered figure.
