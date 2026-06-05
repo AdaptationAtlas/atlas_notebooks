@@ -247,11 +247,23 @@ lets us patch Plot's figure-with-style oddity before rasterise.
 //| output: false
 // html-to-image (MIT, ~30 KB ESM via esm.sh). Modern fork of dom-to-
 // image; handles Plot.plot figure-with-style, multi-SVG composites,
-// computed-style inlining, pixel-true bounds capture for HTML — all of
-// the cases the v1 DIY foreignObject envelope choked on. esm.sh
-// resolves the package's "exports" field and serves a browser-ready
-// ESM bundle (Skypack 404'd in the v2 attempt).
-htmlToImage = await import("https://esm.sh/html-to-image@1.11.13")
+// computed-style inlining, pixel-true bounds capture for HTML.
+//
+// LAZY loader. Top-level `await import()` would block every dependent
+// cell (exportChartPng / Svg / exportBar) until the CDN responded —
+// even just to RENDER the Download ▾ button. With the lazy form, the
+// helper binds immediately; the actual fetch fires on first PNG/SVG
+// click. Subsequent calls reuse the cached module reference.
+loadHtmlToImage = (() => {
+  let cached = null;
+  let pending = null;
+  return async () => {
+    if (cached) return cached;
+    if (!pending) pending = import("https://esm.sh/html-to-image@1.11.13");
+    cached = await pending;
+    return cached;
+  };
+})()
 ```
 
 ```{ojs}
@@ -370,8 +382,9 @@ exportChartPng = async function(opts) {
   // html-to-image: returns a Blob of PNG bytes. `pixelRatio` controls
   // dpr; `backgroundColor` forces white background so the PNG pastes
   // cleanly into docs / slides. `cacheBust` defeats stale Image cache
-  // for hot-reloaded charts.
-  return htmlToImage.toBlob(rootElement, {
+  // for hot-reloaded charts. Lazy CDN load on first composite export.
+  const lib = await loadHtmlToImage();
+  return lib.toBlob(rootElement, {
     pixelRatio: scale || 2,
     backgroundColor: "#ffffff",
     cacheBust: true,
@@ -389,7 +402,8 @@ exportChartSvg = async function(opts) {
   if (s === "single-svg" || s === "plot-figure") {
     return serialiseSingleSvg(resolveSvgForExport(rootElement));
   }
-  const dataUrl = await htmlToImage.toSvg(rootElement, {
+  const lib = await loadHtmlToImage();
+  const dataUrl = await lib.toSvg(rootElement, {
     backgroundColor: "#ffffff",
     cacheBust: true,
   });
