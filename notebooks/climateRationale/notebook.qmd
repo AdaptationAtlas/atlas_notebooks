@@ -2635,6 +2635,20 @@ viewof mapSmooth_obs = Inputs.toggle({
 });
 ```
 
+```{ojs}
+// Classify the continuous ramp into N equal-interval value ranges →
+// stepped / banded (choropleth-style) map instead of a smooth gradient.
+// "Continuous" keeps the existing smooth interpolation. Classification
+// snaps each pixel to its class-centre colour and switches the legend
+// to discrete blocks with break labels. Equal-interval is computed over
+// the ACTIVE ramp domain, so it respects the "Lock map ramp" /
+// dynamic-rescale toggle above.
+viewof mapClasses_obs = Inputs.select(
+  ["Continuous (smooth ramp)", "3", "4", "5", "6", "7", "8", "10"],
+  { label: "Classify into value ranges (stepped map)", value: "Continuous (smooth ramp)" }
+);
+```
+
 :::
 
 ```{ojs}
@@ -2893,7 +2907,7 @@ countryRaster_obs = {
 ```{ojs}
 //| output: false
 // Horizontal colour-bar legend mirroring colorRamp_obs interpolation.
-buildLegend_obs = (stops, variable, stat) => {
+buildLegend_obs = (stops, variable, stat, classInfo) => {
   const W = 600;
   const barH = 14;
   const padTop = 6, padBottom = 22, padX = 8;
@@ -2903,21 +2917,44 @@ buildLegend_obs = (stops, variable, stat) => {
   const v1 = stops[stops.length - 1].at;
   const range = v1 - v0;
   const xForVal = (v) => padX + (v - v0) / range * (W - 2 * padX);
+  const fmtVal = (v) => Math.abs(v) >= 100 ? Math.round(v) : (Math.abs(v) >= 10 ? v.toFixed(0) : v.toFixed(1));
 
-  const gradientId = "legend-grad-obs-" + variable.split("-").join("_") + "-" + stat;
-  const gradientStops = stops.map((s) => {
-    const pct = ((s.at - v0) / range * 100).toFixed(2);
-    return `<stop offset="${pct}%" stop-color="rgb(${s.rgb.join(",")})" />`;
-  }).join("");
-
-  const ticks = stops.map((s) => {
-    const x = xForVal(s.at);
-    const label = Math.abs(s.at) >= 100 ? Math.round(s.at) : (Math.abs(s.at) >= 10 ? s.at.toFixed(0) : s.at.toFixed(1));
-    return `
-      <line x1="${x}" x2="${x}" y1="${padTop}" y2="${padTop + barH + 3}" stroke="#333" stroke-width="0.8"/>
-      <text x="${x}" y="${padTop + barH + 16}" font-size="10" fill="#333" text-anchor="middle" font-family="system-ui, sans-serif">${label}</text>
-    `;
-  }).join("");
+  let defsMarkup = "";
+  let barMarkup;
+  let ticks;
+  if (classInfo) {
+    // Stepped legend: one discrete block per class + N+1 equal-interval
+    // break labels (matches the map's class boundaries exactly).
+    const { nClasses, lo, hi, colors } = classInfo;
+    const span = (hi - lo) || 1;
+    const blockW = (W - 2 * padX) / nClasses;
+    barMarkup = colors.map((c, k) =>
+      `<rect x="${(padX + k * blockW).toFixed(2)}" y="${padTop}" width="${blockW.toFixed(2)}" height="${barH}" fill="rgb(${c.slice(0, 3).join(",")})" stroke="#333" stroke-width="0.4"/>`
+    ).join("");
+    ticks = Array.from({ length: nClasses + 1 }, (_, k) => {
+      const v = lo + (k / nClasses) * span;
+      const x = padX + k * blockW;
+      return `
+        <line x1="${x.toFixed(2)}" x2="${x.toFixed(2)}" y1="${padTop}" y2="${padTop + barH + 3}" stroke="#333" stroke-width="0.8"/>
+        <text x="${x.toFixed(2)}" y="${padTop + barH + 16}" font-size="10" fill="#333" text-anchor="middle" font-family="system-ui, sans-serif">${fmtVal(v)}</text>
+      `;
+    }).join("");
+  } else {
+    const gradientId = "legend-grad-obs-" + variable.split("-").join("_") + "-" + stat;
+    const gradientStops = stops.map((s) => {
+      const pct = ((s.at - v0) / range * 100).toFixed(2);
+      return `<stop offset="${pct}%" stop-color="rgb(${s.rgb.join(",")})" />`;
+    }).join("");
+    defsMarkup = `<defs><linearGradient id="${gradientId}" x1="0" x2="1" y1="0" y2="0">${gradientStops}</linearGradient></defs>`;
+    barMarkup = `<rect x="${padX}" y="${padTop}" width="${W - 2 * padX}" height="${barH}" fill="url(#${gradientId})" stroke="#333" stroke-width="0.6"/>`;
+    ticks = stops.map((s) => {
+      const x = xForVal(s.at);
+      return `
+        <line x1="${x}" x2="${x}" y1="${padTop}" y2="${padTop + barH + 3}" stroke="#333" stroke-width="0.8"/>
+        <text x="${x}" y="${padTop + barH + 16}" font-size="10" fill="#333" text-anchor="middle" font-family="system-ui, sans-serif">${fmtVal(s.at)}</text>
+      `;
+    }).join("");
+  }
 
   const unit = variable === "PTOT" ? "mm" : variable.startsWith("SPEI") ? (stat === "sd" ? "σ (z)" : "z") : "°C";
   const titleText = variable.startsWith("SPEI") && stat === "sd"
@@ -2926,12 +2963,8 @@ buildLegend_obs = (stops, variable, stat) => {
 
   const svgMarkup = `
     <svg width="${W}" height="${totalH}" style="display:block; margin-top: 6px;" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="${gradientId}" x1="0" x2="1" y1="0" y2="0">
-          ${gradientStops}
-        </linearGradient>
-      </defs>
-      <rect x="${padX}" y="${padTop}" width="${W - 2 * padX}" height="${barH}" fill="url(#${gradientId})" stroke="#333" stroke-width="0.6"/>
+      ${defsMarkup}
+      ${barMarkup}
       ${ticks}
     </svg>
   `;
@@ -3063,6 +3096,37 @@ recentChangesMap_obs = {
     rampLabel = "dynamic";
   }
 
+  // Optional classification: snap the continuous ramp to N equal-
+  // interval value ranges for a stepped (choropleth-style) map. Domain
+  // is the ACTIVE ramp extent, so classes track the lock/dynamic toggle.
+  // pixelColor() is the single colour accessor used by BOTH paint paths
+  // and the legend below — continuous falls through to colorRamp_obs.
+  const nClasses_obs =
+    (mapClasses_obs && mapClasses_obs !== "Continuous (smooth ramp)")
+      ? +mapClasses_obs : null;
+  const rampLo = activeStops[0].at;
+  const rampHi = activeStops[activeStops.length - 1].at;
+  let classInfo = null;
+  let pixelColor = (v) => colorRamp_obs(v, activeStops);
+  if (nClasses_obs) {
+    const span = (rampHi - rampLo) || 1;
+    // One representative colour per class, sampled at the class centre.
+    const classColors = [];
+    for (let k = 0; k < nClasses_obs; k++) {
+      const t = (k + 0.5) / nClasses_obs;
+      classColors.push(colorRamp_obs(rampLo + t * span, activeStops));
+    }
+    pixelColor = (v) => {
+      if (v == null || !isFinite(v)) return null;
+      let k = Math.floor((v - rampLo) / span * nClasses_obs);
+      if (k < 0) k = 0;
+      if (k >= nClasses_obs) k = nClasses_obs - 1;
+      return classColors[k];
+    };
+    classInfo = { nClasses: nClasses_obs, lo: rampLo, hi: rampHi, colors: classColors };
+    rampLabel += `, ${nClasses_obs} classes`;
+  }
+
   // Second pass: paint each sub-window pixel via the active ramp.
   const offscreen = document.createElement("canvas");
   offscreen.width = sw;
@@ -3073,7 +3137,7 @@ recentChangesMap_obs = {
     for (let col = 0; col < sw; col++) {
       const v = data[(sy1 + row) * cw + (sx1 + col)];
       if (isNoData(v)) continue;
-      const c = colorRamp_obs(v, activeStops);
+      const c = pixelColor(v);
       if (c) {
         const j = (row * sw + col) * 4;
         img.data[j]     = c[0];
@@ -3161,7 +3225,7 @@ recentChangesMap_obs = {
       for (let col = 0; col < sw; col++) {
         const v = data[rowBase + sx1 + col];
         if (isNoData(v)) continue;
-        const c = colorRamp_obs(v, activeStops);
+        const c = pixelColor(v);
         if (!c) continue;
         const x0 = colX[col];
         const rw = colX[col + 1] - x0;
@@ -3252,7 +3316,7 @@ recentChangesMap_obs = {
     .parseFromString(svgMarkup, "image/svg+xml")
     .documentElement;
 
-  const legend = buildLegend_obs(activeStops, climateVarSelect.id, mapStat_obs);
+  const legend = buildLegend_obs(activeStops, climateVarSelect.id, mapStat_obs, classInfo);
 
   const mapStack = html`<div style="position: relative; width: ${W}px;"></div>`;
   mapStack.appendChild(display);
