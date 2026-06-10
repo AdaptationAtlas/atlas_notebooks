@@ -4,6 +4,8 @@
 **Pairs with:** CR-119 in `ISSUES.md` (see the 2026-06-09 UPDATE block) · [`../../reference/hazard-pipeline-r2.1.md`](../../reference/hazard-pipeline-r2.1.md) (the 06-10 pipeline reference this dispatch corrects on two points).
 **Audience:** pipeline maintainer (Pete owns the stack). Both points are evidence-backed from a real-browser + DuckDB-WASM + `parquet_metadata` verification on 2026-06-09.
 
+> **ROOT CAUSE CONFIRMED 2026-06-10 (see "Smoking gun" section at the bottom).** The file has **no `iso3` row-group statistics** (`stats_min`/`stats_max` null across all 7 row groups), so DuckDB-WASM cannot prune by country — every single-country query scans the whole file (~60 MB of stat columns) → 10–50 s isolated, hangs in-browser. The sibling **Hazard Exposure** section uses the same gate + a single prunable parquet and renders fine; Future Projections does not. **No notebook-side change can fix this** (verified: per-period filter, single-file view, and `read_parquet`-vs-`parquet_scan` all still scan the full file). The fix is a file property only the pipeline can set: **sort rows by `iso3` before writing so row-group stats become prunable** (cheapest), and/or per-iso3 partition + column prune.
+
 ## TL;DR
 
 The pipeline reference says: *"once regeneration finishes + validates, the iso3-bearing trends canonical gets republished to S3 — that's what fully clears the Future Projections iso3/cold-fetch issues."* **That is unlikely to be true**, for two reasons:
@@ -69,6 +71,35 @@ Note: this is a change to the **`ensemble_season_timeseries`** producer path, se
 - **Correct the size note** in `reference/hazard-pipeline-r2.1.md` and the 06-05 permanent-fix doc: `models` is dict-encoded to 0 MB; size lever is per-iso3 partitioning + pruning the 4 unused stat columns.
 - **When you next touch the `ensemble_season_timeseries` producer**, land items 1 + 2 above. After republish, ping me — the browser harness at `/tmp/pw-verify/` re-runs the WASM query check; target is ~1–2 s and a rendered chart.
 
+## Smoking gun — the file is not prunable by `iso3` (2026-06-10)
+
+`parquet_metadata` on the live `period=2021-2040` file via DuckDB-WASM:
+
+```
+row groups: 7
+iso3 per-row-group stats_min / stats_max:
+  rg0..rg6: [null .. null]   ← NO iso3 statistics on any row group
+```
+
+With no per-row-group `iso3` min/max, DuckDB cannot skip row groups for a single-country `WHERE iso3='AGO'` — it must scan **all 7 row groups**, i.e. the full ~60 MB of the 4 stat columns the notebook reads. At a browser's ~5 MB/s S3 fetch + WASM decompress that is **10–50 s isolated** (measured), and longer in-page under contention → the chart never renders for a user.
+
+**Control:** the **Hazard Exposure** section uses the identical section-gate pattern and renders fine in a real browser — because its parquet is prunable. So the gate is not the problem; the *file* is.
+
+**Notebook-side options exhausted (all verified not to help):**
+- per-period `WHERE` filter — still scans the one file's 7 row groups
+- single-file view (1 file not 5) — same, still 10–50 s
+- `read_parquet` instead of `parquet_scan`+hive — *slower* (49 s)
+- column projection is already minimal (reads only `mean, mean_anomaly, sd, sd_anomaly`)
+
+None help because **row-group pruning requires `iso3` statistics, which only exist if the producer writes the rows sorted by `iso3`.**
+
+**The one fix (pipeline, ranked):**
+1. **Sort rows by `iso3` (then admin1) before `write_parquet`** so each row group covers a contiguous iso3 range → stats become tight → single-country queries prune to ~1–2 row groups (~a few MB). Cheapest, biggest win, no schema change.
+2. **Per-iso3 hive partition** — strictly better for cold fetch but more files to manage.
+3. **Drop the 4 unused stat columns** (`max, min, max_anomaly, min_anomaly` ≈ 45 %) — halves the bytes; do alongside (1).
+
+After republish, ping me — harness at `/tmp/pw-verify/` re-runs the WASM query check; target ~1–2 s + rendered chart, **verified in a real browser** (headless mis-reproduces gated DuckDB sections — it hangs even the working Hazard Exposure section, so headless verdicts on these sections are not trustworthy).
+
 ## Notebook side — no action needed
 
-Legacy SELECT (commit `c3da0a7`) reads the live 16:34 file clean; ribbon collapses to mean line as designed. The classify/stepped-map feature (commit `43432d0`) is unrelated and shipped.
+Legacy SELECT (commit `c3da0a7`) reads the live 16:34 file clean; ribbon collapses to mean line as designed. The classify/stepped-map feature (commit `43432d0`) is unrelated and shipped. No notebook change can unblock FP — confirmed.
