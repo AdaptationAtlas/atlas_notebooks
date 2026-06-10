@@ -1012,3 +1012,20 @@ In rough leverage order:
 2. **Loading bars L2** when the rebaked parquets land (the byte-tracked % bar's accuracy improves with smaller, sorted row groups).
 3. **1995-2014 climatology COG** for the Recent Changes map.
 4. Anything user-facing Pete wants — the branch is in a good state to absorb new feature work.
+
+---
+
+## Pipeline-side status (2026-06-10) — producer of the climate canonical
+
+The Future Projections / Recent Changes parquet are produced by
+`R/2.1_create_monthly_haz_tables.R` in the `hazards_prototype` repo. Full producer-side
+reference (CR-119 iso3 fix, §3.4 trend speedup, the multisession bug, CGLabs ops lessons,
+run recipe): **[`playbook/reference/hazard-pipeline-r2.1.md`](../../reference/hazard-pipeline-r2.1.md)**.
+
+- **CR-119 (iso3 dropped / 14× size / thrift corruption)** — root-caused + fixed in the
+  pipeline (`b83dd3f`, `9117450`). The `iso3`-bearing trends are being **regenerated**
+  (sequential + Rcpp kernel; multisession path is temporarily broken — see reference doc).
+- **Blocking the notebook:** once regeneration finishes + validates, the iso3-bearing
+  trends canonical gets **republished to S3** — that's what fully clears the Future
+  Projections `iso3`/cold-fetch issues this handover keeps flagging as "same pipeline-side
+  dispatch covers the fix."
