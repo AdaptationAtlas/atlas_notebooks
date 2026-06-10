@@ -71,6 +71,17 @@ R21_SEC3_4_SEQUENTIAL=1 FORCE_OVERWRITE=1 nohup bash scripts/r21_rerun.sh \
   --skip-sec2 --skip-sec3-1 --skip-sec3-2 --skip-sec3-3 > nohup.out 2>&1 &
 ```
 
+## Progress 2026-06-10 PM
+- Sequential §3.4 (`R21_SEC3_4_SEQUENTIAL=1` + kernel) completed cleanly (exit 0, all 6 sources,
+  iso3 present), ~119 min.
+- Fixed a pre-existing `value_decade = 10 * slope` bug that duplicated every trends row ~20-34×
+  (now `10 * slope[1]`; ratio → 1.0; halved §3.4 time).
+- **⚠️ OPEN blocker:** the kernel-run trends have `value_slope`/`value_pval` = **100% NA** (every
+  group) — fit columns dead on real data despite passing all synthetic probes. **Trends republish
+  is blocked** until fixed. Safe fallback if needed: `R21_DISABLE_TREND_KERNEL=1` (the `trend::`
+  path, which produces correct slopes). This is producer-internal; **does not affect FP** (FP reads
+  `ensemble_season_timeseries`, unrelated).
+
 ## Open / next
 - [ ] Finish the in-flight sequential §3.4 regeneration → validate iso3 + kernel-vs-`trend::`
       diff → republish the iso3-bearing **trends** canonical. NOTE: this serves a *future*
