@@ -3067,6 +3067,7 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
     2. **Column pruning** (NEW) — the notebook reads only `mean, mean_anomaly, sd, sd_anomaly`. The four it never reads (`max, min, max_anomaly, min_anomaly`) are **~48 MB ≈ 45 %** of every file. Drop them (or split to a sidecar) → file nearly halves, zero notebook impact.
     3. **Drop `models` from rows** — keep for cleanliness/sidecar, but DE-prioritize: **0 MB size impact**, not a perf fix.
   - **Notebook side:** legacy SELECT (commit c3da0a7) reads the 16:34 file clean; ribbon collapses to mean line as designed. Browser harness retained at `/tmp/pw-verify/` — re-run after any republish to confirm query time drops to ~1–2 s and the chart renders.
+  - **⚠️ Pipeline-handoff correction (2026-06-10):** the pipeline reference [`hazard-pipeline-r2.1.md`](../../reference/hazard-pipeline-r2.1.md) frames the §3.4 trends republish as clearing the Future Projections breakage. It will NOT — FP + Extreme Events read `ensemble_season_timeseries.parquet` (already iso3-good, perf-blocked), not the `*_trends*` files. Full evidence + reprioritized fix in [`dispatches/2026-06-10_fp-blocker-is-perf-not-trends.md`](dispatches/2026-06-10_fp-blocker-is-perf-not-trends.md).
 
 ### CR-116 — Sandbox Future Projections expansion [NEW 2026-06-04 · shipped]
 
