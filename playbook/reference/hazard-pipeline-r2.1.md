@@ -10,9 +10,18 @@ source, run on CGLabs). Full detail lives there:
 ## Why this matters to the notebook
 The `ensemble_season_timeseries` and `*_trends*` parquet under
 `domain=climate/.../processing=timeseries_mean_month/` are this script's outputs.
-When the notebook throws `Binder Error: column "iso3" not found` or
-`TProtocolException: Invalid data`, or Future Projections cold-fetch is slow, the
-cause is usually producer-side here.
+
+> **CORRECTION (2026-06-10, from `dispatches/2026-06-10_fp-blocker-is-perf-not-trends.md`,
+> evidence-backed via browser + DuckDB-WASM + `parquet_metadata`):**
+> - **Future Projections / Extreme Events read `ensemble_season_timeseries.parquet`, NOT
+>   `*_trends*`.** That file already has `iso3` (live 06-05 16:34, restored by rollback) and
+>   its thrift is clean. FP's blocker is **query speed** (WASM I/O over 5×107 MB), not schema.
+>   The §3.4 **trends** regeneration is **orthogonal to FP** — `*_trends*` has **no production
+>   consumer today** (CR-117 quantile-trend ladder is still proposed). It's correct/necessary
+>   work for that future consumer, not a fix for the current "Loading data…" breakage.
+> - **`models` is NOT the size driver** — `parquet_metadata` shows it dict-encodes to **0 MB**
+>   (1 distinct value). The bad 06-05 12:02 rebake (310 MB) was the **CR-060 quantile columns**
+>   (± row duplication), not `models`. Removing `models` saves ~0 MB.
 
 ## CR-119 — `iso3` dropped from canonical (root cause + fix)
 2026-06-05 publish broke every reader: `iso3` missing from schema, files ~14× too big,
@@ -20,7 +29,11 @@ aggregate scans threw thrift errors.
 - **iso3 dropped** — §3.3 *and* §3.4 aggregation `by=` clauses omitted `iso3`;
   `write_parquet_pushdown` silently drops absent sort columns. Fixed in §3.3
   (`b83dd3f`) and §3.4 (`9117450`). **All `*_trends*.parquet` must be regenerated.**
-- **14× size** — `models` GCM list was a per-row string; now JSON-sidecar only.
+- **Size** — the original CR-119 diagnosis blamed the per-row `models` string; this is
+  **wrong** (see CORRECTION above — `models` dict-encodes to 0 MB). The real size driver on
+  `ensemble_season_timeseries` is the **CR-060 quantile columns** + the 4 unused stat columns
+  (`max/min/max_anomaly/min_anomaly` ≈ 45%). The actual perf lever is **per-iso3 hive
+  partitioning + column pruning** on that file (see "FP fix" below), not `models` removal.
 - **thrift corruption** — parallel §3.3 writers collided on a shared path; §3.3 is now
   sequential.
 - **Acute fix used:** S3 object-versioning rollback to the prior canonical (bucket is
@@ -60,7 +73,16 @@ R21_SEC3_4_SEQUENTIAL=1 FORCE_OVERWRITE=1 nohup bash scripts/r21_rerun.sh \
 
 ## Open / next
 - [ ] Finish the in-flight sequential §3.4 regeneration → validate iso3 + kernel-vs-`trend::`
-      diff → **republish the iso3-bearing trends canonical to S3** (notebook unblocks fully).
-- [ ] Package-ify the kernel to restore the parallel speedup.
+      diff → republish the iso3-bearing **trends** canonical. NOTE: this serves a *future*
+      trends consumer (CR-117), **does not unblock Future Projections** (FP reads
+      `ensemble_season_timeseries`, already schema-good). Validate against a trends consumer,
+      not FP.
+- [ ] **The actual FP unblock — on the `ensemble_season_timeseries` producer (§3.3), separate
+      from §3.4 trends:** (1) **per-iso3 hive partitioning** — one parquet per (period × iso3),
+      single-country read ≈ 5 MB vs 5×107 MB → ~20-50× I/O cut (the real lever); (2) **column
+      pruning** — drop the 4 unused stats (`max/min/max_anomaly/min_anomaly` ≈ 45%); zero
+      notebook impact. `models`→metadata is cleanliness only (0 MB). After republish, the
+      notebook browser harness (`/tmp/pw-verify/`) targets ~1-2 s.
+- [ ] Package-ify the kernel to restore the §3.4 parallel speedup.
 - Republish note: `push_to_s3` uses the legacy `hazards/` path but the notebook reads
   `domain=climate/` → a custom upload is needed; preserve `public-read` ACL.

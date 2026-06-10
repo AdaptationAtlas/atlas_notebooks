@@ -1022,10 +1022,13 @@ The Future Projections / Recent Changes parquet are produced by
 reference (CR-119 iso3 fix, §3.4 trend speedup, the multisession bug, CGLabs ops lessons,
 run recipe): **[`playbook/reference/hazard-pipeline-r2.1.md`](../../reference/hazard-pipeline-r2.1.md)**.
 
-- **CR-119 (iso3 dropped / 14× size / thrift corruption)** — root-caused + fixed in the
-  pipeline (`b83dd3f`, `9117450`). The `iso3`-bearing trends are being **regenerated**
-  (sequential + Rcpp kernel; multisession path is temporarily broken — see reference doc).
-- **Blocking the notebook:** once regeneration finishes + validates, the iso3-bearing
-  trends canonical gets **republished to S3** — that's what fully clears the Future
-  Projections `iso3`/cold-fetch issues this handover keeps flagging as "same pipeline-side
-  dispatch covers the fix."
+- **CR-119 (iso3 / size / thrift)** — root-caused + fixed in the pipeline (`b83dd3f`,
+  `9117450`). The `iso3`-bearing **trends** are being regenerated (sequential + Rcpp kernel;
+  multisession path temporarily broken — see reference doc).
+- **CORRECTION (per `dispatches/2026-06-10_fp-blocker-is-perf-not-trends.md`):** the trends
+  republish does **NOT** unblock Future Projections. FP/Extreme-Events read
+  `ensemble_season_timeseries` (already `iso3`-good + thrift-clean since the 06-05 16:34
+  rollback); their blocker is **query speed** (WASM I/O over 5×107 MB), and `*_trends*` has no
+  prod consumer yet. The actual FP fix is on the **`ensemble_season_timeseries` producer**:
+  **per-iso3 partitioning + pruning the 4 unused stat columns** (`models` is 0 MB, not the
+  driver). Trends regen serves CR-117 (future), not the current "Loading data…" breakage.
