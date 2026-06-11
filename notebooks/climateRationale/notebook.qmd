@@ -2463,15 +2463,11 @@ recentChanges_obs = {
   </div>`;
 
   // chartDownloadMenu handles PNG / SVG / CSV exports. Wrap chart +
-  // legend together so the download button sits below the legend.
-  // PNG = chart only (no legend in the export); SVG = chart only.
-  //
-  // Two composite-PNG attempts failed (commits 48a2e82 + 24feca1):
-  // foreignObject for an HTML legend nested inside an SVG envelope
-  // appears to taint the canvas in this browser, so canvas.toBlob
-  // returns null and the button looks dead. Including the legend in
-  // PNG/SVG export needs a deeper refactor — see dispatch
-  // 2026-05-22_recent-changes-followups.md.
+  // legend together in a single <div>; chartDownloadButton auto-detects
+  // the multi-element wrapper and routes PNG/SVG through html-to-image
+  // (compositePng / compositeSvg), so the LEGEND is captured in the
+  // export alongside the chart. (Earlier foreignObject attempts that
+  // tainted the canvas were superseded by the html-to-image path.)
   const chartAndLegend = html`<div style="background:#fff; display:block;"></div>`;
   chartAndLegend.appendChild(chart);
   if (legend) chartAndLegend.appendChild(legend);
@@ -3331,31 +3327,14 @@ recentChangesMap_obs = {
   const rangeStr = nValid > 0 ? `data range [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]` : "no valid pixels";
   setStatus(`${climateVarSelect.id} ${seasonSelect.season} (${statLabel}) for ${renderLabel} · country fetch ${fetchSec}s · sub-window ${sw}×${sh} → ${W}×${H} · ${rangeStr} · ramp: ${rampLabel} · ${mapSmooth_obs ? "smoothed" : "raster cells"}`);
 
-  // Issues #4 + #5: download button moves below the map, styled
-  // identically to the chart's split-button via chartDownloadMenu.
-  // The map is a canvas+SVG composite (no Plot SVG to rasterise), so
-  // we pass a pngOverride that composites the layers ourselves. SVG
-  // and CSV menu items are suppressed (no real SVG to export beyond
-  // the boundary overlay; no underlying dataframe for CSV).
-  const compositePng = async () => {
-    const composite = document.createElement("canvas");
-    composite.width = W;
-    composite.height = H;
-    const cctx = composite.getContext("2d");
-    cctx.fillStyle = "#ffffff";
-    cctx.fillRect(0, 0, W, H);
-    cctx.drawImage(display, 0, 0);
-    const svgString = new XMLSerializer().serializeToString(svgOverlay);
-    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-    const svgUrl = URL.createObjectURL(svgBlob);
-    await new Promise((resolve, reject) => {
-      const im = new Image();
-      im.onload = () => { cctx.drawImage(im, 0, 0); URL.revokeObjectURL(svgUrl); resolve(); };
-      im.onerror = (e) => { URL.revokeObjectURL(svgUrl); reject(e); };
-      im.src = svgUrl;
-    });
-    return await new Promise((resolve) => composite.toBlob((b) => resolve(b), "image/png"));
-  };
+  // Download button below the map, styled identically to the chart's
+  // split-button. The map is a composite (canvas raster + SVG boundary
+  // overlay + HTML legend), so we pass the whole `mapAndLegend` wrapper
+  // and let chartDownloadButton auto-detect it: PNG routes through
+  // html-to-image (captures canvas + overlay + legend in one pass) and
+  // SVG through compositeSvg (foreignObject envelope). This matches the
+  // sandbox download path and includes the legend — replacing the older
+  // manual canvas-composite that excluded the legend and disabled SVG.
   const mapAndLegend = html`<div></div>`;
   mapAndLegend.appendChild(mapStack);
   mapAndLegend.appendChild(legend);
@@ -3363,11 +3342,7 @@ recentChangesMap_obs = {
   const filename = `obs_map_${climateVarSelect.id}_${seasonSelect.season}_${mapStat_obs}_${slug}`;
   // Split-button moves into the captionDetails plot-footer-row alongside
   // the "About this plot" disclosure.
-  const downloadBtn = chartDownloadButton(mapAndLegend, {
-    filename,
-    pngOverride: compositePng,
-    disableSvg: true,
-  });
+  const downloadBtn = chartDownloadButton(mapAndLegend, { filename });
 
   // "About this plot" — methods notes that used to live in a static
   // callout above the map. Same format as the chart captions elsewhere
