@@ -94,17 +94,94 @@ dataAdmin1 = allAdmin1.filter(d =>
 
 viewof admin1Select = Inputs.input([])
 
+// CR-106 (2026-06-11): popup multi-select ported from the sandbox
+// (CR-097 pattern) — replaces the enhancedMultiSelect dropdown for
+// admin1. Adds a search box + Select all / Clear, a count-style
+// button, and a scrollable checkbox list. Better UX for countries with
+// 20+ admin1s. Contract preserved: the bound `admin1Select` is still an
+// array of `dataAdmin1` OBJECTS ({admin0_name, admin1_name, iso3}), so
+// downstream `.map(d => d.admin1_name)` / `.iso3` consumers are unchanged.
+//
+// Reactivity: the popup manages its own internal `selected` state and
+// writes OUT to `viewof admin1Select` via setSelectorValue — it never
+// reads the reactive `admin1Select` value, so toggling a checkbox does
+// NOT re-render this cell (avoids the focus-loss the component NOTE
+// warns about). Changing the country re-runs dataAdmin1 → this cell
+// re-renders with a fresh empty popup (clears stale admin1s).
 renderA1Multi = ({maxSelections = Infinity, requireAtLeastOne = false} = {}) => {
-    const _admin1 = Inputs.select(
-      dataAdmin1,
-      {
-        label: _lang(general_translations.region),
-        format: (d) => `${d.admin1_name || "Full Country"} (${d.iso3})`,
-        multiple: true,
-      }
-    )
-    enhancedMultiSelect(_admin1, { maxSelections, requireAtLeastOne })
-    return Inputs.bind(_admin1, viewof admin1Select)
+    const opts = dataAdmin1;
+    const labelOf = (d) => `${d.admin1_name || "Full Country"} (${d.iso3})`;
+    const sameOpt = (a, b) => a.admin1_name === b.admin1_name && a.iso3 === b.iso3;
+    let selected = [];
+
+    const wrap = html`<form class="a1-popup-multi" style="display:flex;flex-direction:column;gap:0.2rem;min-width:240px;position:relative;font-family:inherit;">
+      <label style="font:700 9pt sans-serif;letter-spacing:0.5px;color:#1d1d1d;">${_lang(general_translations.region)}</label>
+    </form>`;
+    const btn = html`<button type="button" style="width:100%;text-align:left;padding:0.375rem 0.75rem;border:1px solid #ced4da;background:#fff;cursor:pointer;border-radius:0.25rem;font:14px/1.5 sans-serif;color:#212529;min-height:38px;">All regions ▼</button>`;
+    const dropdown = html`<div style="display:none;position:absolute;z-index:9999;top:calc(100% + 2px);left:0;min-width:280px;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 4px 14px rgba(0,0,0,0.18);padding:8px;">`;
+    const search = html`<input type="text" placeholder="Search…" style="width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:3px;box-sizing:border-box;margin-bottom:6px;font-size:0.86em;">`;
+    const actRow = html`<div style="display:flex;gap:6px;margin-bottom:6px;">`;
+    const selAll = html`<button type="button" style="font-size:0.8em;padding:2px 8px;cursor:pointer;">Select all</button>`;
+    const clrBtn = html`<button type="button" style="font-size:0.8em;padding:2px 8px;cursor:pointer;">Clear</button>`;
+    const closeBtn = html`<button type="button" style="font-size:0.8em;padding:2px 8px;cursor:pointer;margin-left:auto;">Close ✕</button>`;
+    const hint = html`<div style="font-size:0.74em;color:#888;margin-bottom:4px;min-height:1em;"></div>`;
+    const listDiv = html`<div style="max-height:240px;overflow-y:auto;">`;
+
+    const atLimit = () => Number.isFinite(maxSelections) && selected.length >= maxSelections;
+    const isSel = (d) => selected.some((s) => sameOpt(s, d));
+
+    const commit = () => {
+      btn.textContent = selected.length === 0
+        ? "All regions ▼"
+        : `${selected.length}${Number.isFinite(maxSelections) ? " / " + maxSelections : ""} selected ▼`;
+      hint.textContent = atLimit() ? `Maximum ${maxSelections} selected — clear one to choose another.` : "";
+      setSelectorValue(viewof admin1Select, selected);
+    };
+
+    const renderList = (q = "") => {
+      listDiv.innerHTML = "";
+      const ql = q.toLowerCase();
+      opts.filter((d) => labelOf(d).toLowerCase().includes(ql)).forEach((d) => {
+        const checked = isSel(d);
+        const disabled = !checked && atLimit();
+        const lbl = html`<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:${disabled ? "not-allowed" : "pointer"};font-size:0.86em;color:${disabled ? "#aaa" : "#212529"};">`;
+        const cb = html`<input type="checkbox">`;
+        cb.checked = checked;
+        cb.disabled = disabled;
+        cb.onchange = () => {
+          selected = cb.checked ? [...selected, d] : selected.filter((s) => !sameOpt(s, d));
+          renderList(search.value);
+          commit();
+        };
+        lbl.append(cb, document.createTextNode(labelOf(d)));
+        listDiv.append(lbl);
+      });
+    };
+
+    btn.onclick = () => {
+      if (dropdown.style.display === "none") {
+        dropdown.style.display = "block"; search.value = ""; renderList(); search.focus();
+      } else { dropdown.style.display = "none"; }
+    };
+    closeBtn.onclick = () => { dropdown.style.display = "none"; };
+    document.addEventListener("mousedown", (e) => {
+      if (dropdown.style.display === "none") return;
+      if (wrap.contains(e.target)) return;
+      dropdown.style.display = "none";
+    });
+    search.oninput = () => renderList(search.value);
+    selAll.onclick = () => {
+      selected = Number.isFinite(maxSelections) ? opts.slice(0, maxSelections) : [...opts];
+      renderList(search.value); commit();
+    };
+    clrBtn.onclick = () => { selected = []; renderList(search.value); commit(); };
+
+    actRow.append(selAll, clrBtn, closeBtn);
+    dropdown.append(search, actRow, hint, listDiv);
+    wrap.append(btn, dropdown);
+    renderList();
+    commit();
+    return wrap;
 }
 ```
 
