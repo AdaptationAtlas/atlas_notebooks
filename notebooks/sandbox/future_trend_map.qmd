@@ -43,11 +43,14 @@ published file):
 1. **Per-GCM-then-ensemble — CONFIRMED.** The slope is fit on *each GCM's* series (fit_keys include
    \`model\`), then mean/sd taken across GCMs (§3.7.1). Inter-model trend spread (\`sd\`) is preserved.
    Standing rule \`feedback_ensembling-is-always-last\` holds.
-2. **Significance deferred — no overlay yet.** The pipeline dropped \`value_pval\` (mean-of-pvals is
-   uninterpretable). B ships \`value_slope\` + \`value_decade\` only. The significance layer will be an
-   **AR6 agreement metric** — \`pct_gcms_sig\` (frac GCMs with a significant slope) / \`pct_sign_pos\`
-   (frac slope>0), computed per-GCM in §3.7.1, member-level pvals retained upstream so no refit is
-   needed — landing later under **CR-117**. This map shows magnitude + inter-model sd only until then.
+2. **Significance = inter-model agreement (SNR proxy).** The pipeline dropped \`value_pval\`
+   (mean-of-pvals is uninterpretable) and B ships \`value_slope\` + \`value_decade\` with an across-GCM
+   \`mean\` **and inter-model \`sd\`**. The overlay fades any admin1 where **|trend| < σ** — the trend
+   signal sits inside the inter-model spread → low model agreement. This is the Knutti & Sedláček
+   (2013) signal-to-noise proxy for AR6 sign-agreement, the same convention the CR-116 period-maps
+   use. NOTE: computed client-side from \`mean\`/\`sd\` — B has **no dedicated per-GCM agreement column
+   yet** (verified across all 4 periods). If the pipeline later adds a true \`pct_gcms_sig\` /
+   \`pct_sign_pos\` (CR-117), it supersedes this proxy 1:1.
 `
 ```
 
@@ -114,10 +117,13 @@ viewof scenarioSel = Inputs.select(scenarioOptions.length ? scenarioOptions : ["
 viewof seasonSel   = Inputs.select(seasonOptions.length   ? seasonOptions   : ["—"], { label: "Season" })
 viewof hazardSel   = Inputs.select(hazardOptions.length   ? hazardOptions   : ["—"], { label: "Variable" })
 viewof statSel     = Inputs.radio(["value_decade", "value_slope"], { label: "Trend stat", value: "value_decade" })
-// Significance overlay intentionally absent: B ships value_slope + value_decade
-// only (pipeline dropped the mean-of-pvals as uninterpretable, 2026-06-12). The
-// AR6 agreement metric (pct_gcms_sig / pct_sign_pos) lands later under CR-117 —
-// wire it here as a fade/hatch when it arrives.
+// Robustness overlay from the inter-model sd B ships (|trend| < sd = signal
+// below inter-model spread → low agreement → faded). Knutti & Sedláček 2013
+// SNR proxy for AR6 sign-agreement, same convention as the CR-116 period-maps.
+// Computed client-side because B has no dedicated per-GCM agreement column yet
+// (verified: all 4 periods ship only value_slope/value_decade + mean/sd). A true
+// pct_gcms_sig column from the pipeline (CR-117) would supersede this 1:1.
+viewof showSignif  = Inputs.toggle({ label: "Fade low-agreement (|trend| < inter-model σ)", value: true })
 ```
 
 ```{ojs}
@@ -179,13 +185,21 @@ trendMap = {
     marks: [
       Plot.geo(features, {
         fill: f => colour(trendByAdmin.get(f.properties.admin1_name)?.[statSel]),
+        fillOpacity: f => {
+          if (!showSignif) return 1;
+          const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
+          const v = o[statSel], sd = o[`sd_${statSel}`];
+          // robust (signal exceeds inter-model spread) → full opacity; else fade
+          return (v != null && sd != null && Math.abs(v) >= sd) ? 1 : 0.3;
+        },
         stroke: "#fff", strokeWidth: 0.5,
         title: f => {
           const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
-          const v = o[statSel];
-          const sd = o[`sd_${statSel}`];
+          const v = o[statSel], sd = o[`sd_${statSel}`];
+          const robust = (v != null && sd != null && Math.abs(v) >= sd);
           return `${f.properties.admin1_name}\n${statSel}: ${v != null ? v.toFixed(3) : "—"}`
-               + `\ninter-model sd: ${sd != null ? sd.toFixed(3) : "—"}`;
+               + `\ninter-model σ: ${sd != null ? sd.toFixed(3) : "—"}`
+               + `\nagreement: ${v != null && sd != null ? (robust ? "robust (|trend| ≥ σ)" : "low (|trend| < σ)") : "—"}`;
         },
       }),
     ],
@@ -199,7 +213,7 @@ trendMap = {
       <span><span class="swatch" style="background:${d3.interpolateRdBu(0.5)}"></span>~no change</span>
       <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 0 : 1)}"></span>${isWetVar ? "drier / decreasing" : "cooler / decreasing"}</span>
       <span><span class="swatch" style="background:#ddd"></span>no data</span>
-      <span style="opacity:.55">significance overlay pending — AR6 agreement metric (pct_gcms_sig) under CR-117</span>
+      ${showSignif ? htl.html`<span style="opacity:.55">faded = low agreement (|trend| &lt; inter-model σ; Knutti &amp; Sedláček SNR proxy)</span>` : ""}
     </div>
     <p style="font-size:.8rem;color:#666;margin-top:.4rem">
       ${hazardSel} · ${scenarioSel} · ${seasonSel} · ${periodSel} · trend ${unit} (ensemble mean across GCMs)
