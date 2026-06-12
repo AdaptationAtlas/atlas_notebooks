@@ -29,7 +29,7 @@ It is **entirely separate** from `obs_month_overlay.qmd` — its own page, its o
 it can iterate without touching the CR-097/CR-116 sandbox or the production notebook.
 
 Source: `ensemble_season_trends.parquet` (**B**) — per-(iso3 × admin1 × scenario × season × hazard × stat)
-across-GCM ensemble `mean`/`sd`, `stat ∈ {value_slope, value_decade, value_pval}`. iso3-first sorted /
+across-GCM ensemble `mean`/`sd`, `stat ∈ {value_slope, value_decade}`. iso3-first sorted /
 prunable, single `baseline=1995-2014` variant (trend metrics are baseline-invariant).
 
 ```{ojs}
@@ -40,13 +40,14 @@ This map renders the **ensemble-mean trend** of a NEX-GDDP-CMIP6 variable over a
 per admin1. Two open methodology points (relayed to the pipeline session, not yet confirmed in the
 published file):
 
-1. **Per-GCM-then-ensemble.** The slope must be fit on *each GCM's* series and then averaged across
-   GCMs — never fit on a pre-ensembled mean (that smooths away the inter-model trend spread this map
-   exists to show). Standing rule: \`feedback_ensembling-is-always-last\`.
-2. **Significance is interim.** \`value_pval\` as an across-GCM \`mean\`/\`sd\` has no clean interpretation.
-   The significance overlay below is a **placeholder** thresholding the ensemble-mean pval at 0.05.
-   It should be replaced by an **AR6 sign-agreement metric** (fraction of GCMs significant / same-sign)
-   once the pipeline adds it — matching the CR-116 robustness convention.
+1. **Per-GCM-then-ensemble — CONFIRMED.** The slope is fit on *each GCM's* series (fit_keys include
+   \`model\`), then mean/sd taken across GCMs (§3.7.1). Inter-model trend spread (\`sd\`) is preserved.
+   Standing rule \`feedback_ensembling-is-always-last\` holds.
+2. **Significance deferred — no overlay yet.** The pipeline dropped \`value_pval\` (mean-of-pvals is
+   uninterpretable). B ships \`value_slope\` + \`value_decade\` only. The significance layer will be an
+   **AR6 agreement metric** — \`pct_gcms_sig\` (frac GCMs with a significant slope) / \`pct_sign_pos\`
+   (frac slope>0), computed per-GCM in §3.7.1, member-level pvals retained upstream so no refit is
+   needed — landing later under **CR-117**. This map shows magnitude + inter-model sd only until then.
 `
 ```
 
@@ -113,7 +114,10 @@ viewof scenarioSel = Inputs.select(scenarioOptions.length ? scenarioOptions : ["
 viewof seasonSel   = Inputs.select(seasonOptions.length   ? seasonOptions   : ["—"], { label: "Season" })
 viewof hazardSel   = Inputs.select(hazardOptions.length   ? hazardOptions   : ["—"], { label: "Variable" })
 viewof statSel     = Inputs.radio(["value_decade", "value_slope"], { label: "Trend stat", value: "value_decade" })
-viewof showSignif  = Inputs.toggle({ label: "Fade non-significant (interim pval<0.05)", value: true })
+// Significance overlay intentionally absent: B ships value_slope + value_decade
+// only (pipeline dropped the mean-of-pvals as uninterpretable, 2026-06-12). The
+// AR6 agreement metric (pct_gcms_sig / pct_sign_pos) lands later under CR-117 —
+// wire it here as a fade/hatch when it arrives.
 ```
 
 ```{ojs}
@@ -175,17 +179,13 @@ trendMap = {
     marks: [
       Plot.geo(features, {
         fill: f => colour(trendByAdmin.get(f.properties.admin1_name)?.[statSel]),
-        fillOpacity: f => {
-          if (!showSignif) return 1;
-          const p = trendByAdmin.get(f.properties.admin1_name)?.value_pval;
-          return (p != null && p < 0.05) ? 1 : 0.3;  // interim significance
-        },
         stroke: "#fff", strokeWidth: 0.5,
         title: f => {
           const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
           const v = o[statSel];
+          const sd = o[`sd_${statSel}`];
           return `${f.properties.admin1_name}\n${statSel}: ${v != null ? v.toFixed(3) : "—"}`
-               + `\npval: ${o.value_pval != null ? o.value_pval.toFixed(3) : "—"}`;
+               + `\ninter-model sd: ${sd != null ? sd.toFixed(3) : "—"}`;
         },
       }),
     ],
@@ -199,7 +199,7 @@ trendMap = {
       <span><span class="swatch" style="background:${d3.interpolateRdBu(0.5)}"></span>~no change</span>
       <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 0 : 1)}"></span>${isWetVar ? "drier / decreasing" : "cooler / decreasing"}</span>
       <span><span class="swatch" style="background:#ddd"></span>no data</span>
-      ${showSignif ? htl.html`<span style="opacity:.5">faded = pval ≥ 0.05 (interim — replace with AR6 agreement)</span>` : ""}
+      <span style="opacity:.55">significance overlay pending — AR6 agreement metric (pct_gcms_sig) under CR-117</span>
     </div>
     <p style="font-size:.8rem;color:#666;margin-top:.4rem">
       ${hazardSel} · ${scenarioSel} · ${seasonSel} · ${periodSel} · trend ${unit} (ensemble mean across GCMs)
