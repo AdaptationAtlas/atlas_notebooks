@@ -1,0 +1,209 @@
+---
+pagetitle: "Climate Rationale — Sandbox: Future trend & significance map (B)"
+date-created: "2026-06-12"
+toc: false
+---
+
+```{=html}
+<style>
+.controls-row { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: flex-end; margin: 0 0 0.75rem; }
+.controls-row > .cell, .controls-row > div.sourceCode { flex: 1 1 200px; min-width: 0; margin: 0; padding: 0; }
+details.help-callout { padding: 0.5rem 1rem; }
+details.help-callout > summary { cursor: pointer; font-weight: 600; list-style: none; padding: 0.25rem 0; }
+details.help-callout > summary::-webkit-details-marker { display: none; }
+details.help-callout > summary::before { content: "▸"; display: inline-block; width: 1.1em; transition: transform 0.15s; }
+details.help-callout[open] > summary::before { transform: rotate(90deg); }
+.trend-banner { padding: 0.75rem 1rem; border-radius: 6px; margin: 0.75rem 0; }
+.trend-banner.warn { background: #fff4e5; border: 1px solid #f0c36d; color: #8a5a00; }
+.trend-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; align-items: center; font-size: 0.85rem; margin-top: 0.5rem; }
+.trend-legend .swatch { display: inline-block; width: 14px; height: 14px; border-radius: 2px; vertical-align: middle; margin-right: 0.3rem; border: 1px solid rgba(0,0,0,.15); }
+</style>
+```
+
+# Future trend & significance map — sandbox (reads product **B**)
+
+Standalone prototype for the **future-projection trend / significance map** described in
+**CR-117** / **CR-119** dispatch
+[`2026-06-12_publish-B-recommendation.md`](../../playbook/handovers/climateRationale/dispatches/2026-06-12_publish-B-recommendation.md).
+It is **entirely separate** from `obs_month_overlay.qmd` — its own page, its own data layer — so
+it can iterate without touching the CR-097/CR-116 sandbox or the production notebook.
+
+Source: `ensemble_season_trends.parquet` (**B**) — per-(iso3 × admin1 × scenario × season × hazard × stat)
+across-GCM ensemble `mean`/`sd`, `stat ∈ {value_slope, value_decade, value_pval}`. iso3-first sorted /
+prunable, single `baseline=1995-2014` variant (trend metrics are baseline-invariant).
+
+```{ojs}
+md`<details class="help-callout">
+<summary>About this section — methodology & open caveats</summary>
+
+This map renders the **ensemble-mean trend** of a NEX-GDDP-CMIP6 variable over a 20-year future window,
+per admin1. Two open methodology points (relayed to the pipeline session, not yet confirmed in the
+published file):
+
+1. **Per-GCM-then-ensemble.** The slope must be fit on *each GCM's* series and then averaged across
+   GCMs — never fit on a pre-ensembled mean (that smooths away the inter-model trend spread this map
+   exists to show). Standing rule: \`feedback_ensembling-is-always-last\`.
+2. **Significance is interim.** \`value_pval\` as an across-GCM \`mean\`/\`sd\` has no clean interpretation.
+   The significance overlay below is a **placeholder** thresholding the ensemble-mean pval at 0.05.
+   It should be replaced by an **AR6 sign-agreement metric** (fraction of GCMs significant / same-sign)
+   once the pipeline adds it — matching the CR-116 robustness convention.
+`
+```
+
+```{ojs}
+// ── Shared deps (Quarto OJS provides DuckDBClient, Plot, d3, htl, Inputs) ──
+topojson = require("topojson-client@3")
+topoA1   = fetch("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").then(r => r.json())
+countriesRaw = FileAttachment("/data/shared/atlas_countries.json").json()
+```
+
+```{ojs}
+// Country picker — Atlas countries flagged include:true, sorted by name.
+countryOptions = countriesRaw
+  .filter(c => c.include)
+  .map(c => ({ iso3: c.iso3c, name: c.admin0_name }))
+  .sort((a, b) => a.name.localeCompare(b.name))
+
+viewof countrySel = Inputs.select(countryOptions, {
+  label: "Country", format: d => d.name,
+  value: countryOptions.find(c => c.iso3 === "AGO") ?? countryOptions[0],
+})
+
+viewof periodSel = Inputs.select(
+  ["2021-2040", "2041-2060", "2061-2080", "2081-2100"],
+  { label: "Future period", value: "2041-2060" })
+```
+
+```{ojs}
+// ── Data layer (product B) ──────────────────────────────────────────────
+// One small query per (country, period): pull every scenario×season×hazard×stat
+// row for the country. iso3 = '<X>' single-value form so DuckDB-WASM prunes
+// row-groups (B is iso3-first sorted). Everything else filters client-side off
+// this cache. 404-safe: if B isn't published yet, returns [] and the banner shows.
+trendBase = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months"
+
+db_trends = DuckDBClient.of()
+
+trend_dataAll = {
+  const iso3 = countrySel.iso3;
+  const url = `${trendBase}/period=${periodSel}/baseline=1995-2014/variable=ensemble_season_trends.parquet`;
+  const sql = `
+    SELECT admin1_name, iso3, scenario, season, hazard, stat, mean, sd
+    FROM read_parquet('${url}')
+    WHERE iso3 = '${iso3}' AND admin1_name IS NOT NULL`;
+  try {
+    const rows = Array.from(await db_trends.query(sql));
+    return { ok: true, rows };
+  } catch (err) {
+    return { ok: false, rows: [], error: (err && err.message) ? err.message : String(err) };
+  }
+}
+```
+
+```{ojs}
+// Selector options derive from whatever B actually contains (empty until published).
+_distinct = (key) => [...new Set(trend_dataAll.rows.map(r => r[key]))].filter(Boolean).sort()
+scenarioOptions = _distinct("scenario")
+seasonOptions   = _distinct("season")
+hazardOptions   = _distinct("hazard")
+```
+
+```{ojs}
+viewof scenarioSel = Inputs.select(scenarioOptions.length ? scenarioOptions : ["—"], { label: "Scenario (SSP)" })
+viewof seasonSel   = Inputs.select(seasonOptions.length   ? seasonOptions   : ["—"], { label: "Season" })
+viewof hazardSel   = Inputs.select(hazardOptions.length   ? hazardOptions   : ["—"], { label: "Variable" })
+viewof statSel     = Inputs.radio(["value_decade", "value_slope"], { label: "Trend stat", value: "value_decade" })
+viewof showSignif  = Inputs.toggle({ label: "Fade non-significant (interim pval<0.05)", value: true })
+```
+
+```{ojs}
+// Pivot the long-format cache to one record per admin1 for the active selection:
+// { admin1_name -> { value_slope, value_decade, value_pval, sd_<stat> } }
+trendByAdmin = {
+  const sel = trend_dataAll.rows.filter(r =>
+    r.scenario === scenarioSel && r.season === seasonSel && r.hazard === hazardSel);
+  const m = new Map();
+  for (const r of sel) {
+    if (!m.has(r.admin1_name)) m.set(r.admin1_name, {});
+    const o = m.get(r.admin1_name);
+    o[r.stat] = r.mean;
+    o[`sd_${r.stat}`] = r.sd;
+  }
+  return m;
+}
+```
+
+```{ojs}
+// Variable-aware diverging palette: wet vars (PTOT/SPEI) positive=wetter=blue;
+// temperature positive=warmer=red. value_pval would be sequential, but the radio
+// only exposes slope/decade — pval drives the significance fade instead.
+isWetVar = (hazardSel || "").startsWith("PTOT") || (hazardSel || "").startsWith("SPEI")
+
+trendMap = {
+  if (!trend_dataAll.ok) {
+    return htl.html`<div class="trend-banner warn">
+      <strong>Product B not reachable.</strong> <code>ensemble_season_trends.parquet</code> for
+      period <code>${periodSel}</code> returned an error — most likely it isn't published to S3 yet
+      (the pipeline session flagged it as in-progress on 2026-06-12). This scaffold lights up
+      automatically once the key exists.<br><small>${trend_dataAll.error ?? ""}</small></div>`;
+  }
+  if (!trend_dataAll.rows.length)
+    return htl.html`<div class="trend-banner warn">No B rows for <strong>${countrySel.name}</strong> / ${periodSel}.</div>`;
+
+  const features = topojson.feature(topoA1, topoA1.objects["atlas_gaul24_a1_africa"]).features
+    .filter(f => f.properties.iso3 === countrySel.iso3);
+  if (!features.length) return htl.html`<p style="color:#c00">No admin1 geometry for ${countrySel.name}.</p>`;
+
+  const vals = features
+    .map(f => trendByAdmin.get(f.properties.admin1_name)?.[statSel])
+    .filter(v => v != null);
+  const absMax = d3.max(vals, Math.abs) || 1;
+  const scale = d3.scaleLinear().domain([-absMax, absMax]).range([0, 1]);
+  const colour = (v) => {
+    if (v == null) return "#ddd";
+    const t = scale(v);
+    // wet: positive=blue (t); temp: positive=red (1-t)
+    return d3.interpolateRdBu(isWetVar ? t : 1 - t);
+  };
+
+  const fc = { type: "FeatureCollection", features };
+  const width = 720, height = 560;
+
+  const plot = Plot.plot({
+    width, height,
+    projection: { type: "mercator", domain: fc },
+    marks: [
+      Plot.geo(features, {
+        fill: f => colour(trendByAdmin.get(f.properties.admin1_name)?.[statSel]),
+        fillOpacity: f => {
+          if (!showSignif) return 1;
+          const p = trendByAdmin.get(f.properties.admin1_name)?.value_pval;
+          return (p != null && p < 0.05) ? 1 : 0.3;  // interim significance
+        },
+        stroke: "#fff", strokeWidth: 0.5,
+        title: f => {
+          const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
+          const v = o[statSel];
+          return `${f.properties.admin1_name}\n${statSel}: ${v != null ? v.toFixed(3) : "—"}`
+               + `\npval: ${o.value_pval != null ? o.value_pval.toFixed(3) : "—"}`;
+        },
+      }),
+    ],
+  });
+
+  const unit = statSel === "value_decade" ? "per decade" : "per year";
+  return htl.html`<div>
+    ${plot}
+    <div class="trend-legend">
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 1 : 0)}"></span>${isWetVar ? "wetter / increasing" : "warmer / increasing"}</span>
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(0.5)}"></span>~no change</span>
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 0 : 1)}"></span>${isWetVar ? "drier / decreasing" : "cooler / decreasing"}</span>
+      <span><span class="swatch" style="background:#ddd"></span>no data</span>
+      ${showSignif ? htl.html`<span style="opacity:.5">faded = pval ≥ 0.05 (interim — replace with AR6 agreement)</span>` : ""}
+    </div>
+    <p style="font-size:.8rem;color:#666;margin-top:.4rem">
+      ${hazardSel} · ${scenarioSel} · ${seasonSel} · ${periodSel} · trend ${unit} (ensemble mean across GCMs)
+    </p>
+  </div>`;
+}
+```
