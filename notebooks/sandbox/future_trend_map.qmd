@@ -124,6 +124,12 @@ viewof statSel     = Inputs.radio(["value_decade", "value_slope"], { label: "Tre
 // (verified: all 4 periods ship only value_slope/value_decade + mean/sd). A true
 // pct_gcms_sig column from the pipeline (CR-117) would supersede this 1:1.
 viewof showSignif  = Inputs.toggle({ label: "Fade low-agreement (|trend| < inter-model σ)", value: true })
+// What to colour the map by. B ships, per stat, an across-GCM `mean` (the trend
+// magnitude) and `sd` (inter-model variability / disagreement). Both are useful
+// map layers: the trend tells you direction+size, the σ tells you how much the
+// 18 GCMs disagree on it (the same quantity that drives the low-agreement fade).
+viewof metricSel   = Inputs.radio(["Trend (ensemble mean)", "Inter-model variability (σ)"],
+  { label: "Map metric", value: "Trend (ensemble mean)" })
 ```
 
 ```{ojs}
@@ -164,16 +170,43 @@ trendMap = {
     .filter(f => f.properties.iso3 === countrySel.iso3);
   if (!features.length) return htl.html`<p style="color:#c00">No admin1 geometry for ${countrySel.name}.</p>`;
 
-  const vals = features
-    .map(f => trendByAdmin.get(f.properties.admin1_name)?.[statSel])
-    .filter(v => v != null);
-  const absMax = d3.max(vals, Math.abs) || 1;
-  const scale = d3.scaleLinear().domain([-absMax, absMax]).range([0, 1]);
-  const colour = (v) => {
-    if (v == null) return "#ddd";
-    const t = scale(v);
-    // wet: positive=blue (t); temp: positive=red (1-t)
-    return d3.interpolateRdBu(isWetVar ? t : 1 - t);
+  // Metric: trend magnitude (the ensemble-mean of the stat) vs inter-model σ.
+  const sdMode  = metricSel.startsWith("Inter-model");
+  const statKey = sdMode ? `sd_${statSel}` : statSel;
+  const getV    = name => trendByAdmin.get(name)?.[statKey];
+
+  const vals = features.map(f => getV(f.properties.admin1_name)).filter(v => v != null);
+
+  let colour, legendSwatches;
+  if (sdMode) {
+    // σ is always ≥ 0 → sequential neutral palette (Purples), so it never reads
+    // as wet/warm. Darker = more inter-model disagreement on the trend.
+    const hi = d3.max(vals) || 1;
+    const sc = d3.scaleLinear().domain([0, hi]).range([0.12, 0.95]);
+    colour = v => v == null ? "#ddd" : d3.interpolatePurples(sc(v));
+    legendSwatches = htl.html`
+      <span><span class="swatch" style="background:${d3.interpolatePurples(0.12)}"></span>low σ (models agree)</span>
+      <span><span class="swatch" style="background:${d3.interpolatePurples(0.95)}"></span>high σ (models disagree)</span>
+      <span><span class="swatch" style="background:#ddd"></span>no data</span>`;
+  } else {
+    // Trend magnitude: diverging, variable-aware (wet=blue+ / temp=red+).
+    const absMax = d3.max(vals, Math.abs) || 1;
+    const sc = d3.scaleLinear().domain([-absMax, absMax]).range([0, 1]);
+    colour = v => v == null ? "#ddd" : d3.interpolateRdBu(isWetVar ? sc(v) : 1 - sc(v));
+    legendSwatches = htl.html`
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 1 : 0)}"></span>${isWetVar ? "wetter / increasing" : "warmer / increasing"}</span>
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(0.5)}"></span>~no change</span>
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 0 : 1)}"></span>${isWetVar ? "drier / decreasing" : "cooler / decreasing"}</span>
+      <span><span class="swatch" style="background:#ddd"></span>no data</span>
+      ${showSignif ? htl.html`<span style="opacity:.55">faded = low agreement (|trend| &lt; σ; Knutti &amp; Sedláček SNR proxy)</span>` : ""}`;
+  }
+
+  // Agreement fade only applies to the trend layer (σ is the spread itself).
+  const fadeFor = f => {
+    if (sdMode || !showSignif) return 1;
+    const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
+    const v = o[statSel], sd = o[`sd_${statSel}`];
+    return (v != null && sd != null && Math.abs(v) >= sd) ? 1 : 0.3;
   };
 
   const fc = { type: "FeatureCollection", features };
@@ -184,20 +217,15 @@ trendMap = {
     projection: { type: "mercator", domain: fc },
     marks: [
       Plot.geo(features, {
-        fill: f => colour(trendByAdmin.get(f.properties.admin1_name)?.[statSel]),
-        fillOpacity: f => {
-          if (!showSignif) return 1;
-          const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
-          const v = o[statSel], sd = o[`sd_${statSel}`];
-          // robust (signal exceeds inter-model spread) → full opacity; else fade
-          return (v != null && sd != null && Math.abs(v) >= sd) ? 1 : 0.3;
-        },
+        fill: f => colour(getV(f.properties.admin1_name)),
+        fillOpacity: fadeFor,
         stroke: "#fff", strokeWidth: 0.5,
         title: f => {
           const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
           const v = o[statSel], sd = o[`sd_${statSel}`];
           const robust = (v != null && sd != null && Math.abs(v) >= sd);
-          return `${f.properties.admin1_name}\n${statSel}: ${v != null ? v.toFixed(3) : "—"}`
+          return `${f.properties.admin1_name}`
+               + `\ntrend (${statSel}): ${v != null ? v.toFixed(3) : "—"}`
                + `\ninter-model σ: ${sd != null ? sd.toFixed(3) : "—"}`
                + `\nagreement: ${v != null && sd != null ? (robust ? "robust (|trend| ≥ σ)" : "low (|trend| < σ)") : "—"}`;
         },
@@ -206,17 +234,14 @@ trendMap = {
   });
 
   const unit = statSel === "value_decade" ? "per decade" : "per year";
+  const metricLabel = sdMode
+    ? `inter-model σ of trend ${unit}`
+    : `trend ${unit} (ensemble mean across GCMs)`;
   return htl.html`<div>
     ${plot}
-    <div class="trend-legend">
-      <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 1 : 0)}"></span>${isWetVar ? "wetter / increasing" : "warmer / increasing"}</span>
-      <span><span class="swatch" style="background:${d3.interpolateRdBu(0.5)}"></span>~no change</span>
-      <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 0 : 1)}"></span>${isWetVar ? "drier / decreasing" : "cooler / decreasing"}</span>
-      <span><span class="swatch" style="background:#ddd"></span>no data</span>
-      ${showSignif ? htl.html`<span style="opacity:.55">faded = low agreement (|trend| &lt; inter-model σ; Knutti &amp; Sedláček SNR proxy)</span>` : ""}
-    </div>
+    <div class="trend-legend">${legendSwatches}</div>
     <p style="font-size:.8rem;color:#666;margin-top:.4rem">
-      ${hazardSel} · ${scenarioSel} · ${seasonSel} · ${periodSel} · trend ${unit} (ensemble mean across GCMs)
+      ${hazardSel} · ${scenarioSel} · ${seasonSel} · ${periodSel} · ${metricLabel}
     </p>
   </div>`;
 }
