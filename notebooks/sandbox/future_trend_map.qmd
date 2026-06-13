@@ -28,9 +28,11 @@ Standalone prototype for the **future-projection trend / significance map** desc
 It is **entirely separate** from `obs_month_overlay.qmd` — its own page, its own data layer — so
 it can iterate without touching the CR-097/CR-116 sandbox or the production notebook.
 
-Source: `ensemble_season_trends.parquet` (**B**) — per-(iso3 × admin1 × scenario × season × hazard × stat)
-across-GCM ensemble `mean`/`sd`, `stat ∈ {value_slope, value_decade}`. iso3-first sorted /
-prunable, single `baseline=1995-2014` variant (trend metrics are baseline-invariant).
+Sources: **B** `ensemble_season_trends.parquet` — across-GCM ensemble `mean`/`sd`, `stat ∈ {value_slope,
+value_decade}` (drives the Trend + Inter-model variability metrics); and **A**
+`ensemble_season_timeseries.parquet` — per-year `mean` + `mean_anomaly`, aggregated to a 20-yr
+period-mean (drives the Climatology + Anomaly metrics; Anomaly = future − 1995-2014 baseline).
+Both iso3-first sorted / prunable.
 
 ```{ojs}
 md`<details class="help-callout">
@@ -128,8 +130,16 @@ viewof showSignif  = Inputs.toggle({ label: "Fade low-agreement (|trend| < inter
 // magnitude) and `sd` (inter-model variability / disagreement). Both are useful
 // map layers: the trend tells you direction+size, the σ tells you how much the
 // 18 GCMs disagree on it (the same quantity that drives the low-agreement fade).
-viewof metricSel   = Inputs.radio(["Trend (ensemble mean)", "Inter-model variability (σ)"],
-  { label: "Map metric", value: "Trend (ensemble mean)" })
+// Trend / σ come from B (ensemble_season_trends). Climatology / Anomaly come
+// from A (ensemble_season_timeseries): 20-yr period-mean of A.mean (absolute
+// value) and A.mean_anomaly (future − 1995-2014 baseline delta, already computed
+// per-year upstream). Anomaly = "delta from future to baseline".
+viewof metricSel   = Inputs.radio([
+  "Trend (ensemble mean)",
+  "Inter-model variability (σ)",
+  "Climatology (mean value)",
+  "Anomaly (future − baseline)",
+], { label: "Map metric", value: "Trend (ensemble mean)" })
 ```
 
 ```{ojs}
@@ -146,6 +156,33 @@ trendByAdmin = {
     o[`sd_${r.stat}`] = r.sd;
   }
   return m;
+}
+```
+
+```{ojs}
+// Product A (ensemble_season_timeseries) — period-mean climatology + future-vs-
+// baseline anomaly per admin1, for the active selection. A.mean_anomaly is the
+// per-year delta vs the 1995-2014 baseline, so avg over the 20 period-years
+// gives the window climatology (avg mean) and its delta (avg mean_anomaly).
+// Server-side GROUP BY caps the payload to ~one row per admin1. Re-queries on
+// selection change; err-safe (returns empty Map → those metrics show no-data).
+db_ts = DuckDBClient.of()
+
+a_aggByAdmin = {
+  if (!scenarioOptions.length) return new Map();   // B (hence selectors) not loaded yet
+  const url = `${trendBase}/period=${periodSel}/baseline=1995-2014/variable=ensemble_season_timeseries.parquet`;
+  const sql = `
+    SELECT admin1_name, avg(mean) AS clim, avg(mean_anomaly) AS anom
+    FROM read_parquet('${url}')
+    WHERE iso3 = '${countrySel.iso3}' AND admin1_name IS NOT NULL
+      AND scenario = '${scenarioSel}' AND season = '${seasonSel}' AND hazard = '${hazardSel}'
+    GROUP BY admin1_name`;
+  try {
+    const rows = Array.from(await db_ts.query(sql));
+    return new Map(rows.map(r => [r.admin1_name, { clim: r.clim, anom: r.anom }]));
+  } catch (err) {
+    return new Map();
+  }
 }
 ```
 
@@ -170,26 +207,24 @@ trendMap = {
     .filter(f => f.properties.iso3 === countrySel.iso3);
   if (!features.length) return htl.html`<p style="color:#c00">No admin1 geometry for ${countrySel.name}.</p>`;
 
-  // Metric: trend magnitude (the ensemble-mean of the stat) vs inter-model σ.
-  const sdMode  = metricSel.startsWith("Inter-model");
-  const statKey = sdMode ? `sd_${statSel}` : statSel;
-  const getV    = name => trendByAdmin.get(name)?.[statKey];
+  // Metric routing. Trend/σ ← B (trendByAdmin); Climatology/Anomaly ← A (a_aggByAdmin).
+  const isSd    = metricSel.startsWith("Inter-model");
+  const isClim  = metricSel.startsWith("Climatology");
+  const isAnom  = metricSel.startsWith("Anomaly");
+  const isTrend = metricSel.startsWith("Trend");
+  const diverging = isTrend || isAnom;   // signed → diverging; σ/clim → sequential
+
+  const getV = name => {
+    if (isClim || isAnom) { const a = a_aggByAdmin.get(name); return a ? (isClim ? a.clim : a.anom) : undefined; }
+    const o = trendByAdmin.get(name); if (!o) return undefined;
+    return isSd ? o[`sd_${statSel}`] : o[statSel];
+  };
 
   const vals = features.map(f => getV(f.properties.admin1_name)).filter(v => v != null);
 
   let colour, legendSwatches;
-  if (sdMode) {
-    // σ is always ≥ 0 → sequential neutral palette (Purples), so it never reads
-    // as wet/warm. Darker = more inter-model disagreement on the trend.
-    const hi = d3.max(vals) || 1;
-    const sc = d3.scaleLinear().domain([0, hi]).range([0.12, 0.95]);
-    colour = v => v == null ? "#ddd" : d3.interpolatePurples(sc(v));
-    legendSwatches = htl.html`
-      <span><span class="swatch" style="background:${d3.interpolatePurples(0.12)}"></span>low σ (models agree)</span>
-      <span><span class="swatch" style="background:${d3.interpolatePurples(0.95)}"></span>high σ (models disagree)</span>
-      <span><span class="swatch" style="background:#ddd"></span>no data</span>`;
-  } else {
-    // Trend magnitude: diverging, variable-aware (wet=blue+ / temp=red+).
+  if (diverging) {
+    // Signed (trend / anomaly): variable-aware diverging (wet=blue+ / temp=red+).
     const absMax = d3.max(vals, Math.abs) || 1;
     const sc = d3.scaleLinear().domain([-absMax, absMax]).range([0, 1]);
     colour = v => v == null ? "#ddd" : d3.interpolateRdBu(isWetVar ? sc(v) : 1 - sc(v));
@@ -198,12 +233,31 @@ trendMap = {
       <span><span class="swatch" style="background:${d3.interpolateRdBu(0.5)}"></span>~no change</span>
       <span><span class="swatch" style="background:${d3.interpolateRdBu(isWetVar ? 0 : 1)}"></span>${isWetVar ? "drier / decreasing" : "cooler / decreasing"}</span>
       <span><span class="swatch" style="background:#ddd"></span>no data</span>
-      ${showSignif ? htl.html`<span style="opacity:.55">faded = low agreement (|trend| &lt; σ; Knutti &amp; Sedláček SNR proxy)</span>` : ""}`;
+      ${isTrend && showSignif ? htl.html`<span style="opacity:.55">faded = low agreement (|trend| &lt; σ; Knutti &amp; Sedláček SNR proxy)</span>` : ""}`;
+  } else if (isSd) {
+    // σ ≥ 0 → neutral Purples (never reads as wet/warm). Darker = more disagreement.
+    const hi = d3.max(vals) || 1;
+    const sc = d3.scaleLinear().domain([0, hi]).range([0.12, 0.95]);
+    colour = v => v == null ? "#ddd" : d3.interpolatePurples(sc(v));
+    legendSwatches = htl.html`
+      <span><span class="swatch" style="background:${d3.interpolatePurples(0.12)}"></span>low σ (models agree)</span>
+      <span><span class="swatch" style="background:${d3.interpolatePurples(0.95)}"></span>high σ (models disagree)</span>
+      <span><span class="swatch" style="background:#ddd"></span>no data</span>`;
+  } else {
+    // Climatology (absolute value, ≥ 0): variable-aware sequential — wet=Blues, else=YlOrRd.
+    const lo = d3.min(vals) ?? 0, hi = d3.max(vals) ?? 1;
+    const sc = d3.scaleLinear().domain([lo, hi]).range([0.1, 0.92]);
+    const ramp = isWetVar ? d3.interpolateBlues : d3.interpolateYlOrRd;
+    colour = v => v == null ? "#ddd" : ramp(sc(v));
+    legendSwatches = htl.html`
+      <span><span class="swatch" style="background:${ramp(0.1)}"></span>low</span>
+      <span><span class="swatch" style="background:${ramp(0.92)}"></span>high</span>
+      <span><span class="swatch" style="background:#ddd"></span>no data</span>`;
   }
 
-  // Agreement fade only applies to the trend layer (σ is the spread itself).
+  // Agreement fade only applies to the trend layer (σ is the spread itself; A metrics carry no per-stat σ here).
   const fadeFor = f => {
-    if (sdMode || !showSignif) return 1;
+    if (!isTrend || !showSignif) return 1;
     const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
     const v = o[statSel], sd = o[`sd_${statSel}`];
     return (v != null && sd != null && Math.abs(v) >= sd) ? 1 : 0.3;
@@ -221,22 +275,28 @@ trendMap = {
         fillOpacity: fadeFor,
         stroke: "#fff", strokeWidth: 0.5,
         title: f => {
-          const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
+          const name = f.properties.admin1_name;
+          const o = trendByAdmin.get(name) ?? {};
+          const a = a_aggByAdmin.get(name) ?? {};
           const v = o[statSel], sd = o[`sd_${statSel}`];
           const robust = (v != null && sd != null && Math.abs(v) >= sd);
-          return `${f.properties.admin1_name}`
-               + `\ntrend (${statSel}): ${v != null ? v.toFixed(3) : "—"}`
-               + `\ninter-model σ: ${sd != null ? sd.toFixed(3) : "—"}`
-               + `\nagreement: ${v != null && sd != null ? (robust ? "robust (|trend| ≥ σ)" : "low (|trend| < σ)") : "—"}`;
+          const cur = getV(name);
+          return `${name}`
+               + `\n${metricSel}: ${cur != null ? cur.toFixed(3) : "—"}`
+               + `\n— trend (${statSel}): ${v != null ? v.toFixed(3) : "—"} · σ: ${sd != null ? sd.toFixed(3) : "—"}`
+               + ` (${v != null && sd != null ? (robust ? "robust" : "low agreement") : "—"})`
+               + `\n— climatology: ${a.clim != null ? a.clim.toFixed(2) : "—"} · Δ vs baseline: ${a.anom != null ? a.anom.toFixed(2) : "—"}`;
         },
       }),
     ],
   });
 
   const unit = statSel === "value_decade" ? "per decade" : "per year";
-  const metricLabel = sdMode
-    ? `inter-model σ of trend ${unit}`
-    : `trend ${unit} (ensemble mean across GCMs)`;
+  const metricLabel =
+      isSd   ? `inter-model σ of trend ${unit}`
+    : isClim ? `climatology — 20-yr period-mean value (variable units)`
+    : isAnom ? `anomaly — future − 1995-2014 baseline (variable units)`
+    :          `trend ${unit} (ensemble mean across GCMs)`;
   return htl.html`<div>
     ${plot}
     <div class="trend-legend">${legendSwatches}</div>
