@@ -3184,6 +3184,33 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
 
 ---
 
+## CR-120 — Pipeline: per-GCM interannual-variability product (`ensemble_season_variability.parquet`) [NEW 2026-06-13 · pipeline-side]
+
+- **id:** CR-120
+- **title:** Add a pipeline output exposing **per-GCM interannual variability (IAV)** — the year-to-year scatter of each variable within a 20-year window — ensembled across GCMs, so the notebook can answer "does climate become *more variable*, not just shifted?" A future-projection map layer (and the Climate Rationale narrative) currently cannot distinguish a higher mean from a noisier climate.
+- **type:** pipeline (new output file; not a notebook change)
+- **severity:** med (analytical depth — variability change is a distinct adaptation signal from mean/trend change; not currently expressible)
+- **where:** `hazards_prototype` `R/2.1` / §3.7.1 (alongside the existing Theil-Sen trend fit that produces B).
+
+- **why this can't be notebook-side:** IAV computed from the **ensemble-mean** series (A) is wrong — averaging the 18 GCMs smooths out the interannual variance being measured. Per `feedback_ensembling-is-always-last`, IAV must be computed **per GCM, then ensembled**; per-GCM annual series live only in the pipeline. (Inter-*seasonal* amplitude — DJF/MAM/JJA/SON spread within a year — IS derivable client-side from A and can be prototyped notebook-side; this ticket is inter-*annual* only.)
+
+- **proposed producer steps (per GCM × iso3 × admin1 × scenario × season × hazard × period):**
+  1. Take the 20 annual values; **detrend** by subtracting the §3.7.1 Theil-Sen fit (so the trend doesn't inflate variance — residual after the *same* line the trend map shows).
+  2. `iav_sd(gcm) = sd(residuals)`. Do this for the **baseline 1995-2014 window too** (IAV is **not** baseline-invariant, unlike trend slopes).
+  3. Ensemble: `iav_sd` (mean + inter-model sd, absolute), `iav_delta` (per-GCM `future − baseline`, then mean + sd), `pct_gcms_increase` (fraction of GCMs with future IAV > baseline — AR6 agreement metric, **not** a mean p-value). Delta computed per-GCM first, never `mean(future) − mean(baseline)`.
+
+- **proposed schema (long format, mirrors B):** `iso3, admin0_name, admin1_name, scenario, timeframe, season, hazard, stat ∈ {iav_sd, iav_delta}, mean, sd, pct_gcms_increase`. Keys: same path pattern, `variable=ensemble_season_variability.parquet`, ship the `period=1995-2014` file (baseline absolute σ) + 4 futures, iso3-first sorted + prunable.
+
+- **caveats:** n=20 per σ → wide per-GCM sampling uncertainty (ensemble + `pct_gcms_increase` mitigate; methods note). Detrend must match B's Theil-Sen. Count-type hazards (NTx, NDD) → interpret as count-variability.
+
+- **notebook-side use (after C lands):** new **"Interannual variability change"** metric in [`notebooks/sandbox/future_trend_map.qmd`](notebooks/sandbox/future_trend_map.qmd) reading `iav_delta` (diverging more/less variable) + `pct_gcms_increase` agreement overlay — same wiring as the existing Trend/σ metrics. No production change until sign-off.
+
+- **STATUS (2026-06-13):** Dispatched → [`dispatches/2026-06-13_pipeline-interannual-variability-product.md`](dispatches/2026-06-13_pipeline-interannual-variability-product.md). Awaiting pipeline triage. Pipeline edits are the pipeline session's to make.
+
+- **see also:** [[CR-117]] (per-GCM quantile-trend slopes — same producer family, different statistic); [[CR-116]] (sandbox robustness/agreement convention).
+
+---
+
 ## CR-118 — Coordinated reactive-stability convention for control-derived cells [NEW 2026-06-05 · tech-debt]
 
 - **id:** CR-118
