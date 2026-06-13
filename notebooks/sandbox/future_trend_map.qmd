@@ -98,6 +98,13 @@ db_ts = DuckDBClient.of()
 ```
 ```{ojs}
 //| output: false
+// Separate client for the heavy 5-file time-series query so it doesn't serialise
+// behind the small a_aggByAdmin query (DuckDB-WASM runs one query at a time per
+// DuckDBClient → tiny queries queue behind slow ones; see duckdb-wasm-per-plot-clients).
+db_ts2 = DuckDBClient.of()
+```
+```{ojs}
+//| output: false
 _distinct = (key) => [...new Set(trend_dataAll.rows.map(r => r[key]))].filter(Boolean).sort()
 ```
 ```{ojs}
@@ -169,6 +176,12 @@ viewof metricSel = Inputs.radio([
   "Climatology (mean value)",
   "Anomaly (future − baseline)",
 ], { label: "Map metric", value: "Trend (ensemble mean)" })
+```
+```{ojs}
+viewof showAnomalyTs = Inputs.toggle({ label: "Time series: anomaly vs baseline", value: true })
+```
+```{ojs}
+viewof showRibbon = Inputs.toggle({ label: "Time series: 17–83% ribbon", value: true })
 ```
 :::
 
@@ -335,4 +348,77 @@ trendMap = {
     </p>
   </div>`;
 }
+```
+
+# Future projections — time series (CR-notebook replica)
+
+The per-year line + inter-model **17–83 % "likely" ribbon**, mirroring the production
+notebook's Future Projections chart (`timeseries_futureProjections`). Country aggregate
+(`admin1_name IS NULL`), continuous 1995→2100: historical baseline + the selected SSP.
+Toggle anomaly vs absolute and the ribbon in the controls above.
+
+```{ojs}
+//| output: false
+// SSP-keyed colour (IPCC AR6 convention).
+sspColor = ({ ssp126: "#1d3557", ssp245: "#e76f51", ssp370: "#d62828", ssp585: "#6a040f" })[scenarioSel] ?? "#264653"
+```
+
+```{ojs}
+//| output: false
+// Product A per-year country-aggregate series for the selection: baseline file
+// (scenario='historical', 1995-2014) UNION the 4 future period files (selected
+// SSP). q17/q83 are the CR-060 inter-model 17–83% percentile columns. iso3 = '<X>'
+// prunes row-groups. Err-safe → empty array shows a banner.
+a_timeseries = {
+  if (!scenarioOptions.length) return [];
+  const iso3 = countrySel.iso3;
+  const base = `${trendBase}/period=`;
+  const tail = `/baseline=1995-2014/variable=ensemble_season_timeseries.parquet`;
+  const cols = `year, mean, mean_anomaly, q17, q83, q17_anomaly, q83_anomaly`;
+  const filt = (scn) => `WHERE iso3='${iso3}' AND admin1_name IS NULL AND scenario='${scn}' AND season='${seasonSel}' AND hazard='${hazardSel}'`;
+  const baseSql = `SELECT ${cols} FROM read_parquet('${base}1995-2014${tail}') ${filt("historical")}`;
+  const futSql = ["2021-2040","2041-2060","2061-2080","2081-2100"]
+    .map(p => `SELECT ${cols} FROM read_parquet('${base}${p}${tail}') ${filt(scenarioSel)}`)
+    .join(" UNION ALL ");
+  try {
+    return Array.from(await db_ts2.query(`${baseSql} UNION ALL ${futSql} ORDER BY year`));
+  } catch (err) {
+    return [];
+  }
+}
+```
+
+```{ojs}
+tsPlot = {
+  if (!a_timeseries.length)
+    return htl.html`<div class="trend-banner warn">No A time-series rows for
+      <strong>${countrySel.name}</strong> · ${scenarioSel} · ${seasonSel} · ${hazardSel}.</div>`;
+  const anom = showAnomalyTs;
+  const yv = anom ? "mean_anomaly" : "mean";
+  const lo = anom ? "q17_anomaly" : "q17";
+  const hi = anom ? "q83_anomaly" : "q83";
+  const data = a_timeseries;
+  return Plot.plot({
+    width: 760, height: 380, marginLeft: 64, marginRight: 20, marginTop: 24, marginBottom: 40,
+    x: { tickFormat: "d", label: "Year", ticks: 8 },
+    y: { grid: true, nice: true, label: anom ? `${hazardSel} anomaly (vs 1995–2014)` : `${hazardSel}` },
+    marks: [
+      anom ? Plot.ruleY([0], { stroke: "#999", strokeDasharray: [5] }) : null,
+      showRibbon ? Plot.areaY(data, { x: "year", y1: hi, y2: lo, fill: sspColor, fillOpacity: 0.16 }) : null,
+      Plot.line(data, { x: "year", y: yv, stroke: sspColor, strokeWidth: 1.6 }),
+      Plot.dot(data, {
+        x: "year", y: yv, fill: sspColor, r: 2, stroke: "white", strokeWidth: 0.6,
+        tip: { channels: {
+          year: { label: "Year", value: d => d3.format("d")(d.year) },
+          value: { label: anom ? "Anomaly" : "Value", value: d => d[yv]?.toFixed(2) },
+          band: { label: "17–83%", value: d => (d[lo] == null || d[hi] == null) ? "—" : `${d[lo].toFixed(2)} to ${d[hi].toFixed(2)}` },
+        } },
+      }),
+    ].filter(Boolean),
+  });
+}
+```
+
+```{ojs}
+md`<p style="font-size:.8rem;color:#666">${hazardSel} · ${scenarioSel} · ${seasonSel} · country aggregate · line = ensemble mean, band = inter-model 17–83% (AR6 "likely"). Historical 1995–2014 then the selected SSP.</p>`
 ```
