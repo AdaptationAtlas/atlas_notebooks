@@ -3075,6 +3075,7 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
     2. **Notebook (a second, masking bug):** the Future Projections section was *also* dead from a **backtick inside a SQL `--` comment** in `futureProjections_dataAll`'s `dbFutureHive.query(\`…\`)` template literal — it closed the template early, so `?? d[plotValue_mean]` parsed as live JS → `d is not defined` → killed the cell and cascaded to all 14 FP + Extreme Events + Quick Insights cells (whole subgraph dead, reads as "not loading at all"). Independent of the parquet perf. Fixed + CR-060 ribbon un-held in commit `b44f19d`. Verified clean via real-chromium probe (0 OJS error cells, no failed requests).
   - **Remaining:** the in-browser FP **load-time number** (standalone DuckDB can't prove render timing; headless mis-reproduces gated DuckDB sections) — needs Pete's real-browser refresh to log the final perf verdict.
   - **✅ PERF CORROBORATED (2026-06-13, real browser):** the `future_trend_map.qmd` sandbox reads the **same prunable A** (`ensemble_season_timeseries`, single-iso3, a 5-file 1995→2100 series + a period-mean aggregation) and Pete confirms it **loads reasonably fast and looks fine** in a real browser. Strong corroboration that the iso3-prunable republish fixed the WASM wall. NB the sandbox reads the country aggregate (`admin1_name IS NULL`); the production FP section reads admin1 rows — a quick real-browser pass on the production notebook would fully close the last 1 %, but the prunability mechanism is the same.
+  - **✅ FULLY CLOSED (2026-06-13, production real browser):** Pete loaded the rendered production notebook (`_site/notebooks/climateRationale/notebook.html`), scrolled to Future Projections, and confirmed **"the load time is much better"** — the ribbon (now reading the restored q17/q83 columns) loads fast and renders. CR-119 is resolved end-to-end: pipeline republished A iso3-prunable → notebook backtick blocker fixed (`b44f19d`) → in-browser load fast in production. Tidy-up: the FP ribbon toggle was relabelled from the legacy "±1 SD ribbon" to its real meaning, "Show inter-model 17–83% range" (`6a669ab`) — the band already drew q17/q83 (AR6 'likely'); only the label was stale.
 
 ### CR-116 — Sandbox Future Projections expansion [NEW 2026-06-04 · shipped]
 
@@ -3209,6 +3210,31 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
 - **STATUS (2026-06-13):** Dispatched → [`dispatches/2026-06-13_pipeline-interannual-variability-product.md`](dispatches/2026-06-13_pipeline-interannual-variability-product.md). Awaiting pipeline triage. Pipeline edits are the pipeline session's to make.
 
 - **see also:** [[CR-117]] (per-GCM quantile-trend slopes — same producer family, different statistic); [[CR-116]] (sandbox robustness/agreement convention).
+
+---
+
+## CR-121 — Sandbox: standalone future trend / significance map (reads B) [NEW 2026-06-13 · sandbox]
+
+- **id:** CR-121
+- **title:** New **standalone** sandbox [`notebooks/sandbox/future_trend_map.qmd`](notebooks/sandbox/future_trend_map.qmd) (separate page + own data layer, NOT folded into `obs_month_overlay.qmd`) prototyping the future-projection trend/significance map and a CR-notebook time-series replica. Built primarily as a **load-time / accessibility test** for product B (per Pete: "the purpose of the B trends sandbox was to test how long loading the data would take… that we can access it").
+- **type:** notebook (sandbox prototype, consumer-only — no pipeline change)
+- **severity:** low (additive sandbox; high value as the B/CR-117/CR-120 proving ground)
+- **where:** `notebooks/sandbox/future_trend_map.qmd` (auto-rendered — `_quarto.yml` globs `*.qmd`).
+
+- **what shipped (2026-06-13):**
+  1. **Admin1 choropleth** reading **B** (`ensemble_season_trends`) with a **Map metric** selector: Trend (ensemble mean, diverging variable-aware palette) · **Inter-model variability (σ)** (Purples sequential) · **Climatology (mean value)** (from **A**, variable-aware sequential) · **Anomaly (future − baseline)** (from A, diverging). Trend layer carries a **low-agreement fade** — the Knutti & Sedláček SNR proxy `|trend| < σ` (B has no per-GCM agreement column yet; swaps to CR-117's `pct_gcms_sig` 1:1 when it lands).
+  2. **Future Projections time-series replica** of the production `timeseries_futureProjections`: per-year line + inter-model **17–83% ribbon** (q17/q83, anomaly-aware), country aggregate, continuous 1995→2100 (historical baseline file + selected SSP), SSP-keyed colour, anomaly + ribbon toggles.
+  3. **404-safe** data cells (graceful banner when a parquet is absent), **per-plot DuckDBClients** (`db_trends` / `db_ts` / `db_ts2`) so the heavy 5-file series query doesn't serialise behind the small map-aggregation query (see [[CR-119]] DuckDB-WASM per-connection serialisation), hidden data inspectors, controls in a wrapping grid.
+
+- **outcome:** B's **download optimization verified** — B is iso3-first/prunable (16 row groups, 0 NULL iso3 stats) and loads fast in a real browser; A reads (5-file series + period-mean) load fast too. This corroborated the [[CR-119]] perf fix and confirmed B is accessible for future feature work.
+
+- **deferred / not promoted:** B is **not** wired into the production notebook yet (Pete: "we do not need to add lots of new content yet"). Promotion of any B-consuming trend map waits until the feature is actually built; the sandbox is the staging ground. A two-band ribbon experiment (mean→q17 + q17→q83) was tried and reverted (`72288be`).
+
+- **dependencies:** B (`ensemble_season_trends`, live) + A (`ensemble_season_timeseries`, live). Future: [[CR-117]] (`pct_gcms_sig` → significance overlay), [[CR-120]] (interannual-variability product → new metric).
+
+- **STATUS (2026-06-13):** **SHIPPED on `dev/climateRationale`** (commits a2edb06 → 72288be). Sandbox-only; no production change. Promotion deferred per [`sandbox-vs-notebook-parity.md`](sandbox-vs-notebook-parity.md).
+
+- **see also:** [[CR-116]] (sibling sandbox FP expansion in obs_month_overlay); [[CR-119]] (perf fix this corroborated); [[CR-117]] / [[CR-120]] (pending pipeline products that drop into this sandbox).
 
 ---
 

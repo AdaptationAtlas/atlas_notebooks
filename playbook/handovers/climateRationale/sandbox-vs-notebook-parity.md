@@ -1,8 +1,10 @@
 # Sandbox vs Main Notebook — architecture parity audit
 
-**Date:** 2026-06-02
+**Date:** 2026-06-02 (parity audit) · **updated 2026-06-13** (second sandbox added)
 **Scope:** `notebooks/sandbox/obs_month_overlay.qmd` vs `notebooks/climateRationale/notebook.qmd`
 **Purpose:** Enumerate every meaningful divergence (technical, visual, narrative) so the gaps can be closed in priority order.
+
+> **2026-06-13 — second sandbox:** [`notebooks/sandbox/future_trend_map.qmd`](../../notebooks/sandbox/future_trend_map.qmd) (CR-121) is a separate, self-contained sandbox for the future trend/significance map (reads product B) + a CR-notebook time-series replica. It deliberately does **not** share `obs_month_overlay.qmd`'s scaffolding (own data layer, inline EN text, no nbText catalogue). Same promotion discipline applies — wire into production only when the feature is built and signed off. The parity gaps below are specific to `obs_month_overlay.qmd`.
 
 The sandbox has had **15 parity-pass commits** so far (`1ec2911 → 8258e54`) covering hero, loader chrome, chart download menus, per-section help, methods anchors, Quick Insights, translation layer (EN+FR), section gate, atlasTOC, plot-text controls, NavbarLangSelector, NavbarAckLogos, per-chart captionDetails, sticky controls (native + polyfill). What remains is enumerated below.
 
