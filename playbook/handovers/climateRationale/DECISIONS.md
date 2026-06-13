@@ -1032,3 +1032,30 @@ run recipe): **[`playbook/reference/hazard-pipeline-r2.1.md`](../../reference/ha
   prod consumer yet. The actual FP fix is on the **`ensemble_season_timeseries` producer**:
   **per-iso3 partitioning + pruning the 4 unused stat columns** (`models` is 0 MB, not the
   driver). Trends regen serves CR-117 (future), not the current "Loading data…" breakage.
+
+---
+
+## 2026-06-13 session — B trends product, variability, uncertainty, sandbox-first
+
+### Q — Should the pipeline publish product B (`ensemble_season_trends`)? With what stats?
+
+- **Status:** `RESOLVED`
+- **Decision:** **Publish B.** Notebook reads A only (confirmed), so B is additive/zero-risk and is the *only* path to a future-projection trend/significance map (the notebook's MK+Theil-Sen runs on the observed record; future = 4 ensemble points, can't fit a test). Pipeline confirmed `value_slope` is fit **per-GCM then ensembled** (fit_keys include `model`) — satisfies `ensembling-is-always-last`. `value_pval` was **dropped** (mean-of-pvals is uninterpretable); B ships `value_slope` + `value_decade` (mean + inter-model sd) only, iso3-first prunable. `value_decade = value_slope × 10` (pure unit rescale; default display = per-decade).
+- **Action:** B live on S3 (4 future periods). Significance overlay = the **AR6 sign-agreement** metric (`pct_gcms_sig` / `pct_sign_pos`), deferred to **CR-117** producer work — until then the sandbox uses a client-side `|trend| < σ` SNR proxy. See dispatches `2026-06-12_notebook-consumes-A-not-B.md`, `2026-06-12_publish-B-recommendation.md`.
+
+### Q — How do we show "how variability changes" (interannual)?
+
+- **Status:** `RESOLVED → pipeline ask filed`
+- **Decision:** Inter-annual variability **cannot** be computed notebook-side — IAV off the ensemble mean smooths the variance (`ensembling-is-always-last`). Requested a new per-GCM product **C** (`ensemble_season_variability`, **CR-120**): detrend each GCM's 20-yr window (reuse the Theil-Sen fit), residual σ, then ensemble; ships `iav_sd` + `iav_delta` (future−baseline, per-GCM-then-ensembled) + `pct_gcms_increase`; baseline file included (IAV is **not** baseline-invariant). Inter-*seasonal* amplitude (DJF/MAM/JJA/SON spread) IS derivable client-side from A — not requested yet.
+- **Action:** Dispatch `2026-06-13_pipeline-interannual-variability-product.md`; awaiting pipeline.
+
+### Q — Update the production CR notebook with B now?
+
+- **Status:** `RESOLVED → deferred`
+- **Pete's answer (2026-06-13):** "we just want to make sure the download optimization is working… we do not need to add lots of new content yet — the B sandbox was to test how long loading the data would take, that we can access it." Confirmed B is prunable (16 RGs, 0 null iso3 stats) and loads fast in a real browser.
+- **Action:** **No B wiring in production yet** (would be dead code without a consumer). Prototype lives in `future_trend_map.qmd` (CR-121); promote when the feature is actually built. Then look at `obs_month_overlay.qmd`.
+
+### Q — Future Projections ribbon uncertainty.
+
+- **Status:** `RESOLVED`
+- **Decision:** The ribbon already draws the inter-model **17–83% "likely" range** (q17/q83, restored in `b44f19d`); about-text + tooltip already said so. Only the toggle was mislabelled "±1 SD ribbon" → relabelled "Show inter-model 17–83% range" (`6a669ab`). A wider 5–95% band would need the pipeline to re-add `q5`/`q95` (pruned in CR-119) — not requested.
