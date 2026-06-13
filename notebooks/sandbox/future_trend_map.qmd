@@ -8,6 +8,16 @@ toc: false
 <style>
 .controls-row { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: flex-end; margin: 0 0 0.75rem; }
 .controls-row > .cell, .controls-row > div.sourceCode { flex: 1 1 200px; min-width: 0; margin: 0; padding: 0; }
+/* Fence-independent fallback: any cell that renders an input flows into a
+   wrapping row (Quarto hoists OJS cells out of the .controls-row div, so the
+   class alone isn't enough). The map / about cells have no <form> → unaffected. */
+.cell:has(form) { display: inline-block; vertical-align: bottom; margin: 0 1.25rem 0.6rem 0; }
+.cell:has(form) form { margin: 0; }
+/* Hide stray value-inspector dumps from the hidden data cells (objects, arrays,
+   strings). Inputs render as <form> and the map/banner as DOM, so neither is an
+   inspector — only the data dumps match. Belt to `//| output: false`. */
+.observablehq--inspect { display: none !important; }
+.cell:has(> .cell-output-display > .observablehq--inspect):not(:has(form)):not(:has(svg)) { display: none; }
 details.help-callout { padding: 0.5rem 1rem; }
 details.help-callout > summary { cursor: pointer; font-weight: 600; list-style: none; padding: 0.25rem 0; }
 details.help-callout > summary::-webkit-details-marker { display: none; }
@@ -56,40 +66,45 @@ published file):
 `
 ```
 
+<!-- ── Hidden data layer. Each on its own cell because `//| output: false` only
+     suppresses a single-statement OJS block (multi-statement blocks ignore it). -->
 ```{ojs}
-// ── Shared deps (Quarto OJS provides DuckDBClient, Plot, d3, htl, Inputs) ──
+//| output: false
 topojson = require("topojson-client@3")
-topoA1   = fetch("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").then(r => r.json())
+```
+```{ojs}
+//| output: false
+topoA1 = fetch("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").then(r => r.json())
+```
+```{ojs}
+//| output: false
 countriesRaw = FileAttachment("/data/shared/atlas_countries.json").json()
 ```
-
 ```{ojs}
-// Country picker — Atlas countries flagged include:true, sorted by name.
-countryOptions = countriesRaw
-  .filter(c => c.include)
-  .map(c => ({ iso3: c.iso3c, name: c.admin0_name }))
-  .sort((a, b) => a.name.localeCompare(b.name))
-
-viewof countrySel = Inputs.select(countryOptions, {
-  label: "Country", format: d => d.name,
-  value: countryOptions.find(c => c.iso3 === "AGO") ?? countryOptions[0],
-})
-
-viewof periodSel = Inputs.select(
-  ["2021-2040", "2041-2060", "2061-2080", "2081-2100"],
-  { label: "Future period", value: "2041-2060" })
+//| output: false
+countryOptions = countriesRaw.filter(c => c.include).map(c => ({ iso3: c.iso3c, name: c.admin0_name })).sort((a, b) => a.name.localeCompare(b.name))
 ```
-
 ```{ojs}
-// ── Data layer (product B) ──────────────────────────────────────────────
-// One small query per (country, period): pull every scenario×season×hazard×stat
-// row for the country. iso3 = '<X>' single-value form so DuckDB-WASM prunes
-// row-groups (B is iso3-first sorted). Everything else filters client-side off
-// this cache. 404-safe: if B isn't published yet, returns [] and the banner shows.
+//| output: false
 trendBase = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=hazard-indices/source=nex-gddp-cmip6/region=africa/processing=timeseries_mean_month/timeframe=3months"
-
+```
+```{ojs}
+//| output: false
 db_trends = DuckDBClient.of()
-
+```
+```{ojs}
+//| output: false
+db_ts = DuckDBClient.of()
+```
+```{ojs}
+//| output: false
+_distinct = (key) => [...new Set(trend_dataAll.rows.map(r => r[key]))].filter(Boolean).sort()
+```
+```{ojs}
+//| output: false
+// Data layer B (ensemble_season_trends): all stat rows for the country in one
+// query per (country, period). iso3 = '<X>' prunes row-groups (B is iso3-first
+// sorted); rest filters client-side. 404-safe → banner shows if B is absent.
 trend_dataAll = {
   const iso3 = countrySel.iso3;
   const url = `${trendBase}/period=${periodSel}/baseline=1995-2014/variable=ensemble_season_trends.parquet`;
@@ -105,46 +120,62 @@ trend_dataAll = {
   }
 }
 ```
-
 ```{ojs}
-// Selector options derive from whatever B actually contains (empty until published).
-_distinct = (key) => [...new Set(trend_dataAll.rows.map(r => r[key]))].filter(Boolean).sort()
+//| output: false
 scenarioOptions = _distinct("scenario")
-seasonOptions   = _distinct("season")
-hazardOptions   = _distinct("hazard")
+```
+```{ojs}
+//| output: false
+seasonOptions = _distinct("season")
+```
+```{ojs}
+//| output: false
+hazardOptions = _distinct("hazard")
 ```
 
+<!-- ── Controls. `.controls-row` flexes the input cells into a wrapping row. -->
+::: {.controls-row}
+```{ojs}
+viewof countrySel = Inputs.select(countryOptions, {
+  label: "Country", format: d => d.name,
+  value: countryOptions.find(c => c.iso3 === "AGO") ?? countryOptions[0],
+})
+```
+```{ojs}
+viewof periodSel = Inputs.select(
+  ["2021-2040", "2041-2060", "2061-2080", "2081-2100"],
+  { label: "Future period", value: "2041-2060" })
+```
 ```{ojs}
 viewof scenarioSel = Inputs.select(scenarioOptions.length ? scenarioOptions : ["—"], { label: "Scenario (SSP)" })
-viewof seasonSel   = Inputs.select(seasonOptions.length   ? seasonOptions   : ["—"], { label: "Season" })
-viewof hazardSel   = Inputs.select(hazardOptions.length   ? hazardOptions   : ["—"], { label: "Variable" })
-viewof statSel     = Inputs.radio(["value_decade", "value_slope"], { label: "Trend stat", value: "value_decade" })
-// Robustness overlay from the inter-model sd B ships (|trend| < sd = signal
-// below inter-model spread → low agreement → faded). Knutti & Sedláček 2013
-// SNR proxy for AR6 sign-agreement, same convention as the CR-116 period-maps.
-// Computed client-side because B has no dedicated per-GCM agreement column yet
-// (verified: all 4 periods ship only value_slope/value_decade + mean/sd). A true
-// pct_gcms_sig column from the pipeline (CR-117) would supersede this 1:1.
-viewof showSignif  = Inputs.toggle({ label: "Fade low-agreement (|trend| < inter-model σ)", value: true })
-// What to colour the map by. B ships, per stat, an across-GCM `mean` (the trend
-// magnitude) and `sd` (inter-model variability / disagreement). Both are useful
-// map layers: the trend tells you direction+size, the σ tells you how much the
-// 18 GCMs disagree on it (the same quantity that drives the low-agreement fade).
-// Trend / σ come from B (ensemble_season_trends). Climatology / Anomaly come
-// from A (ensemble_season_timeseries): 20-yr period-mean of A.mean (absolute
-// value) and A.mean_anomaly (future − 1995-2014 baseline delta, already computed
-// per-year upstream). Anomaly = "delta from future to baseline".
-viewof metricSel   = Inputs.radio([
+```
+```{ojs}
+viewof seasonSel = Inputs.select(seasonOptions.length ? seasonOptions : ["—"], { label: "Season" })
+```
+```{ojs}
+viewof hazardSel = Inputs.select(hazardOptions.length ? hazardOptions : ["—"], { label: "Variable" })
+```
+```{ojs}
+viewof statSel = Inputs.radio(["value_decade", "value_slope"], { label: "Trend stat", value: "value_decade" })
+```
+```{ojs}
+viewof showSignif = Inputs.toggle({ label: "Fade low-agreement (|trend| < σ)", value: true })
+```
+```{ojs}
+// Trend/σ ← B; Climatology/Anomaly ← A (20-yr period-mean of mean / mean_anomaly).
+viewof metricSel = Inputs.radio([
   "Trend (ensemble mean)",
   "Inter-model variability (σ)",
   "Climatology (mean value)",
   "Anomaly (future − baseline)",
 ], { label: "Map metric", value: "Trend (ensemble mean)" })
 ```
+:::
 
 ```{ojs}
+//| output: false
 // Pivot the long-format cache to one record per admin1 for the active selection:
-// { admin1_name -> { value_slope, value_decade, value_pval, sd_<stat> } }
+// { admin1_name -> { value_slope, value_decade, sd_<stat> } }
 trendByAdmin = {
   const sel = trend_dataAll.rows.filter(r =>
     r.scenario === scenarioSel && r.season === seasonSel && r.hazard === hazardSel);
@@ -160,14 +191,13 @@ trendByAdmin = {
 ```
 
 ```{ojs}
+//| output: false
 // Product A (ensemble_season_timeseries) — period-mean climatology + future-vs-
 // baseline anomaly per admin1, for the active selection. A.mean_anomaly is the
 // per-year delta vs the 1995-2014 baseline, so avg over the 20 period-years
 // gives the window climatology (avg mean) and its delta (avg mean_anomaly).
 // Server-side GROUP BY caps the payload to ~one row per admin1. Re-queries on
 // selection change; err-safe (returns empty Map → those metrics show no-data).
-db_ts = DuckDBClient.of()
-
 a_aggByAdmin = {
   if (!scenarioOptions.length) return new Map();   // B (hence selectors) not loaded yet
   const url = `${trendBase}/period=${periodSel}/baseline=1995-2014/variable=ensemble_season_timeseries.parquet`;
