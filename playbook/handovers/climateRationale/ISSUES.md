@@ -3261,7 +3261,7 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
 - **phasing:** P1 data layer + load-time verify · P2 trend slope · P3 IAV change · P4 i18n/Methods/table · P5(optional) per-year time-series sub-section.
 - **open decisions (for Pete):** radio-extension vs new sub-section; whether to include the time-series view; B uses interim SNR fade until CR-117 `pct_gcms_sig` lands; production promotion stays deferred.
 
-- **STATUS (2026-06-15):** **Strategy drafted** — awaiting Pete's go on the open decisions before P1. Sandbox-only; no production change.
+- **STATUS (2026-06-15):** **P1–P3 IMPLEMENTED** (commit `f2fb210`). Pete's decisions: radio-extension ✅, time-series → production notebook (not here), ship B with interim SNR fade now (CR-117 unlikely soon), sandbox-only. Done: shared B/C caches (`cmip6_trends_data`, `cmip6_variability_data`, separate clients, gated); Statistic radio gains "Trend (per decade · B)" + "Interannual variability change (C)"; render routes value/sd/palette/fade per stat (trend = variable-aware diverging + |slope|<sd fade; IAV = neutral diverging + pct_gcms_increase agreement; NDD → no-data); existing mean/sd unchanged. Render cell parses clean (`node --check`). **Remaining:** real-browser verification (headless mis-reproduces obs's gated DuckDB-WASM layer) + **P4** (i18n EN/FR-stub for the 2 new radio labels + help/Methods text; table-mode currently still shows the anomaly summary for trend/iav — map-mode only). Production promotion deferred.
 
 - **see also:** [[CR-121]] (source sandbox); [[CR-116]] (target sandbox FP section); [[CR-117]] (B significance dependency); [[CR-120]] (C, published).
 
