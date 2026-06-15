@@ -39,10 +39,12 @@ It is **entirely separate** from `obs_month_overlay.qmd` — its own page, its o
 it can iterate without touching the CR-097/CR-116 sandbox or the production notebook.
 
 Sources: **B** `ensemble_season_trends.parquet` — across-GCM ensemble `mean`/`sd`, `stat ∈ {value_slope,
-value_decade}` (drives the Trend + Inter-model variability metrics); and **A**
+value_decade}` (drives the Trend + Inter-model variability metrics); **A**
 `ensemble_season_timeseries.parquet` — per-year `mean` + `mean_anomaly`, aggregated to a 20-yr
-period-mean (drives the Climatology + Anomaly metrics; Anomaly = future − 1995-2014 baseline).
-Both iso3-first sorted / prunable.
+period-mean (drives the Climatology + Anomaly metrics; Anomaly = future − 1995-2014 baseline); and
+**C** `ensemble_season_variability.parquet` (CR-120) — `iav_delta` (future − baseline interannual σ,
+per-GCM-then-ensembled) + `pct_gcms_increase` agreement (drives the Interannual-variability-change
+metric; NDD has no baseline → null there). All three iso3-first sorted / prunable.
 
 ```{ojs}
 md`<details class="help-callout">
@@ -102,6 +104,10 @@ db_ts = DuckDBClient.of()
 // behind the small a_aggByAdmin query (DuckDB-WASM runs one query at a time per
 // DuckDBClient → tiny queries queue behind slow ones; see duckdb-wasm-per-plot-clients).
 db_ts2 = DuckDBClient.of()
+```
+```{ojs}
+//| output: false
+db_c = DuckDBClient.of()
 ```
 ```{ojs}
 //| output: false
@@ -175,6 +181,7 @@ viewof metricSel = Inputs.radio([
   "Inter-model variability (σ)",
   "Climatology (mean value)",
   "Anomaly (future − baseline)",
+  "Interannual variability change",
 ], { label: "Map metric", value: "Trend (ensemble mean)" })
 ```
 ```{ojs}
@@ -230,6 +237,30 @@ a_aggByAdmin = {
 ```
 
 ```{ojs}
+//| output: false
+// Product C (ensemble_season_variability, CR-120) — interannual-variability
+// CHANGE per admin1 for the active selection: iav_delta (future − 1995-2014 σ,
+// per-GCM-then-ensembled) + pct_gcms_increase (frac GCMs more variable = the AR6
+// agreement metric). Read the future period file, stat='iav_delta'. NDD has no
+// baseline → its iav_delta/pct are null (handled as no-data downstream).
+c_aggByAdmin = {
+  if (!scenarioOptions.length) return new Map();
+  const url = `${trendBase}/period=${periodSel}/baseline=1995-2014/variable=ensemble_season_variability.parquet`;
+  const sql = `
+    SELECT admin1_name, mean AS delta, pct_gcms_increase AS pct
+    FROM read_parquet('${url}')
+    WHERE iso3 = '${countrySel.iso3}' AND admin1_name IS NOT NULL AND stat = 'iav_delta'
+      AND scenario = '${scenarioSel}' AND season = '${seasonSel}' AND hazard = '${hazardSel}'`;
+  try {
+    const rows = Array.from(await db_c.query(sql));
+    return new Map(rows.map(r => [r.admin1_name, { delta: r.delta, pct: r.pct }]));
+  } catch (err) {
+    return new Map();
+  }
+}
+```
+
+```{ojs}
 // Variable-aware diverging palette: wet vars (PTOT/SPEI) positive=wetter=blue;
 // temperature positive=warmer=red. value_pval would be sequential, but the radio
 // only exposes slope/decade — pval drives the significance fade instead.
@@ -250,14 +281,17 @@ trendMap = {
     .filter(f => f.properties.iso3 === countrySel.iso3);
   if (!features.length) return htl.html`<p style="color:#c00">No admin1 geometry for ${countrySel.name}.</p>`;
 
-  // Metric routing. Trend/σ ← B (trendByAdmin); Climatology/Anomaly ← A (a_aggByAdmin).
+  // Metric routing. Trend/σ ← B (trendByAdmin); Climatology/Anomaly ← A (a_aggByAdmin);
+  // Interannual-variability change ← C (c_aggByAdmin).
   const isSd    = metricSel.startsWith("Inter-model");
   const isClim  = metricSel.startsWith("Climatology");
   const isAnom  = metricSel.startsWith("Anomaly");
+  const isIav   = metricSel.startsWith("Interannual");
   const isTrend = metricSel.startsWith("Trend");
-  const diverging = isTrend || isAnom;   // signed → diverging; σ/clim → sequential
+  const diverging = isTrend || isAnom;   // variable-aware diverging; IAV is its own neutral diverging
 
   const getV = name => {
+    if (isIav)            { const c = c_aggByAdmin.get(name); return c ? c.delta : undefined; }
     if (isClim || isAnom) { const a = a_aggByAdmin.get(name); return a ? (isClim ? a.clim : a.anom) : undefined; }
     const o = trendByAdmin.get(name); if (!o) return undefined;
     return isSd ? o[`sd_${statSel}`] : o[statSel];
@@ -266,7 +300,19 @@ trendMap = {
   const vals = features.map(f => getV(f.properties.admin1_name)).filter(v => v != null);
 
   let colour, legendSwatches;
-  if (diverging) {
+  if (isIav) {
+    // Variability CHANGE (σ_future − σ_baseline): signed but NOT variable-aware —
+    // "more variable" reads the same hue for every variable. +Δ = red, −Δ = blue.
+    const absMax = d3.max(vals, Math.abs) || 1;
+    const sc = d3.scaleLinear().domain([-absMax, absMax]).range([0, 1]);
+    colour = v => v == null ? "#ddd" : d3.interpolateRdBu(1 - sc(v));
+    legendSwatches = htl.html`
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(0)}"></span>more variable (σ ↑)</span>
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(0.5)}"></span>~no change</span>
+      <span><span class="swatch" style="background:${d3.interpolateRdBu(1)}"></span>less variable (σ ↓)</span>
+      <span><span class="swatch" style="background:#ddd"></span>no data (NDD: no 1995–2014 baseline)</span>
+      ${showSignif ? htl.html`<span style="opacity:.55">faded = low GCM agreement (pct_gcms_increase within 33–67%)</span>` : ""}`;
+  } else if (diverging) {
     // Signed (trend / anomaly): variable-aware diverging (wet=blue+ / temp=red+).
     const absMax = d3.max(vals, Math.abs) || 1;
     const sc = d3.scaleLinear().domain([-absMax, absMax]).range([0, 1]);
@@ -298,10 +344,17 @@ trendMap = {
       <span><span class="swatch" style="background:#ddd"></span>no data</span>`;
   }
 
-  // Agreement fade only applies to the trend layer (σ is the spread itself; A metrics carry no per-stat σ here).
+  // Agreement fade: trend layer uses |trend| ≥ σ; IAV layer uses GCM direction
+  // agreement (pct far from 0.5). Other metrics carry no agreement stat → no fade.
   const fadeFor = f => {
-    if (!isTrend || !showSignif) return 1;
-    const o = trendByAdmin.get(f.properties.admin1_name) ?? {};
+    if (!showSignif) return 1;
+    const name = f.properties.admin1_name;
+    if (isIav) {
+      const pct = c_aggByAdmin.get(name)?.pct;
+      return (pct != null && Math.abs(pct - 0.5) >= 1/6) ? 1 : 0.3;  // ≥ ~2/3 agree on direction
+    }
+    if (!isTrend) return 1;
+    const o = trendByAdmin.get(name) ?? {};
     const v = o[statSel], sd = o[`sd_${statSel}`];
     return (v != null && sd != null && Math.abs(v) >= sd) ? 1 : 0.3;
   };
@@ -321,6 +374,7 @@ trendMap = {
           const name = f.properties.admin1_name;
           const o = trendByAdmin.get(name) ?? {};
           const a = a_aggByAdmin.get(name) ?? {};
+          const c = c_aggByAdmin.get(name) ?? {};
           const v = o[statSel], sd = o[`sd_${statSel}`];
           const robust = (v != null && sd != null && Math.abs(v) >= sd);
           const cur = getV(name);
@@ -328,7 +382,8 @@ trendMap = {
                + `\n${metricSel}: ${cur != null ? cur.toFixed(3) : "—"}`
                + `\n— trend (${statSel}): ${v != null ? v.toFixed(3) : "—"} · σ: ${sd != null ? sd.toFixed(3) : "—"}`
                + ` (${v != null && sd != null ? (robust ? "robust" : "low agreement") : "—"})`
-               + `\n— climatology: ${a.clim != null ? a.clim.toFixed(2) : "—"} · Δ vs baseline: ${a.anom != null ? a.anom.toFixed(2) : "—"}`;
+               + `\n— climatology: ${a.clim != null ? a.clim.toFixed(2) : "—"} · Δ vs baseline: ${a.anom != null ? a.anom.toFixed(2) : "—"}`
+               + `\n— IAV change: ${c.delta != null ? c.delta.toFixed(3) : "—"} · ${c.pct != null ? Math.round(c.pct*100) + "% GCMs ↑" : "n/a (NDD)"}`;
         },
       }),
     ],
@@ -336,7 +391,8 @@ trendMap = {
 
   const unit = statSel === "value_decade" ? "per decade" : "per year";
   const metricLabel =
-      isSd   ? `inter-model σ of trend ${unit}`
+      isIav  ? `interannual variability change — σ(future) − σ(1995-2014), per-GCM then ensembled`
+    : isSd   ? `inter-model σ of trend ${unit}`
     : isClim ? `climatology — 20-yr period-mean value (variable units)`
     : isAnom ? `anomaly — future − 1995-2014 baseline (variable units)`
     :          `trend ${unit} (ensemble mean across GCMs)`;
