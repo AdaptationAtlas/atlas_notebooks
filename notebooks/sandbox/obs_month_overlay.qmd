@@ -4531,6 +4531,66 @@ cmip6_future_data = {
 }
 ```
 
+```{ojs}
+// CR-122 — Product B (ensemble_season_trends) shared cache. Trend slope per
+// (admin1 × scenario × period × season × variable) for the active scope+vars.
+// Mirrors cmip6_future_data: one gated fetch, SEPARATE client (DuckDB-WASM runs
+// one query per connection — duckdb-wasm-per-plot-clients), filtered in-memory
+// per sub-section. Tiny (no year dimension). stat='value_decade' (per-decade).
+db_cmip6_trends = DuckDBClient.of()
+cmip6_trends_data = {
+  if (!futureProjectionsVisible) return [];
+  const { iso3List } = globalScopeInfo;
+  const iso3Where = iso3List.length === 1
+    ? `iso3 = '${iso3List[0]}'`
+    : `iso3 IN (${iso3List.map(c => `'${c}'`).join(",")})`;
+  const hazardIn = cmip6_active_variables.split("|").map(v => `'${v.replace(/'/g, "''")}'`).join(",");
+  const mk = (url, period) => `
+    SELECT admin1_name, iso3, scenario, '${period}' AS period, hazard AS variable, season,
+           mean AS value_decade, sd AS sd_value_decade
+    FROM read_parquet('${url}')
+    WHERE ${iso3Where} AND hazard IN (${hazardIn}) AND admin1_name IS NOT NULL AND stat = 'value_decade'`;
+  const url = p => `${cr097_base}/period=${p}/baseline=1995-2014/variable=ensemble_season_trends.parquet`;
+  const periods = ["2021-2040","2041-2060","2061-2080","2081-2100"];
+  try {
+    return Array.from(await db_cmip6_trends.query(periods.map(p => mk(url(p), p)).join(" UNION ALL ")));
+  } catch (err) {
+    if (typeof console !== "undefined") console.warn("[sandbox] B trends fetch failed", err?.message ?? err);
+    return [];
+  }
+}
+```
+
+```{ojs}
+// CR-122 — Product C (ensemble_season_variability) shared cache. Interannual
+// variability CHANGE (iav_delta = σ_future − σ_1995-2014, per-GCM-then-ensembled)
+// + pct_gcms_increase agreement, per (admin1 × scenario × period × season × var).
+// Futures only; NDD has no 1995-2014 baseline → its iav_delta/pct are null
+// (rendered as no-data). Separate client.
+db_cmip6_variability = DuckDBClient.of()
+cmip6_variability_data = {
+  if (!futureProjectionsVisible) return [];
+  const { iso3List } = globalScopeInfo;
+  const iso3Where = iso3List.length === 1
+    ? `iso3 = '${iso3List[0]}'`
+    : `iso3 IN (${iso3List.map(c => `'${c}'`).join(",")})`;
+  const hazardIn = cmip6_active_variables.split("|").map(v => `'${v.replace(/'/g, "''")}'`).join(",");
+  const mk = (url, period) => `
+    SELECT admin1_name, iso3, scenario, '${period}' AS period, hazard AS variable, season,
+           mean AS iav_delta, pct_gcms_increase
+    FROM read_parquet('${url}')
+    WHERE ${iso3Where} AND hazard IN (${hazardIn}) AND admin1_name IS NOT NULL AND stat = 'iav_delta'`;
+  const url = p => `${cr097_base}/period=${p}/baseline=1995-2014/variable=ensemble_season_variability.parquet`;
+  const periods = ["2021-2040","2041-2060","2061-2080","2081-2100"];
+  try {
+    return Array.from(await db_cmip6_variability.query(periods.map(p => mk(url(p), p)).join(" UNION ALL ")));
+  } catch (err) {
+    if (typeof console !== "undefined") console.warn("[sandbox] C variability fetch failed", err?.message ?? err);
+    return [];
+  }
+}
+```
+
 ## `{ojs} headingCR097` {#cr-097 data-toc-label="Time to warming"}
 
 ```{ojs}
@@ -5004,9 +5064,13 @@ viewof periodMaps_controls = {
   // What to colour cells by:
   //   "mean"  — ensemble-mean anomaly (the forced response).
   //   "sd"    — inter-model SD (model disagreement; sequential palette).
-  const _stat    = Inputs.radio(["mean","sd"],
+  const _stat    = Inputs.radio(["mean","sd","trend","iav"],
                      { label: "Statistic", value: "mean",
-                       format: v => v === "mean" ? "Mean anomaly (forced response)" : "Inter-model SD (model disagreement)" });
+                       format: v =>
+                         v === "mean"  ? "Mean anomaly (forced response)"
+                       : v === "sd"    ? "Inter-model SD (model disagreement)"
+                       : v === "trend" ? "Trend (per decade · product B)"
+                       :                 "Interannual variability change (product C)" });
   // Anomaly vs raw values. Raw (`mean` column) ships in the cache already
   // so toggling here costs zero bandwidth. Anomaly mode = ensemble-mean
   // anomaly vs 1995-2014 baseline; raw mode = ensemble-mean absolute value
@@ -5077,7 +5141,8 @@ loaderDiv("plotPeriodMaps")
 ```{ojs}
 //| output: false
 {
-  [periodMaps_controls, periodMaps_data, globalScopeInfo, globalMapLevel,
+  [periodMaps_controls, periodMaps_data, cmip6_trends_data, cmip6_variability_data,
+   globalScopeInfo, globalMapLevel,
    globalAdmin1, globalTopoA1, globalTopoA0, cbMode, width];
   renderToDiv("plotPeriodMaps", () => {
   const { variable, stat, fadeLowAgreement, valueMode, showTable } = periodMaps_controls;
@@ -5313,10 +5378,29 @@ loaderDiv("plotPeriodMaps")
   // single season currently displayed in the grid, dropping the historical
   // rows (CR-097 + this view both fade the baseline col to a uniform 0
   // — meaningless on a map).
+  // CR-122 lookups: B trend slope + C IAV change for the active variable+season,
+  // keyed admin1|scenario|period, joined onto the A rows below.
+  const trendLU = new Map();
+  for (const d of cmip6_trends_data)
+    if (d.variable === variable && d.season === season)
+      trendLU.set(`${d.admin1_name}|${d.scenario}|${d.period}`,
+        { slope: Number(d.value_decade), sd: Number(d.sd_value_decade) });
+  const iavLU = new Map();
+  for (const d of cmip6_variability_data)
+    if (d.variable === variable && d.season === season)
+      iavLU.set(`${d.admin1_name}|${d.scenario}|${d.period}`,
+        { delta: Number(d.iav_delta), pct: d.pct_gcms_increase == null ? null : Number(d.pct_gcms_increase) });
+
   const mapRows = periodMaps_data.filter(d =>
-    d.season === season && d.period !== "1995-2014" && ssps.includes(d.scenario));
+    d.season === season && d.period !== "1995-2014" && ssps.includes(d.scenario))
+    .map(d => {
+      const k = `${d.admin1_name}|${d.scenario}|${d.period}`;
+      const t = trendLU.get(k), c = iavLU.get(k);
+      return { ...d, slope: t?.slope, sdSlope: t?.sd, iavDelta: c?.delta, pctInc: c?.pct };
+    });
   // Aggregate to chosen map level. admin1 view: passthrough. admin0 view:
   // mean over admin1s per (scenario, period, iso3).
+  const _meanOf = (rs, f) => { const xs = rs.map(f).filter(Number.isFinite); return xs.length ? d3.mean(xs) : undefined; };
   const aggData = useAdmin1Map
     ? mapRows.map(d => ({
         join_key: d.admin1_name,
@@ -5324,6 +5408,7 @@ loaderDiv("plotPeriodMaps")
         period:   d.period,
         mean:     Number(d[meanCol]),
         sd:       Number(d.sd_anomaly),
+        slope:    d.slope, sdSlope: d.sdSlope, iavDelta: d.iavDelta, pctInc: d.pctInc,
       }))
     : [...d3.group(mapRows, d => `${d.iso3}|${d.scenario}|${d.period}`)].map(([k, rs]) => {
         const [jk, sc, pe] = k.split("|");
@@ -5331,11 +5416,18 @@ loaderDiv("plotPeriodMaps")
           join_key: jk, scenario: sc, period: pe,
           mean: d3.mean(rs, d => Number(d[meanCol])),
           sd:   d3.mean(rs, d => Number(d.sd_anomaly)),
+          slope: _meanOf(rs, d => Number(d.slope)), sdSlope: _meanOf(rs, d => Number(d.sdSlope)),
+          iavDelta: _meanOf(rs, d => Number(d.iavDelta)),
+          pctInc: _meanOf(rs, d => d.pctInc == null ? NaN : Number(d.pctInc)),
         };
       });
 
-  // Compute the value the cell will be coloured by per row.
-  for (const r of aggData) r.value = stat === "mean" ? r.mean : r.sd;
+  // Value (and fade-sd) the cell is coloured by, per statistic.
+  for (const r of aggData) {
+    if      (stat === "trend") { r.value = r.slope;    r.sd = r.sdSlope; }
+    else if (stat === "iav")   { r.value = r.iavDelta; }
+    else                       { r.value = stat === "mean" ? r.mean : r.sd; }
+  }
 
   // Colour scale.
   //  - Mean view: diverging palette IF data crosses zero (signed range);
@@ -5355,13 +5447,15 @@ loaderDiv("plotPeriodMaps")
   // semantic zero (a TAVG of 0 °C is a real temperature, not a "no
   // change" point), so we always pin to the data range there.
   const oneSidedTol = 0.05;
-  const positiveOnly = stat === "mean" && !isRawMode && vMin >= -oneSidedTol * Math.max(Math.abs(vMax), 1e-6);
-  const negativeOnly = stat === "mean" && !isRawMode && vMax <=  oneSidedTol * Math.max(Math.abs(vMin), 1e-6);
+  // Signed + zero-centred (diverging) stats: mean-anomaly, trend, IAV change.
+  const signedStat = (stat === "mean" && !isRawMode) || stat === "trend" || stat === "iav";
+  const positiveOnly = signedStat && vMin >= -oneSidedTol * Math.max(Math.abs(vMax), 1e-6);
+  const negativeOnly = signedStat && vMax <=  oneSidedTol * Math.max(Math.abs(vMin), 1e-6);
   const isOneSided   = positiveOnly || negativeOnly;
-  const isSigned     = stat === "mean" && !isRawMode && !isOneSided;
-  const maxAbs = stat === "mean"
-    ? Math.max(1e-6, d3.max(vals, Math.abs))
-    : d3.max(vals);
+  const isSigned     = signedStat && !isOneSided;
+  const maxAbs = stat === "sd"
+    ? d3.max(vals)
+    : Math.max(1e-6, d3.max(vals, Math.abs));
   // Domain selection:
   //   - Raw mean view → [vMin, vMax] tight (no zero anchor — see comment above).
   //   - Anomaly signed → [-maxAbs, maxAbs] (diverging, zero centred).
@@ -5389,18 +5483,26 @@ loaderDiv("plotPeriodMaps")
   //                BrBG (PTOT; positive = teal = wet = cool). Half-
   //                palette when the visible range is one-signed.
   const interp = (() => {
-    if (stat !== "mean") return cbMode ? d3.interpolateViridis : d3.interpolateReds;
-    if (isRawMode) {
+    if (stat === "sd") return cbMode ? d3.interpolateViridis : d3.interpolateReds;
+    if (stat === "iav") {
+      // NEUTRAL diverging — red = +Δ (more variable), blue = −Δ (less). Not variable-aware.
+      if (positiveOnly) return t => d3.interpolateRdBu(0.5 - 0.5 * t);
+      if (negativeOnly) return t => d3.interpolateRdBu(0.5 + 0.5 * t);
+      return t => d3.interpolateRdBu(1 - t);
+    }
+    if (stat === "mean" && isRawMode) {
       if (isPTOT) return cbMode ? d3.interpolatePuBu : d3.interpolateRdYlBu;
       return cbMode ? d3.interpolateInferno : d3.interpolateOrRd;
     }
+    // mean-anomaly OR trend → variable-aware diverging (trend slope sign reads
+    // like anomaly sign: warming/wetting = same hue as a positive anomaly).
     if (isPTOT) {
       const div = cbMode ? d3.interpolatePuOr : d3.interpolateBrBG;
       if (positiveOnly) return t => div(0.5 + 0.5 * t);   // wet half
       if (negativeOnly) return t => div(0.5 * (1 - t));    // dry half (reversed: t=0 → 0.5, t=1 → 0)
       return div;
     }
-    // Temperature anomaly: RdBu (red is the LOW end of RdBu, so reverse).
+    // Temperature anomaly / trend: RdBu (red is the LOW end of RdBu, so reverse).
     if (positiveOnly) return t => d3.interpolateRdBu(0.5 - 0.5 * t); // white → dark red
     if (negativeOnly) return t => d3.interpolateRdBu(0.5 + 0.5 * t); // white → dark blue
     return t => d3.interpolateRdBu(1 - t);                            // diverging, reversed
@@ -5444,8 +5546,12 @@ loaderDiv("plotPeriodMaps")
   // threshold. Caveat in About: the AR6-canonical %-agreement test needs
   // per-GCM rows (CR-060) which the pipeline doesn't expose yet.
   const isRobust = row => {
-    if (!row || !Number.isFinite(row.mean) || !Number.isFinite(row.sd)) return false;
-    return Math.abs(row.mean) >= row.sd;
+    if (!row) return false;
+    if (stat === "iav")                          // C: GCMs agree on direction (pct far from 0.5)
+      return Number.isFinite(row.pctInc) && Math.abs(row.pctInc - 0.5) >= 1/6;
+    // mean / trend: |value| ≥ inter-model SD (SNR proxy). For trend, sd = sd of the slope.
+    if (!Number.isFinite(row.value) || !Number.isFinite(row.sd)) return false;
+    return Math.abs(row.value) >= row.sd;
   };
   // Faded admin1s get this fill-opacity; matches P6's non-significant fade
   // (`fill-opacity: 0.22` for non-MK-sig admin1s) so the visual idiom
@@ -5454,7 +5560,7 @@ loaderDiv("plotPeriodMaps")
   // Fade rule is anomaly-relative — disable in raw view because |raw|
   // is dominated by the climatology (e.g. TAVG 18 °C vs anomaly SD 0.5 °C
   // would trivially pass every admin1).
-  const useFade = fadeLowAgreement && stat === "mean" && !isRawMode;
+  const useFade = fadeLowAgreement && ((stat === "mean" && !isRawMode) || stat === "trend" || stat === "iav");
 
   const gridRows = ssps.map(sspKey => {
     const cells = periods.map(period => {
@@ -5479,11 +5585,18 @@ loaderDiv("plotPeriodMaps")
         const fill = Number.isFinite(v) ? colourScale(v) : "#ddd";
         const robust = isRobust(row);
         const op   = useFade ? (robust ? 1.0 : fadeOpacity) : 1.0;
+        const head = `${f.properties[featureProp]}\n${sspLabels[sspKey]} · ${period}`;
+        const tipText =
+          stat === "iav"
+            ? `${head}\nIAV change (σ future − baseline): ${row?.value?.toFixed(3) ?? "— (NDD: no baseline)"}\nGCMs more-variable: ${Number.isFinite(row?.pctInc) ? Math.round(row.pctInc * 100) + "%" : "n/a"}${row?.value != null ? (robust ? " (robust)" : " (low agreement)") : ""}`
+          : stat === "trend"
+            ? `${head}\ntrend: ${row?.value?.toFixed(3) ?? "—"} /decade\ninter-model σ: ${row?.sd?.toFixed(3) ?? "—"}${Number.isFinite(row?.value) ? (robust ? " (robust)" : " (low agreement)") : ""}`
+            : `${head}\nmean: ${row?.mean?.toFixed(2) ?? "—"} ${unit}\nsd: ${row?.sd?.toFixed(2) ?? "—"} ${unit}\n|mean|/SD: ${(row && Number.isFinite(row.mean) && Number.isFinite(row.sd) && row.sd > 0) ? (Math.abs(row.mean) / row.sd).toFixed(2) : "—"}${robust ? " (robust ≥1)" : " (low agreement <1)"}`;
         g.append("path").attr("d", path0(f))
           .attr("fill", fill).attr("fill-opacity", op)
           .attr("stroke", "none")
           .append("title")
-          .text(`${f.properties[featureProp]}\n${sspLabels[sspKey]} · ${period}\nmean: ${row?.mean?.toFixed(2) ?? "—"} ${unit}\nsd: ${row?.sd?.toFixed(2) ?? "—"} ${unit}\n|mean|/SD: ${(row && Number.isFinite(row.mean) && Number.isFinite(row.sd) && row.sd > 0) ? (Math.abs(row.mean) / row.sd).toFixed(2) : "—"}${robust ? " (robust ≥1)" : " (low agreement <1)"}`);
+          .text(tipText);
       }
       // Pass 3: boundary lines on top.
       for (const f of countryFeatures) {
@@ -5512,7 +5625,7 @@ loaderDiv("plotPeriodMaps")
     const absV  = Math.abs(v);
     const dp    = (isPTOT && absV >= 10) ? 0 : 1;
     // Sign prefix only for anomaly view — raw values use bare numbers.
-    const sign  = (stat === "mean" && !isRawMode && v > 0) ? "+" : "";
+    const sign  = (signedStat && v > 0) ? "+" : "";
     return sign + v.toFixed(dp);
   };
   // Tick anchors driven by the actual colourDomain so the legend matches
@@ -5553,11 +5666,12 @@ loaderDiv("plotPeriodMaps")
   }
 
   // Title — fully above ramp with breathing room.
-  const legendLabel = stat === "mean"
-    ? (isRawMode
-        ? `Ensemble-mean ${variable} (raw value, ${unit})`
-        : `Ensemble-mean anomaly vs 1995–2014 baseline`)
-    : `Inter-model SD across 18 GCMs`;
+  const legendLabel =
+      stat === "trend" ? `Ensemble trend in ${variable} (per decade)`
+    : stat === "iav"   ? `Interannual variability change (σ future − 1995–2014)`
+    : stat === "sd"    ? `Inter-model SD across 18 GCMs`
+    : isRawMode        ? `Ensemble-mean ${variable} (raw value, ${unit})`
+    :                    `Ensemble-mean anomaly vs 1995–2014 baseline`;
   rampSvg.append("text")
     .attr("x", 0).attr("y", titleH - 2)
     .attr("font-size", 11).attr("font-weight", 600).attr("fill", "#222")
@@ -5627,7 +5741,7 @@ captionDetails(htl.html`
     <strong>${globalScopeInfo.scope}</strong>
     · ${periodMaps_controls.variable}
     · ${periodMaps_controls.season} season
-    · ${periodMaps_controls.showTable ? "numerical table" : (periodMaps_controls.stat === "mean" ? "ensemble-mean anomaly" : "inter-model SD")} vs 1995–2014 baseline
+    · ${periodMaps_controls.showTable ? "numerical table" : ({ mean: "ensemble-mean anomaly", sd: "inter-model SD", trend: "trend per decade (product B)", iav: "interannual variability change (product C)" }[periodMaps_controls.stat] ?? "ensemble-mean anomaly")} vs 1995–2014 baseline
     · ${periodMaps_controls.showTable ? `${(periodMaps_controls.ssp ?? ["ssp245"]).length} SSP row${(periodMaps_controls.ssp ?? []).length === 1 ? "" : "s"} × 5 periods` : `4 future windows × ${(periodMaps_controls.ssp ?? ["ssp245"]).length} SSP${(periodMaps_controls.ssp ?? []).length === 1 ? "" : "s"}`}
     · ${globalScopeInfo.isCountry ? "admin1 view" : (globalMapLevel === "admin1" ? "admin1 (regional)" : "admin0 (regional)")}
   </p>
