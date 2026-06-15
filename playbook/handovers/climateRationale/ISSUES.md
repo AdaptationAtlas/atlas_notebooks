@@ -3244,7 +3244,26 @@ Verify exact local filename pattern first (`list.files(output_dir, "_ensemble_se
 
 - **STATUS (2026-06-13):** **SHIPPED on `dev/climateRationale`** (commits a2edb06 → 72288be). Sandbox-only; no production change. Promotion deferred per [`sandbox-vs-notebook-parity.md`](sandbox-vs-notebook-parity.md).
 
-- **see also:** [[CR-116]] (sibling sandbox FP expansion in obs_month_overlay); [[CR-119]] (perf fix this corroborated); [[CR-117]] / [[CR-120]] (pending pipeline products that drop into this sandbox).
+- **see also:** [[CR-116]] (sibling sandbox FP expansion in obs_month_overlay); [[CR-119]] (perf fix this corroborated); [[CR-117]] / [[CR-120]] (pending pipeline products that drop into this sandbox); [[CR-122]] (integrating these into obs_month_overlay).
+
+---
+
+## CR-122 — Integrate trend-map (B/C) data + insights into `obs_month_overlay.qmd` [NEW 2026-06-15 · sandbox · strategy]
+
+- **id:** CR-122
+- **title:** Fold the `future_trend_map.qmd` products (**B** trends, **C** interannual-variability) + insights into the obs sandbox's **Future Projections** section, reusing obs's shared-cache + section-gate + i18n architecture. Strategy in [`future-trend-map-integration-strategy.md`](future-trend-map-integration-strategy.md).
+- **type:** notebook (sandbox integration — consumer-only)
+- **severity:** low (additive sandbox; consolidates the two FP sandboxes)
+- **where:** [`notebooks/sandbox/obs_month_overlay.qmd`](notebooks/sandbox/obs_month_overlay.qmd) Future Projections (`#period-maps`, L4965); data layer mirrors `cmip6_future_data` (L4480).
+
+- **key finding:** obs **Period maps** already delivers mean-anomaly + inter-model SD + raw climatology + the SNR fade — all from **A**. So the trend-map's *net-new* value is just **B trend slope** + **C interannual-variability change** (+ their agreement overlays). Don't rebuild the A-derived metrics.
+- **recommended approach:** extend Period maps' **Statistic radio** with "Trend (per decade)" (B) and "Interannual variability change" (C) — the SSP×period grid already holds one value per (SSP, period), so slope/IAV-delta slot into existing cells. Add two shared caches (`cmip6_trends_data`, `cmip6_variability_data`) with **separate DuckDBClients** (per `duckdb-wasm-per-plot-clients`), gated like A. Generalise the fade to be metric-aware (`|mean|<sd` → `|slope|<sd_slope` → `pct_gcms_increase` agreement). NDD → no-data for C.
+- **phasing:** P1 data layer + load-time verify · P2 trend slope · P3 IAV change · P4 i18n/Methods/table · P5(optional) per-year time-series sub-section.
+- **open decisions (for Pete):** radio-extension vs new sub-section; whether to include the time-series view; B uses interim SNR fade until CR-117 `pct_gcms_sig` lands; production promotion stays deferred.
+
+- **STATUS (2026-06-15):** **Strategy drafted** — awaiting Pete's go on the open decisions before P1. Sandbox-only; no production change.
+
+- **see also:** [[CR-121]] (source sandbox); [[CR-116]] (target sandbox FP section); [[CR-117]] (B significance dependency); [[CR-120]] (C, published).
 
 ---
 
