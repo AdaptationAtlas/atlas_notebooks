@@ -1423,7 +1423,9 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
   }
   ```
 
-### CR-068 — `hazard_exposure` parquet missing "no hazard" / unexposed row [NEW 2026-05-14]
+### CR-068 — `hazard_exposure` parquet missing "no hazard" / unexposed row [✅ RESOLVED-ROUTED 2026-06-15 · was NEW 2026-05-14]
+<!-- (a) CLOSED · (b)+(c) upstream AdaptationAtlas/hazards · Pattern B → hazards_prototype#12. See STATUS block at end. -->
+
 
 - **id:** CR-068
 - **title:** Bake an explicit `hazard = "none"` / unexposed row into the `hazard_exposure` parquet per (admin1, scenario, period, crop) so any "share of VoP exposed" denominator is self-contained inside one table
@@ -1469,6 +1471,12 @@ Plus `climateProjectionInsight` re-reads the same dataset, computes per-decade t
 **2026-05-29 update — Stage F COMPLETE; canonical parquet NOT YET updated.** Annual 44,880/44,880 at 10:14:59 UTC 2026-05-28; jagermeyr 44,880/44,880 at 23:59:46 UTC 2026-05-28. Runbook did NOT auto-chain to STAGE C. No C/D/E logs dated after 2026-05-26. Canonical `severity=severe/int=multi-hazard.parquet` last-modified still 2026-05-26 15:21:59 UTC — pre-fix. STAGE C launch pending (see "Decisions applied — 2026-05-29"); CR-068 closes only once STAGE E publishes and post-bake probes pass.
 
 **2026-05-30 update — CR-068(a) CLOSED; (b) upstream only; (c) partially closed.** Stage E published 2026-05-30 15:54 UTC. (a) `hazard='none'` rows confirmed in canonical (+70,992 rows, Stage D row-count check). (c) `na.rm=TRUE` fix in ENSEMBLE writers — SSP370 2041+ still shows zeros in Stage D [b] snapshot (sugarcane/oilpalm/cocoa); this may be residual NaN where ALL GCMs have NaN pixels even after na.rm fix — post-bake Stage 2C re-probe needed to confirm. (b) remains upstream-only. Post-bake probes (`probe_no_hazard_arithmetic_quick.sh`, `probe_cross_parquet_vop_drift.sh`) not yet run — atlas_notebooks path on CGlabs not located. Backup at `s3://digital-atlas/sandbox/backup/20260530_154522/...` (ACL=public-read, valid rollback).
+
+- **STATUS: ✅ RESOLVED — ROUTED (2026-06-15 pipeline triage).** Probes had in fact run 2026-06-01 (results in pipeline memory). Final disposition, each finding routed to a single owner:
+  - **(a) `hazard='none'` row — CLOSED ✓** (2026-05-30 bake; confirmed working, mutual-exclusivity probe PASS ±0.003%).
+  - **(b) historic NDWS saturation + (c) Luanda NaN residual — UPSTREAM**, `AdaptationAtlas/hazards`. (c) is downstream of (b) (180/6,021 AGO cells, all Luanda admin1 = the saturation signature) — closes when (b) is fixed and historic NDWS republished. GitHub issue to be filed in `AdaptationAtlas/hazards` (only a dispatch existed; that repo's issues are all 2022-closed).
+  - **Pattern B (cross-parquet VoP drift, `value('any')` > standalone VoP per-admin1, all 27 crops) — SPLIT OUT → [hazards_prototype#12](https://github.com/AdaptationAtlas/hazards_prototype/issues/12).** Code review of both VoP paths found **no grid/resample mismatch in our producer** (numerator `R/3:171/518` and denominator `R/0.4.4:162` both read the same atlas-harmonized MapSPAM VoP on `base_rast`, both `method="sum"` + `touches=TRUE`). Reframed as a cross-product reconciliation gap vs the **stale denominator** `crop-livestock_all.parquet` (vintage 2026-01-22, Brayden's queue) ± boundary-vintage. Plan: cheap cglabs probe FIRST (per-admin1 zonal-sum of plain `crop_vop` vs `crop-livestock_all`), **no speculative re-bake**.
+  - **Net:** CR-068's original 3 findings are closed/upstreamed; the residual is two single-owner trackers (`AdaptationAtlas/hazards` for b+c, hazards_prototype#12 for Pattern B). CR-068 closed as a tracking item.
 - **before-string:** n/a (schema + aggregation change).
 
 ### CR-069 — Methods section should enumerate the GCMs in the NEX-GDDP-CMIP6 ensemble [NEW 2026-05-15]
