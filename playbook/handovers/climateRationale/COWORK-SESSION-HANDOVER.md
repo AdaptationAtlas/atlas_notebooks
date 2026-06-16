@@ -3,7 +3,23 @@
 **Audience:** a fresh chat-mode Claude session (Cowork or web/desktop chat)
 picking up the Climate Rationale notebook work. Read this first.
 
-**Last updated:** 2026-05-27 (end of session 17) by Pete + Claude Code.
+**Last updated:** 2026-06-16 by Pete + Claude Code. *(Narrative below is from session 17 / 2026-05-27; read the update block first, then `ISSUES.md` STATUS lines for the live state.)*
+
+---
+
+## ⏩ Update 2026-06-16 — state since session 17
+
+The CMIP6 future-projection data pipeline matured and the notebook caught up. **`ISSUES.md` STATUS lines are the source of truth** (the shared file is co-maintained with the pipeline/Brayden session — expect concurrent edits). Highlights:
+
+- **CR-119 ✅ FULLY CLOSED.** Future Projections "not loading" was two bugs: (1) pipeline shipped the canonical `ensemble_season_timeseries` (**A**) non-prunable → republished iso3-first/prunable; (2) a **backtick inside an SQL comment** in `futureProjections_dataAll` killed the whole FP subgraph (`b44f19d`). Production loads fast (Pete confirmed). The FP ribbon now reads the restored q17/q83 inter-model 17–83% range (relabelled from the legacy "±1 SD"; `6a669ab`).
+- **Three pipeline products now live + iso3-prunable** under `…/period={…}/baseline=1995-2014/variable=…`:
+  - **A** `ensemble_season_timeseries` (per-year mean/anomaly + q17/q83 + sd).
+  - **B** `ensemble_season_trends` (CR-117) — `value_slope`/`value_decade`, mean+sd across GCMs. No per-GCM agreement column yet (`pct_gcms_sig` deferred — CR-117, unlikely soon → interim SNR fade used).
+  - **C** `ensemble_season_variability` (CR-120) — `iav_sd` + `iav_delta` (future−baseline interannual σ) + `pct_gcms_increase` agreement. NDD has no baseline → its delta/pct null by design.
+- **New sandbox `notebooks/sandbox/future_trend_map.qmd` (CR-121)** — standalone trend/significance map: 5 metrics (trend/σ from B, climatology/anomaly from A, IAV-change from C) + a CR-notebook time-series replica. Built as a B/C load-time + access test (passed).
+- **CR-122 — B/C integrated into `obs_month_overlay.qmd` Period maps** (P1–P3, `f2fb210`): the Statistic radio gained "Trend (per decade)" + "Interannual variability change"; two shared B/C caches (separate DuckDBClients). Strategy doc: `future-trend-map-integration-strategy.md`. **NOT yet real-browser-verified** (headless can't run obs's gated DuckDB layer) + P4 help/Methods text pending.
+- **French:** production `nbText.json` FR gaps filled (0 remaining); obs Statistic-radio labels translated. `future_trend_map.qmd` is inline-EN by design.
+- **Open / handover:** CR-122 obs trend/IAV grids need a real-browser pass + P4 help text; CR-117 `pct_gcms_sig` awaits pipeline; B/C wiring into the **production** notebook is deferred (Pete: no new production content until a feature is signed off). `.agents/` (verifier-quarto-notebook skill) is untracked — commit or ignore is Pete's call.
 
 ---
 
