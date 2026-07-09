@@ -2666,8 +2666,30 @@ admin0_geo_obs = {
 admin0_feature_obs = {
   const iso3 = obsAdmin0Iso3;
   if (iso3 == null) return null;
-  const f = admin0_geo_obs.features.find((f) => f.properties && (f.properties.iso3 === iso3 || f.properties.ISO3 === iso3 || f.properties.iso_3 === iso3));
-  return f ?? null;
+  // A country can ship as several admin0 units sharing one iso3 —
+  // disputed regions carry the host country's iso3 as their own gaul0
+  // unit (CR-115 option2 convention: KEN = Kenya + Ilemi Triangle;
+  // also EGY, SDN, SSD). Merge all matches into one MultiPolygon so
+  // the COG fetch bbox and mask cover the whole country, not just
+  // whichever unit happens to sit first in the topojson.
+  const matches = admin0_geo_obs.features.filter((f) => f.properties && (f.properties.iso3 === iso3 || f.properties.ISO3 === iso3 || f.properties.iso_3 === iso3));
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+  const polys = [];
+  for (const m of matches) {
+    const g = m.geometry;
+    if (!g) continue;
+    if (g.type === "Polygon") polys.push(g.coordinates);
+    else if (g.type === "MultiPolygon") polys.push(...g.coordinates);
+  }
+  const primary = matches.reduce((a, b) =>
+    (b.properties.gaul0_code ?? 0) > (a.properties.gaul0_code ?? 0) ? b : a
+  );
+  return {
+    type: "Feature",
+    properties: primary.properties,
+    geometry: { type: "MultiPolygon", coordinates: polys },
+  };
 }
 
 admin1_geo_obs = {
