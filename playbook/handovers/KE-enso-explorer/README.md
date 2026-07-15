@@ -12,8 +12,12 @@ _quarto.yml conventions). Created 2026-07-09.
 - **Data pipeline: v1 assembled; core series validated, with named gaps** (below). Lives in the
   D409 project OneDrive, not this repo: `…/RCMRD/ENSO explorer/`; index = `_master/DATA_CATALOG.md`.
 - **Standalone scaffold: built + browser-verified to render/run** (`…/ENSO explorer/notebook/`,
-  plain Quarto+OJS, 5 blocks). = the reference to PORT FROM, *after* the fixes below.
-- **This branch: bootstrapping.** No notebook code committed yet.
+  plain Quarto+OJS, 5 blocks). = the reference the port carried logic from.
+- **This branch: blocks 1–5 ported + browser-verified (2026-07-15)** on Atlas conventions
+  (`_lang` i18n, per-plot DuckDB clients, download button per figure, H2 chart titles, dynamic
+  insights). See `dispatches/2026-07-15_blocks-1-5-ported.md` for the two data gotchas
+  (unharmonized county names in staged parquets; INT64→BigInt) and the named gaps
+  (no exposure/VoP chart in B1; B4 lacks market prices + ReliefWeb; no county map yet).
 
 ### Validated (LLM-independent gates)
 - Driver indices — Niño 3.4 r=0.998 vs NOAA; Western-V reproduces Funk's sign + post-1997 regime
