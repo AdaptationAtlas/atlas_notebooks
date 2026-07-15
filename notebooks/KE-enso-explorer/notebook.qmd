@@ -540,6 +540,37 @@ html`<table class="table table-sm" style="font-size:0.85rem">
 </table>`
 ```
 
+## `{ojs} title_ndvi`
+
+```{ojs}
+md`${_lang(nbText.sections.b4.ndviIntro)}`
+```
+
+```{ojs}
+ndviChart = Plot.plot({
+  height: 340, width: 900, marginLeft: 50,
+  y: {label: "NDVI (% of normal)", domain: ndviDomain},
+  color: {domain: ["Below normal", "Above normal"], range: ["#d95f0e", "#41ab5d"], legend: true},
+  marks: [
+    // two-tone anomaly band around the 100% = normal baseline
+    Plot.areaY(ndviCty, {
+      x: (d) => new Date(d.date), y: "ndvi_pct_normal", y1: 100,
+      fill: (d) => d.ndvi_pct_normal < 100 ? "Below normal" : "Above normal",
+      fillOpacity: 0.65,
+    }),
+    Plot.lineY(ndviCty, {x: (d) => new Date(d.date), y: "ndvi_pct_normal", stroke: "#333", strokeWidth: 0.4}),
+    Plot.ruleY([100], {stroke: "#555", strokeDasharray: "3"}),
+  ],
+})
+```
+
+```{ojs}
+html`<div class="plot-footer-row">${chartDownloadButton(ndviChart, {
+  filename: `${county}_ndvi_pct_normal_wfp`,
+  data: ndviCty,
+})}</div>`
+```
+
 # `{ojs} heading_b5` {#b5}
 
 ```{ojs}
@@ -623,6 +654,7 @@ title_prices = priceProducts.length
   ? `${county} — ${priceProduct} — ${_lang(nbText.sections.b4.pricesTitle)}`
   : `${county} — ${_lang(nbText.sections.b4.pricesTitle)}`
 title_rw = `${county} — ${_lang(nbText.sections.b4.rwTitle)}`
+title_ndvi = `${county} — ${_lang(nbText.sections.b4.ndviTitle)}`
 title_recent = _lang(nbText.sections.b5.recentTitle)
 ```
 
@@ -921,6 +953,27 @@ rwCat = (t) => {
 rwByYear = d3.rollups(rwCty, (v) => v.length, (d) => +d.date.slice(0, 4), (d) => rwCat(d.disaster_type))
   .flatMap(([year, cats]) => cats.map(([cat, n]) => ({year, cat, n})))
   .sort((a, b) => a.year - b.year)
+```
+
+```{ojs}
+dbNdvi = DuckDBClient.of({
+  ndvi_county: FileAttachment("/data/KE-enso-explorer/ndvi_county.parquet"),
+})
+
+// dekadal NDVI as % of the long-term normal (WFP VAM / MODIS, pixel-
+// weighted to county in the producer). All 47 counties -> also covers
+// the pastoralist ASAL counties the crop calendar (Block 2) cannot.
+ndviCty = dbNdvi.query(`
+  SELECT date, ndvi_pct_normal
+  FROM ndvi_county
+  WHERE ${normExpr("county")} = '${countyNorm(county)}'
+  ORDER BY date`)
+
+// symmetric-ish y domain padded around the data, always spanning 100
+ndviDomain = {
+  const v = ndviCty.map((d) => d.ndvi_pct_normal);
+  return v.length ? [Math.min(90, Math.floor(d3.min(v) / 10) * 10), Math.max(110, Math.ceil(d3.max(v) / 10) * 10)] : [50, 150];
+}
 ```
 
 ```{ojs}

@@ -123,6 +123,30 @@ would fake county-specificity. The ASAL seasonality gap is correctly filled by r
 Portal** (earlywarning.usgs.gov/fews; dekadal/monthly downloadable rasters). That is the
 recommended next task and the natural ASAL filler.
 
+## Addendum 4 (same day) — #11 NDVI vegetation condition into B4
+
+The ASAL filler promised by #10 is now built. Source = **WFP VAM "Kenya: NDVI at Subnational
+Level"** (HDX, CC-BY; MODIS 6.1, dekadal, 2002→2026). Tier-1 CSV, no raster work — but it is on
+the **OCHA legacy sub-county grid** (8 old provinces as "admin1", 73 old districts as "admin2"),
+NOT the 47 counties. The unlock: the admin2 p-codes are `KE` + county(001–047) + subunit, so the
+**county is exactly the 5-char p-code prefix** — a clean nesting, not a fuzzy crosswalk. Rollup is
+**pixel-weighted** (`n_pixels`); the anomaly `ndvi_pct_normal = ndvi/ndvi_mean*100` is recomputed
+from the rolled-up values, never averaged. County name from the OCHA COD admin1 table (cod-ab-ken),
+joined to the canonical 47 + `gaul1_code` with 0 name mismatches. Parser + meta in-repo
+(`_sources/parse_ndvi.py`, `ndvi_county.meta.json`); output `ndvi_county.parquet` (40 608 rows,
+47 counties, 864 dekads).
+
+New B4 figure: a two-tone anomaly band around the 100%-of-normal baseline (orange = deficit/drought
+stress, green = greener than normal). **Covers all 47 counties incl. the 8 ASAL** — closing the loop
+the crop-calendar no-data note points to. Signal validated against known droughts: Marsabit 2022
+(peak Horn drought) mean 81% (min 63%); 2018 recovery 124%; the deep deficits at 2006/2009/2011/
+2017/2019/2022 are Kenya's major droughts and render as expected.
+
+Verified (`verify_ndvi.mjs`, `v1–v2*.png`): Marsabit + Turkana chart renders, county-scoped title,
+two-tone band, 0 persistent OJS errors. Reusable insight banked to memory
+(`reference_wfp-vam-subnational`): WFP VAM subnational p-code prefix = OCHA county code → pixel-
+weighted rollup; applies to the WFP rainfall dataset too.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
@@ -130,7 +154,8 @@ recommended next task and the natural ASAL filler.
 - **#12 remainder:** the FEWS Enhanced Market Analysis / trade-flow map + banked XBT cross-border
   data are still not folded in (market prices + ReliefWeb now are — see addenda above).
 - No county map / multi-county compare yet (`enhancedMultiSelect` + shared GAUL24 topojson).
-- **#11 (NDVI county layer)** untouched — the natural next task; it is also what fills the
-  seasonality gap for the 8 pastoralist ASAL counties the crop calendar can't cover.
-- #10 done (see addendum 3). The FEWS graphic seasonal calendar was deliberately NOT used
-  (transcription); ASAP is the machine-readable source of record.
+- **B1 exposure/VoP chart** still missing (needs a staging decision) — probably the next task.
+- WFP VAM also publishes a **subnational rainfall** dataset (same p-code grid, 1981→present) — a
+  cheap future add if a longer county rainfall series than CHIRPS-in-hub is wanted.
+- #10 done (addendum 3; ASAP, not the FEWS graphic). #11 done (addendum 4; WFP VAM NDVI).
+  #12 remainder = trade-flow / market-structure map + XBT.
