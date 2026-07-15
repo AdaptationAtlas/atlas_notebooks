@@ -571,6 +571,93 @@ html`<div class="plot-footer-row">${chartDownloadButton(ndviChart, {
 })}</div>`
 ```
 
+## `{ojs} heading_trade`
+
+```{ojs}
+md`${_lang(nbText.sections.b4.tradeIntro)}`
+```
+
+::: {.controls-row}
+
+```{ojs}
+viewof xbtProduct = Inputs.select(xbtProducts, {
+  label: _lang(nbText.sections.controls.product),
+  value: xbtProducts.includes("Maize Grain (White)") ? "Maize Grain (White)" : xbtProducts[0],
+})
+```
+
+:::
+
+```{ojs}
+md`**${_lang(nbText.sections.b4.mapTitle)} — ${xbtProduct}**`
+```
+
+```{ojs}
+tradeMap = {
+  const kenC = centroidByIso["KEN"];
+  const links = xbtFlows.map((f) => {
+    const c = centroidByIso[f.partner_iso3];
+    if (!c || !kenC) return null;
+    const imp = f.direction === "Import";
+    return {...f, x1: imp ? c[0] : kenC[0], y1: imp ? c[1] : kenC[1],
+                  x2: imp ? kenC[0] : c[0], y2: imp ? kenC[1] : c[1]};
+  }).filter((d) => d != null);
+  const maxQ = d3.max(links, (d) => d.qty) || 1;
+  const nodes = [...new Set(xbtFlows.map((f) => f.partner_iso3))]
+    .map((iso) => ({iso, c: centroidByIso[iso]})).filter((d) => d.c);
+  const domain = {type: "FeatureCollection",
+    features: africaFeatures.filter((f) => f.properties.iso3 === "KEN" || nodes.some((n) => n.iso === f.properties.iso3))};
+  return Plot.plot({
+    projection: {type: "mercator", domain, inset: 24}, width: 760, height: 560,
+    color: {domain: ["Import", "Export"], range: ["#d95f0e", "#238b45"], legend: true},
+    marks: [
+      Plot.geo(africaFeatures, {stroke: "#d0d0d0", fill: "#f6f6f4"}),
+      Plot.geo(domain.features.filter((f) => f.properties.iso3 === "KEN"), {fill: "#e6efe6", stroke: "#333"}),
+      Plot.arrow(links, {x1: "x1", y1: "y1", x2: "x2", y2: "y2", stroke: "direction",
+        strokeWidth: (d) => 1 + 7 * Math.sqrt(d.qty / maxQ), bend: 18, headLength: 9,
+        tip: true, title: (d) => `${d.direction}: ${d.partner}\n${d3.format(",.0f")(d.qty)} ${d.unit}`}),
+      Plot.dot(nodes, {x: (d) => d.c[0], y: (d) => d.c[1], r: 3, fill: "#333"}),
+      Plot.text(nodes, {x: (d) => d.c[0], y: (d) => d.c[1], text: (d) => d.iso,
+        dy: -8, fontWeight: 600, fill: "#333"}),
+    ],
+  });
+}
+```
+
+```{ojs}
+md`${_lang(nbText.sections.b4.mapNote)}`
+```
+
+```{ojs}
+html`<div class="plot-footer-row">${chartDownloadButton(tradeMap, {
+  filename: `kenya_xbt_trade_flows_${xbtProduct.replace(/[^a-z0-9]+/gi, "_")}`,
+  data: xbtFlows,
+})}</div>`
+```
+
+```{ojs}
+md`**${_lang(nbText.sections.b4.importsTitle)} — ${xbtProduct} (${xbtUnit})**`
+```
+
+```{ojs}
+importsChart = Plot.plot({
+  height: 340, width: 900, marginLeft: 65,
+  x: {tickFormat: "d", label: "year"}, y: {label: `imported (${xbtUnit})`},
+  color: {legend: true},
+  marks: [
+    Plot.barY(xbtImports, {x: "year", y: "qty", fill: "partner", tip: true}),
+    Plot.ruleY([0]),
+  ],
+})
+```
+
+```{ojs}
+html`<div class="plot-footer-row">${chartDownloadButton(importsChart, {
+  filename: `kenya_xbt_imports_${xbtProduct.replace(/[^a-z0-9]+/gi, "_")}`,
+  data: xbtImports,
+})}</div>`
+```
+
 # `{ojs} heading_b5` {#b5}
 
 ```{ojs}
@@ -635,6 +722,7 @@ heading_appendix = _lang(nbText.sections.appendix.title)
 heading_interact = _lang(nbText.sections.b2.interactHeading)
 heading_combined = _lang(nbText.sections.b2.combinedHeading)
 heading_calendar = _lang(nbText.sections.b2.calendarHeading)
+heading_trade = _lang(nbText.sections.b4.tradeHeading)
 quickInsight = _lang(nbText.general.quickInsight)
 ```
 
@@ -968,6 +1056,57 @@ ndviCty = dbNdvi.query(`
   FROM ndvi_county
   WHERE ${normExpr("county")} = '${countyNorm(county)}'
   ORDER BY date`)
+```
+
+```{ojs}
+// ---- cross-border trade (national context, NOT county-scoped) ----
+dbXbt = DuckDBClient.of({
+  xbt: FileAttachment("/data/KE-enso-explorer/xbt_trade.parquet"),
+})
+
+// products ordered by total traded volume (default = maize grain)
+xbtProducts = {
+  const rows = await dbXbt.query(`
+    SELECT product FROM xbt GROUP BY product ORDER BY SUM(qty) DESC`);
+  return rows.map((d) => d.product);
+}
+
+// total flow per partner+direction for the selected product (map). Product
+// values come from the select's own option list, but escape apostrophes
+// (e.g. Cow's Milk) for safety.
+xbtFlows = dbXbt.query(`
+  SELECT partner, partner_iso3, direction,
+         SUM(qty) AS qty, MAX(qty_unit) AS unit
+  FROM xbt
+  WHERE product = '${String(xbtProduct).replace(/'/g, "''")}'
+  GROUP BY partner, partner_iso3, direction`)
+
+xbtUnit = xbtFlows.length ? xbtFlows[0].unit : ""
+
+// imports into Kenya per partner per year (supporting bar chart)
+xbtImports = dbXbt.query(`
+  SELECT partner, year, SUM(qty) AS qty
+  FROM xbt
+  WHERE product = '${String(xbtProduct).replace(/'/g, "''")}' AND direction = 'Import'
+  GROUP BY partner, year
+  ORDER BY year`)
+```
+
+```{ojs}
+// admin0 outlines for the flow map. topojson-client via esm (same as
+// climateRationale); centroids are computed with d3.geoCentroid so no
+// coordinates are ever typed by hand.
+topojsonClient = await import("https://esm.sh/topojson-client@3.1.0")
+africaTopo = FileAttachment("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").json()
+africaFeatures = topojsonClient.feature(africaTopo, africaTopo.objects["atlas_gaul24_a0_africa"]).features
+
+centroidByIso = {
+  const m = {};
+  for (const [iso, feats] of d3.group(africaFeatures, (f) => f.properties.iso3)) {
+    m[iso] = d3.geoCentroid({type: "GeometryCollection", geometries: feats.map((f) => f.geometry)});
+  }
+  return m;
+}
 
 // symmetric-ish y domain padded around the data, always spanning 100
 ndviDomain = {

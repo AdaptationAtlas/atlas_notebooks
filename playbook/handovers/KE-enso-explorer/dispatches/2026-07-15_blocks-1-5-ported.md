@@ -147,6 +147,28 @@ two-tone band, 0 persistent OJS errors. Reusable insight banked to memory
 (`reference_wfp-vam-subnational`): WFP VAM subnational p-code prefix = OCHA county code → pixel-
 weighted rollup; applies to the WFP rainfall dataset too.
 
+## Addendum 5 (same day) — #12 complete: cross-border trade-flow map into B4
+
+The last #12 piece (market prices + ReliefWeb were addenda 1–2). Staged the banked FEWS NET **XBT**
+(cross-border trade) → `xbt_trade.parquet` (24 272 Kenya-touching rows, 2010–2024, 99 products).
+It is **national/border-point resolution, not county** — a country-level supply context layer,
+labelled as such (identical for every county selection).
+
+New B4 sub-section "National context: cross-border trade": a **trade-flow map** + an
+**imports-by-partner** bar chart, both driven by a product selector (default Maize Grain (White)).
+The map draws Kenya + neighbour outlines (shared admin0 topojson) with import (orange) / export
+(green) arrows between country centroids, arrow width ∝ traded volume, frame auto-fit to the
+partners present. **Honesty design:** flows aggregate by partner country and arrows anchor on
+`d3.geoCentroid` positions computed from the topojson — **no coordinates are typed by hand** (the
+"LLM never types a number" rule extends to map geometry; a mistyped lat/lon would put a crossing in
+the ocean). Partner→ISO3 is a fixed reference code map only. Unit adapts to the product (kg / ea /
+L). Parser + meta in-repo (`_sources/parse_xbt.py`, `xbt_trade.meta.json`).
+
+Verified (`verify_xbt*.mjs`, `w1/w3*.png`): maize → Tanzania/Uganda import arrows dominate;
+Cattle → Ethiopia-dominant (the ASAL pastoralist livestock story) + unit flips to `ea`; selector
+re-draws map (partners, frame, widths) + chart + unit; 0 persistent OJS errors. FEWS *Enhanced
+Market Analysis* itself is a narrative report (graphic/PDF) → cited in Methods, not transcribed.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
@@ -157,5 +179,5 @@ weighted rollup; applies to the WFP rainfall dataset too.
 - **B1 exposure/VoP chart** still missing (needs a staging decision) — probably the next task.
 - WFP VAM also publishes a **subnational rainfall** dataset (same p-code grid, 1981→present) — a
   cheap future add if a longer county rainfall series than CHIRPS-in-hub is wanted.
-- #10 done (addendum 3; ASAP, not the FEWS graphic). #11 done (addendum 4; WFP VAM NDVI).
-  #12 remainder = trade-flow / market-structure map + XBT.
+- #10 done (addendum 3; ASAP). #11 done (addendum 4; WFP VAM NDVI). #12 done (addenda 1–2 + 5;
+  market prices, ReliefWeb, XBT trade-flow map). B1 exposure/VoP chart is the main remaining gap.
