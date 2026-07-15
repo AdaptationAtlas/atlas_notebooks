@@ -1,39 +1,81 @@
 ---
 pagetitle: "ENSO Explorer — Kenya"
+nb-authors:
+  - Pete Steward
+date-created: "2026-07-09"
+date-edited: today
 ---
 
 ```{ojs}
-//| echo: false
-// ---- i18n: all strings live in nbText.json, resolved via _lang({en,fr}) ----
-nbText = FileAttachment("/data/KE-enso-explorer/nbText.json").json()
+import { atlasTOC } from "/helpers/toc.ojs";
+import { chartDownloadButton } from "/helpers/chartDownloadMenu.ojs";
 ```
 
-{{< include /components/_lang.qmd >}}
-
 ```{ojs}
-//| echo: false
-// ---- hero ----
-htl.html`<div class="cr-hero">
-  <div class="cr-hero-eyebrow">${_lang(nbText.sections.hero.eyebrow)}</div>
-  <h1 class="cr-hero-title" id="notebook-title">${_lang(nbText.sections.hero.title)}</h1>
-  <div class="cr-hero-sub">${_lang(nbText.sections.hero.subtitle)}</div>
+// Hero. Text flows through _lang(...) so EN+FR render correctly
+// (see data/KE-enso-explorer/nbText.json). Styles in the scoped
+// .ke-hero block below — independent of climateRationale's .cr-hero.
+html`<div class="ke-hero">
+  <div class="ke-hero-eyebrow">${_lang(nbText.sections.hero.eyebrow)}</div>
+  <h1 class="ke-hero-title" id="notebook-title">${_lang(nbText.sections.hero.title)}</h1>
+  <div class="ke-hero-sub">${_lang(nbText.sections.hero.subtitle)}</div>
 </div>`
 ```
 
-```{ojs}
-//| echo: false
-import { atlasTOC } from "/helpers/toc.ojs";
-atlasTOC({ skip: ["notebook-title", "appendix", "source-code"], heading: `<b>In this notebook</b>`, selector: "h1" });
+```{=html}
+<style>
+  /* ENSO-Explorer hero. Scoped to .ke-hero — does not affect other
+     notebooks. Plain dark panel for now; imagery can come later. */
+  .ke-hero {
+    position: relative;
+    width: 100%;
+    padding: 2.2rem 2rem;
+    margin: 0 0 1rem;
+    background: #07121e;
+    color: #fff;
+  }
+  .ke-hero-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 0.78rem;
+    font-weight: 600;
+    opacity: 0.85;
+    margin-bottom: 0.4rem;
+  }
+  .ke-hero-title {
+    all: unset;
+    display: block;
+    font-size: 2.4rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: #fff;
+  }
+  .ke-hero-sub {
+    margin-top: 0.6rem;
+    font-size: 1rem;
+    opacity: 0.9;
+    max-width: 46rem;
+  }
+  /* Footer row under each plot holding the download button. */
+  .plot-footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.5rem;
+    margin: 0.25rem 0 0.75rem;
+  }
+</style>
 ```
 
-${_lang(nbText.sections.intro)}
+```{ojs}
+atlasTOC({
+  skip: ["notebook-title", "appendix", "source-code"],
+  heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
+});
+```
 
 ```{ojs}
-//| echo: false
-// section heading vars (question-form, translatable)
-heading_b5 = _lang(nbText.sections.b5.title)
-heading_methods = _lang(nbText.sections.methods.title)
-heading_appendix = _lang(nbText.sections.appendix.title)
+md`${_lang(nbText.sections.intro)}`; // wrapped in md so markdown (lists/links) works
 ```
 
 # `{ojs} heading_b5` {#b5}
@@ -42,9 +84,11 @@ heading_appendix = _lang(nbText.sections.appendix.title)
 rains; the Western-V is a partly-independent control on the MAM long rains.*
 
 ```{ojs}
-//| echo: false
-recent = drivers.filter(d => d.year >= 2015)
-Plot.plot({
+recent = drivers.filter((d) => d.year >= 2015)
+```
+
+```{ojs}
+driversChart = Plot.plot({
   height: 380, width: 900, marginLeft: 45, color: {legend: true}, y: {label: "index / z"},
   marks: [
     Plot.lineY(recent.filter(d => d.nino34_anom_noaa != null),
@@ -58,6 +102,13 @@ Plot.plot({
 })
 ```
 
+```{ojs}
+html`<div class="plot-footer-row">${chartDownloadButton(driversChart, {
+  filename: "enso_driver_indices_recent",
+  data: recent,
+})}</div>`
+```
+
 # `{ojs} heading_methods` {#methods}
 
 Drivers: NOAA ONI / Niño 3.4 + HadISST DMI + Western-V/WNP from ERSSTv5 (Funk et al. 2018 boxes;
@@ -68,8 +119,33 @@ Niño 3.4 validated r=0.998 vs NOAA, WNP reproduces Funk's post-1997 MAM sign). 
 
 # `{ojs} heading_appendix` {#appendix}
 
+::: {.hidden}
+
+{{< include /components/_lang.qmd >}}
+
 ```{ojs}
-//| echo: false
-// ---- data (parquet under /data/KE-enso-explorer) ----
-drivers = FileAttachment("/data/KE-enso-explorer/driver_indices.parquet").parquet().then(t => [...t])
+// ---- i18n: all strings live in nbText.json, resolved via _lang({en,fr}) ----
+nbText = FileAttachment("/data/KE-enso-explorer/nbText.json").json()
 ```
+
+```{ojs}
+// Section heading vars (question-form, translatable).
+heading_b5 = _lang(nbText.sections.b5.title)
+heading_methods = _lang(nbText.sections.methods.title)
+heading_appendix = _lang(nbText.sections.appendix.title)
+```
+
+```{ojs}
+// Dedicated DuckDB client for the driver-indices parquet (per-plot
+// client convention — DuckDB-WASM serialises queries within a
+// connection, so each plot's parquet gets its own client).
+// NOTE: FileAttachment(...).parquet() does NOT exist in Quarto's OJS
+// stdlib — parquet must be read through DuckDBClient.
+dbDrivers = DuckDBClient.of({
+  driver_indices: FileAttachment("/data/KE-enso-explorer/driver_indices.parquet"),
+})
+
+drivers = dbDrivers.query(`SELECT * FROM driver_indices ORDER BY date`)
+```
+
+:::

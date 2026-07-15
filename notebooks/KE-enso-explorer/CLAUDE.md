@@ -27,9 +27,11 @@ Audience: Kenya county/national policymakers (non-coders). Branch: `dev/KE-enso-
 - Render one file: `quarto render notebooks/KE-enso-explorer/notebook.qmd`  (slow; project post-render minifies)
 - **Verify in a real browser** (OJS/DuckDB run client-side — render success ≠ works):
   `Skill verify` → repo skill `.claude/skills/verifier-quarto-notebook` (playwright vs `_site` HTML).
-- ⚠️ **Known blocker:** the scaffold renders but the browser page is BLANK — the project `_include.html`
-  spinner-overlay waits on an OJS boot signal not yet emitted. Fix = mirror climateRationale's
-  top-of-notebook boot sequence. See the next-session dispatch. Clear this before porting blocks.
+- ✅ **Boot blocker RESOLVED (2026-07-15):** root cause was `FileAttachment(...).parquet()` — that
+  method does not exist in Quarto's OJS stdlib; parquet MUST be read via `DuckDBClient`. (The
+  "boot signal" theory was wrong: `_include.html` just hides error callouts until the count hits 0
+  or decreases+stabilises; persistent errors = spinner till the 60 s cap.) See
+  `dispatches/2026-07-15_boot-blocker-fixed.md`.
 
 ## AAA conventions (from docs/nb_guidelines.qmd + climateRationale)
 - Text in `nbText.json`, resolved via `_lang({en,fr})`; include `{{< include /components/_lang.qmd >}}`.
