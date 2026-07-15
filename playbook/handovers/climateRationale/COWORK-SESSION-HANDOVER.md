@@ -3,7 +3,18 @@
 **Audience:** a fresh chat-mode Claude session (Cowork or web/desktop chat)
 picking up the Climate Rationale notebook work. Read this first.
 
-**Last updated:** 2026-06-16 by Pete + Claude Code. *(Narrative below is from session 17 / 2026-05-27; read the update block first, then `ISSUES.md` STATUS lines for the live state.)*
+**Last updated:** 2026-07-15 by Pete + Claude Code. *(Narrative below is from session 17 / 2026-05-27; read the update blocks first — newest first — then `ISSUES.md` STATUS lines for the live state.)*
+
+---
+
+## ⏩ Update 2026-07-15 — two rendering/layout fixes (landed 2026-07-09, `830b247`)
+
+Short in-IDE session (Claude Code in Pete's VS Code, not a Cowork/Tier-2 pass). Pete previewed `notebook.qmd` in the browser, spotted two live defects, fixed both in one commit **`830b247`** on `dev/climateRationale` (pushed to origin; **no PR** — this is Pete's iteration branch, he does not want to merge to `main`). Full write-up in the DECISIONS.md "Session state — 2026-07-09" block.
+
+- **Disputed-region admin0 map clip ([[CR-115]] notebook-side stop-gap).** Kenya's Recent Changes observational map rendered only the Ilemi Triangle. `admin0_feature_obs` used `.find(iso3===…)` and grabbed the first of KEN's two adm0 polygons (the gaul0 135 sliver, not gaul0 137 Kenya) → COG-fetch bbox clipped to the sliver. Now merges **all** iso3 matches into one `MultiPolygon`. Same latent bug fixed for EGY/SDN/SSD. Becomes a no-op once CR-115's pipeline convention lands. Independent of the CR-115 data-aggregation (double-attribution mean) question — this is a geometry/COG-fetch fix.
+- **Floating-TOC width clamp ([[CR-074]] follow-up).** The *open* TOC still overlapped the content column at intermediate widths. Clamped panel width to the free gutter beside the 1180 px body column. Applied in **both** `helpers/toc.ojs` and `styles.css` (divergence from CR-074's original notebook-only scope — the clamp is shared TOC geometry, so every `atlasTOC` notebook inherits it).
+
+**State for the next session:** branch clean + pushed at `830b247`, nothing half-done. Untracked `.agents/` + modified `.github/PULL_REQUEST_TEMPLATE.md` left alone (pre-existing, not this session's). Big outstanding levers unchanged (see the 2026-06-16 block below): CR-115 pipeline convention, producer-side parquet rewrite (perf), CR-117 `pct_gcms_sig`, CR-122 obs trend/IAV real-browser pass + P4 help text.
 
 ---
 

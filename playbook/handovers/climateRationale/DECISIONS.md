@@ -1059,3 +1059,28 @@ run recipe): **[`playbook/reference/hazard-pipeline-r2.1.md`](../../reference/ha
 
 - **Status:** `RESOLVED`
 - **Decision:** The ribbon already draws the inter-model **17–83% "likely" range** (q17/q83, restored in `b44f19d`); about-text + tooltip already said so. Only the toggle was mislabelled "±1 SD ribbon" → relabelled "Show inter-model 17–83% range" (`6a669ab`). A wider 5–95% band would need the pipeline to re-add `q5`/`q95` (pruned in CR-119) — not requested.
+
+---
+
+## Session state — 2026-07-09 (short VS-Code / Claude Code session: two rendering/layout fixes)
+
+Small in-IDE session (not a Cowork/Tier-2 pass). Pete asked to fire up `notebook.qmd` in the browser, spotted two defects live, and had them fixed + committed on the spot. Both landed in a single commit **`830b247`** on `dev/climateRationale`; pushed to origin (direct push, PR-required rule bypassed — Pete does not want a PR to `main`, this branch is his iteration branch). No PR opened.
+
+### What landed (`830b247`, 3 files, +38/-6)
+
+1. **Disputed-region admin0 map clip ([[CR-115]] notebook-side stop-gap).** The Recent Changes observational map rendered only the Ilemi Triangle when Kenya was selected. Root cause: the a0 topojson ships disputed territories as **separate adm0 polygons under the claimant iso3** (KEN = gaul0 135 Ilemi + 137 Kenya; also EGY/SDN/SSD), and `admin0_feature_obs` used `.find(iso3===…)` → grabbed the **first** match (the sliver) → the COG-fetch bbox shrank to the sliver → whole map clipped (status line `sub-window 24×9`). Fix: `.filter()` all iso3 matches and merge into one `MultiPolygon` (mask + outline paths already handle MultiPolygon). See the CR-115 "NOTEBOOK-SIDE MAP FIX" note for why this is independent of the data-aggregation double-attribution question and why it becomes a no-op once the pipeline convention lands.
+2. **Floating-TOC width clamp ([[CR-074]] follow-up).** CR-074's toggle + auto-collapse fixed *first-paint* overlap; the *open* TOC still crossed into the content column at intermediate widths. Capped the panel to the free gutter beside the 1180 px body column: `width: clamp(100px, calc((100vw - 1180px) / 2 - 30px), 300px)` + `box-sizing: border-box`, applied in **both** `helpers/toc.ojs` (`ensureAtlasTOCStyles`, wins the cascade) and static `styles.css`. Divergence from CR-074's original "does not touch `helpers/toc.ojs`" scope — noted in the ticket because the clamp is a property of the shared TOC geometry, so all `atlasTOC`-consuming notebooks now inherit it.
+
+### Process notes
+
+- **Verification was live-browser, not headless.** Both fixes are runtime rendering/layout, and per [[headless-mis-reproduces-duckdb-wasm-sections]] headless can't be trusted for render outcome here. Pete confirmed the Kenya map and the TOC clamp in his own browser.
+- **The map fix touched `notebook.qmd` only — no `hazards_prototype` edit** (respects the no-direct-edits-to-haz-pipeline rule). The real disputed-region resolution stays a pipeline convention decision under CR-115.
+- **Two notebooks previewed simultaneously via one project-level `quarto preview`** (serves the whole `_site`, so `climateRationale/notebook.html` + `sandbox/obs_month_overlay.html` share port 4200) — per-file previews fight over the port.
+
+### In flight / uncommitted
+
+- Working tree: `dev/climateRationale` at `830b247`, in sync with origin. Untracked `.agents/` (verifier-quarto-notebook tooling) and a modified `.github/PULL_REQUEST_TEMPLATE.md` were **left alone** — pre-existing, not this session's, and PR-template is Brayden's repo-wide surface.
+
+### Suggested next step
+
+- New branch / new session coming (Pete's heads-up). This branch is at a clean, pushed state — nothing half-done to carry over. The big outstanding levers are unchanged: CR-115 pipeline convention (blocks a proper disputed-region fix), producer-side parquet rewrite (perf), CR-117 `pct_gcms_sig` (FP significance), and CR-122 obs trend/IAV real-browser verification + P4 help text.
