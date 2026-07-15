@@ -111,6 +111,18 @@ with correct wrap ✓, county selector drives it ✓, 0 persistent OJS errors. (
 `calBars:0` — the detector matched the legend mini-svg, not the plot svg; screenshots are the
 ground truth.)
 
+**ASAL-gap follow-up (verified, don't re-litigate).** Checked whether any tier-1/2 source can
+fill the 8 pastoralist counties ASAP omits: **none exists.** FDW `season` API is national
+Admin-0 only (the `unit_type=Livelihood Zone` filter is ignored → same 6 national rows); ASAP is
+crop-only by definition; FEWS's own Kenya livelihood-zone seasonal calendars are published as
+**PDF/PNG + GIS boundary shapefiles** — the seasonal timing (rains, lean, migration, livestock
+births/milk) is in the graphic/description, not a table → tier 3/4 (OCR + human audit), not an
+LLM read. So the empty-state is the honest ceiling; a national FDW strip on a specific county
+would fake county-specificity. The ASAL seasonality gap is correctly filled by rainfall (B2) +
+**task #11 NDVI** — and the tier-1 machine-readable NDVI source is the **USGS FEWS NET Data
+Portal** (earlywarning.usgs.gov/fews; dekadal/monthly downloadable rasters). That is the
+recommended next task and the natural ASAL filler.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
