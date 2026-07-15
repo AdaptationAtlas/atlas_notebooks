@@ -18,7 +18,8 @@ _quarto.yml conventions). Created 2026-07-09.
   insights). See `dispatches/2026-07-15_blocks-1-5-ported.md` for the two data gotchas
   (unharmonized county names in staged parquets; INT64→BigInt) and the named gaps
   (no exposure/VoP chart in B1; B4 has FEWS retail market prices + ReliefWeb reports but still
-  lacks the trade-flow/market-structure work; no county map yet).
+  lacks the trade-flow/market-structure work; no county map yet). B2 has the #10 per-county
+  crop-calendar strip (JRC ASAP, 38/47 counties; the FEWS graphic was NOT transcribed).
 
 ### Validated (LLM-independent gates)
 - Driver indices — Niño 3.4 r=0.998 vs NOAA; Western-V reproduces Funk's sign + post-1997 regime

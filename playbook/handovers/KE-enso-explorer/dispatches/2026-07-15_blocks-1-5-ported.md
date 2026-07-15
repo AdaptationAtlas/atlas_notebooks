@@ -81,6 +81,36 @@ epidemic → other) — stated in the intro text so the stacking is honest. Veri
 (`verify_rw.mjs`, `s1–s2*.png`): Marsabit drought-dominated bars ✓, Tana River switch ✓,
 10 reliefweb.int links each ✓, 0 persistent errors.
 
+## Addendum 3 (same day) — #10 seasonal calendar into B2
+
+The literal task source (FEWS NET per-livelihood-zone seasonal calendar) is a **graphic** on
+fews.net — extracting per-zone timing = LLM pixel transcription = banned by the project honesty
+rule. The FDW `season` API is machine-readable but **national only** (6 Admin-0 rows). So the
+honest machine-readable substitute is the **JRC ASAP sub-national crop calendar** (CSV, dekad
+resolution, GAUL admin1, DOI 10.2905/JRC.PXQH3Q0). Deterministic parse only
+(`data/KE-enso-explorer/_sources/parse_seasonal_calendar.py`): dekad→month arithmetic, wrapped
+harvest windows split into contiguous month segments, joined to the canonical 47 via
+`county_key` (ASAP `Keiyo-Marakwet`/`Tharaka` aliased; `Malindi` dropped — inside Kilifi, which
+ASAP carries separately; `Unit unavailable` dropped). Output `seasonal_calendar.parquet` (571
+segments, 38 counties) + `seasonal_calendar.meta.json` (full provenance).
+
+New B2 sub-section "When does my county plant and harvest?" — a per-county planting (green) /
+harvest (orange) month strip. It grounds both the B2 season windows and the **B3 harvest lag**:
+e.g. Meru/Kitui long-rains crops plant Mar–Apr → harvest Jun–Aug; short-rains crops plant Sep–Oct
+→ harvest Jan–Feb (the wrap renders as two segments on one row). **Coverage is the story:** the 9
+counties with no ASAP calendar are the 8 pastoralist ASAL counties + Mombasa — they get an explicit
+"no rainfed crop season; seasonality is the rains + pasture (NDVI, forthcoming)" note, not a blank.
+
+Provenance banking note: attempted to bank the raw CSV in the D409 OneDrive store; the write was
+correctly blocked (standing rule: repo is the canonical handoff, no OneDrive writes). Provenance
+instead lives in-repo — the parser + ASAP notes under `_sources/`, the DOI/URL in the meta.json —
+so the dataset is reproducible from git alone.
+
+Verified (`verify_cal2.mjs`, `u1–u3*.png`): Marsabit no-data note ✓, Meru + Kitui full calendars
+with correct wrap ✓, county selector drives it ✓, 0 persistent OJS errors. (First run false-read
+`calBars:0` — the detector matched the legend mini-svg, not the plot svg; screenshots are the
+ground truth.)
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
@@ -88,5 +118,7 @@ epidemic → other) — stated in the intro text so the stacking is honest. Veri
 - **#12 remainder:** the FEWS Enhanced Market Analysis / trade-flow map + banked XBT cross-border
   data are still not folded in (market prices + ReliefWeb now are — see addenda above).
 - No county map / multi-county compare yet (`enhancedMultiSelect` + shared GAUL24 topojson).
-- Context tasks #10 (seasonal calendar — needs a deterministic digitization pipeline in the D409
-  store, NOT casual transcription) and #11 (NDVI county layer — new bake) untouched.
+- **#11 (NDVI county layer)** untouched — the natural next task; it is also what fills the
+  seasonality gap for the 8 pastoralist ASAL counties the crop calendar can't cover.
+- #10 done (see addendum 3). The FEWS graphic seasonal calendar was deliberately NOT used
+  (transcription); ASAP is the machine-readable source of record.

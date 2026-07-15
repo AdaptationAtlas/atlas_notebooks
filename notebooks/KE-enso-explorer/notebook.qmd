@@ -297,6 +297,45 @@ html`<div class="plot-footer-row">${chartDownloadButton(combinedChart, {
 md`${_lang(nbText.sections.b2.insight2)}`
 ```
 
+## `{ojs} heading_calendar`
+
+```{ojs}
+md`${_lang(nbText.sections.b2.calendarIntro)}`
+```
+
+```{ojs}
+calCty.length ? md`**${county} — ${_lang(nbText.sections.b2.calendarTitle)}**` : html``
+```
+
+```{ojs}
+// honest empty state for the 9 counties with no ASAP crop calendar
+// (8 pastoralist ASAL + Mombasa)
+calCty.length ? html`` : md`${_lang(nbText.sections.b2.calendarNoData)}`
+```
+
+```{ojs}
+calendarChart = calCty.length ? Plot.plot({
+  height: 40 + calRows.length * 26, width: 820, marginLeft: 150,
+  x: {domain: [0.5, 12.5], ticks: d3.range(1, 13), tickFormat: (m) => monthAbbr[m - 1], label: null, grid: true},
+  y: {domain: calRows, label: null},
+  color: {domain: ["Planting", "Harvest"], range: ["#41ab5d", "#d95f0e"], legend: true},
+  marks: [
+    Plot.barX(calCty, {
+      x1: (d) => d.m_start - 0.5, x2: (d) => d.m_end + 0.5,
+      y: "label", fill: "stage", rx: 3,
+      tip: true, title: (d) => `${d.label}\n${d.stage}: ${monthAbbr[d.m_start - 1]}–${monthAbbr[d.m_end - 1]}`,
+    }),
+  ],
+}) : html``
+```
+
+```{ojs}
+calCty.length ? html`<div class="plot-footer-row">${chartDownloadButton(calendarChart, {
+  filename: `${county}_crop_calendar_asap`,
+  data: calCty,
+})}</div>` : html``
+```
+
 # `{ojs} heading_b3` {#b3}
 
 ```{ojs}
@@ -564,6 +603,7 @@ heading_methods = _lang(nbText.sections.methods.title)
 heading_appendix = _lang(nbText.sections.appendix.title)
 heading_interact = _lang(nbText.sections.b2.interactHeading)
 heading_combined = _lang(nbText.sections.b2.combinedHeading)
+heading_calendar = _lang(nbText.sections.b2.calendarHeading)
 quickInsight = _lang(nbText.general.quickInsight)
 ```
 
@@ -700,6 +740,10 @@ cropStat = {
 
 ```{ojs}
 recent = drivers.filter((d) => d.year >= 2015)
+```
+
+```{ojs}
+monthAbbr = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 ```
 
 ```{ojs}
@@ -877,6 +921,29 @@ rwCat = (t) => {
 rwByYear = d3.rollups(rwCty, (v) => v.length, (d) => +d.date.slice(0, 4), (d) => rwCat(d.disaster_type))
   .flatMap(([year, cats]) => cats.map(([cat, n]) => ({year, cat, n})))
   .sort((a, b) => a.year - b.year)
+```
+
+```{ojs}
+dbCal = DuckDBClient.of({
+  seasonal_calendar: FileAttachment("/data/KE-enso-explorer/seasonal_calendar.parquet"),
+})
+
+// Per-county planting/harvest month segments (JRC ASAP). 38/47 counties;
+// the 9 pastoralist/urban counties return zero rows -> honest empty state.
+calCty = {
+  const rows = await dbCal.query(`
+    SELECT crop, season, stage, m_start, m_end
+    FROM seasonal_calendar
+    WHERE ${normExpr("county")} = '${countyNorm(county)}'
+    ORDER BY season, crop, stage`);
+  return rows.map((d) => ({...d, label: `${d.crop} (${d.season})`}));
+}
+
+// distinct y-axis rows, long rains before short rains, crop A->Z within
+calRows = [...new Set(calCty.map((d) => d.label))]
+  .sort((a, b) => (a.includes("Long") === b.includes("Long")
+    ? a.localeCompare(b)
+    : a.includes("Long") ? -1 : 1))
 ```
 
 :::
