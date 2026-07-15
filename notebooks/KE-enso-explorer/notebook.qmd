@@ -458,6 +458,49 @@ html`<div class="plot-footer-row">${chartDownloadButton(pricesChart, {
 })}</div>`
 ```
 
+## `{ojs} title_rw`
+
+```{ojs}
+md`${_lang(nbText.sections.b4.rwIntro)}`
+```
+
+```{ojs}
+rwChart = Plot.plot({
+  height: 380, width: 900, marginLeft: 50,
+  x: {tickFormat: "d", label: "year"}, y: {label: "reports"},
+  color: {domain: ["Drought", "Flood", "Epidemic", "Other"],
+          range: ["#d95f0e", "#4575b4", "#7b3294", "#bbbbbb"], legend: true},
+  marks: [
+    Plot.barY(rwByYear, {x: "year", y: "n", fill: "cat", tip: true}),
+    Plot.ruleY([0]),
+  ],
+})
+```
+
+```{ojs}
+html`<div class="plot-footer-row">${chartDownloadButton(rwChart, {
+  filename: `${county}_reliefweb_reports`,
+  data: rwCty,
+})}</div>`
+```
+
+```{ojs}
+md`**${_lang(nbText.sections.b4.rwRecent)}**`
+```
+
+```{ojs}
+// htl escapes interpolated report titles, so raw API strings are safe
+html`<table class="table table-sm" style="font-size:0.85rem">
+  <thead><tr><th>date</th><th>title</th><th>source</th><th>hazards</th></tr></thead>
+  <tbody>${rwCty.slice(0, 10).map((d) => html`<tr>
+    <td style="white-space:nowrap">${d.date}</td>
+    <td><a href="${d.url}" target="_blank" rel="noopener">${d.title}</a></td>
+    <td>${d.source}</td>
+    <td>${d.disaster_type}</td>
+  </tr>`)}</tbody>
+</table>`
+```
+
 # `{ojs} heading_b5` {#b5}
 
 ```{ojs}
@@ -539,6 +582,7 @@ title_acled = `${county} — ${_lang(nbText.sections.b4.acledTitle)}`
 title_prices = priceProducts.length
   ? `${county} — ${priceProduct} — ${_lang(nbText.sections.b4.pricesTitle)}`
   : `${county} — ${_lang(nbText.sections.b4.pricesTitle)}`
+title_rw = `${county} — ${_lang(nbText.sections.b4.rwTitle)}`
 title_recent = _lang(nbText.sections.b5.recentTitle)
 ```
 
@@ -806,6 +850,33 @@ pricesCty = dbPrices.query(`
   ORDER BY period_date`)
 
 priceUnitLabel = pricesCty.length ? `KES per ${pricesCty[0].unit.replace("_", " ")}` : "KES"
+```
+
+```{ojs}
+dbRw = DuckDBClient.of({
+  reliefweb: FileAttachment("/data/KE-enso-explorer/reliefweb_county.parquet"),
+})
+
+// newest first: the body table shows the 10 most recent as-is
+rwCty = dbRw.query(`
+  SELECT date, disaster_type, title, source, url
+  FROM reliefweb
+  WHERE ${normExpr("county")} = '${countyNorm(county)}'
+  ORDER BY date DESC`)
+
+// deterministic single-category classification (first match wins) so a
+// multi-tagged report is counted exactly once in the stacked bars
+rwCat = (t) => {
+  const s = t ?? "";
+  return s.includes("Drought") ? "Drought"
+    : s.includes("Flood") ? "Flood"
+    : s.includes("Epidemic") ? "Epidemic"
+    : "Other";
+}
+
+rwByYear = d3.rollups(rwCty, (v) => v.length, (d) => +d.date.slice(0, 4), (d) => rwCat(d.disaster_type))
+  .flatMap(([year, cats]) => cats.map(([cat, n]) => ({year, cat, n})))
+  .sort((a, b) => a.year - b.year)
 ```
 
 :::

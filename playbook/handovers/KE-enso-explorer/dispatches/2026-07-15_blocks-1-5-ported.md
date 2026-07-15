@@ -71,12 +71,22 @@ Verified same protocol (`verify_prices.mjs`, `report_prices.json`, `r1–r4*.png
 2 markets ✓, product switch → Goats ✓, Samburu no-data note ✓, Nairobi 6 products ✓; 0 persistent
 errors in all phases. SQL escapes product names (Cow's Milk) via doubled quotes.
 
+## Addendum 2 (same day) — #12 second slice + ReliefWeb into B4
+
+`reliefweb_county.parquet` (15 736 county-tagged reports, 2010–2026-06, all 47 counties canonical
+— the first live API run happened 2026-07-09 and was banked) is now a fourth B4 figure: stacked
+reports/year by hazard class + a 10-most-recent table with links to the source documents.
+Multi-tagged reports are counted ONCE via a deterministic first-match rule (drought → flood →
+epidemic → other) — stated in the intro text so the stacking is honest. Verified
+(`verify_rw.mjs`, `s1–s2*.png`): Marsabit drought-dominated bars ✓, Tana River switch ✓,
+10 reliefweb.int links each ✓, 0 persistent errors.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
   was staged and the standalone never had the chart. Needs a staging decision first.
-- **B4 still lacks ReliefWeb** (`reliefweb_county.parquet` staged, unused) **and the FEWS Enhanced
-  Market Analysis / trade-flow map** — the rest of context task #12.
+- **#12 remainder:** the FEWS Enhanced Market Analysis / trade-flow map + banked XBT cross-border
+  data are still not folded in (market prices + ReliefWeb now are — see addenda above).
 - No county map / multi-county compare yet (`enhancedMultiSelect` + shared GAUL24 topojson).
 - Context tasks #10 (seasonal calendar — needs a deterministic digitization pipeline in the D409
   store, NOT casual transcription) and #11 (NDVI county layer — new bake) untouched.
