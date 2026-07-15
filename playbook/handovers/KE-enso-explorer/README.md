@@ -22,8 +22,10 @@ _quarto.yml conventions). Created 2026-07-09.
   crop-calendar strip (JRC ASAP, 38/47 counties; the FEWS graphic was NOT transcribed). B4 has the
   #11 NDVI vegetation-condition chart (WFP VAM / MODIS, all 47 counties incl. ASAL) — closes the
   crop-calendar ASAL gap; and the #12 national cross-border trade-flow map (FEWS XBT, arrows on
-  topojson centroids, no typed coords). #12 fully done (prices + ReliefWeb + XBT). Main remaining
-  gap: B1 exposure/VoP chart.
+  topojson centroids, no typed coords). #12 fully done (prices + ReliefWeb + XBT). B1 now leads with
+  the Atlas value-of-production chart (MapSPAM crops + GLW4 livestock, constant I$; livestock-share
+  insight) — **all named port gaps closed**. Remaining nice-to-haves: county map / multi-county
+  compare; WFP subnational rainfall; OCR of 2002–2012 scanned KNBS (tier-3, deferred).
 
 ### Validated (LLM-independent gates)
 - Driver indices — Niño 3.4 r=0.998 vs NOAA; Western-V reproduces Funk's sign + post-1997 regime

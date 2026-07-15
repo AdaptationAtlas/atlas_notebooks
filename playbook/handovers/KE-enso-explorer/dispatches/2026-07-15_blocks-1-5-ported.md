@@ -169,6 +169,27 @@ Cattle → Ethiopia-dominant (the ASAL pastoralist livestock story) + unit flips
 re-draws map (partners, frame, widths) + chart + unit; 0 persistent OJS errors. FEWS *Enhanced
 Market Analysis* itself is a narrative report (graphic/PDF) → cited in Methods, not transcribed.
 
+## Addendum 6 (same day) — B1 exposure/VoP chart (last named gap)
+
+The "staging decision" the B1 exposure gap waited on: the Atlas combined-exposure snapshot is
+already banked (`_master/harmonized/atlas_exposure.csv`, MapSPAM 2020 crops + GLW4 livestock,
+"Done — do not rebuild"). Staged a slim county VoP subset → `exposure_vop.parquet` (1156 rows,
+47 counties, 34 commodities). **The non-obvious filter:** crops carry `tech='all'` but livestock
+carry `tech=''` (GLW4 has no technology dimension), so filtering `tech='all'` alone silently drops
+all livestock — exactly the ASAL story. Correct filter = `vop`/`intld15`/adm1 with
+`tech='all'` (crops) OR `tech=''` (livestock, excl `total-*` roll-ups); livestock species merged
+across highland/tropical agro-zones. VoP values pass through verbatim.
+
+New lead B1 figure: horizontal value-of-production bars by commodity (green crops / brown
+livestock, constant I$), plus a **computed** insight (livestock share + leading commodity —
+deterministic from the staged values, no model-authored number). Verified: Marsabit livestock
+**95%** ("drought = economic shock, not just food-supply"), Nakuru tea-led, livestock **25%**;
+12 bars, county selector drives it, 0 persistent OJS errors (`verify_vop.mjs`, `x1/x2*.png`).
+
+**All named gaps from the port are now closed** (B1 VoP, #10, #11, #12). Remaining nice-to-haves:
+county map / multi-county compare (`enhancedMultiSelect` + shared topojson); WFP subnational
+rainfall as a longer county series; OCR of the 2002–2012 scanned KNBS abstracts (tier-3, deferred).
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet

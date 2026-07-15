@@ -142,6 +142,38 @@ md`${_lang(nbText.sections.keyfacts.insight)}`
 md`${_lang(nbText.sections.b1.intro)}`
 ```
 
+## `{ojs} title_vop`
+
+```{ojs}
+md`${_lang(nbText.sections.b1.vopIntro)}`
+```
+
+```{ojs}
+vopChart = Plot.plot({
+  height: 40 + vopTop.length * 26, width: 760, marginLeft: 130,
+  x: {label: "value of production (constant I$)", tickFormat: "~s", grid: true},
+  y: {domain: vopTop.map((d) => d.commodity), label: null},
+  color: {domain: ["Crop", "Livestock"], range: ["#41ab5d", "#a6611a"], legend: true},
+  marks: [
+    Plot.barX(vopTop, {x: "vop_intld15", y: "commodity", fill: "kind", rx: 2,
+      tip: true, title: (d) => `${d.commodity} (${d.kind})\n${d3.format("$,.0f")(d.vop_intld15)} I$`}),
+    Plot.ruleX([0]),
+  ],
+})
+```
+
+```{ojs}
+html`<div class="plot-footer-row">${chartDownloadButton(vopChart, {
+  filename: `${county}_value_of_production_atlas`,
+  data: vopCty,
+})}</div>`
+```
+
+```{ojs}
+// dynamic insight computed from the staged VoP values (no LLM number)
+md`**${vopInsight}**`
+```
+
 ## `{ojs} title_gesi`
 
 ```{ojs}
@@ -730,6 +762,7 @@ quickInsight = _lang(nbText.general.quickInsight)
 // Chart-title vars (H2s in the body; dynamic on the selected county /
 // season / driver / crop). Plot.plot title: is NOT used — it renders an
 // h2 inside the figure wrapper, which breaks PNG export widths.
+title_vop = `${county} — ${_lang(nbText.sections.b1.vopTitle)}`
 title_gesi = `${county} — ${_lang(nbText.sections.b1.gesiTitle)}`
 title_maize = `${county} — ${_lang(nbText.sections.b1.maizeTitle)}`
 title_rain = `${county} — ${season} ${_lang(nbText.sections.b2.rainTitle)}`
@@ -908,6 +941,34 @@ rainCty = {
     GROUP BY year
     ORDER BY year`);
   return rows.map((d) => ({...d, enso: ensoPhaseByYear.get(d.year) ?? "Neutral"}));
+}
+```
+
+```{ojs}
+dbVop = DuckDBClient.of({
+  exposure_vop: FileAttachment("/data/KE-enso-explorer/exposure_vop.parquet"),
+})
+
+// county value of production by commodity (Atlas exposure: MapSPAM 2020
+// crops tech='all' + GLW4 livestock, merged agro-zones, constant I$).
+vopCty = dbVop.query(`
+  SELECT commodity, kind, vop_intld15
+  FROM exposure_vop
+  WHERE ${normExpr("county")} = '${countyNorm(county)}'
+  ORDER BY vop_intld15 DESC`)
+
+// top commodities for the bar; the rest folded into the download data
+vopTop = vopCty.slice(0, 12)
+
+// dynamic insight — livestock share + leading commodity, computed from
+// the staged VoP (deterministic; no value is produced by the model)
+vopInsight = {
+  if (!vopCty.length) return `No Atlas value-of-production data for ${county}.`;
+  const total = d3.sum(vopCty, (d) => d.vop_intld15);
+  const live = d3.sum(vopCty.filter((d) => d.kind === "Livestock"), (d) => d.vop_intld15);
+  const top = vopCty[0];
+  const livePct = Math.round((live / total) * 100);
+  return `In ${county}, ${top.commodity.toLowerCase()} leads the agricultural economy, and livestock is ${livePct}% of the county's total production value — ${livePct >= 50 ? "a livestock-driven economy where a pasture-failing drought is an economic shock, not just a food-supply one" : "so both crop and rangeland conditions matter to household income"}.`;
 }
 ```
 
