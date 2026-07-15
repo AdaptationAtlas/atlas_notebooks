@@ -54,11 +54,29 @@ Harness note: first run "broke" on selector changes — `Inputs.select` option *
 ("0","1",…), so `select.value = "Turkana"` set `""` and fed `undefined` into the graph. Select by
 option *text* in Playwright. Not a notebook bug.
 
+## Addendum (same day) — #12 first slice: FEWS market prices into B4
+
+`market_prices.parquet` (FEWS NET FDW, 27 406 rows, 2000–2026, 42/47 counties, county names
+already canonical) is now a third B4 figure: monthly **retail** price, line per market, county-
+scoped product selector. Two honesty decisions baked in:
+
+- **Retail only.** In the retail series every product has exactly ONE trading unit (verified —
+  the `90_kg` maize rows are all Wholesale), so a single per-product y axis (`KES per <unit>`)
+  never mixes units.
+- **Explicit empty state** for the 5 uncovered counties (Bungoma, Kericho, Machakos, Nyamira,
+  Samburu): a "no FEWS series for this county" note, product dropped from the H2, no phantom
+  chart implied.
+
+Verified same protocol (`verify_prices.mjs`, `report_prices.json`, `r1–r4*.png`): Marsabit maize
+2 markets ✓, product switch → Goats ✓, Samburu no-data note ✓, Nairobi 6 products ✓; 0 persistent
+errors in all phases. SQL escapes product names (Cow's Milk) via doubled quotes.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
   was staged and the standalone never had the chart. Needs a staging decision first.
-- **B4 = IPC + ACLED only** — `market_prices.parquet` + `reliefweb_county.parquet` are staged but
-  unused; folding them in is context task #12 (with the FEWS market-structure work).
+- **B4 still lacks ReliefWeb** (`reliefweb_county.parquet` staged, unused) **and the FEWS Enhanced
+  Market Analysis / trade-flow map** — the rest of context task #12.
 - No county map / multi-county compare yet (`enhancedMultiSelect` + shared GAUL24 topojson).
-- Context tasks #10 (seasonal calendar) and #11 (NDVI) untouched.
+- Context tasks #10 (seasonal calendar — needs a deterministic digitization pipeline in the D409
+  store, NOT casual transcription) and #11 (NDVI county layer — new bake) untouched.

@@ -17,7 +17,8 @@ _quarto.yml conventions). Created 2026-07-09.
   (`_lang` i18n, per-plot DuckDB clients, download button per figure, H2 chart titles, dynamic
   insights). See `dispatches/2026-07-15_blocks-1-5-ported.md` for the two data gotchas
   (unharmonized county names in staged parquets; INT64→BigInt) and the named gaps
-  (no exposure/VoP chart in B1; B4 lacks market prices + ReliefWeb; no county map yet).
+  (no exposure/VoP chart in B1; B4 has FEWS retail market prices but still lacks ReliefWeb +
+  the trade-flow/market-structure work; no county map yet).
 
 ### Validated (LLM-independent gates)
 - Driver indices — Niño 3.4 r=0.998 vs NOAA; Western-V reproduces Funk's sign + post-1997 regime

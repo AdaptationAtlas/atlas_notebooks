@@ -414,6 +414,50 @@ html`<div class="plot-footer-row">${chartDownloadButton(acledChart, {
 })}</div>`
 ```
 
+## `{ojs} title_prices`
+
+```{ojs}
+md`${_lang(nbText.sections.b4.pricesIntro)}`
+```
+
+::: {.controls-row}
+
+```{ojs}
+viewof priceProduct = Inputs.select(
+  priceProducts.length ? priceProducts : ["(no data)"],
+  {
+    label: _lang(nbText.sections.controls.product),
+    value: priceProducts.includes("Maize Grain (White)") ? "Maize Grain (White)" : priceProducts[0],
+  }
+)
+```
+
+:::
+
+```{ojs}
+// honest empty state: 5 of 47 counties have no FEWS market series
+pricesCty.length ? html`` : md`${_lang(nbText.sections.b4.pricesNoData)}`
+```
+
+```{ojs}
+pricesChart = Plot.plot({
+  height: 380, width: 900, marginLeft: 60,
+  color: {legend: true},
+  y: {label: priceUnitLabel},
+  marks: [
+    Plot.lineY(pricesCty, {x: (d) => new Date(d.period_date), y: "value_kes", stroke: "market", tip: true}),
+    Plot.ruleY([0]),
+  ],
+})
+```
+
+```{ojs}
+html`<div class="plot-footer-row">${chartDownloadButton(pricesChart, {
+  filename: `${county}_market_prices_fews`,
+  data: pricesCty,
+})}</div>`
+```
+
 # `{ojs} heading_b5` {#b5}
 
 ```{ojs}
@@ -492,6 +536,9 @@ title_scatter = `${cropSel} ${_lang(nbText.sections.b3.scatterTitle)} ${driverNa
 title_trend = `${cropSel} ${_lang(nbText.sections.b3.trendTitle)}`
 title_ipc = `${county} — ${_lang(nbText.sections.b4.ipcTitle)}`
 title_acled = `${county} — ${_lang(nbText.sections.b4.acledTitle)}`
+title_prices = priceProducts.length
+  ? `${county} — ${priceProduct} — ${_lang(nbText.sections.b4.pricesTitle)}`
+  : `${county} — ${_lang(nbText.sections.b4.pricesTitle)}`
 title_recent = _lang(nbText.sections.b5.recentTitle)
 ```
 
@@ -728,6 +775,37 @@ acledCty = dbAcled.query(`
   GROUP BY 1
   HAVING CAST(SUBSTR(week, 1, 4) AS INT) > 1990
   ORDER BY 1`)
+```
+
+```{ojs}
+dbPrices = DuckDBClient.of({
+  market_prices: FileAttachment("/data/KE-enso-explorer/market_prices.parquet"),
+})
+
+// Retail only: each product has exactly ONE unit in the retail series
+// (verified 2026-07-15 — the 90_kg maize rows are all Wholesale), so a
+// single y axis per product is honest. Product options are scoped to
+// the selected county so the select never offers an empty chart.
+priceProducts = {
+  const rows = await dbPrices.query(`
+    SELECT DISTINCT product
+    FROM market_prices
+    WHERE ${normExpr("county")} = '${countyNorm(county)}'
+      AND price_type = 'Retail'
+    ORDER BY product`);
+  return rows.map((d) => d.product);
+}
+
+// product names contain apostrophes (Cow's Milk ...) — escape for SQL
+pricesCty = dbPrices.query(`
+  SELECT market, period_date, value_kes, unit
+  FROM market_prices
+  WHERE ${normExpr("county")} = '${countyNorm(county)}'
+    AND price_type = 'Retail'
+    AND product = '${String(priceProduct).replace(/'/g, "''")}'
+  ORDER BY period_date`)
+
+priceUnitLabel = pricesCty.length ? `KES per ${pricesCty[0].unit.replace("_", " ")}` : "KES"
 ```
 
 :::
