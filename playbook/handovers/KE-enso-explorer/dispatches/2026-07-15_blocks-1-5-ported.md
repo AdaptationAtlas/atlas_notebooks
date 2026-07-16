@@ -190,6 +190,34 @@ deterministic from the staged values, no model-authored number). Verified: Marsa
 county map / multi-county compare (`enhancedMultiSelect` + shared topojson); WFP subnational
 rainfall as a longer county series; OCR of the 2002–2012 scanned KNBS abstracts (tier-3, deferred).
 
+## Addendum 7 (2026-07-16) — county map + compare-counties (first nice-to-have)
+
+Two additions, design/interactivity aligned with the climateRationale family (per Pete):
+
+1. **Key Facts county choropleth** (`countyMap`) — a spatial picker. Kenya admin1 polygons from the
+   shared GAUL24 a1 topojson (join by normalized name; all 47 match, Ilemi Triangle renders grey).
+   Metric selector (VoP / latest NDVI %normal / latest IPC phase / mean OND / mean MAM rainfall) +
+   palette dropdown + county-labels toggle in a `.controls-row` (mirrors climateRationale's map
+   controls). One Plot color scale drives BOTH the d3 polygon fills and the `Plot.legend` so they
+   agree (adaptive domain; diverging-at-100 for NDVI; fixed 1–5 for IPC). **Click a county → drives
+   the global `county` select** (match option by text — values are indices), so the map re-selects
+   for all five blocks. Built with d3 (not Plot.geo) specifically so click binds to the datum
+   reliably.
+2. **"How Do Counties Compare?" section** (`#compare`, after B4) — `enhancedMultiSelect` (the shared
+   helper, `enableSelectAll`) over the 47 counties; overlays seasonal rainfall (uses the global
+   season) and annual-mean NDVI %-normal, one line per county. This is the multi-county view;
+   B1–B5 stay single-county (per the agreed scope).
+
+**Gotcha fixed mid-build (memory-worthy):** a displayed DOM cell must be *defined* in the body, not
+defined in the hidden appendix and merely *referenced* bare in the body — the latter renders the
+node inside `.hidden` and the body shows only an `▸HTMLDivElement {}` inspector dump. Moved the
+`countyMap` definition into its body cell.
+
+Verified (`verify_map2.mjs` / `verify_all.mjs`, `z1/z2*.png`): map renders (48 polygons, adaptive
+ramp, selected outline), clicking Turkana flipped the banner + B1 + NDVI headings to Turkana;
+compare overlays 3 counties (Nakuru highland wettest, Turkana arid driest); 0 persistent OJS errors.
+No new data staged — reuses existing parquets + the shared topojson.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
