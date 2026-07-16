@@ -218,6 +218,34 @@ ramp, selected outline), clicking Turkana flipped the banner + B1 + NDVI heading
 compare overlays 3 counties (Nakuru highland wettest, Turkana arid driest); 0 persistent OJS errors.
 No new data staged — reuses existing parquets + the shared topojson.
 
+## Addendum 8 (2026-07-16) — review round: sticky controls, figure explainers, calendar cut, rainfall redesign
+
+Live review with Pete against `quarto preview`. Changes:
+
+- **Sticky global controls.** County/season/driver `.controls-row` pinned below the navbar
+  (`.ke-sticky-controls`, `position:sticky; top:56px`) — mirrors climateRationale's
+  `.global-admin-selectors`. (commit `77ace9f`)
+- **"About this plot" on every figure.** Copied climateRationale's `captionDetails` + a thin
+  `plotFooter(caption, chart, opts)` wrapper; all 20 footers converted from a bare download button
+  to a foldable explainer sharing the footer row. Per-figure caption text in nbText. (`77ace9f`)
+- **Crop calendar removed** from Block 2 at Pete's request (the `seasonal_calendar` parquet + parser
+  stay staged, just not shown). (`77ace9f`)
+- **Rainfall chart redesigned to be season-aware** (Pete: "why ENSO for MAM?"). Bars are now
+  coloured by the driver that governs the selected season: **OND → ENSO phase** with the **IOD**
+  overlaid as a ▲/▼ glyph (the two coupled OND drivers); **MAM → Western-V (WNP) phase** (ENSO
+  explains little of MAM — matches the framing rules); **OND+MAM → two panels side by side**. Added
+  an **Absolute ↔ Anomaly (vs 1991–2020)** toggle. Western-V phase from `wnp_std_mam` averaged over
+  MAM months; labelled sign-neutrally (Western-V high/low) since the wet/dry sign isn't asserted.
+
+**Two gotchas hit + fixed:** (1) a global `}</div>\`` strip while scripting the footer conversion
+also clipped `countyMap`'s return — repaired. (2) `rainCharts`, like `countyMap` before it, was
+first defined in the hidden appendix + referenced bare in the body → rendered an inspector dump;
+moved the definition into the body cell (see memory `feedback_displayed-ojs-cell-define-in-body`).
+
+Verified after each: sticky present, 20 foldables with correct bodies, calendar gone, map intact,
+rainfall panels correct for OND / MAM / OND+MAM / anomaly, 0 persistent OJS errors
+(`verify_batch.mjs`, `verify_rain.mjs`, `aa1–aa4*.png`).
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet

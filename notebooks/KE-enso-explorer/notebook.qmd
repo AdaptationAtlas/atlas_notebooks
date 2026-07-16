@@ -331,21 +331,30 @@ md`${_lang(nbText.sections.b2.intro)}`
 
 ## `{ojs} title_rain`
 
+::: {.controls-row}
+
 ```{ojs}
-rainChart = Plot.plot({
-  height: 380, width: 900, marginLeft: 55, y: {label: "mm"},
-  color: {domain: ["El Niño", "La Niña", "Neutral"], range: ["#d73027", "#4575b4", "#bbbbbb"], legend: true},
-  marks: [
-    Plot.barY(rainCty, {x: "year", y: "value_mean", fill: "enso", tip: true}),
-    Plot.ruleY([0]),
-  ],
+viewof rainView = Inputs.radio(["Absolute (mm)", "Anomaly (vs 1991–2020)"], {
+  label: _lang(nbText.sections.controls.rainView),
+  value: "Absolute (mm)",
 })
 ```
 
+:::
+
 ```{ojs}
-plotFooter(_lang(nbText.sections.b2.rainCaption), rainChart, {
-  filename: `${county}_${season}_rainfall_by_enso_phase`,
-  data: rainCty,
+// season-aware panels: OND coloured by ENSO phase (+ IOD as a ▲/▼ glyph,
+// the two coupled OND drivers); MAM coloured by the Western-V phase (ENSO
+// explains little of MAM); OND+MAM shows both panels side by side.
+// (Defined here in the body so the DOM node renders in place, not as an
+// inspector dump — see the appendix helpers rainPanel / rainSeasonData.)
+rainCharts = html`<div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;">${rainActiveSeasons.map((s) => rainPanel(s))}</div>`
+```
+
+```{ojs}
+plotFooter(_lang(nbText.sections.b2.rainCaption), rainCharts, {
+  filename: `${county}_${season}_rainfall_by_driver`,
+  data: rainDownloadRows,
 })
 ```
 
@@ -1079,20 +1088,89 @@ dbChirps = DuckDBClient.of({
   chirps_county: FileAttachment("/data/KE-enso-explorer/chirps_county.parquet"),
 })
 
-// county seasonal rainfall (PTOT): sum the selected season's period(s)
-// to ONE value per year (prevents OND+MAM stacking two bars), coloured
-// by that year's ENSO phase. seasonPeriods values come from a fixed
-// whitelist, so inlining them in the SQL is safe.
-rainCty = {
-  const periods = seasonPeriods.map((p) => `'${p}'`).join(", ");
-  const rows = await dbChirps.query(`
-    SELECT year, SUM(value_mean) AS value_mean
-    FROM chirps_county
-    WHERE ${normExpr("admin1_name")} = '${countyNorm(county)}'
-      AND variable = 'PTOT' AND period IN (${periods})
-    GROUP BY year
-    ORDER BY year`);
-  return rows.map((d) => ({...d, enso: ensoPhaseByYear.get(d.year) ?? "Neutral"}));
+// ---- season-aware rainfall panels ----
+// Per-season driver phase from the season's own months: OND coloured by
+// ENSO (+ IOD symbol), MAM by the Western-V (WNP) — matching the notebook's
+// framing (ENSO leads OND; Western-V is the partly-independent MAM control).
+rainPhaseByYear = (months, col, thr, hi, lo) => {
+  const by = d3.rollups(
+    drivers.filter((d) => months.includes(d.month) && d[col] != null),
+    (v) => d3.mean(v, (d) => d[col]), (d) => d.year);
+  return new Map(by.map(([y, v]) => [y, v > thr ? hi : v < -thr ? lo : "Neutral"]));
+}
+
+rainSeasonMonths = ({OND: [10, 11, 12], MAM: [3, 4, 5],
+  annual: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]})
+rainSeasonPeriods = ({OND: ["OND"], MAM: ["MAM"], annual: ["annual"]})
+
+// which single-season panels the current selection needs
+rainActiveSeasons = season === "OND+MAM" ? ["OND", "MAM"] : [season]
+
+// one {rows, clim} bundle per active season (rain + ENSO/WNP/IOD phase)
+rainSeasonData = {
+  const out = new Map();
+  for (const s of rainActiveSeasons) {
+    const months = rainSeasonMonths[s];
+    const enso = rainPhaseByYear(months, "nino34_anom_noaa", 0.5, "El Niño", "La Niña");
+    const wnp = rainPhaseByYear(months, "wnp_std_mam", 0.5, "Western-V high", "Western-V low");
+    const iod = rainPhaseByYear(months, "dmi_hadisst", 0.4, "IOD positive", "IOD negative");
+    const periods = rainSeasonPeriods[s].map((p) => `'${p}'`).join(", ");
+    const rows = await dbChirps.query(`
+      SELECT year, SUM(value_mean) AS value
+      FROM chirps_county
+      WHERE ${normExpr("admin1_name")} = '${countyNorm(county)}'
+        AND variable = 'PTOT' AND period IN (${periods})
+      GROUP BY year ORDER BY year`);
+    const clim = d3.mean(rows.filter((r) => r.year >= 1991 && r.year <= 2020), (r) => r.value);
+    out.set(s, {
+      clim,
+      rows: rows.map((r) => ({
+        year: r.year, value: r.value,
+        enso: enso.get(r.year) ?? "Neutral",
+        wnp: wnp.get(r.year) ?? "Neutral",
+        iodPhase: iod.get(r.year) ?? "IOD neutral",
+      })),
+    });
+  }
+  return out;
+}
+
+rainDownloadRows = rainActiveSeasons.flatMap((s) =>
+  rainSeasonData.get(s).rows.map((r) => ({season: s, ...r})))
+
+// one panel (Plot) per season, coloured by the season's driver
+rainPanel = (s) => {
+  const {rows, clim} = rainSeasonData.get(s);
+  const anomaly = rainView.startsWith("Anomaly");
+  const isMAM = s === "MAM";
+  const phaseKey = isMAM ? "wnp" : "enso";
+  const domain = isMAM ? ["Western-V high", "Western-V low", "Neutral"]
+                       : ["El Niño", "La Niña", "Neutral"];
+  const range = isMAM ? ["#1b9e77", "#a6611a", "#bbbbbb"]
+                      : ["#d73027", "#4575b4", "#bbbbbb"];
+  const data = rows.map((r) => ({...r, y: anomaly ? r.value - clim : r.value, fill: r[phaseKey]}));
+  const twoUp = rainActiveSeasons.length > 1;
+  const driverName = isMAM ? "Western-V" : "ENSO";
+  const marks = [
+    Plot.barY(data, {x: "year", y: "y", fill: "fill", tip: true,
+      title: (d) => `${d.year}: ${Math.round(d.value)} mm\n${driverName}: ${d.fill}${s === "OND" ? `\n${d.iodPhase}` : ""}`}),
+    Plot.ruleY([0]),
+  ];
+  // OND: overlay IOD as a ▲ (positive) / ▼ (negative) glyph at each bar
+  // top — the second OND driver, without fighting the ENSO colour scale.
+  if (s === "OND")
+    marks.push(Plot.text(data.filter((d) => d.iodPhase !== "IOD neutral"),
+      {x: "year", y: "y", dy: -6, fontSize: 9, fill: "#333",
+       text: (d) => d.iodPhase === "IOD positive" ? "▲" : "▼",
+       title: (d) => `${d.year}: ${d.iodPhase}`}));
+  const chart = Plot.plot({
+    height: 360, width: twoUp ? 440 : 900, marginLeft: 55,
+    x: {tickFormat: "d", label: "year"},
+    y: {label: anomaly ? "mm vs 1991–2020 mean" : "mm"},
+    color: {domain, range, legend: true},
+    marks,
+  });
+  return html`<div><div style="font-weight:600;font-size:0.9em;margin:0 0 0.25rem;">${s} — ${driverName} phase</div>${chart}</div>`;
 }
 ```
 
