@@ -384,6 +384,23 @@ Pete: maize (+ others) missing for many counties; is the 2022 drop real?
 - Added an always-visible coverage note under the figure (`keyfacts.produceNote`) so per-county
   absences read as "not a top producer", not broken data.
 
+### Update — ROTATION was the fix; maize/coffee/cotton unlocked (2026-07-17)
+
+Pete's key insight: the problem annexes are **landscape tables rotated 90° on a portrait page**
+(writing-dir (0,-1)), not "mirrored". De-rotate = group words into landscape rows (shared x-band,
+read −y). This is now the standard for rotated annexes (`data/KE-enso-explorer/_sources/`):
+- **Maize** → all 47 counties (was top-19). Top-20 cross-check 190/190 exact + additivity 100%.
+- **Cotton (Table 4.12)** → 18 counties, Area + Seed-Cotton Tonnes + **Value (KSh)** (value_ksh column).
+- **Coffee (Annex 11)** → 20 itemised counties = ~87% of the printed national total (rest unlisted);
+  crop-year → ending calendar year. Additivity consistent 87% across years.
+- **12 crops now served** + livestock. `dual_ok` de-rotated annexes validated by cross-check/additivity.
+
+**Q3 — 2024 data / 2025 edition (OPEN):** current series is the **2024 NAPR (2019–2023)**. The **2025
+NAPR (2020–2024)** annexes are ALSO rotated and now de-rotatable — so 2024 data is reachable. Not
+yet done: it's a source decision (single-source switch to 2020–2024, vs merging to 2019–2024 which
+introduces a cross-edition revision break). Recommend single-source 2025 (2020–2024, current). See
+question to Pete.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
