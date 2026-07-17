@@ -280,6 +280,41 @@ its startup render AND kept overwriting `_site` with that stale build, so my com
 invisible. Killed it; view the fresh static build on `:8765` (or restart preview WITHOUT
 `--no-watch-inputs` for hot reload).
 
+## Addendum 10 (2026-07-17) — KNBS IS subnational: NAPR county production, dual-engine extracted, multi-view
+
+Pete pushed back: "there should be subnational data in the KNBS ag production reports." **He was
+right and I was wrong.** My "KNBS = national only" was true only of the *Statistical Abstract*
+tables; the **KNBS National Agriculture Production Report (NAPR)** in `KNBS/Ag Production Reports/`
+is authored by KNBS and is county-level (Annexes: Area & Production by County, 2019–2023, all 47).
+
+**Extraction (the #1-risk work, done rigorously):** dual-engine (`_sources/parse_napr.py`,
+pdfplumber `extract_tables` + PyMuPDF word-clustering), values parsed by code (comma-strip), never
+LLM-read. Gates: (1) cell-by-cell engine agreement **99–100%** per crop; (2) **additivity** — each
+crop's county sum equals the annex's printed national Total, **100.0% every crop every year**.
+Staged `knbs_napr_county_production.parquet` (1420 rows, 9 crops, 2019–2023, 47 counties) + meta +
+extractor.
+
+**Served: 9 rainfed food crops** (sorghum, finger & pearl millet, dry beans, cowpeas, green grams,
+pigeon peas, Irish & sweet potato). **Quarantined (not shown wrong):**
+- **Maize** — the 2024 NAPR maize annex (pp.114–115) is **mirror-reversed AND transposed**. Neither
+  gate catches a bad transpose there: additivity is order-invariant (county sum unchanged by
+  mis-assignment) and dual-engine agrees because *both* engines read the mirroring identically.
+  Needs a per-county cross-check against the clean "Top 20 Counties in Maize Production" table (or the
+  2025 edition, whose annex layout still needs mapping) before it's safe. **This is the top follow-up.**
+- Coffee (crop-year) + cotton/lint (value) annexes have different structures — not yet extracted.
+- Livestock-population annexes (cattle/sheep/goats/camels by county) available in the same report.
+
+**UI:** the Key-Facts "What does my county produce?" figure now sources KNBS NAPR county data with a
+**View selector — Table / Bars / Treemap / Lineplot** — and an Absolute(t) / % of national toggle
+(% = county ÷ sum-of-counties = the printed KNBS national). Provenance caption names the report +
+extraction gates + the maize/coffee/cotton quarantine. Verified (`verify_napr.mjs`, `cc_*.png`): all
+four views render for Meru (Irish-potato-dominant), % toggle works, 0 persistent OJS errors, no
+inspector dump.
+
+**Superseded:** the earlier AFA-county + KNBS-national-StatAbs side-by-side (addendum 9) is replaced
+by this. `afa_production` + `knbs_production_national` parquets are now unused-but-staged (kept). The
+`exposure_vop` + `seasonal_calendar` parquets likewise remain staged-unused.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
