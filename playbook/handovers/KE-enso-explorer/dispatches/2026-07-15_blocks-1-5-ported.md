@@ -404,6 +404,14 @@ revision** (2022 ≈+18% all counties, 2023 ≈+2%) + one maize county — 86 ce
 change; noted in the caption. Millet (combined in 2025 vs finger+pearl in 2024) + cassava (new) not
 appended; coffee/cotton stay 2019–2023 (industrial annexes not pulled).
 
+**Q3 follow-up — rebased to 2025 (Pete's call).** To remove the sweet-potato seam, the 8 food crops'
+overlap years **2020–2024 now use the 2024–25 edition** (latest; incorporates KNBS revisions),
+2019 stays 2023–24 edition (`_sources/parse_napr_2025_rebase.py`). Single-basis 2020–2024. The
+edition diff remains banked as the record of what the rebase changed. **Methods section updated** to
+describe the dataset + rebase (de-rotation, dual-engine+additivity, latest-edition-for-overlap,
+which crops are which edition, provisional 2024). Finger/pearl millet, coffee, cotton unchanged
+(2019–2023, 2023–24 edition — 2025 reports them differently).
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
