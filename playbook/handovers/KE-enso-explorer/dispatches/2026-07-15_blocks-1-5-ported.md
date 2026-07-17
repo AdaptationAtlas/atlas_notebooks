@@ -315,6 +315,23 @@ inspector dump.
 by this. `afa_production` + `knbs_production_national` parquets are now unused-but-staged (kept). The
 `exposure_vop` + `seasonal_calendar` parquets likewise remain staged-unused.
 
+### Update — maize added; coffee/cotton deferred (2026-07-17)
+
+**MAIZE now served** (10 crops total). Not from the mirrored Annex 1 but from the report's **clean
+Top-producing-counties table (p26)** — 19 counties, dual-engine cell agreement **190/190 = 100%**,
+0 unresolved names (`_sources/parse_napr_maize.py`, merged into the parquet → 1515 rows). The ~28
+non-top counties grow negligible maize, so top-producing coverage is effectively complete for the
+crop that matters most. Labelled as top-counties in the caption. Verified: Trans Nzoia shows
+Maize + Dry beans + Sorghum, 0 errors.
+
+**COFFEE + COTTON deferred (honest quarantine).** Coffee's only county source is the mirror-reversed
+Annex 11 (no clean in-body table to cross-check). Cotton's county production is fragmented across
+text-contaminated in-body tables (seed-supplied / area mixed with prose) + a mirrored lint annex
+(Annex 14) — no single clean table. Neither can pass the dual-engine + cross-check gate without
+risking wrong per-county numbers, so both are left out rather than shown wrong. Follow-up options:
+the 2025 NAPR edition (annex layout still needs mapping) or careful reverse-parse + a named-county
+cross-check like the one that unlocked maize.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
