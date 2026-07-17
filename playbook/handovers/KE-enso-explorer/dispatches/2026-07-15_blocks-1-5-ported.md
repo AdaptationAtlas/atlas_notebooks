@@ -395,11 +395,14 @@ read −y). This is now the standard for rotated annexes (`data/KE-enso-explorer
   crop-year → ending calendar year. Additivity consistent 87% across years.
 - **12 crops now served** + livestock. `dual_ok` de-rotated annexes validated by cross-check/additivity.
 
-**Q3 — 2024 data / 2025 edition (OPEN):** current series is the **2024 NAPR (2019–2023)**. The **2025
-NAPR (2020–2024)** annexes are ALSO rotated and now de-rotatable — so 2024 data is reachable. Not
-yet done: it's a source decision (single-source switch to 2020–2024, vs merging to 2019–2024 which
-introduces a cross-edition revision break). Recommend single-source 2025 (2020–2024, current). See
-question to Pete.
+**Q3 — 2024 data (DONE, Pete chose merge + flag diffs).** Series now **2019–2024** for the 8 food
+crops: 2019–2023 from the 2024 edition, **2024 (provisional) from the 2025 edition** (de-rotated,
+`_sources/parse_napr_2025_append.py`), 2024 additivity 98.6–100%. **Cross-edition diff flagged:**
+overlap years 2020–2023 are identical between editions **except a systematic KNBS sweet-potato
+revision** (2022 ≈+18% all counties, 2023 ≈+2%) + one maize county — 86 cells total, full report
+`_sources/edition_diffs_2024ed_vs_2025ed.csv`. So the 2023→2024 seam carries that sweet-potato basis
+change; noted in the caption. Millet (combined in 2025 vs finger+pearl in 2024) + cassava (new) not
+appended; coffee/cotton stay 2019–2023 (industrial annexes not pulled).
 
 ## Known gaps (deliberate, next sessions)
 
