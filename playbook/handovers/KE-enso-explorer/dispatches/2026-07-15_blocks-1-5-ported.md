@@ -341,6 +341,28 @@ text-contaminated in-body tables (seed-supplied / area mixed with prose) + a mir
   crops (incl. maize) cover it. Only revisit if coffee/cotton become a specific ask — then reverse-
   parse the mirrored annex + a named-county cross-check (the maize trick), accepting the effort.
 
+### Update — livestock added + review fixes (2026-07-17)
+
+Pete: "there is no livestock?" — right, added it. **Livestock population by county** (KNBS NAPR
+Annexes 15 + 18, dual-engine): Cattle/Sheep/Goats (sub-types summed) + Camels/Donkeys, **2021**,
+46 counties → `knbs_napr_livestock.parquet` (+ meta, `_sources/parse_napr_livestock.py`). Dual-engine
+99–100%; sanity-checked (Turkana cattle 2.5M/sheep 6.6M/goats 7.0M; Marsabit camels 283k; Nakuru
+cattle-heavy, ~0 camels = the ASAL↔highland split). **2022–23 quarantined** (p131 scored 71%
+dual-engine — engine misalignment on dashes; livestock is a stock so the 2021 snapshot stands).
+
+The produce figure is now commodity-generic: **Show = Crops / Livestock** toggle drives the same
+four views. Livestock's Lineplot degrades gracefully to a "single-year snapshot" note.
+
+Fixed Pete's review points on the figure:
+- **Duplicate x-axis years (2×2022):** Plot auto-ticked at half-years; set `ticks: prodYears`
+  (explicit integers) → clean 2019–2023.
+- **No mouseover:** added `Plot.tip(Plot.pointer(...))` to the lineplot + a formatted `tip` on the
+  bars (treemap already had `<title>`).
+- **Crop filter:** added a FILTER checkbox row (all crops/species, default all) → `prodShown`.
+- **"Maize missing?":** maize IS integrated — the earlier screenshot was a non-top-19 county (those
+  have no maize row; only the 19 top-producing counties, from the clean Top-20 table). Confirmed
+  Meru shows maize (96k→151k t). Provenance is in the intro (names the KNBS NAPR) + the foldout.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
