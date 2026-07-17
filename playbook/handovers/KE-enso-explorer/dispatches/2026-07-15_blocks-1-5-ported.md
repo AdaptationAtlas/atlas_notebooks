@@ -327,10 +327,19 @@ Maize + Dry beans + Sorghum, 0 errors.
 **COFFEE + COTTON deferred (honest quarantine).** Coffee's only county source is the mirror-reversed
 Annex 11 (no clean in-body table to cross-check). Cotton's county production is fragmented across
 text-contaminated in-body tables (seed-supplied / area mixed with prose) + a mirrored lint annex
-(Annex 14) — no single clean table. Neither can pass the dual-engine + cross-check gate without
-risking wrong per-county numbers, so both are left out rather than shown wrong. Follow-up options:
-the 2025 NAPR edition (annex layout still needs mapping) or careful reverse-parse + a named-county
-cross-check like the one that unlocked maize.
+(Annex 14) — no single clean table.
+
+**Chased both editions + in-body tables (2026-07-17) — DEFINITIVE defer, do not re-chase:**
+- Coffee: the only *clean* coffee-by-county table (2024 p60, Table 4.15) is **AREA (Ha), co-op/estate
+  split, 2 crop-years (2021/22–2022/23)** — wrong metric + shape (not production tonnes, not calendar
+  2019–2023). Coffee *production* by county exists only in the mirrored Annex 11.
+- Cotton: clean tables are **seed-supplied / area / value fragments** (2024 p52), prose-contaminated;
+  production-by-county is mirrored/fragmented.
+- 2025 NAPR edition: annex table pages don't extract as clean crop grids (figures / 1×N summaries);
+  layout differs from 2024, would need substantial per-page work.
+- Both are perennial cash crops, peripheral to the rainfed-staple ENSO story; the 10 served food
+  crops (incl. maize) cover it. Only revisit if coffee/cotton become a specific ask — then reverse-
+  parse the mirrored annex + a named-county cross-check (the maize trick), accepting the effort.
 
 ## Known gaps (deliberate, next sessions)
 
