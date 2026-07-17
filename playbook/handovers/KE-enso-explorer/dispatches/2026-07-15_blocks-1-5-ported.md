@@ -363,6 +363,27 @@ Fixed Pete's review points on the figure:
   have no maize row; only the 19 top-producing counties, from the clean Top-20 table). Confirmed
   Meru shows maize (96k→151k t). Provenance is in the intro (names the KNBS NAPR) + the foldout.
 
+### Update — full-county maize investigated, NOT safely extractable (2026-07-17)
+
+Pete: maize (+ others) missing for many counties; is the 2022 drop real?
+
+- **2022 drop is REAL.** Additivity was gated **per year** — 2022 county sums = printed national
+  Total at 100%, same as every year → the 2022 column is correctly aligned, not misread. 2022 =
+  peak of the 2021–23 Horn drought; synchronized crop fall + 2023 rebound is the drought signal.
+- **Other crops are complete as published** — each crop lists only the counties KNBS reports it in;
+  additivity 100% means no county was dropped. Fewer crops for a county is real, not a bug.
+- **Full-county maize: investigated, cannot serve safely.** The 2024 maize Annex 1 (pp.114–115) is
+  doubled-glyph + mirror-reversed + **transposed** (counties as rotated column-headers). An
+  x-reflection (`rx = W − x1`) + per-token char-reversal **does** recover the numbers correctly
+  (verified: Uasin Gishu 456,574 = its Top-20 value), BUT the county names come out jumbled/rotated
+  so the number-column → county mapping is not reliably recoverable. Assigning values to counties
+  would risk mis-assignment (a hallucination) that neither additivity (order-invariant) nor the
+  Top-20 cross-check can fully guard. **So maize stays at the 19 top-producing counties** (clean
+  Top-20 table, ~95% of national). 2025 edition annex doesn't extract cleanly either. Do not
+  re-chase without a genuinely clean per-county maize source.
+- Added an always-visible coverage note under the figure (`keyfacts.produceNote`) so per-county
+  absences read as "not a top producer", not broken data.
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
