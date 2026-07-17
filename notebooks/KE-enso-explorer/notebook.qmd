@@ -131,6 +131,8 @@ html`<div class="ke-hero">
     max-width: 62rem;
   }
   .plot-caption-body p { margin: 0 0 0.4em; }
+  /* Small bold label above a side-by-side panel (production / rainfall). */
+  .ke-panel-lbl { font-weight: 600; font-size: 0.9em; margin: 0 0 0.25rem; }
 </style>
 ```
 
@@ -179,67 +181,40 @@ viewof driverKind = Inputs.radio(["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (W
 md`**Current state** (as of ${d3.utcFormat("%Y-%m")(currentState.asOf)}) — Niño 3.4 (ONI, 3-mo mean) **${currentState.oni?.toFixed(2)} °C** (**${currentState.phase}**)${currentState.dmi != null ? `, IOD (DMI) **${currentState.dmi.toFixed(2)}**` : ""}. Selected county: **${county}**. Season lens: **${season}**.`
 ```
 
-## `{ojs} heading_map`
+## `{ojs} heading_produce`
 
 ```{ojs}
-md`${_lang(nbText.sections.keyfacts.mapIntro)}`
+md`${_lang(nbText.sections.keyfacts.produceIntro)}`
 ```
 
 ::: {.controls-row}
 
 ```{ojs}
-viewof mapMetric = Inputs.select(mapMetricKeys, {
-  label: _lang(nbText.sections.controls.mapMetric),
-  format: (k) => _lang(nbText.sections.keyfacts.metrics[k]),
-  value: "vop",
+viewof prodView = Inputs.radio(["Absolute (MT)", "% of national"], {
+  label: _lang(nbText.sections.controls.prodView),
+  value: "Absolute (MT)",
 })
-```
-
-```{ojs}
-viewof mapPalette = Inputs.select(["default", "viridis", "magma", "turbo", "warm–cool"], {
-  label: _lang(nbText.sections.controls.mapPalette),
-  value: "default",
-})
-```
-
-```{ojs}
-viewof mapLabels = Inputs.toggle({label: _lang(nbText.sections.controls.mapLabels), value: false})
 ```
 
 :::
 
 ```{ojs}
-countyMap = {
-  const W = 620, H = 600;
-  const proj = d3.geoMercator().fitExtent([[8, 8], [W - 8, H - 8]], {type: "FeatureCollection", features: keFeatures});
-  const path = d3.geoPath(proj);
-  const isSel = (f) => countyNorm(f.properties.admin1_name) === countyNorm(county);
-  const svg = d3.create("svg")
-    .attr("viewBox", `0 0 ${W} ${H}`).attr("width", W)
-    .attr("style", "max-width:100%;height:auto;font:11px system-ui;");
-  svg.append("g").selectAll("path").data(keFeatures).join("path")
-    .attr("d", path)
-    .attr("fill", (d) => mapFill(mapValues.get(countyNorm(d.properties.admin1_name))))
-    .attr("stroke", (d) => isSel(d) ? "#111" : "#fff")
-    .attr("stroke-width", (d) => isSel(d) ? 2.5 : 0.5)
-    .style("cursor", "pointer")
-    .on("click", (e, d) => setCounty(d.properties.admin1_name))
-    .append("title")
-    .text((d) => `${d.properties.admin1_name}: ${mapFmt(mapValues.get(countyNorm(d.properties.admin1_name)))}`);
-  if (mapLabels)
-    svg.append("g").attr("pointer-events", "none").selectAll("text").data(keFeatures).join("text")
-      .attr("transform", (d) => `translate(${path.centroid(d)})`)
-      .attr("text-anchor", "middle").attr("font-size", 7).attr("fill", "#222")
-      .text((d) => d.properties.admin1_name);
-  const legend = Plot.legend({color: mapColorOpts, width: 360});
-  return html`<div>${svg.node()}${legend}</div>`;
-}
+// Side by side: AFA county food-crop production (toggle absolute MT vs
+// % of the AFA-reported national total = sum of counties) alongside the
+// KNBS Statistical Abstract national marketed series. Two agencies, two
+// crop sets, two bases — labelled distinctly. Built in the body so the
+// DOM renders in place; afaPanel()/knbsPanel() are functions (appendix)
+// so no node gets consumed by a hidden-appendix display.
+produceCharts = html`<div style="display:flex;gap:1.75rem;flex-wrap:wrap;align-items:flex-start;">
+  <div><div class="ke-panel-lbl">${county} — ${_lang(nbText.sections.keyfacts.afaPanelTitle)}</div>${afaPanel()}</div>
+  <div><div class="ke-panel-lbl">${_lang(nbText.sections.keyfacts.knbsPanelTitle)}</div>${knbsPanel()}</div>
+</div>`
 ```
 
 ```{ojs}
-plotFooter(_lang(nbText.sections.keyfacts.mapCaption), countyMap, {
-  filename: `kenya_counties_${mapMetric}`,
-  data: mapRows,
+plotFooter(_lang(nbText.sections.keyfacts.produceCaption), produceCharts, {
+  filename: `${county}_production_afa_county_knbs_national`,
+  data: afaCountyRows,
 })
 ```
 
@@ -253,38 +228,6 @@ md`${_lang(nbText.sections.keyfacts.insight)}`
 
 ```{ojs}
 md`${_lang(nbText.sections.b1.intro)}`
-```
-
-## `{ojs} title_vop`
-
-```{ojs}
-md`${_lang(nbText.sections.b1.vopIntro)}`
-```
-
-```{ojs}
-vopChart = Plot.plot({
-  height: 40 + vopTop.length * 26, width: 760, marginLeft: 130,
-  x: {label: "value of production (constant I$)", tickFormat: "~s", grid: true},
-  y: {domain: vopTop.map((d) => d.commodity), label: null},
-  color: {domain: ["Crop", "Livestock"], range: ["#41ab5d", "#a6611a"], legend: true},
-  marks: [
-    Plot.barX(vopTop, {x: "vop_intld15", y: "commodity", fill: "kind", rx: 2,
-      tip: true, title: (d) => `${d.commodity} (${d.kind})\n${d3.format("$,.0f")(d.vop_intld15)} I$`}),
-    Plot.ruleX([0]),
-  ],
-})
-```
-
-```{ojs}
-plotFooter(_lang(nbText.sections.b1.vopCaption), vopChart, {
-  filename: `${county}_value_of_production_atlas`,
-  data: vopCty,
-})
-```
-
-```{ojs}
-// dynamic insight computed from the staged VoP values (no LLM number)
-md`**${vopInsight}**`
 ```
 
 ## `{ojs} title_gesi`
@@ -916,7 +859,7 @@ heading_appendix = _lang(nbText.sections.appendix.title)
 heading_interact = _lang(nbText.sections.b2.interactHeading)
 heading_combined = _lang(nbText.sections.b2.combinedHeading)
 heading_trade = _lang(nbText.sections.b4.tradeHeading)
-heading_map = _lang(nbText.sections.keyfacts.mapHeading)
+heading_produce = _lang(nbText.sections.keyfacts.produceHeading)
 heading_compare = _lang(nbText.sections.compare.title)
 quickInsight = _lang(nbText.general.quickInsight)
 ```
@@ -925,7 +868,6 @@ quickInsight = _lang(nbText.general.quickInsight)
 // Chart-title vars (H2s in the body; dynamic on the selected county /
 // season / driver / crop). Plot.plot title: is NOT used — it renders an
 // h2 inside the figure wrapper, which breaks PNG export widths.
-title_vop = `${county} — ${_lang(nbText.sections.b1.vopTitle)}`
 title_gesi = `${county} — ${_lang(nbText.sections.b1.gesiTitle)}`
 title_maize = `${county} — ${_lang(nbText.sections.b1.maizeTitle)}`
 title_rain = `${county} — ${season} ${_lang(nbText.sections.b2.rainTitle)}`
@@ -1175,34 +1117,6 @@ rainPanel = (s) => {
 ```
 
 ```{ojs}
-dbVop = DuckDBClient.of({
-  exposure_vop: FileAttachment("/data/KE-enso-explorer/exposure_vop.parquet"),
-})
-
-// county value of production by commodity (Atlas exposure: MapSPAM 2020
-// crops tech='all' + GLW4 livestock, merged agro-zones, constant I$).
-vopCty = dbVop.query(`
-  SELECT commodity, kind, vop_intld15
-  FROM exposure_vop
-  WHERE ${normExpr("county")} = '${countyNorm(county)}'
-  ORDER BY vop_intld15 DESC`)
-
-// top commodities for the bar; the rest folded into the download data
-vopTop = vopCty.slice(0, 12)
-
-// dynamic insight — livestock share + leading commodity, computed from
-// the staged VoP (deterministic; no value is produced by the model)
-vopInsight = {
-  if (!vopCty.length) return `No Atlas value-of-production data for ${county}.`;
-  const total = d3.sum(vopCty, (d) => d.vop_intld15);
-  const live = d3.sum(vopCty.filter((d) => d.kind === "Livestock"), (d) => d.vop_intld15);
-  const top = vopCty[0];
-  const livePct = Math.round((live / total) * 100);
-  return `In ${county}, ${top.commodity.toLowerCase()} leads the agricultural economy, and livestock is ${livePct}% of the county's total production value — ${livePct >= 50 ? "a livestock-driven economy where a pasture-failing drought is an economic shock, not just a food-supply one" : "so both crop and rangeland conditions matter to household income"}.`;
-}
-```
-
-```{ojs}
 dbGesi = DuckDBClient.of({
   gesi: FileAttachment("/data/KE-enso-explorer/gesi.parquet"),
 })
@@ -1407,75 +1321,70 @@ ndviDomain = {
 ```
 
 ```{ojs}
-// ---- county choropleth (Key Facts spatial picker) ----
-// Kenya admin1 polygons from the shared GAUL24 topojson (48 = 47 counties
-// + Ilemi Triangle, which has no metric data -> renders grey).
-keTopo = FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json()
-keFeatures = topojsonClient.feature(keTopo, keTopo.objects["atlas_gaul24_a1_africa"])
-  .features.filter((f) => f.properties.iso3 === "KEN")
+// ---- production panels (Key Facts): AFA county vs KNBS national ----
+dbKnbs = DuckDBClient.of({
+  knbs_production_national: FileAttachment("/data/KE-enso-explorer/knbs_production_national.parquet"),
+})
 
-mapMetricKeys = ["vop", "ndvi", "ipc", "rainOND", "rainMAM"]
+// KNBS national marketed volume — most recent reported year per commodity,
+// carrying page-level provenance for the tooltip.
+knbsNational = dbKnbs.query(`
+  SELECT crop, value_kt, year, edition, source_file, pdf_page
+  FROM knbs_production_national
+  QUALIFY row_number() OVER (PARTITION BY crop ORDER BY year DESC) = 1
+  ORDER BY value_kt DESC`)
 
-// one value per county for the selected metric (keyed by normalized name
-// so it joins the topojson regardless of raw spelling)
-mapRows = {
-  if (mapMetric === "vop")
-    return dbVop.query(`SELECT county AS name, SUM(vop_intld15) AS v FROM exposure_vop GROUP BY county`);
-  if (mapMetric === "ndvi")
-    return dbNdvi.query(`SELECT county AS name, ndvi_pct_normal AS v FROM ndvi_county
-      QUALIFY row_number() OVER (PARTITION BY county ORDER BY date DESC) = 1`);
-  if (mapMetric === "ipc")
-    return dbIpc.query(`SELECT county AS name, max_phase AS v FROM ipc_county
-      WHERE scenario_name = 'Current Situation'
-      QUALIFY row_number() OVER (PARTITION BY county ORDER BY reporting_date DESC) = 1`);
-  const period = mapMetric === "rainMAM" ? "MAM" : "OND";
-  return dbChirps.query(`SELECT admin1_name AS name, AVG(value_mean) AS v
-    FROM chirps_county WHERE variable = 'PTOT' AND period = '${period}' GROUP BY admin1_name`);
+// AFA county food-crop production: the county's mean 2020-24 per crop, plus
+// the AFA-reported national total (sum of all counties) for the % view.
+afaCountyRows = {
+  const cty = await dbAfa.query(`
+    SELECT Crop AS crop, AVG(Value) AS county_mt
+    FROM afa_production
+    WHERE Metric = 'Production' AND ${normExpr("County")} = '${countyNorm(county)}'
+    GROUP BY Crop`);
+  const natl = await dbAfa.query(`
+    SELECT crop, AVG(yr_total) AS national_mt FROM (
+      SELECT Crop AS crop, "Year" AS yr, SUM(Value) AS yr_total
+      FROM afa_production WHERE Metric = 'Production' GROUP BY Crop, "Year"
+    ) GROUP BY crop`);
+  const nmap = new Map(natl.map((d) => [d.crop, d.national_mt]));
+  return cty.filter((d) => d.county_mt > 0)
+    .map((d) => ({crop: d.crop, county_mt: d.county_mt, national_mt: nmap.get(d.crop) ?? null,
+      pct: nmap.get(d.crop) ? (d.county_mt / nmap.get(d.crop)) * 100 : null}))
+    .sort((a, b) => b.county_mt - a.county_mt);
 }
 
-mapValues = new Map(mapRows.filter((r) => r.v != null).map((r) => [countyNorm(r.name), +r.v]))
-```
-
-```{ojs}
-// one Plot color scale used for BOTH the polygon fills and the legend, so
-// they always agree. Adaptive domain; diverging around 100 for NDVI;
-// fixed 1-5 for IPC; palette dropdown overrides the scheme.
-mapColorOpts = {
-  const vals = [...mapValues.values()];
-  const ext = vals.length ? d3.extent(vals) : [0, 1];
-  const label = _lang(nbText.sections.keyfacts.metrics[mapMetric]);
-  const override = ({viridis: "viridis", magma: "magma", turbo: "turbo", "warm–cool": "rdbu"})[mapPalette];
-  const reverse = mapPalette === "warm–cool";
-  if (mapMetric === "ndvi")
-    return {label, type: "diverging", pivot: 100, domain: [Math.min(ext[0], 100), Math.max(ext[1], 100)],
-            scheme: override ?? "rdylgn", reverse};
-  if (mapMetric === "ipc")
-    return {label, domain: [1, 5], scheme: override ?? "ylorrd", reverse};
-  return {label, domain: ext,
-          scheme: override ?? (mapMetric === "vop" ? "greens" : "blues"), reverse};
+// panels are FUNCTIONS (called from the body produceCharts cell) so no
+// DOM node is consumed by a hidden-appendix display.
+afaPanel = () => {
+  const abs = prodView.startsWith("Absolute");
+  const data = afaCountyRows;
+  if (!data.length)
+    return html`<div style="color:#666;font-style:italic;max-width:22rem">No AFA county crop-production returns for ${county}.</div>`;
+  return Plot.plot({
+    height: 44 + data.length * 24, width: 440, marginLeft: 100,
+    x: {label: abs ? "MT (avg 2020–24)" : "% of national (avg 2020–24)",
+        tickFormat: abs ? "~s" : ((d) => d + "%"), grid: true},
+    y: {domain: data.map((d) => d.crop), label: null},
+    marks: [
+      Plot.barX(data, {x: abs ? "county_mt" : "pct", y: "crop", fill: "#2c7fb8", rx: 2, tip: true,
+        title: (d) => abs ? `${d.crop}: ${Math.round(d.county_mt).toLocaleString()} MT`
+          : `${d.crop}: ${d.pct == null ? "n/a" : d.pct.toFixed(1) + "% of national"}`}),
+      Plot.ruleX([0]),
+    ],
+  });
 }
 
-mapScale = Plot.scale({color: mapColorOpts})
-mapFill = (v) => v == null ? "#e9e9e9" : mapScale.apply(v)
-mapFmt = (v) => v == null ? "no data"
-  : mapMetric === "vop" ? d3.format("$~s")(v) + " I$"
-  : mapMetric === "ndvi" ? Math.round(v) + "% of normal"
-  : mapMetric === "ipc" ? "IPC " + v.toFixed(1)
-  : Math.round(v) + " mm"
-
-// map click -> drive the global County select (option values are indices,
-// so match by option text; see memory inputs-select-values-are-indices)
-setCounty = (rawName) => {
-  const forms = [...document.querySelectorAll("form")];
-  const label = _lang(nbText.sections.controls.county);
-  const form = forms.find((f) => f.querySelector("label")?.textContent.trim() === label);
-  const sel = form?.querySelector("select");
-  if (!sel) return;
-  const opt = [...sel.options].find((o) => countyNorm(o.textContent) === countyNorm(rawName));
-  if (!opt || sel.value === opt.value) return;
-  sel.value = opt.value;
-  sel.dispatchEvent(new Event("input", {bubbles: true}));
-}
+knbsPanel = () => Plot.plot({
+  height: 44 + knbsNational.length * 24, width: 440, marginLeft: 100,
+  x: {label: "'000 t marketed (latest reported year)", grid: true},
+  y: {domain: knbsNational.map((d) => d.crop), label: null},
+  marks: [
+    Plot.barX(knbsNational, {x: "value_kt", y: "crop", fill: "#238b45", rx: 2, tip: true,
+      title: (d) => `${d.crop}: ${d.value_kt} '000 t (${d.year})\nKNBS Statistical Abstract ${d.edition}, p.${d.pdf_page}`}),
+    Plot.ruleX([0]),
+  ],
+})
 ```
 
 ```{ojs}

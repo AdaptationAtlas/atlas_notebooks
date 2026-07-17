@@ -246,6 +246,40 @@ Verified after each: sticky present, 20 foldables with correct bodies, calendar 
 rainfall panels correct for OND / MAM / OND+MAM / anomaly, 0 persistent OJS errors
 (`verify_batch.mjs`, `verify_rain.mjs`, `aa1–aa4*.png`).
 
+## Addendum 9 (2026-07-17) — production pivot: drop map + MapSPAM, lead with AFA county + KNBS national
+
+Pete: the county choropleth "isn't helpful"; open instead with **nationally-reported subnational
+production** for the selected county(ies), include **KNBS with very clear provenance**, a
+**% -of-national toggle**, and **drop MapSPAM**.
+
+**Data reality surfaced first (provenance matters):** the banked KNBS Statistical Abstract production
+is **national-only** (`gross_marketed` VoP + `production_for_sale` volume) — no county breakdown. The
+only county-level production is **AFA** (a different agency). So "KNBS subnational" can't be met
+literally without mislabeling. Pete chose **AFA county + KNBS national side-by-side**.
+
+Built (replaces the Key-Facts map with "What does my county produce?"):
+- **Left — AFA county** food-crop production, mean 2020–24, MT; toggle **Absolute ↔ % of national**
+  (national = sum of all counties' AFA returns — an AFA-internal ratio, no cross-source mixing).
+- **Right — KNBS national** marketed production ('000 t), latest reported year per commodity, from
+  the dual-engine-validated banked extraction; each bar's tooltip cites edition + PDF page. Staged
+  `knbs_production_national.parquet` (+ meta) from `knbs_production_for_sale_BANKED.csv`, provenance
+  columns retained; only `dual_validated=true` rows.
+- Different agencies / crop sets / bases (county food vs national marketed) → shown side by side,
+  each labelled, never merged (stated in the caption).
+
+**Removed:** the county choropleth map (`countyMap` + all `map*`/`setCounty`/`keFeatures` cells) and
+the **MapSPAM** B1 VoP chart (`vopChart`/`vopCty`/`vopTop`/`vopInsight`/`dbVop`). `exposure_vop`
+and `seasonal_calendar` parquets are now **staged-but-unused** (kept per "don't delete data").
+Their `.meta.json` `used_by` fields are now stale — update if either is re-shown.
+
+Verified (`verify_prod.mjs`, `bb1/bb2/bb3*.png`): heading present, map + VoP gone, both panels render
+for Marsabit + Nakuru, % toggle flips the AFA axis, no inspector dump, 0 persistent OJS errors.
+
+**Preview gotcha (fixed):** the `:4333 quarto preview` was launched `--no-watch-inputs` — it froze at
+its startup render AND kept overwriting `_site` with that stale build, so my committed changes looked
+invisible. Killed it; view the fresh static build on `:8765` (or restart preview WITHOUT
+`--no-watch-inputs` for hot reload).
+
 ## Known gaps (deliberate, next sessions)
 
 - **B1 has no Atlas exposure (VoP) chart** — the block→data map lists it but no exposure parquet
