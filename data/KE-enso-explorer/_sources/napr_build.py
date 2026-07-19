@@ -63,11 +63,16 @@ FOOD = [
     ("Sweet potato", "2024", [123], AP(Y24)), ("Sweet potato", "2025", [196, 197], AP(Y25)),
     ("Cassava", "2025", [198, 199], AP(Y25)),
 ]
-CASH = [  # all 2024 edition, rotated in-body / annex tables
-    ("Cotton (seed)", "2024", [55], blk(["area", "production", "value"], YC)),
-    ("Coffee", "2024", [124], grp3(YC)),
-    ("Lint", "2024", [127], blk(["production", "value"], YC)),
+CASH = [  # all 2024 edition
+    ("Cotton (seed)", "2024", [55], blk(["area", "production", "value"], YC)),  # rotated
+    ("Coffee", "2024", [124], grp3(YC)),                                        # rotated
+    ("Lint", "2024", [127], blk(["production", "value"], YC)),                  # rotated
+    ("Macadamia", "2024", [81], blk(["area", "production", "value"], YC)),      # upright
+    ("Groundnut", "2024", [84], blk(["area", "production", "value"], YC)),      # upright
+    ("Sunflower", "2024", [88], [("area", 2023), ("production", 2023), ("value", 2023)]),
 ]
+# value normalisation to raw KSh: several cash tables print value in KSh million
+VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6}
 
 DOC = {"2024": (fitz.open(PDF24), pdfplumber.open(PDF24), "National-Agriculture-Production-Report-2024.pdf"),
        "2025": (fitz.open(PDF25), pdfplumber.open(PDF25), "National-Agriculture-Production-Report-2025.pdf")}
@@ -95,8 +100,36 @@ def try_table(crop, edition, pages, layout):
 
 
 def gate(rep):
-    oversum = any(v is not None and v > 101 for v in rep["additivity"].values())
-    return rep["dual_engine"] >= 0.98 and not rep["missed"] and not oversum and rep["counties"] >= 4
+    """Serve iff ALL hold:
+      * completeness  - no capitalised numeric row left unattributed (`missed`)
+      * no over-sum   - county sum never EXCEEDS the printed Total (double-count)
+      * has a printed Total to reconcile against
+      * >= 4 counties
+    Rationale: with every printed county captured (completeness) and no
+    double-count, county-sum <= Total, so any shortfall is genuinely unlisted
+    counties / an "Others" bucket -> a CORRECT extraction. Additivity vs the
+    report's own printed Total is the authoritative deterministic check.
+    Dual-engine is reported (`validation`) as extra corroboration where
+    pdfplumber could read the page, but is NOT required: pdfplumber mis-reads
+    the duplicate-/shifted-layer pages (proven: it returns 4 counties and a
+    null Meru for macadamia), so requiring it would drop data additivity
+    confirms is correct."""
+    add = [v for v in rep["additivity"].values() if v is not None]
+    if not add or rep["missed"] or any(v > 101 for v in add) or rep["counties"] < 4:
+        return False
+    dual_confirmed = rep["dual_shared"] >= 8 and rep["dual_engine"] >= 0.98
+    # a shortfall (sum < Total) is only trusted if the numbers are dual-engine
+    # corroborated (then the gap is a source Total > itemised counties, e.g.
+    # coffee). Single-engine tables must reconcile to ~100% -> otherwise a
+    # nameless row the completeness check can't see may have been dropped
+    # (e.g. macadamia's Murang'a). This keeps unverified shortfalls out.
+    return dual_confirmed or min(add) >= 97
+
+
+def validation_label(rep):
+    if rep["dual_shared"] >= 8 and rep["dual_engine"] >= 0.98:
+        return "dual-engine + additivity"
+    return "additivity + completeness (single-engine; pdfplumber unreliable on page)"
 
 
 def build():
@@ -107,8 +140,9 @@ def build():
         padd = {k[1]: v for k, v in rep["additivity"].items() if k[0] == "production"}
         report.append({"crop": crop, "edition": edition, "pages": str(rep["pages"]),
                        "rotated": rep["rotated"], "counties": rep["counties"],
-                       "dual_engine": rep["dual_engine"], "prod_additivity": str(padd),
-                       "missed": ";".join(rep["missed"]), "served": ok})
+                       "dual_engine": rep["dual_engine"], "dual_shared": rep["dual_shared"],
+                       "prod_additivity": str(padd), "missed": ";".join(rep["missed"]),
+                       "validation": validation_label(rep), "served": ok})
         if ok:
             long_rows += rows
 
@@ -125,7 +159,8 @@ def build():
     for (crop, county, year, metric), r in best.items():
         if metric not in MET:
             continue
-        wide[(crop, county, year)][MET[metric]] = r["value"]
+        val = r["value"] * VSCALE.get(crop, 1) if metric == "value" else r["value"]
+        wide[(crop, county, year)][MET[metric]] = val
         meta[(crop, county, year)] = (r["gaul1_code"], r["source_file"], r["pdf_page"])
 
     out = []

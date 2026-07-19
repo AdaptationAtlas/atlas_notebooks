@@ -52,7 +52,7 @@ def _rows_pymupdf(doc, pidx, rotated):
         for w in ws:
             groups[round(w[1] / 4) * 4].append(w)           # y-band = row
         pos = lambda w: w[0]                                # read left->right
-    return [sorted(((pos(w), w[4]) for w in groups[k])) for k in sorted(groups)]
+    return _merge_wrapped([sorted(((pos(w), w[4]) for w in groups[k])) for k in sorted(groups)])
 
 
 def _rows_pdfplumber(pl, pidx, rotated):
@@ -70,7 +70,29 @@ def _rows_pdfplumber(pl, pidx, rotated):
     # pdfplumber returns glyphs of rotated (dir (0,-1)) text in reversed
     # character order; reverse each token so it matches PyMuPDF's reading.
     txt = (lambda w: w["text"][::-1]) if rotated else (lambda w: w["text"])
-    return [sorted(((pos(w), txt(w)) for w in groups[k])) for k in sorted(groups)]
+    return _merge_wrapped([sorted(((pos(w), txt(w)) for w in groups[k])) for k in sorted(groups)])
+
+
+def _merge_wrapped(rows):
+    """A county whose name wraps to two lines (Elgeyo/Marakwet, Trans-/Nzoia)
+    can leave its NUMBERS on a nameless band BETWEEN the two name fragments
+    (finer than the row pitch). Attach each such nameless-numeric row to the
+    immediately-preceding name-only row that resolves to a county, so the data
+    is not silently lost. The trailing second fragment then resolves to the
+    same county with no numbers and is harmlessly dropped downstream."""
+    out = []
+    for r in rows:
+        starts_num = bool(r) and not re.match(r"[A-Za-z]", r[0][1])
+        has_num = any(isinstance(cell(t), float) for _, t in r)
+        if starts_num and has_num and out:
+            prev = out[-1]
+            pname = " ".join(t for _, t in prev if re.fullmatch(r"[A-Za-z'./&()-]+", t)).strip()
+            prev_has_num = any(isinstance(cell(t), float) for _, t in prev)
+            if not prev_has_num and resolve(pname):
+                out[-1] = prev + r     # name fragment + its dangling numbers
+                continue
+        out.append(r)
+    return out
 
 
 def _name_and_nums(row):
@@ -86,12 +108,12 @@ def _name_and_nums(row):
 
 
 def _centers(rows, ncells):
-    """column x/-y centers, averaged over the FULL rows (exactly ncells numeric
-    cells) that ALSO resolve to a county. Restricting to resolved counties is
-    what excludes the word-grouper's occasional mis-merged rows (which sit at a
-    shifted position and otherwise poison the average). County rows are dense,
-    so they define the true grid; sparse rows (incl. a Total with a blank) are
-    then mapped onto it."""
+    """column x/-y centers from the FULL rows (exactly ncells numeric cells)
+    that resolve to a county. Some pages carry a duplicated / x-shifted copy of
+    the table (a text layer at a different origin, or pdfplumber vs pymupdf
+    reading different mediabox origins); the full rows then fall into >1
+    cluster by first-column position. Keep the LARGEST cluster and average it,
+    so the grid tracks one clean copy regardless of the shifted twin."""
     fulls = []
     for r in rows:
         name, nums = _name_and_nums(r)
@@ -99,7 +121,15 @@ def _centers(rows, ncells):
             fulls.append([p for p, _ in nums])
     if not fulls:
         return None
-    return [sum(c) / len(c) for c in zip(*fulls)]
+    fulls.sort(key=lambda f: f[0])
+    groups = [[fulls[0]]]
+    for f in fulls[1:]:
+        if f[0] - groups[-1][-1][0] > 50:      # jump => a shifted copy
+            groups.append([f])
+        else:
+            groups[-1].append(f)
+    big = max(groups, key=len)
+    return [sum(c) / len(c) for c in zip(*big)]
 
 
 def _cells_by_col(nums, centers):
@@ -141,6 +171,8 @@ def _extract_rows(rows, centers, ncells):
         if nm in ("total", "kenya", "national", "grand total"):
             if total is None or _filled(cells) > _filled(total):
                 total = cells
+        elif nm in ("others", "other", "other counties", "rest", "others counties"):
+            continue    # legitimate non-county aggregate; explains county-sum < Total
         elif resolve(name) and _filled(cells) > 0:
             # skip all-None rows: a shifted duplicate-layer copy bins to nothing
             # and would otherwise inflate the county count with empty phantoms.
@@ -172,22 +204,28 @@ def parse_table(doc, pl, spec):
     for p in spec["pages"]:
         mu = _rows_pymupdf(doc, p, spec["rotated"])
         pp = _rows_pdfplumber(pl, p, spec["rotated"])
-        # shared column grid from pymupdf (clean; pdfplumber can carry a
-        # duplicated text layer). Fall back to pdfplumber if pymupdf is empty.
-        centers = _centers(mu, ncells) or _centers(pp, ncells)
-        if not centers:
+        # each engine on its OWN grid (they can read different mediabox origins
+        # -> different x). pymupdf is authoritative for serving; pdfplumber is
+        # the independent cross-check. Comparing by county VALUE (below) is
+        # origin-independent, so an x-offset between engines doesn't matter.
+        cmu, cpp = _centers(mu, ncells), _centers(pp, ncells)
+        if not (cmu or cpp):
             continue
-        a, ta, ma = _extract_rows(pp, centers, ncells)
-        b, _, _ = _extract_rows(mu, centers, ncells)
+        a, ta, ma = _extract_rows(mu, cmu or cpp, ncells)   # SERVE (pymupdf)
+        b, _, _ = _extract_rows(pp, cpp or cmu, ncells)     # CHECK (pdfplumber)
         A.update(a); B.update(b)
         missed += ma
         totalA = totalA or ta
-    # dual-engine agreement over shared counties/cells
-    agree = tot = 0
+    # dual-engine agreement over shared counties/cells. dual_shared = how many
+    # counties both engines read: near-0 means pdfplumber failed on this page
+    # (duplicate/shifted/garbled layer), so dual can't corroborate and the gate
+    # falls back to additivity + completeness (both pymupdf-authoritative).
+    agree = tot = shared = 0
     for c in A:
         bk = next((k for k in B if norm(k) == norm(c)), None)
         if not bk:
             continue
+        shared += 1
         for x, y in zip(A[c], B[bk]):
             if x is None:
                 continue
@@ -213,8 +251,8 @@ def parse_table(doc, pl, spec):
                          "value": v[j], "unit": UNIT.get(metric, ""), "source_file": spec["src"],
                          "pdf_page": spec["pages"][0] + 1})
     report = {"crop": spec["crop"], "edition": spec["edition"], "pages": [p + 1 for p in spec["pages"]],
-              "counties": len(A), "dual_engine": round(dual, 3), "additivity": add,
-              "missed": sorted(set(missed))}
+              "counties": len(A), "dual_engine": round(dual, 3), "dual_shared": shared,
+              "additivity": add, "missed": sorted(set(missed))}
     return rows, report
 
 
@@ -226,7 +264,10 @@ ALIAS = {"kiliif": "kilifi", "muranga": "murang'a", "tharaka": "tharaka nithi",
          # bare 2nd words of wrapped two-word names (orphaned onto their own row
          # when the name wraps). Safe: on a duplicate, the fuller row wins.
          "nithi": "tharaka nithi", "marakwet": "elgeyo marakwet",
-         "taveta": "taita taveta", "nzoia": "trans nzoia", "gishu": "uasin gishu"}
+         "taveta": "taita taveta", "nzoia": "trans nzoia", "gishu": "uasin gishu",
+         # slash-abbreviated names seen in the cash-crop tables
+         "e/marakwet": "elgeyo marakwet", "t/nithi": "tharaka nithi",
+         "t/nzoia": "trans nzoia", "u/gishu": "uasin gishu", "taita/taveta": "taita taveta"}
 
 
 def resolve(name):
