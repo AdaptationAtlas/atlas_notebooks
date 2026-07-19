@@ -483,3 +483,42 @@ titles mapped. Remaining un-pulled families are known and page-located.
   area/prod/value — each needs a one-line registry entry (pages + layout) then runs through the same
   engine + gate. Low risk, mechanical.
 - B1 exposure/VoP chart still the other main gap (unchanged).
+
+## Addendum 7 — cash crops + wrapped-county recovery, additivity-primary gate (2026-07-18)
+
+Continued the "everything" sweep (Pete: cash crops first, I decode livestock years myself next).
+
+**Now 17 crops served** (was 15): +Groundnut (19 cty, 2019–23), +Sunflower (20 cty, 2023 only).
+Value (KSh) now on cotton, lint, groundnut, sunflower (normalised from KSh-million where the
+table prints millions). Macadamia **held back** (see below).
+
+**Two engine fixes, both real data-integrity bugs:**
+1. **Wrapped county names.** A two-word county (Elgeyo/Marakwet, Trans-/Nzoia, Uasin-/Gishu,
+   Taita/Taveta, Tharaka/Nithi) can leave its 15 figures on a *nameless* band BETWEEN the two
+   name-fragment lines (name pitch finer than 4px banding). `_merge_wrapped` re-attaches them.
+   Impact was large and I had it wrong before: Irish potato **80→100%**, finger millet **93→100%**,
+   cowpeas/green grams/pigeon peas **95→100%** additivity. Those shortfalls were genuine dropped
+   counties, NOT (as addendum 6's "source Total > itemised" wording implied) a source property.
+2. **Per-engine grids.** pdfplumber and pymupdf can read different mediabox origins (macadamia is
+   +590px in pdfplumber). Each engine now bins on its own dominant-cluster grid; the dual check
+   compares county VALUES (origin-independent). pymupdf is authoritative for serving.
+
+**Gate is now additivity-primary** (the strongest deterministic check — the report reconciling to
+its own printed national Total): completeness + reconcile-to-Total, with dual-engine required only
+where the 2nd engine can read the page. ~90% of tables are dual-confirmed; 3 (pearl millet, pigeon
+peas 2024, and the excluded macadamia) are single-engine because pdfplumber mis-reads a duplicated/
+shifted layer (proven: 4 counties + null Meru for macadamia) — those serve on additivity+
+completeness, flagged in `napr_validation_report.csv` (`validation` column). A sum<Total shortfall
+is served ONLY if dual-corroborated (coffee 87–91%, crop-year Total); otherwise held back.
+
+**Macadamia held back (deliberate).** Only 72% additivity single-engine — its #1 county Murang'a
+(apostrophe) still lands on an unmerged nameless row the completeness check can't see. Serving it
+would ship a silent ~28% gap. Fix later (apostrophe-name wrap); not served meanwhile.
+
+**Everything is reproducible:** `_sources/napr_build.py` (registry + gate + rebase) over
+`_sources/napr_extract.py` (engine). Re-run: `python napr_build.py <2024.pdf> <2025.pdf>`.
+
+**Still pending:** livestock breadth (I'll decode the Annex 15/16/17 year-mapping from the PDF next),
+the long tail of tiny cash tables (cashew 5 cty, bambara 6, sesame 6, castor, sisal, sugar,
+pyrethrum, bixa, tea, miraa — low county coverage / awkward layouts, low priority), and the
+notebook produce-figure UI rework for 25+ commodities (grouping/search).
