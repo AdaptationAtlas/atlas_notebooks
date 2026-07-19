@@ -141,7 +141,9 @@ def _extract_rows(rows, centers, ncells):
         if nm in ("total", "kenya", "national", "grand total"):
             if total is None or _filled(cells) > _filled(total):
                 total = cells
-        elif resolve(name):
+        elif resolve(name) and _filled(cells) > 0:
+            # skip all-None rows: a shifted duplicate-layer copy bins to nothing
+            # and would otherwise inflate the county count with empty phantoms.
             if name not in out or _filled(cells) > _filled(out[name]):
                 out[name] = cells
         elif re.match(r"[A-Z]", name) and len(nums) >= ncells / 2 and not _is_header(name) \
