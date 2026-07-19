@@ -424,3 +424,62 @@ which crops are which edition, provisional 2024). Finger/pearl millet, coffee, c
   cheap future add if a longer county rainfall series than CHIRPS-in-hub is wanted.
 - #10 done (addendum 3; ASAP). #11 done (addendum 4; WFP VAM NDVI). #12 done (addenda 1–2 + 5;
   market prices, ReliefWeb, XBT trade-flow map). B1 exposure/VoP chart is the main remaining gap.
+
+## Addendum 6 — robust NAPR engine + 15 crops, both editions (2026-07-18)
+
+**Trigger.** Pete: "why no seed cotton for Machakos? I feel like you have missed crops…
+review ALL the data in the PDF and cross-reference"; then "confirm there is no sorghum, pigeon
+peas, green grams, cow peas, dry beans… if there is data you have missed extracting it and we need
+a more robust skill/agent approach… list each table with data and ensure it has been extracted."
+Scope Pete chose: **everything (all crops + all livestock, both editions)**.
+
+**Finding on the named crops.** Not missing — sorghum, pigeon peas, green grams, cowpeas, dry beans
+and Machakos seed cotton were already in the parquet (both editions). The *real* gaps were: no
+**value (KSh)** for most commodities, and ~15 cash crops + most livestock categories/products absent.
+
+**What was built (the "more robust approach", per the #1 rule = no LLM reads numbers).**
+One deterministic engine `_sources/napr_extract.py` (241 lines) run by `_sources/napr_build.py`
+(registry + gate + rebase) over every county table in both PDFs:
+- **orientation auto-detect** per table (rotated-landscape vs upright — 2023-24 maize/coffee/cotton
+  are rotated, its food annexes are upright; 2024-25 annexes are all rotated).
+- **column grid by coordinate binning** — a blank or dash cell stays null *in place*. This is the
+  root-cause fix for the cotton drop: the old positional parse collapsed dashes and lost 7 cotton
+  counties (Isiolo, Kakamega, Laikipia, Murang'a, Tana River, Uasin Gishu, West Pokot). Cotton is
+  now 25 counties.
+- **shared pymupdf grid** neutralises a **duplicated text layer** several 2023-24 pages carry
+  (pdfplumber else double-reads → phantom rows shifted +275px → engines disagreed, additivity
+  garbage). With the shared grid both engines agree cell-by-cell; phantom tokens fall outside every
+  column and drop out.
+- **gate** (serve only if all hold): dual-engine agreement ≥0.98, completeness (no capitalised
+  numeric row left unattributed), county-sum never *exceeds* the printed Total. County-sum < Total
+  is left as-is where KNBS's Total exceeds its itemised counties (highland/minor crops, coffee) —
+  verified by spot-check (e.g. the Irish-potato "missing" counties are arid counties simply not
+  printed in that annex).
+- per-table log `_sources/napr_validation_report.csv`.
+
+**Served now: 15 crops** (was 12). Food (maize, sorghum, combined millet, dry beans, cowpeas,
+green grams, pigeon peas, Irish/sweet potato, cassava) 2019–2024, 2020–2024 rebased onto the
+2024-25 edition, 2019 from 2023-24. Finger/pearl millet, coffee (32 cty), cotton (25), lint (25)
+2019–2023; cotton + lint carry KSh value. All food/cash tables validate dual=1.0, additivity 100%
+on the 2024-25 edition. **Sisal excluded** (fails the gate — different in-body layout; deferred).
+Methods/caption/note in `nbText.json` updated.
+
+**Table catalog (discovery scan, deterministic).** 2023-24 edition: 42 county-table pages;
+2024-25: 12+ (continuation/livestock pages fall under the ≥20-county scan threshold). Full annex
+titles mapped. Remaining un-pulled families are known and page-located.
+
+## Known gaps (updated)
+
+- **Livestock breadth NOT yet expanded** — still the old `knbs_napr_livestock.parquet`
+  (cattle/sheep/goats/camels/donkeys head, 2021). The 2023-24 edition has population Annexes 15–26
+  (cattle/sheep/goats + dairy/beef/wool/hair/dairy-goat/meat-goat breakdowns; donkeys/camels/
+  beehives; pigs/rabbits/broilers/layers/indigenous; turkeys/ducks/geese) and **products Annex 27**
+  (milk/honey/wax/wool/mutton/eggs/hides/meat, qty·price·value, ~16 pages). Structurally simple
+  (upright, county + N numeric cols) but **the Annex 15/16/17 year-mapping is ambiguous** (same
+  title thrice) and needs decoding before serving — do NOT guess. This is the next chunk; the engine
+  handles the shape already.
+- **~15 more cash crops** (sunflower, sesame, macadamia, cashew, groundnuts, bambara, castor,
+  coconut, pyrethrum, bixa, tea, sugar, sisal, miraa) are county-level Table X.Y tables with
+  area/prod/value — each needs a one-line registry entry (pages + layout) then runs through the same
+  engine + gate. Low risk, mechanical.
+- B1 exposure/VoP chart still the other main gap (unchanged).
