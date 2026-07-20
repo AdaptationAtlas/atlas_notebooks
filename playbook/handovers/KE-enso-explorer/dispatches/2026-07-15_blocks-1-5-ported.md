@@ -612,3 +612,40 @@ tickable. Caption/intro updated (19 crops; 10 livestock species 2021–23; produ
 Held back / low-value tail (documented): macadamia, castor, sesame/bambara/sugar/tea/pyrethrum/bixa/
 miraa, wool 2021. Reproducible: `_sources/napr_build.py`, `napr_build_livestock.py`,
 `napr_build_products.py` over `napr_extract.py`.
+
+## Addendum 11 — decode-all + full-PDF audit (2026-07-20)
+
+Pete: "decode all, then triple check we have mined all the available data". A full-PDF audit
+(every page, both orientations, >=4 resolving counties) found substantial un-mined tables the
+earlier ">=20 counties" scan had missed. Worked through all of them.
+
+**Added this pass (all dual-engine=1.0 unless noted): 26 crops (was 19), 13 livestock species
+(was 10), 11 products.**
+- New crops: **Wheat** (Section-3 body, area+prod, no Total -> dual-validated), **Tea (green leaf)**,
+  **Sugarcane**, **Sisal**, **Pyrethrum**, **Bambara nut** — several both editions 2019-2024.
+- **Cotton -> 2024** (2025 edition Table 5.5d). **Macadamia now served** from the 2025 edition
+  (fixes the held-back 2024 Murang'a wrap); Groundnut/Coconut/Cashew nut from 2025.
+- Livestock **+Turkeys/Ducks/Geese** (Annex 24-26).
+- Engine hardening: no-space county aliases (Homabay), aggregate/footer skips (All Companies,
+  Average yield), more header-fragment words (Unit, KSh/Kg, Tons, Year, Table...), production-unit
+  scale (tea/pyrethrum kg->t), gate accepts dual-confirmed tables with no Total, dual-shared floor 5.
+
+**Triple-check ledger:** `_sources/napr_audit_ledger.csv` classifies EVERY county table in both
+PDFs. Everything tabular + in-scope (crops/livestock) + deterministically-validatable is now mined.
+The remainder is documented and defensible:
+- **Held (data quality):** Barley (single-engine, no Total), Castor (82.9% single-engine), Sesame
+  (2024 oversum 104.9% / 2025 Canola shares the page), Groundnut-2025-yr2024 (186% double-count),
+  Sunflower-2025 (oversum; served from 2024), and the Section-3 food-crop VALUE body tables (15-col
+  value region won't bin cleanly, no Total).
+- **Held (minor/ambiguous):** Bixa (unit = acres).
+- **Duplicate of served:** Maize/Beans Top-20, Sugar Annex-12, Sisal Annex-13, lint/product
+  5-summaries, Cashew-2024.
+- **Secondary metric:** coffee/tea/pyrethrum AREA (production already served).
+- **Excluded:** seed-distribution table; 2025 chart/figure data (nc=1, incl. 2025 livestock which is
+  chart-only — 2024 annexes serve 2021-23).
+- **Out of scope:** fisheries (Table 8.7).
+
+**Browser-verified again (verifier-quarto-notebook, PASS):** Crops (tonnes/2024), Livestock
+(head/2023), Products (KSh/2022) all render + toggle after the data growth. Caption -> 26 crops /
+13 species. Builders: napr_build.py / napr_build_livestock.py / napr_build_products.py over
+napr_extract.py; per-table log napr_validation_report.csv; page-level audit napr_audit_ledger.csv.
