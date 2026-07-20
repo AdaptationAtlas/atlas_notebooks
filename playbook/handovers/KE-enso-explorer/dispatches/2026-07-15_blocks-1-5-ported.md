@@ -522,3 +522,43 @@ would ship a silent ~28% gap. Fix later (apostrophe-name wrap); not served meanw
 the long tail of tiny cash tables (cashew 5 cty, bambara 6, sesame 6, castor, sisal, sugar,
 pyrethrum, bixa, tea, miraa — low county coverage / awkward layouts, low priority), and the
 notebook produce-figure UI rework for 25+ commodities (grouping/search).
+
+## Addendum 8 — livestock population expansion, 10 species × 2021–2023 (2026-07-20)
+
+Pete: "yes livestock". Decoded the annex year-mapping from the PDF (as agreed).
+
+**Year-mapping decoded.** Annexes 15/16/17, 18/19/20, 21/22/23, 24/25/26 each repeat one
+animal-family across **2021 / 2022 / 2023** (one annex = one year; confirmed by Baringo cattle
+148211→145919→147496 differing per annex). The "2024" on each page is the report-year footer,
+not a data year.
+
+**Layout gotcha.** The headline "Cattle / Sheep / Goats" in the header are SPANNING labels over
+sub-column pairs; the DATA columns are Dairy_Cattle, Beef_Cattle, Wool_sheep, Hair_sheep,
+Dairy_Goats, Meat_Goats (ncells=6). Cattle = Dairy+Beef (Baringo 148211+373807 = 522018, matches
+the prior parquet). Sheep, Goats likewise. Dash sub-column = 0.
+
+**Validation (these annexes print NO Total, so additivity can't apply):**
+- **dual-engine** where pdfplumber can read the page. It garbles a duplicated/shifted layer on
+  ~half the pages, PAGE-SPECIFIC (cattle/pig 2022 garbled; donkey 2021+2023 garbled) — pymupdf
+  reads every page cleanly and is authoritative.
+- **cross-year plausibility** for the garbled years: a county count must be within ±50% of the
+  median of its dual-confirmed years (populations don't swing that hard); fails → dropped, not shown.
+- donkey/camel/cattle **2021 additionally match the prior extraction exactly** (0 mismatches),
+  independently confirming pymupdf on the garbled 2021 donkey page.
+
+**Served: 10 species × 2021–2023, 1219 rows** (was 5 species × 2021): cattle, sheep, goats,
+camels, donkeys, pigs, rabbits, broiler/layer/indigenous chicken. Reproducible via
+`_sources/napr_build_livestock.py`. Schema unchanged so the notebook Livestock toggle auto-adds
+the years + species (trend view now spans 2021–23). Caption updated.
+
+**Deferred — livestock PRODUCTS (Annex 27, p141–156, 2021).** milk/beef/mutton/pork/wool/chevon/
+honey/wax/eggs/hides, each as Quantity·Unit-price·Total-value. Clean built-in check available
+(**value = qty × unit price**, e.g. Baringo milk 34,218,882 kg × 40 = 1,368,755,280 ✓ — stronger
+than dual-engine), BUT the pages are messy: products repeat across pages with different values
+(milk on p143 AND p150), and some pages misread a neighbour's data via the duplicate layer
+(p144 returned p143's numbers). Needs the page→product→year mapping decoded + dedup before serving.
+Good, well-scoped next chunk (the qty×price gate makes it validatable).
+
+**Also still pending:** the long tail of tiny cash tables (cashew/bambara/sesame/sugar/tea/pyrethrum/
+bixa/miraa — low county coverage) and the produce-figure UI rework for 25+ commodities + expanded
+livestock (grouping/search).
