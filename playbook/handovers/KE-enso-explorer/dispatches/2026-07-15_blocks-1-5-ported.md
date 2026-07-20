@@ -649,3 +649,32 @@ The remainder is documented and defensible:
 (head/2023), Products (KSh/2022) all render + toggle after the data growth. Caption -> 26 crops /
 13 species. Builders: napr_build.py / napr_build_livestock.py / napr_build_products.py over
 napr_extract.py; per-table log napr_validation_report.csv; page-level audit napr_audit_ledger.csv.
+
+## Addendum 12 — Tier 1+2 recovery + reusable extraction skill (2026-07-20)
+
+Worked the plan Pete approved.
+
+**Tier 1 (done):**
+- Food-crop VALUE — confirmed NOT in source (Section-3 body tables are area+prod only, subset of
+  annexes; body Kitui == annex exactly). Value is national-only, in prose. Ledger corrected.
+- Groundnut/Sunflower 2024 recovered via column-masking + column-level gate (mask the double-counted
+  2023 block, take clean 2024). Sunflower 20 -> 33 cty.
+- Sesame recovered (8 cty) via a NEW engine capability — **y-range table isolation** — separating it
+  from the Canola table on p133; **Canola added** as a new crop (12 cty).
+
+**Tier 2 (done):**
+- area_ha added to Tea + Pyrethrum (their area tables, both editions).
+- **Bixa** added (area only, acres->ha, 8 cty 2022-24).
+- Coffee area skipped (crop-year mapping uncertain; production served). 2025 livestock figures
+  skipped (top-N charts nc=1; 2024-edition annexes serve population 2021-23).
+
+**Tier 3 (blocked, unchanged):** Barley, Castor — single-engine, no Total, no cross-source; no
+deterministic gate passes without a model reading numbers. Held.
+
+**Now: 29 crops, 13 livestock species, 11 products.** Max served production-additivity 100.2 (no
+double-count leaks). Browser-verified PASS after each data change.
+
+**Reusable skill:** `.claude/skills/extract-knbs-napr/` — the full audit -> decode -> gate -> rebase
+workflow + all gotchas, so the **2026 edition** (when released) is mostly page-number shifts + one
+new year. Audit/probe tools persisted to `_sources/napr_audit.py` + `napr_probe.py`; page-by-page
+record in `_sources/napr_audit_ledger.csv`.
