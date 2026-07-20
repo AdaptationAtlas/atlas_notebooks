@@ -190,7 +190,7 @@ md`${_lang(nbText.sections.keyfacts.produceIntro)}`
 ::: {.controls-row}
 
 ```{ojs}
-viewof prodCommodity = Inputs.radio(["Crops", "Livestock"], {
+viewof prodCommodity = Inputs.radio(["Crops", "Livestock", "Products"], {
   label: _lang(nbText.sections.controls.prodCommodity),
   value: "Crops",
 })
@@ -213,10 +213,12 @@ viewof prodMode = Inputs.radio(["Absolute", "% of national"], {
 :::
 
 ```{ojs}
-// crop/species filter — options depend on county + commodity, default all
+// crop/species/product filter — options depend on county + commodity. With up
+// to 19 crops, default to the county's top items (by latest-year value) so the
+// chart starts legible; every item stays tickable.
 viewof prodPick = Inputs.checkbox(prodItemNames, {
   label: _lang(nbText.sections.controls.prodPick),
-  value: prodItemNames,
+  value: prodDefault,
 })
 ```
 
@@ -1342,32 +1344,43 @@ ndviDomain = {
 ```
 
 ```{ojs}
-// ---- KNBS NAPR county production + livestock (Key Facts multi-view) ----
+// ---- KNBS NAPR county production + livestock + products (Key Facts multi-view) ----
 dbNapr = DuckDBClient.of({napr: FileAttachment("/data/KE-enso-explorer/knbs_napr_county_production.parquet")})
 dbLive = DuckDBClient.of({live: FileAttachment("/data/KE-enso-explorer/knbs_napr_livestock.parquet")})
+dbProd = DuckDBClient.of({prod: FileAttachment("/data/KE-enso-explorer/knbs_napr_livestock_products.parquet")})
 
-// both sources normalized to {item, year, val, pdf_page}
-naprCty = dbNapr.query(`SELECT crop AS item, year, production_t AS val, pdf_page FROM napr WHERE ${normExpr("county")} = '${countyNorm(county)}' ORDER BY item, year`)
+// all three sources normalized to {item, year, val, pdf_page}
+naprCty = dbNapr.query(`SELECT crop AS item, year, production_t AS val, pdf_page FROM napr WHERE ${normExpr("county")} = '${countyNorm(county)}' AND production_t IS NOT NULL ORDER BY item, year`)
 naprNatl = dbNapr.query(`SELECT crop AS item, year, SUM(production_t) AS natl FROM napr GROUP BY crop, year`)
 liveCty = dbLive.query(`SELECT species AS item, year, head AS val, pdf_page FROM live WHERE ${normExpr("county")} = '${countyNorm(county)}' ORDER BY item, year`)
 liveNatl = dbLive.query(`SELECT species AS item, year, SUM(head) AS natl FROM live GROUP BY species, year`)
+// products: value (KSh) is the cross-product comparable (quantity units differ)
+prodProdCty = dbProd.query(`SELECT product AS item, year, value_ksh AS val, pdf_page FROM prod WHERE ${normExpr("county")} = '${countyNorm(county)}' ORDER BY item, year`)
+prodProdNatl = dbProd.query(`SELECT product AS item, year, SUM(value_ksh) AS natl FROM prod GROUP BY product, year`)
 
 prodIsLive = () => prodCommodity === "Livestock"
-prodItems = prodIsLive() ? liveCty : naprCty
-// distinct crops/species available for this county+commodity (drives the filter)
+prodIsProd = () => prodCommodity === "Products"
+prodItems = prodIsProd() ? prodProdCty : prodIsLive() ? liveCty : naprCty
+// distinct crops/species/products available for this county+commodity (drives the filter)
 prodItemNames = [...new Set(prodItems.map((d) => d.item))].sort()
-// rows after the crop/species filter (prodPick, defined in the body)
+// default filter = the county's top items by latest-year value (keeps the chart legible)
+prodDefault = {
+  const byItem = d3.rollup(prodItems.filter((d) => d.year === prodLatest && d.val > 0),
+    (v) => d3.sum(v, (d) => d.val), (d) => d.item);
+  return [...byItem].sort((a, b) => b[1] - a[1]).slice(0, 8).map((d) => d[0]);
+}
+// rows after the item filter (prodPick, defined in the body)
 prodShown = prodItems.filter((d) => prodPick.includes(d.item))
-prodNatlMap = new Map((prodIsLive() ? liveNatl : naprNatl).map((d) => [`${d.item}|${d.year}`, d.natl]))
+prodNatlMap = new Map((prodIsProd() ? prodProdNatl : prodIsLive() ? liveNatl : naprNatl).map((d) => [`${d.item}|${d.year}`, d.natl]))
 prodYears = [...new Set(prodItems.map((d) => d.year))].sort((a, b) => a - b)
-prodLatest = prodYears.length ? prodYears[prodYears.length - 1] : (prodIsLive() ? 2021 : 2023)
+prodLatest = prodYears.length ? prodYears[prodYears.length - 1] : (prodIsProd() ? 2022 : prodIsLive() ? 2023 : 2024)
 prodVal = (d) => prodMode.startsWith("%")
   ? (prodNatlMap.get(`${d.item}|${d.year}`) ? d.val / prodNatlMap.get(`${d.item}|${d.year}`) * 100 : null)
   : d.val
-prodUnit = () => prodMode.startsWith("%") ? "% of national" : (prodIsLive() ? "head" : "tonnes")
-prodUnitShort = () => prodMode.startsWith("%") ? "%" : (prodIsLive() ? "" : " t")
+prodUnit = () => prodMode.startsWith("%") ? "% of national" : prodIsProd() ? "KSh (value)" : prodIsLive() ? "head" : "tonnes"
+prodUnitShort = () => prodMode.startsWith("%") ? "%" : prodIsProd() ? " KSh" : prodIsLive() ? "" : " t"
 
-prodEmpty = () => html`<div style="color:#666;font-style:italic;max-width:30rem">No KNBS NAPR ${prodIsLive() ? "livestock population" : "crop production"} for ${county} in the served ${prodIsLive() ? "species" : "crops"}.</div>`
+prodEmpty = () => html`<div style="color:#666;font-style:italic;max-width:30rem">No KNBS NAPR ${prodIsProd() ? "livestock products" : prodIsLive() ? "livestock population" : "crop production"} for ${county} in the served ${prodIsProd() ? "products" : prodIsLive() ? "species" : "crops"}.</div>`
 
 // view builders (functions -> no hidden-appendix display consumes a node)
 prodBars = () => {
@@ -1379,7 +1392,7 @@ prodBars = () => {
     x: {label: `${prodUnit()} (${prodLatest})`, tickFormat: prodMode.startsWith("%") ? ((d) => d + "%") : "~s", grid: true},
     y: {domain: rows.map((d) => d.item), label: null},
     marks: [
-      Plot.barX(rows, {x: "v", y: "item", fill: prodIsLive() ? "#a6611a" : "#2c7fb8", rx: 2,
+      Plot.barX(rows, {x: "v", y: "item", fill: prodIsProd() ? "#5aae61" : prodIsLive() ? "#a6611a" : "#2c7fb8", rx: 2,
         tip: {format: {x: (v) => Math.round(v).toLocaleString() + prodUnitShort(), y: true}}}),
       Plot.ruleX([0]),
     ],
@@ -1416,7 +1429,7 @@ prodTree = () => {
     .attr("style", "max-width:100%;height:auto;font:11px system-ui;");
   const g = svg.selectAll("g").data(root.leaves()).join("g").attr("transform", (d) => `translate(${d.x0},${d.y0})`);
   g.append("rect").attr("width", (d) => d.x1 - d.x0).attr("height", (d) => d.y1 - d.y0).attr("fill", (d) => color(d.data.item)).attr("stroke", "#fff");
-  g.append("title").text((d) => `${d.data.item}: ${Math.round(d.value).toLocaleString()}${prodIsLive() ? " head" : " t"} — ${(100 * d.value / total).toFixed(1)}% of county (${prodLatest})`);
+  g.append("title").text((d) => `${d.data.item}: ${Math.round(d.value).toLocaleString()}${prodIsProd() ? " KSh" : prodIsLive() ? " head" : " t"} — ${(100 * d.value / total).toFixed(1)}% of county (${prodLatest})`);
   g.filter((d) => (d.x1 - d.x0) > 48 && (d.y1 - d.y0) > 22).append("text")
     .attr("x", 4).attr("y", 14).attr("fill", "#fff").attr("font-weight", 600).text((d) => d.data.item);
   return svg.node();
@@ -1433,7 +1446,7 @@ prodTable = () => {
       : Math.round(r.val);
     return m;
   }).sort((a, b) => (b[String(prodLatest)] ?? 0) - (a[String(prodLatest)] ?? 0));
-  const header = {item: prodIsLive() ? "Species" : "Crop"};
+  const header = {item: prodIsProd() ? "Product" : prodIsLive() ? "Species" : "Crop"};
   ys.forEach((y) => header[y] = y === String(prodLatest) ? `${y} (${prodUnit()})` : y);
   return Inputs.table(rows, {columns: ["item", ...ys], header, rows: 14, layout: "auto"});
 }
