@@ -212,7 +212,8 @@ def _extract_rows(rows, centers, ncells):
 
 
 _HDR = re.compile(r"county|area|produc|tonnes|\(ha\)|national|annex|report|value|price|total|"
-                  r"year|top|ranking|figure|table|quantity|head|number|\(kg\)|trays", re.I)
+                  r"year|top|ranking|figure|table|quantity|head|number|\(kg\)|trays|"
+                  r"unit|ksh|kshs|tons|kgs?|litres|hives|/", re.I)
 
 
 def _is_header(name):

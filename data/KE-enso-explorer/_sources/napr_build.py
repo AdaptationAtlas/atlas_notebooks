@@ -97,12 +97,15 @@ CASH = [  # all 2024 edition
     ("Sugarcane", "2025", [98], prod_only(Y25)),
     # sisal quantity + value (2025 Table 5.4(b), 2021-2024)
     ("Sisal", "2025", [103], blk(["production", "value"], [2021, 2022, 2023, 2024])),
+    # pyrethrum dry-flower production (kg -> tonnes), both editions
+    ("Pyrethrum", "2024", [64], prod_only(Y24)),
+    ("Pyrethrum", "2025", [119], prod_only(Y25)),
 ]
 # value normalisation to raw KSh: several cash tables print value in KSh million
 VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6,
           "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6, "Sisal": 1e6}
 # production-unit normalisation to tonnes (green-leaf tea is printed in kg)
-PSCALE = {"Tea (green leaf)": 0.001}
+PSCALE = {"Tea (green leaf)": 0.001, "Pyrethrum": 0.001}
 
 DOC = {"2024": (fitz.open(PDF24), pdfplumber.open(PDF24), "National-Agriculture-Production-Report-2024.pdf"),
        "2025": (fitz.open(PDF25), pdfplumber.open(PDF25), "National-Agriculture-Production-Report-2025.pdf")}
