@@ -45,6 +45,10 @@ FAMILIES = [
     dict(ncells=5, pages={2021: 134, 2022: 135, 2023: 136},
          species={"Pigs": [0], "Rabbits": [1], "Broiler chicken": [2],
                   "Layer chicken": [3], "Indigenous chicken": [4]}),
+    # other poultry (Annex 24-26); only the dense leading columns are served
+    # (guinea fowl / pigeons / doves / quails / ostrich are too sparse to trust)
+    dict(ncells=8, pages={2021: 137, 2022: 138, 2023: 139},
+         species={"Turkeys": [0], "Ducks": [1], "Geese": [2]}),
 ]
 
 
