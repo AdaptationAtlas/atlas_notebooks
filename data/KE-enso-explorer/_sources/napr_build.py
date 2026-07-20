@@ -56,6 +56,10 @@ def prod_only(ys):
     return [("production", y) for y in ys]
 
 
+def area_only(ys):
+    return [("area", y) for y in ys]
+
+
 # crop, edition, [0-based pages], layout  (ncells = len(layout))
 FOOD = [
     ("Maize", "2024", [113, 114], AP(Y24)), ("Maize", "2025", [185, 186], AP(Y25)),
@@ -108,12 +112,21 @@ CASH = [  # all 2024 edition
     ("Sesame", "2024", [86], AP(Y24)),               # area+prod (2025 held: Canola shares page)
     ("Bambara nut", "2024", [85], blk(["area", "production", "value"], YC)),
     ("Bambara nut", "2025", [131], byyear([2023, 2024])),
+    # AREA tables that enrich already-served crops with area_ha (production served elsewhere)
+    ("Tea (green leaf)", "2024", [74], area_only(Y24)),
+    ("Tea (green leaf)", "2025", [91], area_only(Y25)),
+    ("Pyrethrum", "2024", [63], area_only(Y24)),
+    ("Pyrethrum", "2025", [117], area_only(Y25)),
+    # bixa: area only, printed in acres (-> ha), 2022-2024
+    ("Bixa", "2025", [121], area_only([2022, 2023, 2024])),
 ]
 # value normalisation to raw KSh: several cash tables print value in KSh million
 VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6,
           "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6, "Sisal": 1e6, "Bambara nut": 1e6, "Canola": 1e6}
 # production-unit normalisation to tonnes (green-leaf tea is printed in kg)
 PSCALE = {"Tea (green leaf)": 0.001, "Pyrethrum": 0.001}
+# area-unit normalisation to hectares (bixa is printed in acres)
+ASCALE = {"Bixa": 0.404686}
 
 DOC = {"2024": (fitz.open(PDF24), pdfplumber.open(PDF24), "National-Agriculture-Production-Report-2024.pdf"),
        "2025": (fitz.open(PDF25), pdfplumber.open(PDF25), "National-Agriculture-Production-Report-2025.pdf")}
@@ -218,6 +231,8 @@ def build():
             val *= VSCALE.get(crop, 1)
         elif metric == "production":
             val *= PSCALE.get(crop, 1)
+        elif metric == "area":
+            val *= ASCALE.get(crop, 1)
         wide[(crop, county, year)][MET[metric]] = val
         meta[(crop, county, year)] = (r["gaul1_code"], r["source_file"], r["pdf_page"])
 

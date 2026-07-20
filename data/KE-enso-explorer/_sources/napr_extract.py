@@ -218,7 +218,8 @@ def _extract_rows(rows, centers, ncells):
 
 _HDR = re.compile(r"county|area|produc|tonnes|\(ha\)|national|annex|report|value|price|total|"
                   r"year|top|ranking|figure|table|quantity|head|number|\(kg\)|trays|"
-                  r"unit|ksh|kshs|tons|kgs?|litres|hives|/", re.I)
+                  r"unit|ksh|kshs|tons|kgs?|litres|hives|/|parameter|export|month|"
+                  r"january|february|march|april|may|june|july|august|september|october|november|december", re.I)
 
 
 def _is_header(name):
