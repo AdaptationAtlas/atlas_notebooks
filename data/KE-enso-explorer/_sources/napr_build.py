@@ -100,10 +100,14 @@ CASH = [  # all 2024 edition
     # pyrethrum dry-flower production (kg -> tonnes), both editions
     ("Pyrethrum", "2024", [64], prod_only(Y24)),
     ("Pyrethrum", "2025", [119], prod_only(Y25)),
+    # minor oilseeds/legumes (few counties, but full for the crop)
+    ("Sesame", "2024", [86], AP(Y24)),               # area+prod (2025 held: Canola shares page)
+    ("Bambara nut", "2024", [85], blk(["area", "production", "value"], YC)),
+    ("Bambara nut", "2025", [131], byyear([2023, 2024])),
 ]
 # value normalisation to raw KSh: several cash tables print value in KSh million
 VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6,
-          "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6, "Sisal": 1e6}
+          "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6, "Sisal": 1e6, "Bambara nut": 1e6}
 # production-unit normalisation to tonnes (green-leaf tea is printed in kg)
 PSCALE = {"Tea (green leaf)": 0.001, "Pyrethrum": 0.001}
 
