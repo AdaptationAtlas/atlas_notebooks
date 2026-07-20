@@ -48,6 +48,10 @@ def grp3(ys):     # coffee: 3 sub-cols/year (Co-op, Estate, Total); Total=produc
     return [(m, y) for y in ys for m in ("coop", "estate", "production")]
 
 
+def byyear(ys):   # area,production,value grouped BY YEAR (each year's 3 together)
+    return [(m, y) for y in ys for m in ("area", "production", "value")]
+
+
 # crop, edition, [0-based pages], layout  (ncells = len(layout))
 FOOD = [
     ("Maize", "2024", [113, 114], AP(Y24)), ("Maize", "2025", [185, 186], AP(Y25)),
@@ -70,9 +74,13 @@ CASH = [  # all 2024 edition
     ("Macadamia", "2024", [81], blk(["area", "production", "value"], YC)),      # upright
     ("Groundnut", "2024", [84], blk(["area", "production", "value"], YC)),      # upright
     ("Sunflower", "2024", [88], [("area", 2023), ("production", 2023), ("value", 2023)]),
+    ("Coconut", "2025", [126], blk(["area", "production", "value"], [2023, 2024])),  # by-metric
+    ("Cashew nut", "2025", [127], byyear([2023, 2024])),                             # by-year
+    ("Castor", "2024", [89], [("area", 2023), ("production", 2023)]),  # value unit ambiguous -> omit
 ]
 # value normalisation to raw KSh: several cash tables print value in KSh million
-VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6}
+VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6,
+          "Coconut": 1e6, "Cashew nut": 1e6}
 
 DOC = {"2024": (fitz.open(PDF24), pdfplumber.open(PDF24), "National-Agriculture-Production-Report-2024.pdf"),
        "2025": (fitz.open(PDF25), pdfplumber.open(PDF25), "National-Agriculture-Production-Report-2025.pdf")}
