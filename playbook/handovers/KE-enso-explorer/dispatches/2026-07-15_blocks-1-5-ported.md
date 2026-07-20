@@ -584,3 +584,31 @@ a Products view; folding into the produce-figure rework (next) rather than half-
 
 **Remaining:** produce-figure UI rework (27 crops/livestock + products, grouping/search) and the
 tiny cash tables (low value).
+
+## Addendum 10 — produce-figure UI rework + browser-verified (2026-07-20)
+
+Pete: "2 then 1" — tiny cash tables, then UI. Cash: +Coconut (6 cty), +Cashew nut (8 cty), both
+dual=1.0/100%, KSh value (**19 crops** total); Castor held back (single-engine 82.9%);
+sesame/bambara/sugar/tea/pyrethrum skipped (ambiguous or <7 cty). See addendum + commit.
+
+**UI rework.** The "What does my county produce?" multi-view gains a **Products** commodity
+(Crops / Livestock / Products), served by **value (KSh)** — the cross-product comparable since
+product units differ (kg / trays / number). `dbProd` + `prodProdCty`/`prodProdNatl` mirror the
+crop/livestock query shape; unit / empty-state / bar-colour / treemap / table labels branch on
+`prodIsProd()`. With up to 19 crops the item filter now defaults to the county's **top 8 by
+latest-year value** (`prodDefault`) instead of all, so the chart starts legible; every item stays
+tickable. Caption/intro updated (19 crops; 10 livestock species 2021–23; products note).
+
+**Browser-verified (verifier-quarto-notebook, chromium-headless vs `_site`, :8765). Verdict: PASS.**
+- Crops → 5 bars, axis "tonnes (2024)"
+- Livestock → 8 bars, axis "head (2023)"
+- Products → 5 bars, axis "KSh (value) (2022)" — Marsabit shows Milk dominant then Beef/Mutton/
+  Camel meat/Honey (pastoralist county by value — sanity ✓)
+- toggle back to Crops clean; the 27 console errors are transient OJS bootstrap
+  (plotFooter/atlasTOC/enhancedMultiSelect), none produce-related. Screenshot 03_products.png.
+
+**"Everything" sweep now complete** for what validates: 19 crops (2019–24), 10 livestock species
+(2021–23), 11 products (2021–22) — all deterministically gated, all browsable in the notebook.
+Held back / low-value tail (documented): macadamia, castor, sesame/bambara/sugar/tea/pyrethrum/bixa/
+miraa, wool 2021. Reproducible: `_sources/napr_build.py`, `napr_build_livestock.py`,
+`napr_build_products.py` over `napr_extract.py`.
