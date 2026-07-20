@@ -39,10 +39,13 @@ def cell(t):
     return float(s) if re.fullmatch(r"-?\d+(?:\.\d+)?", s) else "TEXT"  # "TEXT" = non-numeric token
 
 
-def _rows_pymupdf(doc, pidx, rotated):
+def _rows_pymupdf(doc, pidx, rotated, yrange=None):
     """rows of (pos, text) pairs. pos = within-row reading coordinate, used
-    later for column binning (rotated: -y; normal: x)."""
+    later for column binning (rotated: -y; normal: x). yrange=(lo,hi) spatially
+    crops to one table on a page that carries more than one (by vertical y0)."""
     ws = doc[pidx].get_text("words")  # x0,y0,x1,y1,text,...
+    if yrange:
+        ws = [w for w in ws if yrange[0] <= w[1] <= yrange[1]]
     groups = collections.defaultdict(list)
     if rotated:
         for w in ws:
@@ -55,9 +58,11 @@ def _rows_pymupdf(doc, pidx, rotated):
     return _merge_wrapped([sorted(((pos(w), w[4]) for w in groups[k])) for k in sorted(groups)])
 
 
-def _rows_pdfplumber(pl, pidx, rotated):
+def _rows_pdfplumber(pl, pidx, rotated, yrange=None):
     pg = pl.pages[pidx]
     ws = pg.extract_words()
+    if yrange:
+        ws = [w for w in ws if yrange[0] <= w["top"] <= yrange[1]]
     groups = collections.defaultdict(list)
     if rotated:
         for w in ws:
@@ -230,9 +235,10 @@ def parse_table(doc, pl, spec):
     ncells = spec["ncells"]
     A, totalA, missed = {}, None, []
     B = {}
+    yr = spec.get("yrange")
     for p in spec["pages"]:
-        mu = _rows_pymupdf(doc, p, spec["rotated"])
-        pp = _rows_pdfplumber(pl, p, spec["rotated"])
+        mu = _rows_pymupdf(doc, p, spec["rotated"], yr)
+        pp = _rows_pdfplumber(pl, p, spec["rotated"], yr)
         # each engine on its OWN grid (they can read different mediabox origins
         # -> different x). pymupdf is authoritative for serving; pdfplumber is
         # the independent cross-check. Comparing by county VALUE (below) is

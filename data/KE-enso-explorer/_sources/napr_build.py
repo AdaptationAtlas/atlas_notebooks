@@ -85,9 +85,13 @@ CASH = [  # all 2024 edition
     # 2025 cash tables (Table 6.x), by-year area/prod/value 2023-2024, value in KSh million.
     # These extend / replace their 2024-edition counterparts (Macadamia 2024 was held back).
     ("Macadamia", "2025", [128], byyear([2023, 2024])),
-    ("Groundnut", "2025", [129], byyear([2023, 2024])),
-    ("Sesame", "2025", [132], byyear([2023, 2024])),
-    ("Sunflower", "2025", [134], byyear([2023, 2024])),
+    # Groundnut/Sunflower 2025: the 2023 column-block double-counts (186% / 104.8%);
+    # 2023 is already served from the 2024 edition, so mask it and take only 2024.
+    ("Groundnut", "2025", [129], [("drop", 2023)] * 3 + byyear([2024])),
+    # Sesame + Canola share page p133; y-crop isolates each table.
+    ("Sesame", "2025", [132], byyear([2023, 2024]), (120, 320)),
+    ("Canola", "2025", [132], byyear([2023, 2024]), (540, 760)),
+    ("Sunflower", "2025", [134], [("drop", 2023)] * 3 + byyear([2024])),
     # cotton to 2024 (2025 edition, blk area/prod/value x 2020-2024, value raw KSh)
     ("Cotton (seed)", "2025", [114], blk(["area", "production", "value"], Y25)),
     # major cash crops: green-leaf tea + sugarcane (production only), both editions
@@ -107,7 +111,7 @@ CASH = [  # all 2024 edition
 ]
 # value normalisation to raw KSh: several cash tables print value in KSh million
 VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6,
-          "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6, "Sisal": 1e6, "Bambara nut": 1e6}
+          "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6, "Sisal": 1e6, "Bambara nut": 1e6, "Canola": 1e6}
 # production-unit normalisation to tonnes (green-leaf tea is printed in kg)
 PSCALE = {"Tea (green leaf)": 0.001, "Pyrethrum": 0.001}
 
@@ -115,7 +119,7 @@ DOC = {"2024": (fitz.open(PDF24), pdfplumber.open(PDF24), "National-Agriculture-
        "2025": (fitz.open(PDF25), pdfplumber.open(PDF25), "National-Agriculture-Production-Report-2025.pdf")}
 
 
-def try_table(crop, edition, pages, layout):
+def try_table(crop, edition, pages, layout, yrange=None):
     """Run both orientations, return (rows, rep) for the one with best
     production additivity + dual + county count."""
     doc, pl, src = DOC[edition]
@@ -123,7 +127,7 @@ def try_table(crop, edition, pages, layout):
     best = None
     for rot in (True, False):
         spec = dict(crop=crop, category="crop", edition=edition, src=src,
-                    pages=pages, rotated=rot, ncells=ncells, layout=layout)
+                    pages=pages, rotated=rot, ncells=ncells, layout=layout, yrange=yrange)
         rows, rep = NE.parse_table(doc, pl, spec)
         ref = [v for k, v in rep["additivity"].items() if k[0] == "production" and v is not None] \
             or [v for k, v in rep["additivity"].items() if v is not None] or [0]
@@ -154,8 +158,14 @@ def gate(rep):
     the duplicate-/shifted-layer pages (proven: it returns 4 counties and a
     null Meru for macadamia), so requiring it would drop data additivity
     confirms is correct."""
-    add = [v for v in rep["additivity"].values() if v is not None]
-    if rep["missed"] or any(v > 101 for v in add) or rep["counties"] < 4:
+    # judge only the columns we actually serve (real metrics) — a masked "drop"
+    # column (e.g. a contaminated year we take from the other edition) must not
+    # sink the table.
+    add = [v for (m, y), v in rep["additivity"].items()
+           if m in ("area", "production", "value") and v is not None]
+    # >102 = double-count (real ones are 150-500%); <=102 tolerates rounding on
+    # KSh-million value columns summed over ~30 counties.
+    if rep["missed"] or any(v > 102 for v in add) or rep["counties"] < 4:
         return False
     dual_confirmed = rep["dual_shared"] >= 5 and rep["dual_engine"] >= 0.98
     # dual-engine corroboration alone is sufficient (some body tables print no
@@ -176,8 +186,10 @@ def validation_label(rep):
 
 def build():
     long_rows, report = [], []
-    for crop, edition, pages, layout in FOOD + CASH:
-        rows, rep = try_table(crop, edition, pages, layout)
+    for entry in FOOD + CASH:
+        crop, edition, pages, layout = entry[:4]
+        yrange = entry[4] if len(entry) > 4 else None
+        rows, rep = try_table(crop, edition, pages, layout, yrange)
         ok = gate(rep)
         padd = {k[1]: v for k, v in rep["additivity"].items() if k[0] == "production"}
         report.append({"crop": crop, "edition": edition, "pages": str(rep["pages"]),
