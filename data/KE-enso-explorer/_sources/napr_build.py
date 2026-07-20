@@ -85,7 +85,10 @@ CASH = [  # all 2024 edition
     ("Sunflower", "2024", [88], [("area", 2023), ("production", 2023), ("value", 2023)]),
     ("Coconut", "2025", [126], blk(["area", "production", "value"], [2023, 2024])),  # by-metric
     ("Cashew nut", "2025", [127], byyear([2023, 2024])),                             # by-year
-    ("Castor", "2024", [89], [("area", 2023), ("production", 2023)]),  # value unit ambiguous -> omit
+    # castor: physical table is area/prod/value (3 cols) — read all 3 for alignment,
+    # serve area+prod (both reconcile to the printed Total 100%); value dropped
+    # (labelled "Ksh Million" but the magnitude doesn't reconcile).
+    ("Castor", "2024", [89], [("area", 2023), ("production", 2023), ("drop", 2023)]),
     # 2025 cash tables (Table 6.x), by-year area/prod/value 2023-2024, value in KSh million.
     # These extend / replace their 2024-edition counterparts (Macadamia 2024 was held back).
     ("Macadamia", "2025", [128], byyear([2023, 2024])),
