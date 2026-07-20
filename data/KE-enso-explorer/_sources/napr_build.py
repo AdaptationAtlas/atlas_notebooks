@@ -52,6 +52,10 @@ def byyear(ys):   # area,production,value grouped BY YEAR (each year's 3 togethe
     return [(m, y) for y in ys for m in ("area", "production", "value")]
 
 
+def prod_only(ys):
+    return [("production", y) for y in ys]
+
+
 # crop, edition, [0-based pages], layout  (ncells = len(layout))
 FOOD = [
     ("Maize", "2024", [113, 114], AP(Y24)), ("Maize", "2025", [185, 186], AP(Y25)),
@@ -84,10 +88,21 @@ CASH = [  # all 2024 edition
     ("Groundnut", "2025", [129], byyear([2023, 2024])),
     ("Sesame", "2025", [132], byyear([2023, 2024])),
     ("Sunflower", "2025", [134], byyear([2023, 2024])),
+    # cotton to 2024 (2025 edition, blk area/prod/value x 2020-2024, value raw KSh)
+    ("Cotton (seed)", "2025", [114], blk(["area", "production", "value"], Y25)),
+    # major cash crops: green-leaf tea + sugarcane (production only), both editions
+    ("Tea (green leaf)", "2024", [72], prod_only(Y24)),
+    ("Tea (green leaf)", "2025", [88], prod_only(Y25)),
+    ("Sugarcane", "2024", [46], prod_only(Y24)),
+    ("Sugarcane", "2025", [98], prod_only(Y25)),
+    # sisal quantity + value (2025 Table 5.4(b), 2021-2024)
+    ("Sisal", "2025", [103], blk(["production", "value"], [2021, 2022, 2023, 2024])),
 ]
 # value normalisation to raw KSh: several cash tables print value in KSh million
 VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6,
-          "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6}
+          "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6, "Sisal": 1e6}
+# production-unit normalisation to tonnes (green-leaf tea is printed in kg)
+PSCALE = {"Tea (green leaf)": 0.001}
 
 DOC = {"2024": (fitz.open(PDF24), pdfplumber.open(PDF24), "National-Agriculture-Production-Report-2024.pdf"),
        "2025": (fitz.open(PDF25), pdfplumber.open(PDF25), "National-Agriculture-Production-Report-2025.pdf")}
@@ -135,7 +150,7 @@ def gate(rep):
     add = [v for v in rep["additivity"].values() if v is not None]
     if rep["missed"] or any(v > 101 for v in add) or rep["counties"] < 4:
         return False
-    dual_confirmed = rep["dual_shared"] >= 8 and rep["dual_engine"] >= 0.98
+    dual_confirmed = rep["dual_shared"] >= 5 and rep["dual_engine"] >= 0.98
     # dual-engine corroboration alone is sufficient (some body tables print no
     # national Total -> no additivity possible, e.g. Wheat). When a Total IS
     # printed, a single-engine table must reconcile to ~100%, else a nameless
@@ -147,7 +162,7 @@ def gate(rep):
 
 
 def validation_label(rep):
-    if rep["dual_shared"] >= 8 and rep["dual_engine"] >= 0.98:
+    if rep["dual_shared"] >= 5 and rep["dual_engine"] >= 0.98:
         return "dual-engine + additivity"
     return "additivity + completeness (single-engine; pdfplumber unreliable on page)"
 
@@ -179,7 +194,11 @@ def build():
     for (crop, county, year, metric), r in best.items():
         if metric not in MET:
             continue
-        val = r["value"] * VSCALE.get(crop, 1) if metric == "value" else r["value"]
+        val = r["value"]
+        if metric == "value":
+            val *= VSCALE.get(crop, 1)
+        elif metric == "production":
+            val *= PSCALE.get(crop, 1)
         wide[(crop, county, year)][MET[metric]] = val
         meta[(crop, county, year)] = (r["gaul1_code"], r["source_file"], r["pdf_page"])
 

@@ -196,8 +196,10 @@ def _extract_rows(rows, centers, ncells):
         if nm in ("total", "kenya", "national", "grand total"):
             if total is None or _filled(cells) > _filled(total):
                 total = cells
-        elif nm in ("others", "other", "other counties", "rest", "others counties"):
-            continue    # legitimate non-county aggregate; explains county-sum < Total
+        elif nm in ("others", "other", "other counties", "rest", "others counties",
+                    "all companies", "all", "subtotal", "sub total", "average") \
+                or nm.startswith("average yield") or nm.startswith("all companies"):
+            continue    # non-county aggregate / footer; explains county-sum < Total
         elif resolve(name) and _filled(cells) > 0:
             # skip all-None rows: a shifted duplicate-layer copy bins to nothing
             # and would otherwise inflate the county count with empty phantoms.
@@ -293,7 +295,11 @@ ALIAS = {"kiliif": "kilifi", "muranga": "murang'a", "tharaka": "tharaka nithi",
          "taveta": "taita taveta", "nzoia": "trans nzoia", "gishu": "uasin gishu",
          # slash-abbreviated names seen in the cash-crop tables
          "e/marakwet": "elgeyo marakwet", "t/nithi": "tharaka nithi",
-         "t/nzoia": "trans nzoia", "u/gishu": "uasin gishu", "taita/taveta": "taita taveta"}
+         "t/nzoia": "trans nzoia", "u/gishu": "uasin gishu", "taita/taveta": "taita taveta",
+         # two-word names printed with no space
+         "homabay": "homa bay", "tanariver": "tana river", "transnzoia": "trans nzoia",
+         "westpokot": "west pokot", "uasingishu": "uasin gishu", "elgeyomarakwet": "elgeyo marakwet",
+         "tharakanithi": "tharaka nithi", "taitataveta": "taita taveta", "nairobicity": "nairobi city"}
 
 
 def resolve(name):
