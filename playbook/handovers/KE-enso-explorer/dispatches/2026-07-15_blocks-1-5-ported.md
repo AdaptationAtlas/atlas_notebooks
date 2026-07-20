@@ -562,3 +562,25 @@ Good, well-scoped next chunk (the qty×price gate makes it validatable).
 **Also still pending:** the long tail of tiny cash tables (cashew/bambara/sesame/sugar/tea/pyrethrum/
 bixa/miraa — low county coverage) and the produce-figure UI rework for 25+ commodities + expanded
 livestock (grouping/search).
+
+## Addendum 9 — livestock products, 11 products × 2021–2022 (2026-07-20)
+
+Pete: "products". Decoded Annex 27 (p143–156). Products = Quantity / Unit-price / Total-value
+triple, 2 per page, years **2021 & 2022** (report has no 2023 products). p141–142 are a different
+5-product summary layout — skipped.
+
+**Served: 11 products × 2021–2022, 858 rows** — milk, beef, mutton, pork, goat meat, camel meat,
+honey, wax, eggs, hides, skins. New parquet `knbs_napr_livestock_products.parquet`
+(product/county/year/quantity/unit/unit_price_ksh/value_ksh); `_sources/napr_build_products.py`.
+
+**Validation (no Total row):** IDENTITY `value == quantity × unit_price` per county (**0/858
+violations** — strongest gate yet) + CROSS-YEAR national qty within 4× across the two years. The
+duplicated text layer mislabels a neighbour's numbers on some 2021 pages; that surfaces as a wild
+cross-year swing — **Wool dropped** (2021 = 1680 Mkg vs 2022 = 1.8 Mkg). Units vary (kg; eggs =
+trays; hides/skins = number) so value_ksh is the cross-product comparable.
+
+**Notebook wiring deferred to the UI rework** — products are quantity/value not head, so they need
+a Products view; folding into the produce-figure rework (next) rather than half-wiring now.
+
+**Remaining:** produce-figure UI rework (27 crops/livestock + products, grouping/search) and the
+tiny cash tables (low value).
