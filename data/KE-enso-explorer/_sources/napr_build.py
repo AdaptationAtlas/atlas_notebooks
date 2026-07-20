@@ -66,6 +66,7 @@ FOOD = [
     ("Irish potato", "2024", [122], AP(Y24)), ("Irish potato", "2025", [195], AP(Y25)),
     ("Sweet potato", "2024", [123], AP(Y24)), ("Sweet potato", "2025", [196, 197], AP(Y25)),
     ("Cassava", "2025", [198, 199], AP(Y25)),
+    ("Wheat", "2024", [27], AP(Y24)),   # Section-3 body table, area+prod (no Total row)
 ]
 CASH = [  # all 2024 edition
     ("Cotton (seed)", "2024", [55], blk(["area", "production", "value"], YC)),  # rotated
@@ -77,10 +78,16 @@ CASH = [  # all 2024 edition
     ("Coconut", "2025", [126], blk(["area", "production", "value"], [2023, 2024])),  # by-metric
     ("Cashew nut", "2025", [127], byyear([2023, 2024])),                             # by-year
     ("Castor", "2024", [89], [("area", 2023), ("production", 2023)]),  # value unit ambiguous -> omit
+    # 2025 cash tables (Table 6.x), by-year area/prod/value 2023-2024, value in KSh million.
+    # These extend / replace their 2024-edition counterparts (Macadamia 2024 was held back).
+    ("Macadamia", "2025", [128], byyear([2023, 2024])),
+    ("Groundnut", "2025", [129], byyear([2023, 2024])),
+    ("Sesame", "2025", [132], byyear([2023, 2024])),
+    ("Sunflower", "2025", [134], byyear([2023, 2024])),
 ]
 # value normalisation to raw KSh: several cash tables print value in KSh million
 VSCALE = {"Macadamia": 1e6, "Groundnut": 1e6, "Sunflower": 1e6,
-          "Coconut": 1e6, "Cashew nut": 1e6}
+          "Coconut": 1e6, "Cashew nut": 1e6, "Sesame": 1e6}
 
 DOC = {"2024": (fitz.open(PDF24), pdfplumber.open(PDF24), "National-Agriculture-Production-Report-2024.pdf"),
        "2025": (fitz.open(PDF25), pdfplumber.open(PDF25), "National-Agriculture-Production-Report-2025.pdf")}
@@ -99,7 +106,10 @@ def try_table(crop, edition, pages, layout):
         ref = [v for k, v in rep["additivity"].items() if k[0] == "production" and v is not None] \
             or [v for k, v in rep["additivity"].items() if v is not None] or [0]
         dev = sum(abs(x - 100) for x in ref) / len(ref)
-        score = (rep["counties"] >= 15 and rep["dual_engine"] >= 0.98, -dev)
+        # prefer the orientation that resolves counties with engine agreement,
+        # then the most counties, then the tightest additivity. (No >=15 floor:
+        # minor crops like Wheat have few counties and no Total row.)
+        score = (rep["counties"] >= 4 and rep["dual_engine"] >= 0.98, rep["counties"], -dev)
         if best is None or score > best[0]:
             best = (score, rot, rows, rep, dev)
     _, rot, rows, rep, dev = best
@@ -123,15 +133,17 @@ def gate(rep):
     null Meru for macadamia), so requiring it would drop data additivity
     confirms is correct."""
     add = [v for v in rep["additivity"].values() if v is not None]
-    if not add or rep["missed"] or any(v > 101 for v in add) or rep["counties"] < 4:
+    if rep["missed"] or any(v > 101 for v in add) or rep["counties"] < 4:
         return False
     dual_confirmed = rep["dual_shared"] >= 8 and rep["dual_engine"] >= 0.98
-    # a shortfall (sum < Total) is only trusted if the numbers are dual-engine
-    # corroborated (then the gap is a source Total > itemised counties, e.g.
-    # coffee). Single-engine tables must reconcile to ~100% -> otherwise a
-    # nameless row the completeness check can't see may have been dropped
-    # (e.g. macadamia's Murang'a). This keeps unverified shortfalls out.
-    return dual_confirmed or min(add) >= 97
+    # dual-engine corroboration alone is sufficient (some body tables print no
+    # national Total -> no additivity possible, e.g. Wheat). When a Total IS
+    # printed, a single-engine table must reconcile to ~100%, else a nameless
+    # row the completeness check can't see may have been dropped (macadamia's
+    # Murang'a). Shortfalls (sum<Total) are only trusted when dual-confirmed.
+    if dual_confirmed:
+        return True
+    return bool(add) and min(add) >= 97
 
 
 def validation_label(rep):

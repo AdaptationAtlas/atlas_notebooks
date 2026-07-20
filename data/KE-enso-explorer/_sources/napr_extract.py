@@ -119,8 +119,8 @@ def _centers(rows, ncells):
         name, nums = _name_and_nums(r)
         if resolve(name) and len(nums) == ncells:
             fulls.append([p for p, _ in nums])
-    if not fulls:
-        return None
+    if len(fulls) < 3:
+        return _centers_gap(rows, ncells)      # sparse table: no/few full rows
     fulls.sort(key=lambda f: f[0])
     groups = [[fulls[0]]]
     for f in fulls[1:]:
@@ -129,7 +129,32 @@ def _centers(rows, ncells):
         else:
             groups[-1].append(f)
     big = max(groups, key=len)
-    return [sum(c) / len(c) for c in zip(*big)]
+    if len(big) >= 3:
+        return [sum(c) / len(c) for c in zip(*big)]
+    return _centers_gap(rows, ncells)
+
+
+def _centers_gap(rows, ncells):
+    """Fallback grid for SPARSE tables where no county row is full (every row
+    has dash cells, e.g. livestock population with breakdown columns). Pool all
+    numeric-token positions from resolved county rows and split at the ncells-1
+    largest gaps. Works when the leading columns are dense enough to anchor the
+    clusters. Used only when the full-row method yields too few complete rows."""
+    pos = []
+    for r in rows:
+        name, nums = _name_and_nums(r)
+        if resolve(name):
+            pos += [p for p, _ in nums]
+    pos.sort()
+    if len(pos) < ncells:
+        return None
+    cuts = sorted(sorted(range(1, len(pos)), key=lambda i: pos[i] - pos[i - 1],
+                         reverse=True)[:ncells - 1])
+    centers, start = [], 0
+    for c in cuts + [len(pos)]:
+        centers.append(sum(pos[start:c]) / (c - start))
+        start = c
+    return centers
 
 
 def _cells_by_col(nums, centers):
@@ -184,7 +209,8 @@ def _extract_rows(rows, centers, ncells):
     return out, total, missed
 
 
-_HDR = re.compile(r"county|area|produc|tonnes|\(ha\)|national|annex|report|value|price|total", re.I)
+_HDR = re.compile(r"county|area|produc|tonnes|\(ha\)|national|annex|report|value|price|total|"
+                  r"year|top|ranking|figure|table|quantity|head|number|\(kg\)|trays", re.I)
 
 
 def _is_header(name):
