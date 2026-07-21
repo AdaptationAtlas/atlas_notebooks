@@ -75,7 +75,11 @@ FOOD = [
     ("Sweet potato", "2024", [123], AP(Y24)), ("Sweet potato", "2025", [196, 197], AP(Y25)),
     ("Cassava", "2025", [198, 199], AP(Y25)),
     ("Wheat", "2024", [27], AP(Y24)),   # Section-3 body table, area+prod (no Total row)
+    ("Barley", "2024", [34], AP(Y24)),  # Table 3.12; no Total + pdfplumber garbles -> manual-verify
 ]
+# tables that cannot pass the automatic gate (no Total AND pdfplumber unreadable)
+# but were verified by eye against the PDF; served with that provenance recorded.
+MANUAL_VERIFY = {"Barley": "Pete vs PDF p35 (2024 ed, Table 3.12), 2026-07-20"}
 CASH = [  # all 2024 edition
     ("Cotton (seed)", "2024", [55], blk(["area", "production", "value"], YC)),  # rotated
     ("Coffee", "2024", [124], grp3(YC)),                                        # rotated
@@ -177,6 +181,8 @@ def gate(rep):
     # judge only the columns we actually serve (real metrics) — a masked "drop"
     # column (e.g. a contaminated year we take from the other edition) must not
     # sink the table.
+    if rep["crop"] in MANUAL_VERIFY:      # eye-verified against the PDF (see MANUAL_VERIFY)
+        return True
     add = [v for (m, y), v in rep["additivity"].items()
            if m in ("area", "production", "value") and v is not None]
     # >102 = double-count (real ones are 150-500%); <=102 tolerates rounding on
@@ -195,13 +201,39 @@ def gate(rep):
 
 
 def validation_label(rep):
+    if rep["crop"] in MANUAL_VERIFY:
+        return "manual-verify (" + MANUAL_VERIFY[rep["crop"]] + ")"
     if rep["dual_shared"] >= 5 and rep["dual_engine"] >= 0.98:
         return "dual-engine + additivity"
     return "additivity + completeness (single-engine; pdfplumber unreliable on page)"
 
 
+import re as _re
+
+
+def _title(edition, page, yrange=None):
+    """the 'Table X.Y: ...' / 'Annex N: ...' caption for citation. Requires the
+    colon/period caption form (skips prose cross-refs like 'Table 3.12).'). When
+    yrange is set (a page with >1 table) restrict to lines near that region so
+    the right table's caption wins."""
+    doc = DOC[edition][0][page]
+    if yrange:
+        lines = []
+        for b in doc.get_text("dict")["blocks"]:
+            for ln in b.get("lines", []):
+                y = ln["bbox"][1]
+                if yrange[0] - 70 <= y <= yrange[1]:
+                    lines.append((y, " ".join(s["text"] for s in ln["spans"])))
+        text = " ".join(t for _, t in sorted(lines))
+    else:
+        text = _re.sub(r"\s+", " ", doc.get_text("text"))
+    m = _re.search(r"((?:Annex|Table)\s*[\d.]+\s*\(?\s?[a-d]?\)?\s*:\s*[A-Z][A-Za-z][^0-9]{3,55})", text)
+    return _re.sub(r"\s+", " ", m.group(1)).strip().rstrip(",") if m else f"p{page + 1}"
+
+
 def build():
-    long_rows, report = [], []
+    long_rows, report, cites = [], [], []
+    ED = {"2024": "2023-24 edition", "2025": "2024-25 edition"}
     for entry in FOOD + CASH:
         crop, edition, pages, layout = entry[:4]
         yrange = entry[4] if len(entry) > 4 else None
@@ -215,6 +247,12 @@ def build():
                        "validation": validation_label(rep), "served": ok})
         if ok:
             long_rows += rows
+            vs = [m for m in ("area", "production", "value") if any(mm == m for mm, _ in layout)]
+            cites.append({"commodity": crop, "category": "crop",
+                          "variables": ", ".join({"area": "area (ha)", "production": "production (t)",
+                                                   "value": "value (KSh)"}[v] for v in vs),
+                          "edition": ED[edition], "table": _title(edition, pages[0], yrange),
+                          "page": pages[0] + 1, "validation": validation_label(rep)})
 
     # rebase: prefer 2025-edition value for a (crop,county,year,metric)
     best = {}
@@ -254,6 +292,20 @@ def build():
     with open(REPORT, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(report[0].keys()))
         w.writeheader(); w.writerows(report)
+
+    # citation table (crop x variable -> report table/page) + livestock/products
+    cites.append({"commodity": "Livestock population (13 species)", "category": "livestock",
+                  "variables": "head", "edition": "2023-24 edition",
+                  "table": "Annex 15-26: Population by county", "page": 129,
+                  "validation": "dual-engine (per page) + cross-year plausibility"})
+    cites.append({"commodity": "Livestock products (11)", "category": "product",
+                  "variables": "quantity, value (KSh)", "edition": "2023-24 edition",
+                  "table": "Annex 27: Livestock products by county", "page": 143,
+                  "validation": "value = quantity x unit-price + cross-year"})
+    import json as _json
+    cites.sort(key=lambda c: (c["category"], c["commodity"]))
+    with open(f"{HERE}/napr_sources.json", "w") as f:
+        _json.dump(cites, f, indent=1, ensure_ascii=False)
 
     served = sorted(set(r["crop"] for r in out))
     print(f"parquet rows: {len(out)}   crops served: {len(served)}")
