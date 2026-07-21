@@ -678,3 +678,26 @@ double-count leaks). Browser-verified PASS after each data change.
 workflow + all gotchas, so the **2026 edition** (when released) is mostly page-number shifts + one
 new year. Audit/probe tools persisted to `_sources/napr_audit.py` + `napr_probe.py`; page-by-page
 record in `_sources/napr_audit_ledger.csv`.
+
+## Addendum 13 — Barley served, blank≠zero, methodology + per-table citations (2026-07-21)
+
+- **Castor recovered** (prompted by Pete asking where to check it) — the "82.9% single-engine fail"
+  was my own 2-vs-3 column mis-spec; Castor is area/prod/value, reconciles to Total at 100%. Served
+  area+prod (value label "Ksh Million" doesn't reconcile → dropped). **30 crops.**
+- **Barley served** (Table 3.12, 6 cty 2019-23) — Pete verified the 6 rows against PDF p35;
+  recorded as `MANUAL_VERIFY` provenance in the build + validation report (pdfplumber garbles the
+  page + no Total, so the automatic gate can't run — a human gate replaces it). **31 crops.**
+- **blank ≠ zero.** KNBS data is administrative expert-estimate with gaps; a missing county-year is
+  a GAP, not zero. Confirmed structurally correct (missing = absent row, never imputed 0; the crop
+  query drops null production so nothing renders as a false 0) and made explicit in a new
+  `produceMethodology` note. Only a figure the report prints as 0 is shown as 0.
+- **KNBS methodology reproduced** in the notebook (admin data via county extension officers,
+  ward→county aggregation under the County Government Act 2012, state corporations for value-chain
+  crops, ANES validation, documented gaps).
+- **Per-table citations**: `napr_build.py` emits `data/KE-enso-explorer/napr_sources.json` — each
+  commodity × variables → exact NAPR table/annex + page + edition + how validated. Rendered as a
+  collapsible "methodology & per-table sources" panel under the produce figure (52 table rows).
+  Browser-verified (panel present, table renders, blank≠zero note shown).
+
+**Final: 31 crops, 13 livestock species, 11 products.** Only Macadamia-2024 + Sesame-2024 held
+(both superseded by their 2025-edition tables). Everything else in both PDFs is served or ledgered.
