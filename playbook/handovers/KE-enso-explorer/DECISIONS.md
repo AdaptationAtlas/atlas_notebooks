@@ -76,6 +76,22 @@ Pete is the sole human owner of this branch (notebook + data pipeline) — no ot
   SMCI (2016–26 annual), thin. **Verdict: don't build against it** — no real historical gap-fill.
   Do NOT re-scan; if revisited, start from the dispatch.
 
+## D13 — Kenya Met forecast is PDF-only; Jemal repos rejected (Claude, 2026-07-22)
+- **RESOLVED (scan).** Deep-researched Kenya Met forecast availability + two candidate repos
+  (`jemsethio/AgClimateAF_indices`, `jemsethio/Seas_AgroClimIndices`). Full findings in
+  `dispatches/2026-07-22_kenya-met-forecast-and-jemal-repos.md`. Conclusions:
+  - Kenya Met publishes the full forecast suite (seasonal/monthly/weekly/county/agromet) but **PDF-only,
+    no API** — served from `meteo.go.ke/documents/`, incl. **47 county PDFs** + national zonal tercile
+    tables. Only true KMD ingest = scrape + parse PDFs (NAPR-class work).
+  - **ICPAC = the KMD-endorsed machine-readable form** (GHACOF, KMD co-produces/downscales). Clean
+    `geoportal.icpac.net` WFS/WCS exists BUT forecast layers stale (~2018); current forecasts sit behind
+    the undocumented `eahazardswatch.icpac.net` API (reverse-engineer) + are regional grid (aggregate to
+    counties yourself).
+  - **Both Jemal repos rejected**: they are third-party seasonal-forecast pipelines (SEAS5/C3S/NMME) →
+    disallowed by D11; and neither delivers historical/projections (no reanalysis, no CMIP6/CORDEX)
+    despite the framing. No Kenya config. Reusable only as index-formula reference, not as data. No code
+    pulled. If a forecast layer is ever built, start from the dispatch (KMD PDF parse or ICPAC route).
+
 ## Open
 - **D10 — 2026 NAPR refresh (OPEN).** When KNBS releases the 2026 edition: run `/extract-knbs-napr`
   (add the path + new year to the `Y*` lists, re-audit, shift pages). See ISSUES KE-01.

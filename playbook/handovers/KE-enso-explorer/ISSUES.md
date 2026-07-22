@@ -30,6 +30,15 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   acres only, converted to ha). It's in the parquet but won't chart in the production/value figure.
   Fine; noted for awareness.
 
+- **KE-08 · Kenya Met forecast layer · OPEN (scoped, not started).** Kenya Met forecasts are PDF-only
+  (no API) — 47 county seasonal PDFs + national zonal tercile tables at `meteo.go.ke/documents/`. Two
+  build paths if a forecast layer is wanted: (a) NAPR-style PDF extractor over the county seasonal PDFs;
+  (b) ICPAC as KMD-endorsed machine-readable form (current tercile grids behind undocumented
+  eahazardswatch API, regional grid → zonal-aggregate to counties). Candidate repos
+  `jemsethio/AgClimateAF_indices` + `Seas_AgroClimIndices` REJECTED (third-party SEAS5/C3S forecasts →
+  fail D11; no historical/projections despite framing). See
+  `dispatches/2026-07-22_kenya-met-forecast-and-jemal-repos.md` + DECISIONS D13.
+
 - **KE-07 · IWMI ENSO Outlook API · CLOSED (not worth building).** Live
   public API (`https://enso.iwmi.org/ENSO_api/api/v1`, 34 layers) scanned 2026-07-22 — see
   `dispatches/2026-07-22_iwmi-enso-api-scan.md`. Highest value: ECMWF SEAS5 / IRI NMME per-county
