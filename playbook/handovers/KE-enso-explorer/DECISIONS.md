@@ -61,6 +61,21 @@ Pete is the sole human owner of this branch (notebook + data pipeline) — no ot
 
 ---
 
+## D11 — Forecast data = Kenya Met only (Pete, 2026-07-22)
+- **STANDING.** Any forward-looking / forecast layer in the notebook must come from **Kenya
+  Meteorological Department**, not third-party global models. This excludes IWMI/ECMWF-SEAS5/IRI/
+  NOAA-CFS/GEFS/GloFAS/Google-Flood/Open-Meteo forecast products regardless of quality. Applies to
+  any future "outlook / seasonal forecast" work (e.g. Block 5). Historical/observational third-party
+  data is unaffected.
+
+## D12 — IWMI ENSO Outlook API scanned; no gap-fill (Claude, 2026-07-22)
+- **RESOLVED.** Scanned `https://enso.iwmi.org/ENSO_api/api/v1` (34 layers) — full endpoint map +
+  triage in `dispatches/2026-07-22_iwmi-enso-api-scan.md`. Its value was seasonal forecasts (excluded
+  by D11); its historical point-series are ~12-month monitoring caches (not decadal), ASIS is
+  country-mean, and the rest duplicate what we already serve. Only genuinely-new layer = soil-moisture
+  SMCI (2016–26 annual), thin. **Verdict: don't build against it** — no real historical gap-fill.
+  Do NOT re-scan; if revisited, start from the dispatch.
+
 ## Open
 - **D10 — 2026 NAPR refresh (OPEN).** When KNBS releases the 2026 edition: run `/extract-knbs-napr`
   (add the path + new year to the `Y*` lists, re-audit, shift pages). See ISSUES KE-01.
