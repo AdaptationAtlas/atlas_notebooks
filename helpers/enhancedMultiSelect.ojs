@@ -1,0 +1,430 @@
+/**
+ * @fileoverview Custom UI wrapper for an HTML <select multiple> element.
+ *
+ * This function replaces the native multiple select with a cleaner,
+ * click-toggleable button and list, implementing maximum selection limits,
+ * required selection constraints, and synchronization with Observable
+ * Inputs.select().
+ */
+
+/**
+ * Creates a custom UI wrapper for a native HTML <select multiple> element,
+ * converting it into a styled dropdown with click-to-toggle functionality.
+ *
+ * It hides the native select, creates a button and a dropdown list, implements
+ * max/min selection constraints, and includes necessary memory cleanup for
+ * Observable notebooks.
+ *
+ * @param {HTMLElement|HTMLFormElement} viewofSelect - The container element (or the select itself) holding the target <select multiple>.
+ * @param {object} [config] - Configuration options for the toggle component.
+ * @param {?number} [config.maxSelections=null] - The maximum number of items that can be selected. Null means no limit.
+ * @param {boolean} [config.requireAtLeastOne=true] - If true, prevents the user from deselecting the last selected item.
+ * @param {boolean} [config.enableSelectAll=false] - If true, displays Select All / Deselect All buttons in the dropdown.
+ * @param {string} [config.minWidth="240px"] - Preferred minimum width. It can still shrink on narrow screens.
+ * @param {string} [config.maxWidth="400px"] - Maximum width for the enhanced input.
+ * @returns {HTMLElement} An html element, but in OJS the initial select should be returned
+ *
+ * @example
+ * {
+ *  const input = Inputs.select([1, 2, 3, 4, 5, 6], {
+ *      multiple: true,
+ *      label: "pretty multi-select"
+ *    });
+ *  enhancedMultiSelect(input, {
+ *    maxSelections: 3,
+ *    requireAtLeastOne: false,
+ *    enableSelectAll: true
+ *  });
+ *  return input;
+ * }
+ */
+function enhancedMultiSelect(
+  viewofSelect,
+  {
+    maxSelections = null,
+    requireAtLeastOne = true,
+    enableSelectAll = false,
+    minWidth = "240px",
+    maxWidth = "400px"
+  } = {}
+) {
+  const select = viewofSelect.querySelector("select") || viewofSelect;
+
+  if (!select || !select.multiple) {
+    throw new Error("Inputs.select() requires a multiple=true select");
+  }
+
+  if (enableSelectAll && Number.isFinite(maxSelections)) {
+    throw new Error("Cannot enable select all/deselect all while also specifying maxSelections.");
+  }
+
+  if (enableSelectAll && requireAtLeastOne) {
+    throw new Error("Cannot enable select all/deselect all while also requiring at least one selection.");
+  }
+
+  // --- Styles Configuration ---
+  const styles = {
+    wrapper: `
+      font-family: inherit; width: 100%; min-width: 0; max-width: ${maxWidth};
+      box-sizing: border-box; padding: 0; position: relative;
+      font-size: var(--atlas-input-font-size, 13px); line-height: 1.35;
+    `,
+    btn: `
+      width: 100%; box-sizing: border-box; padding: 10px;
+      background: var(--atlas-color-surface, #fff);
+      border: 2px solid var(--atlas-color-control-border, #d1d5db);
+      border-radius: var(--atlas-radius-control-small, 6px);
+      cursor: pointer; font-size: var(--atlas-input-action-font-size, 12px); font-weight: 500;
+      text-align: left; display: flex; justify-content: space-between;
+      align-items: center;
+      transition: var(--atlas-transition-control, border-color 200ms ease, background-color 200ms ease, color 200ms ease);
+      color: var(--atlas-color-text, #111);
+    `,
+    list: `
+      display: none; width: 100%; box-sizing: border-box;
+      border: 1px solid var(--atlas-color-control-border, #d1d5db);
+      border-radius: var(--atlas-radius-control, 8px);
+      background: var(--atlas-color-surface, #fff);
+      z-index: 10; top: 100%; position: absolute;
+      overflow: hidden; padding: 0; margin-top: 4px;
+      box-shadow: var(--atlas-shadow-popover, 0 4px 6px -1px rgba(0, 0, 0, 0.1));
+    `,
+    buttonContainer: `
+      display: flex; gap: 8px; padding: 8px 12px;
+      border-bottom: 2px solid var(--atlas-color-divider, #e5e7eb);
+      background: var(--atlas-color-surface-muted, #f9fafb);
+      position: relative; z-index: 1;
+    `,
+    optionsContainer: `
+      max-height: 240px; overflow-y: auto; padding: 0;
+      overscroll-behavior: contain;
+    `,
+    actionBtn: `
+      flex: 1; padding: 6px 12px;
+      font-size: var(--atlas-input-action-font-size, 12px); font-weight: 500;
+      border: 1px solid var(--atlas-color-control-border, #d1d5db);
+      border-radius: var(--atlas-radius-action, 4px); cursor: pointer;
+      background: var(--atlas-color-surface, #fff);
+      transition: var(--atlas-transition-action, border-color 150ms ease, background-color 150ms ease, color 150ms ease);
+    `,
+    option: `
+      padding: 8px 12px; cursor: pointer; display: flex;
+      font-size: var(--atlas-input-font-size, 13px);
+      justify-content: space-between; align-items: center;
+      border-bottom: 1px solid var(--atlas-color-divider, #e5e7eb);
+      transition: background-color 100ms ease;
+    `,
+    check: `
+       color: var(--atlas-color-check, rgba(0, 0, 0, 0.8));
+       font-weight: 400; margin-left: 12px;
+       min-width: 15px;
+    `
+  };
+
+  // --- Helper Functions ---
+  const applyStyle = (el, css) => (el.style.cssText = css);
+
+  const shake = (el) => {
+    const originalBg = el.style.backgroundColor;
+    el.style.backgroundColor = "var(--atlas-color-danger-surface, #ffe5e5)";
+    setTimeout(() => (el.style.backgroundColor = originalBg), 180);
+    el.animate(
+      [
+        { transform: "translateX(0)" },
+        { transform: "translateX(-2px)" },
+        { transform: "translateX(2px)" },
+        { transform: "translateX(0)" }
+      ],
+      { duration: 200 }
+    );
+  };
+
+  // --- Initialization & State ---
+  select.style.display = "none";
+
+  if (
+    requireAtLeastOne &&
+    select.selectedIndex === -1 &&
+    select.options.length > 0
+  ) {
+    select.options[0].selected = true;
+  }
+
+  const wrapper = document.createElement("div");
+  applyStyle(wrapper, styles.wrapper);
+  wrapper.classList.add("enhanced-multiselect");
+
+  if (viewofSelect !== select) {
+    viewofSelect.style.boxSizing = "border-box";
+    viewofSelect.style.flex = `1 1 ${minWidth}`;
+    viewofSelect.style.width = "100%";
+    viewofSelect.style.minWidth = `min(${minWidth}, 100%)`;
+    viewofSelect.style.maxWidth = maxWidth;
+  }
+
+  const btn = document.createElement("button");
+  applyStyle(btn, styles.btn);
+
+  const list = document.createElement("div");
+  applyStyle(list, styles.list);
+  list.classList.add("enhanced-multiselect-list");
+
+  const optionsContainer = document.createElement("div");
+  applyStyle(optionsContainer, styles.optionsContainer);
+  optionsContainer.classList.add("enhanced-multiselect-options");
+
+  let isCollapsed = true;
+
+  // --- View Control ---
+
+  const collapseList = () => {
+    if (!isCollapsed) {
+      isCollapsed = true;
+      list.style.display = "none";
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  };
+
+  const expandList = () => {
+    if (isCollapsed) {
+      isCollapsed = false;
+      list.style.display = "block";
+      updateUI();
+      optionsContainer.scrollTop = 0;
+    }
+  };
+
+  function updateUI() {
+    // Update Button Text and Arrow
+    const selectedOptions = Array.from(select.options).filter(
+      (o) => o.selected
+    );
+    const text = selectedOptions.length
+      ? selectedOptions.map((o) => o.textContent).join(", ")
+      : "None selected";
+    btn.innerHTML = `
+      <span style="pointer-events:none; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${text}</span>
+      <span style="opacity:0.7; pointer-events:none;">
+        ${isCollapsed ? "▾" : "▴"}
+      </span>
+    `;
+
+    // Update List Checkmarks and Backgrounds
+    Array.from(optionsContainer.children).forEach((div, i) => {
+      if (i >= select.options.length) return;
+
+      const isSelected = select.options[i].selected;
+      const check = div.querySelector("span");
+      if (check) check.textContent = isSelected ? "✔" : "";
+      div.style.backgroundColor = isSelected
+        ? "var(--atlas-color-surface-muted, #f9fafb)"
+        : "var(--atlas-color-surface, #fff)";
+    });
+  }
+  select.addEventListener("input", updateUI); // makes ui update when bound select changes
+
+  // --- Select/Deselect All Buttons ---
+  if (enableSelectAll) {
+    const buttonContainer = document.createElement("div");
+    applyStyle(buttonContainer, styles.buttonContainer);
+    buttonContainer.classList.add("button-container");
+
+    // Select All Button
+    const selectAllBtn = document.createElement("button");
+    applyStyle(selectAllBtn, styles.actionBtn);
+    selectAllBtn.textContent = "Select All";
+
+    selectAllBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const maxAllowed =
+        Number.isFinite(maxSelections) ? maxSelections : select.options.length;
+
+      let selectedCount = 0;
+      Array.from(select.options).forEach((opt) => {
+        if (selectedCount < maxAllowed) {
+          opt.selected = true;
+          selectedCount++;
+        }
+      });
+      updateUI();
+    });
+
+    selectAllBtn.addEventListener("mouseenter", () => {
+      selectAllBtn.style.backgroundColor =
+        "var(--atlas-color-surface-hover, #f3f4f6)";
+      selectAllBtn.style.borderColor =
+        "var(--atlas-color-primary, #2e7636)";
+      selectAllBtn.style.color = "var(--atlas-color-text-strong, #000)";
+    });
+
+    selectAllBtn.addEventListener("mouseleave", () => {
+      selectAllBtn.style.backgroundColor =
+        "var(--atlas-color-surface, #fff)";
+      selectAllBtn.style.borderColor =
+        "var(--atlas-color-control-border, #d1d5db)";
+    });
+
+    // Deselect All Button
+    const deselectAllBtn = document.createElement("button");
+    applyStyle(deselectAllBtn, styles.actionBtn);
+    deselectAllBtn.textContent = "Deselect All";
+
+    deselectAllBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (requireAtLeastOne) {
+        shake(buttonContainer);
+        return;
+      }
+
+      Array.from(select.options).forEach((opt) => {
+        opt.selected = false;
+      });
+      updateUI();
+    });
+
+    deselectAllBtn.addEventListener("mouseenter", () => {
+      deselectAllBtn.style.backgroundColor =
+        "var(--atlas-color-surface-hover, #f3f4f6)";
+      deselectAllBtn.style.borderColor =
+        "var(--atlas-color-primary, #2e7636)";
+      deselectAllBtn.style.color = "var(--atlas-color-text-strong, #000)";
+    });
+
+    deselectAllBtn.addEventListener("mouseleave", () => {
+      deselectAllBtn.style.backgroundColor =
+        "var(--atlas-color-surface, #fff)";
+      deselectAllBtn.style.borderColor =
+        "var(--atlas-color-control-border, #d1d5db)";
+    });
+
+    buttonContainer.appendChild(selectAllBtn);
+    buttonContainer.appendChild(deselectAllBtn);
+    list.appendChild(buttonContainer);
+  }
+
+  // --- Option Rendering ---
+  Array.from(select.options).forEach((opt) => {
+    const div = document.createElement("div");
+    div.textContent = opt.textContent;
+    applyStyle(div, styles.option);
+
+    const check = document.createElement("span");
+    applyStyle(check, styles.check);
+    div.appendChild(check);
+
+    // Hover Events
+    div.addEventListener("mouseenter", () => {
+      div.style.color = "var(--atlas-color-text, #111)";
+      div.style.backgroundColor = opt.selected
+        ? "var(--atlas-color-surface-muted, #f9fafb)"
+        : "var(--atlas-color-surface-hover, #f3f4f6)";
+    });
+
+    div.addEventListener("mouseleave", () => {
+      div.style.color = "var(--atlas-color-text, #111)";
+      div.style.backgroundColor = opt.selected
+        ? "var(--atlas-color-surface-muted, #f9fafb)"
+        : "var(--atlas-color-surface, #fff)";
+    });
+
+    // Click Event
+    div.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const selectedCount = Array.from(select.options).filter(
+        (o) => o.selected
+      ).length;
+
+      // Max limit check
+      if (
+        maxSelections !== null &&
+        !opt.selected &&
+        selectedCount >= maxSelections
+      ) {
+        shake(div);
+        return;
+      }
+
+      // Min limit check
+      if (requireAtLeastOne && opt.selected && selectedCount <= 1) {
+        shake(div);
+        return;
+      }
+
+      // Toggle & Sync
+      opt.selected = !opt.selected;
+      // NOTE: input when dropdown is closed to avoid noise and to prevent it closing when other values in cell update
+      // (in a form for example)
+
+      // select.dispatchEvent(new Event("input", { bubbles: true }));
+      updateUI();
+    });
+
+    optionsContainer.appendChild(div);
+  });
+
+  // --- Event Handlers ---
+
+  // Collapse Toggle
+  btn.addEventListener("click", () =>
+    isCollapsed ? expandList() : collapseList()
+  );
+
+  // Button Hover
+  btn.addEventListener("mouseenter", () => {
+    btn.style.borderColor = "var(--atlas-color-primary, #2e7636)";
+    btn.style.color = "var(--atlas-color-text, #111)";
+  });
+
+  btn.addEventListener("mouseleave", () => {
+    btn.style.borderColor =
+      "var(--atlas-color-control-border, #d1d5db)";
+  });
+
+  btn.addEventListener("focus", () => {
+    btn.style.borderColor = "var(--atlas-color-primary, #2e7636)";
+  });
+
+  // External Click Handler (Closes list if click is outside the wrapper)
+  const outsideClickListener = (event) => {
+    if (!wrapper.contains(event.target)) {
+      collapseList();
+    }
+  };
+
+  // --- Assembly ---
+  select.parentNode.insertBefore(wrapper, select);
+  wrapper.appendChild(btn);
+  wrapper.appendChild(list);
+  list.appendChild(optionsContainer);
+  wrapper.appendChild(select);
+
+  document.addEventListener("click", outsideClickListener);
+
+  updateUI();
+
+  // --- Polling Loop & Cleanup ---
+  let lastSelected = Array.from(select.options).map(o => o.selected).join(",");
+
+  const rafLoop = () => {
+    if (!document.body.contains(wrapper)) {
+      document.removeEventListener("click", outsideClickListener);
+      return; // stop the loop — no cleanup needed
+    }
+
+    const current = Array.from(select.options).map(o => o.selected).join(",");
+    if (current !== lastSelected) {
+      lastSelected = current;
+      updateUI();
+    }
+
+    requestAnimationFrame(rafLoop);
+  };
+
+  requestAnimationFrame(rafLoop);
+
+  return viewofSelect;
+}
