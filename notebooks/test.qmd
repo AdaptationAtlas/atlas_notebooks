@@ -1,0 +1,197 @@
+---
+title: OJS Sandbox test
+---
+
+```{ojs}
+viewof test = Inputs.radio(["hi", "bye"]) // Can access directly through await _ojs.runtime.value("test")
+
+window.anotherTest = "Hello World" // Can be accessed through console
+
+{
+  window.livetest = test // Can also be accessed through console
+}
+
+{ // Dispatch an event to be able to get the value from js console and trigger a js event.
+  window.livetest = test
+  window.dispatchEvent(new CustomEvent("livetest-change", { detail: test }))
+  return test
+}
+// Then in JS console:
+// window.addEventListener("livetest-change", (e) => {
+//   console.log("livetest changed:", e.detail)
+// })
+
+
+livetest = Generators.observe((notify) => {
+  const handler = (e) => notify(e.detail)
+  window.addEventListener("livetest-change", handler)
+  return () => window.removeEventListener("livetest-change", handler)
+})
+// Then in JS console:
+// window.dispatchEvent(new CustomEvent("livetest-change", { detail: 5 }))
+
+livetest
+
+livetest + 5
+```
+
+```{ojs}
+ojsBridge = (id, value) => {
+  const key = `ojs_${id}`;
+  const eventName = `ojs:${id}:change`;
+
+  // Push current OJS value out to regular JS
+  window[key] = value;
+  window.dispatchEvent(new CustomEvent(eventName, { detail: value }));
+
+  // Return an observable that can receive updates from JS/console
+  return Generators.observe((notify) => {
+    const handler = (e) => notify(e.detail);
+    window.addEventListener(eventName, handler);
+
+    // Initialize from current global if present
+    if (key in window) notify(window[key]);
+
+    return () => window.removeEventListener(eventName, handler);
+  });
+};
+
+// viewof initialVar = Input.input(["Hi Brayden"])
+
+viewof inputVar = Inputs.radio(["Hi World", "Hi Brayden"]);
+
+testBridge = ojsBridge("bridgetest", inputVar);
+
+md`Say hello from JS and OJS: ${testBridge}`;
+
+// IN JS console:
+
+// To get/watch value:
+// window.addEventListener("ojs:bridgetest:change", (e) => {
+//   console.log("livetest changed:", e.detail)
+// })
+
+// To set value:
+// window.ojs_bridgetest = "Hello World"
+// window.dispatchEvent(new CustomEvent("ojs:bridgetest:change", { detail: "Hello World" }))
+```
+
+# Observable input CSS regression checks
+
+Use this section after changing `styles/observable-inputs.css` or the enhanced
+multiselect. Check it at desktop width and again with a narrow browser window.
+
+## Native Observable inputs
+
+Check that labels, borders, hover/focus states, controls, and the native button
+still match the Atlas styling. The plain custom button underneath should not
+inherit the green Observable button hover style.
+
+```{ojs}
+nativeInputChecks = {
+  const controls = [
+    Inputs.text({ label: "Text input", value: "Atlas input" }),
+    Inputs.select(["Kenya", "Tanzania", "Uganda"], {
+      label: "Single select",
+      value: "Kenya",
+    }),
+    Inputs.range([0, 100], {
+      label: "Range",
+      value: 40,
+      step: 5,
+    }),
+    Inputs.radio(["Map", "Chart", "Table"], {
+      label: "Radio group",
+      value: "Map",
+    }),
+    Inputs.checkbox(["Crops", "Livestock"], {
+      label: "Checkbox group",
+      value: ["Crops"],
+    }),
+    Inputs.toggle({ label: "Toggle", value: true }),
+    Inputs.textarea({
+      label: "Textarea",
+      value: "Nested divs should not receive global vertical padding.",
+      rows: 3,
+    }),
+    Inputs.button("Native Observable button"),
+  ];
+
+  return html`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2rem;align-items:start;">${controls}</div>`;
+}
+```
+
+```{ojs}
+customButtonCheck = html`<div style="margin:1rem 0 2rem;">
+  <button type="button" style="padding:0.5rem 0.75rem;">Plain custom button</button>
+</div>`;
+```
+
+## Enhanced multiselects
+
+For each dropdown, verify:
+
+- its width does not change as selections are added or removed;
+- Select/Deselect All stays flush at the top;
+- only the option list scrolls, with no text visible behind the action row;
+- long selected labels truncate with an ellipsis;
+- the controls wrap instead of overflowing at narrow viewport widths.
+
+```{ojs}
+import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
+
+makeEnhancedCheck = ({
+  label,
+  options,
+  value = [],
+  minWidth = "240px",
+  maxWidth = "400px",
+} = {}) => {
+  const input = Inputs.select(options, {
+    label,
+    multiple: true,
+    value,
+  });
+
+  enhancedMultiSelect(input, {
+    enableSelectAll: true,
+    requireAtLeastOne: false,
+    minWidth,
+    maxWidth,
+  });
+
+  return input;
+};
+```
+
+```{ojs}
+enhancedInputChecks = {
+  const shortOptions = ["Kenya", "Tanzania", "Uganda", "Rwanda", "Burundi"];
+  const longOptions = Array.from(
+    { length: 36 },
+    (_, i) => `Administrative region ${String(i + 1).padStart(2, "0")} with a deliberately long label`,
+  );
+
+  const controls = [
+    makeEnhancedCheck({
+      label: "Typical selection",
+      options: shortOptions,
+      value: ["Kenya", "Tanzania"],
+    }),
+    makeEnhancedCheck({
+      label: "Long labels and scrolling",
+      options: longOptions,
+      value: longOptions.slice(0, 8),
+    }),
+    makeEnhancedCheck({
+      label: "Narrow configured width",
+      options: longOptions.slice(0, 12),
+      value: longOptions.slice(0, 3),
+      minWidth: "200px",
+      maxWidth: "320px",
+    }),
+  ];
+
+  return html`<div style="display:flex;flex-wrap:wrap;gap:2rem;align-items:flex-start;">${controls}</div>`;
+}
+```
