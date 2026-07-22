@@ -701,3 +701,15 @@ record in `_sources/napr_audit_ledger.csv`.
 
 **Final: 31 crops, 13 livestock species, 11 products.** Only Macadamia-2024 + Sesame-2024 held
 (both superseded by their 2025-edition tables). Everything else in both PDFs is served or ledgered.
+
+## Addendum 14 — final full-PDF sweep (2026-07-22)
+
+Ran a definitive sweep: every page of both editions cross-referenced against served pages
+(registries + livestock + products) and the ledger. Surfaced + closed two real gaps (Tea p74
+continuation; Coconut 2024 = 2019-23, extends coconut to full 2019-2024). Re-swept:
+**ZERO unaccounted pages (>=4 counties) in either edition.** Browser-verified PASS.
+
+Every county table in both KNBS NAPR PDFs is now either SERVED (31 crops, 13 livestock species, 11
+products) or recorded in `_sources/napr_audit_ledger.csv` with a reason (duplicate / secondary-metric
+/ superseded / chart / out-of-scope / held-with-cause). Held-with-cause remaining: Macadamia-2024 +
+Sesame-2024 (both superseded by their 2025 tables). Sweep is reproducible from the registries + ledger.
