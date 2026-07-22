@@ -20,6 +20,10 @@
  * @param {?number} [config.maxSelections=null] - The maximum number of items that can be selected. Null means no limit.
  * @param {boolean} [config.requireAtLeastOne=true] - If true, prevents the user from deselecting the last selected item.
  * @param {boolean} [config.enableSelectAll=false] - If true, displays Select All / Deselect All buttons in the dropdown.
+ * @param {boolean} [config.searchable=false] - If true, adds a text filter above the options.
+ * @param {boolean} [config.emitOnChange=false] - Emit input events for each toggle instead of waiting for the menu to close.
+ * @param {?number} [config.compactLabelThreshold=null] - Show a count instead of joined labels above this number of selections.
+ * @param {object} [config.labels] - UI label overrides. `selected` may be a function accepting the selection count.
  * @param {string} [config.minWidth="240px"] - Preferred minimum width. It can still shrink on narrow screens.
  * @param {string} [config.maxWidth="400px"] - Maximum width for the enhanced input.
  * @returns {HTMLElement} An html element, but in OJS the initial select should be returned
@@ -44,6 +48,10 @@ function enhancedMultiSelect(
     maxSelections = null,
     requireAtLeastOne = true,
     enableSelectAll = false,
+    searchable = false,
+    emitOnChange = false,
+    compactLabelThreshold = null,
+    labels = {},
     minWidth = "240px",
     maxWidth = "400px"
   } = {}
@@ -54,13 +62,17 @@ function enhancedMultiSelect(
     throw new Error("Inputs.select() requires a multiple=true select");
   }
 
-  if (enableSelectAll && Number.isFinite(maxSelections)) {
-    throw new Error("Cannot enable select all/deselect all while also specifying maxSelections.");
-  }
-
-  if (enableSelectAll && requireAtLeastOne) {
-    throw new Error("Cannot enable select all/deselect all while also requiring at least one selection.");
-  }
+  const text = {
+    selectAll: "Select All",
+    deselectAll: "Deselect All",
+    noneSelected: "None selected",
+    search: "Search…",
+    selected: (count) => `${count} selected`,
+    ...labels,
+  };
+  const selectionLimit = Number.isFinite(maxSelections)
+    ? Math.max(0, Math.floor(maxSelections))
+    : Infinity;
 
   // --- Styles Configuration ---
   const styles = {
@@ -70,15 +82,17 @@ function enhancedMultiSelect(
       font-size: var(--atlas-input-font-size, 13px); line-height: 1.35;
     `,
     btn: `
-      width: 100%; box-sizing: border-box; padding: 10px;
+      width: 100%; height: 40px; box-sizing: border-box; padding: 8px 12px;
       background: var(--atlas-color-surface, #fff);
-      border: 2px solid var(--atlas-color-control-border, #d1d5db);
-      border-radius: var(--atlas-radius-control-small, 6px);
-      cursor: pointer; font-size: var(--atlas-input-action-font-size, 12px); font-weight: 500;
+      border: 2px solid var(--atlas-color-border, #c9c9c9);
+      border-radius: var(--atlas-radius-control, 8px);
+      cursor: pointer; font-family: inherit;
+      font-size: var(--atlas-input-font-size, 13px); font-weight: 400;
+      line-height: 1.35;
       text-align: left; display: flex; justify-content: space-between;
       align-items: center;
       transition: var(--atlas-transition-control, border-color 200ms ease, background-color 200ms ease, color 200ms ease);
-      color: var(--atlas-color-text, #111);
+      color: var(--atlas-color-text-muted, #4a5568);
     `,
     list: `
       display: none; width: 100%; box-sizing: border-box;
@@ -99,6 +113,20 @@ function enhancedMultiSelect(
       max-height: 240px; overflow-y: auto; padding: 0;
       overscroll-behavior: contain;
     `,
+    searchContainer: `
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--atlas-color-divider, #e5e7eb);
+      background: var(--atlas-color-surface, #fff);
+    `,
+    searchInput: `
+      display: block; width: 100%; box-sizing: border-box;
+      padding: 7px 9px;
+      border: 1px solid var(--atlas-color-control-border, #d1d5db);
+      border-radius: var(--atlas-radius-action, 4px);
+      background: var(--atlas-color-surface, #fff);
+      color: var(--atlas-color-text, #111);
+      font: inherit;
+    `,
     actionBtn: `
       flex: 1; padding: 6px 12px;
       font-size: var(--atlas-input-action-font-size, 12px); font-weight: 500;
@@ -109,7 +137,9 @@ function enhancedMultiSelect(
     `,
     option: `
       padding: 8px 12px; cursor: pointer; display: flex;
-      font-size: var(--atlas-input-font-size, 13px);
+      color: var(--atlas-color-text-muted, #4a5568);
+      font-family: inherit; font-size: var(--atlas-input-font-size, 13px);
+      font-weight: 400; line-height: 1.35;
       justify-content: space-between; align-items: center;
       border-bottom: 1px solid var(--atlas-color-divider, #e5e7eb);
       transition: background-color 100ms ease;
@@ -164,16 +194,39 @@ function enhancedMultiSelect(
 
   const btn = document.createElement("button");
   applyStyle(btn, styles.btn);
+  btn.type = "button";
+  btn.disabled = select.disabled;
+  btn.setAttribute("aria-haspopup", "listbox");
+  btn.setAttribute("aria-expanded", "false");
+
+  const buttonLabel = document.createElement("span");
+  buttonLabel.style.cssText = `
+    pointer-events: none; flex: 1; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  `;
+  const buttonArrow = document.createElement("span");
+  buttonArrow.style.cssText = "opacity: 0.7; pointer-events: none;";
+  btn.append(buttonLabel, buttonArrow);
 
   const list = document.createElement("div");
   applyStyle(list, styles.list);
   list.classList.add("enhanced-multiselect-list");
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-multiselectable", "true");
 
   const optionsContainer = document.createElement("div");
   applyStyle(optionsContainer, styles.optionsContainer);
   optionsContainer.classList.add("enhanced-multiselect-options");
 
   let isCollapsed = true;
+  let selectionAtExpand = "";
+  const selectionSignature = () =>
+    Array.from(select.options, (option) => option.selected).join(",");
+  const emitSelection = () => {
+    if (!emitOnChange) return;
+    selectionAtExpand = selectionSignature();
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+  };
 
   // --- View Control ---
 
@@ -181,16 +234,26 @@ function enhancedMultiSelect(
     if (!isCollapsed) {
       isCollapsed = true;
       list.style.display = "none";
-      select.dispatchEvent(new Event("input", { bubbles: true }));
+      btn.setAttribute("aria-expanded", "false");
+      if (selectionSignature() !== selectionAtExpand) {
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+      }
     }
   };
 
   const expandList = () => {
-    if (isCollapsed) {
+    if (isCollapsed && !select.disabled) {
       isCollapsed = false;
+      selectionAtExpand = selectionSignature();
       list.style.display = "block";
+      btn.setAttribute("aria-expanded", "true");
       updateUI();
       optionsContainer.scrollTop = 0;
+      if (searchInput) {
+        searchInput.value = "";
+        filterOptions("");
+        searchInput.focus({ preventScroll: true });
+      }
     }
   };
 
@@ -199,15 +262,20 @@ function enhancedMultiSelect(
     const selectedOptions = Array.from(select.options).filter(
       (o) => o.selected
     );
-    const text = selectedOptions.length
-      ? selectedOptions.map((o) => o.textContent).join(", ")
-      : "None selected";
-    btn.innerHTML = `
-      <span style="pointer-events:none; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${text}</span>
-      <span style="opacity:0.7; pointer-events:none;">
-        ${isCollapsed ? "▾" : "▴"}
-      </span>
-    `;
+    const useCompactLabel =
+      Number.isFinite(compactLabelThreshold) &&
+      selectedOptions.length > compactLabelThreshold;
+    const selectedLabel =
+      typeof text.selected === "function"
+        ? text.selected(selectedOptions.length)
+        : String(text.selected).replace("{count}", selectedOptions.length);
+    buttonLabel.textContent = !selectedOptions.length
+      ? text.noneSelected
+      : useCompactLabel
+        ? selectedLabel
+        : selectedOptions.map((option) => option.textContent).join(", ");
+    buttonArrow.textContent = isCollapsed ? "▾" : "▴";
+    btn.disabled = select.disabled;
 
     // Update List Checkmarks and Backgrounds
     Array.from(optionsContainer.children).forEach((div, i) => {
@@ -216,6 +284,7 @@ function enhancedMultiSelect(
       const isSelected = select.options[i].selected;
       const check = div.querySelector("span");
       if (check) check.textContent = isSelected ? "✔" : "";
+      div.setAttribute("aria-selected", String(isSelected));
       div.style.backgroundColor = isSelected
         ? "var(--atlas-color-surface-muted, #f9fafb)"
         : "var(--atlas-color-surface, #fff)";
@@ -232,23 +301,24 @@ function enhancedMultiSelect(
     // Select All Button
     const selectAllBtn = document.createElement("button");
     applyStyle(selectAllBtn, styles.actionBtn);
-    selectAllBtn.textContent = "Select All";
+    selectAllBtn.type = "button";
+    selectAllBtn.textContent = text.selectAll;
 
     selectAllBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
 
-      const maxAllowed =
-        Number.isFinite(maxSelections) ? maxSelections : select.options.length;
-
       let selectedCount = 0;
       Array.from(select.options).forEach((opt) => {
-        if (selectedCount < maxAllowed) {
+        if (!opt.disabled && selectedCount < selectionLimit) {
           opt.selected = true;
           selectedCount++;
+        } else {
+          opt.selected = false;
         }
       });
       updateUI();
+      emitSelection();
     });
 
     selectAllBtn.addEventListener("mouseenter", () => {
@@ -269,7 +339,8 @@ function enhancedMultiSelect(
     // Deselect All Button
     const deselectAllBtn = document.createElement("button");
     applyStyle(deselectAllBtn, styles.actionBtn);
-    deselectAllBtn.textContent = "Deselect All";
+    deselectAllBtn.type = "button";
+    deselectAllBtn.textContent = text.deselectAll;
 
     deselectAllBtn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -284,6 +355,7 @@ function enhancedMultiSelect(
         opt.selected = false;
       });
       updateUI();
+      emitSelection();
     });
 
     deselectAllBtn.addEventListener("mouseenter", () => {
@@ -306,11 +378,52 @@ function enhancedMultiSelect(
     list.appendChild(buttonContainer);
   }
 
+  // --- Optional search ---
+  const optionRows = [];
+  let searchInput = null;
+
+  const normalizeSearchText = (value) =>
+    String(value)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLocaleLowerCase();
+
+  const filterOptions = (query) => {
+    const normalizedQuery = normalizeSearchText(query).trim();
+    optionRows.forEach((row) => {
+      row.hidden =
+        normalizedQuery.length > 0 &&
+        !row.dataset.search.includes(normalizedQuery);
+    });
+  };
+
+  if (searchable) {
+    const searchContainer = document.createElement("div");
+    applyStyle(searchContainer, styles.searchContainer);
+    searchInput = document.createElement("input");
+    searchInput.type = "search";
+    searchInput.placeholder = text.search;
+    searchInput.setAttribute("aria-label", text.search);
+    applyStyle(searchInput, styles.searchInput);
+    searchInput.addEventListener("input", () => filterOptions(searchInput.value));
+    searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        collapseList();
+        btn.focus();
+      }
+    });
+    searchContainer.appendChild(searchInput);
+    list.appendChild(searchContainer);
+  }
+
   // --- Option Rendering ---
   Array.from(select.options).forEach((opt) => {
     const div = document.createElement("div");
     div.textContent = opt.textContent;
     applyStyle(div, styles.option);
+    div.dataset.search = normalizeSearchText(opt.textContent);
+    div.setAttribute("role", "option");
+    div.tabIndex = opt.disabled ? -1 : 0;
 
     const check = document.createElement("span");
     applyStyle(check, styles.check);
@@ -318,34 +431,40 @@ function enhancedMultiSelect(
 
     // Hover Events
     div.addEventListener("mouseenter", () => {
-      div.style.color = "var(--atlas-color-text, #111)";
+      div.style.color = "var(--atlas-color-text-muted, #4a5568)";
       div.style.backgroundColor = opt.selected
         ? "var(--atlas-color-surface-muted, #f9fafb)"
         : "var(--atlas-color-surface-hover, #f3f4f6)";
     });
 
     div.addEventListener("mouseleave", () => {
-      div.style.color = "var(--atlas-color-text, #111)";
+      div.style.color = "var(--atlas-color-text-muted, #4a5568)";
       div.style.backgroundColor = opt.selected
         ? "var(--atlas-color-surface-muted, #f9fafb)"
         : "var(--atlas-color-surface, #fff)";
     });
 
     // Click Event
-    div.addEventListener("mousedown", (e) => {
-      e.preventDefault();
+    const toggleOption = () => {
+      if (opt.disabled) return;
       const selectedCount = Array.from(select.options).filter(
         (o) => o.selected
       ).length;
 
       // Max limit check
       if (
-        maxSelections !== null &&
+        Number.isFinite(selectionLimit) &&
         !opt.selected &&
-        selectedCount >= maxSelections
+        selectedCount >= selectionLimit
       ) {
-        shake(div);
-        return;
+        if (selectionLimit === 1) {
+          Array.from(select.options).forEach((option) => {
+            option.selected = false;
+          });
+        } else {
+          shake(div);
+          return;
+        }
       }
 
       // Min limit check
@@ -356,32 +475,43 @@ function enhancedMultiSelect(
 
       // Toggle & Sync
       opt.selected = !opt.selected;
-      // NOTE: input when dropdown is closed to avoid noise and to prevent it closing when other values in cell update
-      // (in a form for example)
-
-      // select.dispatchEvent(new Event("input", { bubbles: true }));
+      // By default the input event is deferred until the menu closes. Linked
+      // components can opt into immediate events with `emitOnChange`.
       updateUI();
+      emitSelection();
+    };
+
+    div.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      toggleOption();
+    });
+    div.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleOption();
+      }
     });
 
     optionsContainer.appendChild(div);
+    optionRows.push(div);
   });
 
   // --- Event Handlers ---
 
   // Collapse Toggle
-  btn.addEventListener("click", () =>
-    isCollapsed ? expandList() : collapseList()
-  );
+  btn.addEventListener("click", () => {
+    isCollapsed ? expandList() : collapseList();
+  });
 
   // Button Hover
   btn.addEventListener("mouseenter", () => {
     btn.style.borderColor = "var(--atlas-color-primary, #2e7636)";
-    btn.style.color = "var(--atlas-color-text, #111)";
+    btn.style.color = "var(--atlas-color-text-muted, #4a5568)";
   });
 
   btn.addEventListener("mouseleave", () => {
     btn.style.borderColor =
-      "var(--atlas-color-control-border, #d1d5db)";
+      "var(--atlas-color-border, #c9c9c9)";
   });
 
   btn.addEventListener("focus", () => {
