@@ -36,11 +36,19 @@ _quarto.yml conventions). Created 2026-07-09.
 - CHIRPS / exposure / FAOStat / ACLED / FEWS — machine-readable sources, no transcription.
 - County harmonization — all county datasets resolve to the canonical 47 + gaul1_code (checked).
 
+### NAPR extraction — COMPLETE (2026-07-22; was the biggest gap)
+Both KNBS NAPR editions (2023-24 + 2024-25) comprehensively mined by a robust deterministic engine
+(`data/KE-enso-explorer/_sources/napr_extract.py` + registry builders): **31 crops** (2019–2024,
+value on 9), **13 livestock species** (head, 2021–2023), **11 livestock products** (qty+value,
+2021–2022). No LLM reads a number; every table gated (dual-engine / additivity-to-printed-Total /
+completeness / cross-year / qty×price). Final full-PDF sweep = **zero unaccounted county tables**;
+page-by-page provenance in `_sources/napr_audit_ledger.csv`; per-table citations surfaced in the
+notebook. Reusable via the `extract-knbs-napr` skill for the 2026 edition. See `DECISIONS.md` (D1–D9)
++ dispatch addenda 6–14. **Blank ≠ zero** (D6): a missing county-year is a KNBS admin gap, not 0.
+
 ### Known gaps — do NOT claim these are done
-- **NAPR extraction incomplete:** livestock (highest-value gap for the ASAL/pastoralist story), tea,
-  sugarcane, fisheries never extracted.
-- **County crop production only 2020–24 (5 yr)** — too short for a county-level teleconnection;
-  Block 3 currently falls back to *national* FAOStat.
+- **County crop production now 2019–2024** (was 2020–24) but still short for a county-level
+  teleconnection; Block 3 still falls back to *national* FAOStat until the county series is longer.
 - **GESI gate validates the extractor, not the county column** (47-way consensus gates the Kenya
   benchmark; dual-engine not yet run on GESI county values). Don't count GESI as fully
   LLM-independent-gated yet.
@@ -65,6 +73,14 @@ _quarto.yml conventions). Created 2026-07-09.
 Rebuild onto Atlas conventions/components (NOT drop the standalone): `_lang` i18n, `atlasTOC`,
 `enhancedMultiSelect` (multi-county), `downloadButton` per figure, question-headers, dynamic
 insights, Methods & Sources, Appendix-at-bottom.
+
+## Branch management (this dir)
+- `README.md` — status + framing (this file). `ISSUES.md` — open backlog. `DECISIONS.md` — settled
+  calls + rationale. `dispatches/` — chronological work records (append one per work session).
+- NAPR pipeline: `data/KE-enso-explorer/_sources/` — engine `napr_extract.py`; builders
+  `napr_build.py` / `napr_build_livestock.py` / `napr_build_products.py`; tools `napr_audit.py` +
+  `napr_probe.py`; provenance `napr_audit_ledger.csv` + `napr_validation_report.csv`. Reuse for the
+  next edition via the `extract-knbs-napr` skill.
 
 ## Pointers
 - Data catalog + provenance: `<OneDrive>/…/ENSO explorer/_master/DATA_CATALOG.md`

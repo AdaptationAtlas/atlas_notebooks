@@ -56,8 +56,14 @@ Audience: Kenya county/national policymakers (non-coders). Branch: `dev/KE-enso-
 ## Honesty / provenance (project's #1 risk = AI hallucination)
 - No numeric value is produced by the LLM reading + typing it — deterministic parsers only, with
   dual-engine / additivity / cross-edition / consensus gates. See `METHODOLOGY_extraction_QA.md`.
-- Don't overclaim status. Name gaps (NAPR livestock/tea/sugar not extracted; county production 5yr;
-  GESI structural-mapping LLM-assisted). Match the handover's honest v1 framing.
+- **KNBS NAPR is now comprehensively mined** (2026-07-22): 31 crops, 13 livestock species, 11
+  products, both editions, all gated; `data/KE-enso-explorer/_sources/` (engine `napr_extract.py`,
+  builders `napr_build*.py`, `napr_audit_ledger.csv`); reuse via the `extract-knbs-napr` skill.
+  **Blank ≠ zero** — a missing county-year is a KNBS admin gap, never imputed 0.
+- Branch management: `playbook/handovers/KE-enso-explorer/` — `README.md` (status), `ISSUES.md`
+  (backlog), `DECISIONS.md` (settled calls), `dispatches/` (chronological). Update these as you work.
+- Don't overclaim status. Remaining honest gaps: county crop series still short for Block 3 (uses
+  national FAOStat); GESI county column not yet dual-engine-gated; climate-conflict exploratory.
 
 ## Working rhythm
 Commit on `dev/KE-enso-explorer` (factual subject + why-body; end with
