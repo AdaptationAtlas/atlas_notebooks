@@ -87,6 +87,7 @@ CASH = [  # all 2024 edition
     ("Macadamia", "2024", [81], blk(["area", "production", "value"], YC)),      # upright
     ("Groundnut", "2024", [84], blk(["area", "production", "value"], YC)),      # upright
     ("Sunflower", "2024", [88], [("area", 2023), ("production", 2023), ("value", 2023)]),
+    ("Coconut", "2024", [82], blk(["area", "production", "value"], YC)),             # 2019-23, extends coconut back
     ("Coconut", "2025", [126], blk(["area", "production", "value"], [2023, 2024])),  # by-metric
     ("Cashew nut", "2025", [127], byyear([2023, 2024])),                             # by-year
     # castor: physical table is area/prod/value (3 cols) — read all 3 for alignment,
@@ -106,7 +107,7 @@ CASH = [  # all 2024 edition
     # cotton to 2024 (2025 edition, blk area/prod/value x 2020-2024, value raw KSh)
     ("Cotton (seed)", "2025", [114], blk(["area", "production", "value"], Y25)),
     # major cash crops: green-leaf tea + sugarcane (production only), both editions
-    ("Tea (green leaf)", "2024", [72], prod_only(Y24)),
+    ("Tea (green leaf)", "2024", [72, 73], prod_only(Y24)),  # green-leaf table spans p73-74
     ("Tea (green leaf)", "2025", [88], prod_only(Y25)),
     ("Sugarcane", "2024", [46], prod_only(Y24)),
     ("Sugarcane", "2025", [98], prod_only(Y25)),
