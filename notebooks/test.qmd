@@ -195,3 +195,176 @@ enhancedInputChecks = {
   return html`<div style="display:flex;flex-wrap:wrap;gap:2rem;align-items:flex-start;">${controls}</div>`;
 }
 ```
+
+# Canonical administrative selector checks
+
+The shared selector is `helpers/adminSelectors.ojs`. Test both versions below:
+
+- changing a parent removes child selections that no longer belong to it;
+- Côte d'Ivoire and names containing apostrophes work without affecting data
+  queries;
+- region and district search works with or without accents;
+- Select All respects each level's maximum;
+- the two synchronized multi-select displays stay in sync;
+- controls wrap cleanly in a narrow window.
+
+```{ojs}
+import { createAdminSelectors } from "/helpers/adminSelectors.ojs";
+
+adminSelectorSummary = (selection) =>
+  Object.fromEntries(
+    Object.entries(selection).map(([level, values]) => [
+      level,
+      (Array.isArray(values) ? values : values ? [values] : []).map(
+        (value) =>
+          value.kind === "ssa"
+            ? "SSA"
+            : [value.iso3, value.admin1_name, value.admin2_name]
+                .filter((part) => part != null)
+                .join(" / "),
+      ),
+    ]),
+  );
+```
+
+## Single selection
+
+```{ojs}
+viewof adminSingleCheck = createAdminSelectors({
+  multiple: false,
+  language: "en",
+});
+```
+
+```{ojs}
+html`<pre>${JSON.stringify(adminSelectorSummary(adminSingleCheck), null, 2)}</pre>`
+```
+
+## Multiple selection and binding
+
+```{ojs}
+viewof adminMultiCheck = createAdminSelectors({
+  multiple: true,
+  language: "en",
+  maxSelections: { admin0: 3, admin1: 8, admin2: 12 },
+  selectAll: true,
+  searchable: { admin0: true, admin1: true, admin2: true },
+});
+```
+
+```{ojs}
+adminMultiBoundCheck = Inputs.bind(
+  createAdminSelectors({
+    multiple: true,
+    language: "fr",
+    maxSelections: { admin0: 3, admin1: 8, admin2: 12 },
+    selectAll: true,
+    searchable: true,
+  }),
+  viewof adminMultiCheck,
+);
+```
+
+```{ojs}
+html`<pre>${JSON.stringify(adminSelectorSummary(adminMultiCheck), null, 2)}</pre>`
+```
+
+# Atlas map helper regression checks
+
+The canonical map helpers live in `helpers/atlasMap.ojs`. Check that the map
+shows two adjacent regions, a green continuous legend, a dark outline around
+the eastern region, and a tooltip on hover. The separate bivariate legend
+should show a complete rotated three-by-three grid.
+
+```{ojs}
+import {
+  makeBivariateLegend,
+  makeChoropleth,
+  mergeDataToBoundaries,
+} from "/helpers/atlasMap.ojs";
+
+atlasMapBoundaries = ({
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      properties: { region_id: "west" },
+      geometry: {
+        type: "Polygon",
+        coordinates: [[[30, -2], [34, -2], [34, 2], [30, 2], [30, -2]]],
+      },
+    },
+    {
+      type: "Feature",
+      properties: { region_id: "east" },
+      geometry: {
+        type: "Polygon",
+        coordinates: [[[34, -2], [38, -2], [38, 2], [34, 2], [34, -2]]],
+      },
+    },
+  ],
+});
+
+atlasMapData = [
+  { region_id: "west", region: "Western example", score: 28 },
+  { region_id: "east", region: "Eastern example", score: 76 },
+];
+
+atlasMapFeatures = mergeDataToBoundaries({
+  boundaries: atlasMapBoundaries,
+  data: atlasMapData,
+  boundaryKey: "region_id",
+  dataKey: "region_id",
+});
+```
+
+```{ojs}
+atlasMapCheck = makeChoropleth({
+  // Passing the feature array exercises vulnerability-style input.
+  features: atlasMapFeatures.features,
+  width: Math.min(width, 720),
+  height: 320,
+  projection: { type: "mercator" },
+  fill: (d) => d.properties.data?.score,
+  color: {
+    type: "linear",
+    domain: [0, 100],
+    scheme: "YlGn",
+    label: "Example score",
+  },
+  channels: {
+    region: {
+      label: "Region",
+      value: (d) => d.properties.data?.region,
+    },
+    score: {
+      label: "Score",
+      value: (d) => d.properties.data?.score,
+    },
+  },
+  tooltip: { region: true, score: true },
+  adminHighlight: {
+    filter: (d) => d.properties.region_id === "east",
+    stroke: "#333",
+    strokeWidth: 2.5,
+  },
+});
+```
+
+```{ojs}
+atlasBivariateLegendCheck = makeBivariateLegend({
+  xLabel: "Readiness",
+  yLabel: "Exposure",
+  colors: {
+    "Low × Low": "#e8f4d9",
+    "Moderate × Low": "#b7d99c",
+    "High × Low": "#77b77a",
+    "Low × Moderate": "#f4df9d",
+    "Moderate × Moderate": "#d8bd72",
+    "High × Moderate": "#9c945d",
+    "Low × High": "#efb0a1",
+    "Moderate × High": "#d27a70",
+    "High × High": "#a8444f",
+  },
+});
+```
