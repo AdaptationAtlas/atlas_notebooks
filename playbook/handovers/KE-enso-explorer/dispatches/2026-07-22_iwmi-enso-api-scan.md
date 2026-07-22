@@ -59,3 +59,20 @@ status, waitlist key), `iwmi_flood_alert` (Ganga/Mekong/Zambezi only — not Ken
 3. Everything else = cross-validation only (we already have IPC / prices / SPAM / crop-calendar).
 
 No data pulled into the repo yet — this is a scan. Endpoints + base recorded here for whoever builds it.
+
+## Update — HISTORICAL re-assessment (Kenya-Met-only forecast constraint, 2026-07-22)
+
+Pete: forecasts must come from Kenya Met only → drop every IWMI forecast layer. Re-scored the
+HISTORICAL layers vs what we hold, probed live (Kenya, 3 counties):
+- Point-level series work (SPI: Marsabit/Kericho/Mandera differ) BUT history is capped at ~12 months
+  (months= ignored) = monitoring, not the decades our teleconnection needs. (We can compute SPI from
+  our own CHIRPS 1981+ anyway.)
+- ASIS/VHI = country-mean (GAUL L0) + ~1yr. Not county, not historical.
+- SMCI (soil-moisture) = point-level + 11yr (2016-26 annual) — the ONE genuinely-new multi-year
+  sub-national variable (we hold no soil moisture), but annual/single-month/short → marginal.
+- Everything else = duplicates (NDVI/IPC/prices/SPAM/crop-calendars) or static context.
+
+Verdict: essentially nothing. With forecasts excluded, the IWMI ENSO API (a monitoring/forecast
+service, short GEE-cached history) fills no real historical gap. The real historical gap = a longer
+county production series pre-2019, which lives only in older scanned KNBS reports (OCR tier-3,
+deferred), not any API. KE-07 closed.

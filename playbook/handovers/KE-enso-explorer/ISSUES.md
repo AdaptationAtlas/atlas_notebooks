@@ -30,7 +30,7 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   acres only, converted to ha). It's in the parquet but won't chart in the production/value figure.
   Fine; noted for awareness.
 
-- **KE-07 · IWMI ENSO Outlook API — seasonal forecast for Block 5 · OPEN (opportunity).** Live
+- **KE-07 · IWMI ENSO Outlook API · CLOSED (not worth building).** Live
   public API (`https://enso.iwmi.org/ENSO_api/api/v1`, 34 layers) scanned 2026-07-22 — see
   `dispatches/2026-07-22_iwmi-enso-api-scan.md`. Highest value: ECMWF SEAS5 / IRI NMME per-county
   seasonal rainfall FORECAST — the one thing the notebook lacks (Block 5 currently just links out).
