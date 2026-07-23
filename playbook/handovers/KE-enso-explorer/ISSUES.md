@@ -41,12 +41,15 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   dispatch `2026-07-22_kenya-met-forecast-and-jemal-repos.md`. Full: `2026-07-23_block5-outlook-and-
   climweb-cap.md`, DECISIONS D14.
 
-- **KE-09 · Block-5 outlook figure · OPEN (designed, ready to build).** Low-burden "next season likely
-  what?" = analogue-anchored: current ENSO+IOD state + N nearest historical analogue seasons + Kenya
-  MAM/OND CHIRPS outcome (wet/near/dry) + allowed ENSO-state prob bar (D14). OND high-confidence, MAM
-  low. Data: NOAA CPC (ONI/Niño 3.4), BoM (SOI, DMI), CHIRPS 1981+, IRI/CPC ENSO probs. Pull in Python
-  → parquet. Plus a live KMD CAP layer (KE-08). Design: dispatch `2026-07-23_block5-outlook-and-climweb-
-  cap.md`.
+- **KE-09 · Block-5 outlook figure · BUILT (browser render-verify pending).** Analogue-anchored "what
+  are the coming rains likely to do?" shipped to Block 5 (commit 8080334): 47-county choropleth (likely
+  Drier/Near/Wetter tercile) + per-county verdict card, OND/MAM toggle. CPC ENSO-state forecast (D14)
+  picks the phase; historical analogue years supply the county rainfall outcome. MAM flagged
+  low-confidence (Western-V; outside CPC window → FMA proxy). Data layer done + spot-checked: commits
+  52ba025 (drivers RONI/SOI/DMI), 830c0b6 (outlook base MAM/OND terciles), 5c3c2f0 (CPC probs). All
+  new JS cells pass `node --check`. **Remaining: render in a real browser** (per memory, headless
+  mis-reproduces gated DuckDB-WASM render outcome → Pete's browser is ground truth). Live KMD CAP layer
+  (KE-08) still to add. Design + data-source detail: dispatch `2026-07-23_block5-outlook-and-climweb-cap.md`.
 
 - **KE-07 · IWMI ENSO Outlook API · CLOSED (not worth building).** Live
   public API (`https://enso.iwmi.org/ENSO_api/api/v1`, 34 layers) scanned 2026-07-22 — see

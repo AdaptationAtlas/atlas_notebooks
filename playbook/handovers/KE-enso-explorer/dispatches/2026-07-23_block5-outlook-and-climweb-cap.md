@@ -75,3 +75,25 @@ archive. Does NOT give the **seasonal outlook** (still PDF/Maproom-TBD).
    Kenya-Met-native outlook destination our Block 5 links to.
 
 No code pulled yet. Endpoints recorded for the build. See DECISIONS D13/D14, ISSUES KE-08.
+
+## Build log (2026-07-23, same session)
+
+Data layer (Python, `_sources/enso_*_build.py`) + Block-5 figure built and committed:
+- `enso_drivers_build.py` → `enso_drivers_{monthly,seasonal}.parquet` (RONI/SOI/DMI, NOAA CPC + PSL;
+  spot-checked vs source). Commit 52ba025.
+- `enso_outlook_build.py` → `enso_outlook_base.parquet` (MAM/OND county Dry/Near/Wet terciles vs
+  1991-2020 + predictor/concurrent driver state). Validation: OND 1997/2015/2023 (El Niño) ≈47/47 Wet;
+  OND 2010 (La Niña) 37/47 Dry — teleconnection captured. Commit 830c0b6.
+- `enso_state_prob_build.py` → `enso_state_probabilities.parquet` (CPC RONI ENSO probs, HTML-table
+  parse, sum≈100 gate; issued July 2026, OND 100% El Niño). D14-allowed. Commit 5c3c2f0.
+- Notebook Block 5 (commit 8080334): OND/MAM toggle → 47-county likely-outcome choropleth + per-county
+  verdict card. CPC forecast picks the ENSO phase; analogue years (same-phase historical target seasons,
+  ranked by RONI) supply each county's modal tercile. Self-contained on the outlook parquets; a1
+  features joined on gaul1_code (cast to Number, BigInt dodge); reuses `currentState` + `viewof
+  county/season`. MAM = low-confidence (Western-V control; MAM outside CPC window → FMA proxy).
+  All new JS cells pass `node --check`.
+
+**Verification status:** deterministic data validated; OJS syntactically checked. NOT yet rendered in a
+browser — headless mis-reproduces gated DuckDB-WASM render outcomes (memory
+`feedback_headless-mis-reproduces-duckdb-wasm-sections`), so Pete's real-browser preview is the gate.
+Next build step: live KMD CAP layer (KE-08) once Ani confirms the endpoint contract.
