@@ -272,16 +272,48 @@ md`${_lang(nbText.sections.b1.intro)}`
 ## `{ojs} title_gesi`
 
 ```{ojs}
-gesiTable = Inputs.table(
-  gesiCounty.map((d) => ({indicator: d.title, sub: d.row, county: d.county_value, Kenya: d.kenya_value})),
-  {rows: 12, layout: "auto"}
-)
+gesiTable = {
+  if (!gesiDist.length) return html`<div style="color:#666;font-style:italic">No GESI indicators reported for ${county}.</div>`;
+  const W = 168, H = 15, x = (p) => 4 + p * (W - 8);
+  const fmt = (v) => v == null ? "—" : (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : +v.toFixed(2));
+  const bullet = (d) => svg`<svg width=${W} height=${H} viewBox="0 0 ${W} ${H}" style="overflow:visible">
+    <line x1=${x(0)} y1=${H / 2} x2=${x(1)} y2=${H / 2} stroke="#dcdcdc" stroke-width="3" stroke-linecap="round"/>
+    <line x1=${x(d.posMed)} y1=${3} x2=${x(d.posMed)} y2=${H - 3} stroke="#9a9a9a" stroke-width="1.5"/>
+    ${d.posK != null ? svg`<path d=${`M ${x(d.posK)} 2.5 L ${x(d.posK) + 4} ${H / 2} L ${x(d.posK)} ${H - 2.5} L ${x(d.posK) - 4} ${H / 2} Z`} fill="white" stroke="#333" stroke-width="1.1"/>` : svg`<g/>`}
+    <circle cx=${x(d.pos)} cy=${H / 2} r="4.5" fill="#2c7fb8" stroke="white" stroke-width="1"/>
+  </svg>`;
+  const rows = gesiDist.map((d) => html`<tr style="border-bottom:1px solid #f2f2f2;">
+    <td style="padding:3px 10px 3px 4px;font-size:12px;line-height:1.25;">${d.title}${d.sub && d.sub !== "-" ? html` <span style="color:#999">· ${d.sub}</span>` : ""}</td>
+    <td style="text-align:right;font-weight:600;padding:3px 8px;font-variant-numeric:tabular-nums;">${fmt(d.cv)}</td>
+    <td style="text-align:right;color:#777;padding:3px 8px;font-variant-numeric:tabular-nums;">${fmt(d.kenya)}</td>
+    <td style="text-align:center;padding:3px 8px;white-space:nowrap;font-variant-numeric:tabular-nums;"><b>${d.rank}</b><span style="color:#aaa">/${d.n}</span></td>
+    <td style="padding:2px 4px;">${bullet(d)}</td>
+  </tr>`);
+  return html`<figure style="margin:0;max-width:860px;">
+    <div style="max-height:520px;overflow:auto;border:1px solid #eee;border-radius:6px;">
+    <table style="border-collapse:collapse;width:100%;font-family:inherit;">
+      <thead><tr style="position:sticky;top:0;background:white;border-bottom:2px solid #333;text-align:left;font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;color:#555;">
+        <th style="padding:6px 4px;">Indicator</th>
+        <th style="padding:6px 8px;text-align:right;">${county}</th>
+        <th style="padding:6px 8px;text-align:right;">Kenya</th>
+        <th style="padding:6px 8px;text-align:center;">Rank</th>
+        <th style="padding:6px 8px;">Among 47 counties</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </div>
+    <figcaption style="font-size:11px;color:#888;margin-top:5px;">
+      <span style="color:#2c7fb8;font-weight:700;">●</span> ${county} · ◇ Kenya · │ county median · bar = 47-county low→high range.
+      Rank is by raw value (1 = highest); direction of “better” varies by indicator.
+    </figcaption>
+  </figure>`;
+}
 ```
 
 ```{ojs}
 plotFooter(_lang(nbText.sections.b1.gesiCaption), gesiTable, {
   filename: `${county}_gesi_indicators`,
-  data: gesiCounty,
+  data: gesiDist,
 })
 ```
 
@@ -1388,6 +1420,36 @@ gesiCounty = dbGesi.query(`
   WHERE ${normExpr("county")} = '${countyNorm(county)}'
     AND county_value IS NOT NULL
   ORDER BY title, "row"`)
+
+// all counties, all indicators — for the county-vs-47 distribution + rank
+gesiAll = dbGesi.query(`
+  SELECT title, "row" AS sub, county, county_value AS v, kenya_value AS kenya
+  FROM gesi WHERE county_value IS NOT NULL`)
+
+// per indicator the selected county reports: its value, national value, the
+// 47-county min/median/max, the county's rank (1 = highest value), and 0–1
+// positions for the bullet. Each indicator is normalised to its own county
+// range (mixed units), so position is comparable within a row, not across.
+gesiDist = {
+  const byInd = d3.group(gesiAll, (d) => d.title + "␟" + (d.sub ?? ""));
+  const norm = countyNorm(county);
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const out = [];
+  for (const [key, recs] of byInd) {
+    const cRec = recs.find((r) => countyNorm(r.county) === norm);
+    if (!cRec || cRec.v == null) continue;
+    const vals = recs.map((r) => r.v).filter((x) => x != null).sort((a, b) => a - b);
+    const n = vals.length;
+    const min = vals[0], max = vals[n - 1], span = max - min, median = d3.median(vals);
+    const [title, sub] = key.split("␟");
+    out.push({title, sub, cv: cRec.v, kenya: cRec.kenya, min, max, median, n,
+      rank: vals.filter((x) => x > cRec.v).length + 1,
+      pos: span ? (cRec.v - min) / span : 0.5,
+      posMed: span ? (median - min) / span : 0.5,
+      posK: (cRec.kenya != null && span) ? clamp01((cRec.kenya - min) / span) : null});
+  }
+  return out.sort((a, b) => (a.title + a.sub).localeCompare(b.title + b.sub));
+}
 ```
 
 ```{ojs}
