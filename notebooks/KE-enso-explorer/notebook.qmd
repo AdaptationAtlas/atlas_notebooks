@@ -847,6 +847,87 @@ plotFooter(_lang(nbText.sections.b5.recentCaption), driversChart, {
 })
 ```
 
+## `{ojs} title_outlook`
+
+::: {.controls-row}
+
+```{ojs}
+viewof outlookSeason = Inputs.radio(["OND (short rains)", "MAM (long rains)"], {
+  label: _lang(nbText.sections.controls.outlookSeason),
+  value: "OND (short rains)",
+})
+```
+
+:::
+
+```{ojs}
+md`${_lang(nbText.sections.b5.outlookIntro)}`
+```
+
+```{ojs}
+outlookMap = {
+  const label = {Wet: "Wetter", Dry: "Drier", Near: "Near-normal"};
+  const feats = kenyaA1.map((f) => {
+    const o = countyOutlook.get(f.properties.gaul1_code);
+    return {...f, properties: {...f.properties,
+      modal: o ? o.modal : null, share: o ? o.share : null, n: o ? o.n : 0}};
+  });
+  const domain = {type: "FeatureCollection", features: feats};
+  return Plot.plot({
+    projection: {type: "mercator", domain, inset: 8}, width: 720, height: 620,
+    color: {domain: ["Drier", "Near-normal", "Wetter"], range: ["#d73027", "#e0e0e0", "#1a9850"],
+      legend: true, label: `likely ${outlookTarget} rainfall vs 1991–2020`},
+    marks: [
+      Plot.geo(feats, {fill: "#f0f0ec", stroke: "#fff", strokeWidth: 0.5}),
+      Plot.geo(feats.filter((f) => f.properties.modal),
+        {fill: (d) => label[d.properties.modal], stroke: "#fff", strokeWidth: 0.5,
+         title: (d) => `${d.properties.admin1_name}: likely ${label[d.properties.modal]} `
+           + `(${Math.round(d.properties.share * 100)}% of ${d.properties.n} analogue years)`}),
+      Plot.geo(feats.filter((f) => f.properties.admin1_name === county),
+        {fill: "none", stroke: "#111", strokeWidth: 2}),
+    ],
+  });
+}
+```
+
+```{ojs}
+md`${_lang(nbText.sections.b5.outlookMapNote)}`
+```
+
+```{ojs}
+outlookCard = {
+  const o = selectedOutlook.outlook;
+  const f = outlookForecast;
+  const dotColor = {Wet: "#1a9850", Dry: "#d73027", Near: "#bbb"};
+  const word = o ? (o.modal === "Wet" ? "WETTER" : o.modal === "Dry" ? "DRIER" : "NEAR-NORMAL") : "—";
+  const wcolor = o ? (o.modal === "Wet" ? "#1a9850" : o.modal === "Dry" ? "#d73027" : "#888") : "#888";
+  const pct = (x) => x == null ? "—" : Math.round(x) + "%";
+  const fpct = f.phase === "El Niño" ? f.el_nino : f.phase === "La Niña" ? f.la_nina : f.neutral;
+  const chips = selectedOutlook.dots.map((d) => html`<span style="display:inline-flex;align-items:center;gap:5px;padding:2px 9px;margin:2px;border:1px solid #ddd;border-radius:12px;font-size:13px;">${d.year}<span style="width:9px;height:9px;border-radius:50%;background:${dotColor[d.tercile] || "#eee"};display:inline-block;"></span></span>`);
+  const seasonLabel = outlookTarget === "OND" ? "short rains (OND)" : "long rains (MAM)";
+  return html`<div style="max-width:560px;border:1px solid #e2e2e2;border-radius:10px;padding:16px 18px;">
+    <div style="font-size:12px;letter-spacing:.05em;color:#666;text-transform:uppercase;">${seasonLabel} · ${county}</div>
+    <div style="font-size:13px;color:#444;margin:2px 0 10px;">NOAA CPC forecast: <b>${f.phase}</b> ${pct(fpct)}${f.proxy ? " (proxy)" : ""} · current Niño 3.4 ${currentState.oni != null ? currentState.oni.toFixed(2) + " °C" : "—"}</div>
+    <div style="font-size:26px;font-weight:700;color:${wcolor};line-height:1.15;">LIKELY ${word}<span style="font-size:16px;font-weight:400;color:#555;"> than normal</span></div>
+    <div style="font-size:14px;color:#444;margin:6px 0 12px;">${o ? `${o.counts[o.modal]} of ${o.n} analogue years were ${word.toLowerCase()}` : "no 1991–2020 baseline for this county"}</div>
+    <div style="font-size:12px;color:#666;margin-bottom:4px;">most similar ${f.phase} ${outlookTarget} years:</div>
+    <div>${chips}</div>
+  </div>`;
+}
+```
+
+```{ojs}
+plotFooter(_lang(nbText.sections.b5.outlookCaption), outlookMap, {
+  filename: `kenya_${outlookTarget.toLowerCase()}_analogue_outlook`,
+  data: [...countyOutlook.values()].map((o) => ({county: o.county, likely: o.modal,
+    share: o.share, analogues: o.n, dry: o.counts.Dry, near: o.counts.Near, wet: o.counts.Wet})),
+})
+```
+
+```{ojs}
+md`${outlookTarget === "MAM" ? _lang(nbText.sections.b5.outlookMamCaveat) : ""}`
+```
+
 ```{ojs}
 md`${_lang(nbText.sections.b5.watch)}`
 ```
@@ -1059,9 +1140,125 @@ dbCounties = DuckDBClient.of({
   county_key: FileAttachment("/data/KE-enso-explorer/county_key.parquet"),
 })
 
-counties = dbCounties.query(`SELECT county FROM county_key ORDER BY county`)
+counties = dbCounties.query(`SELECT county, gaul1_code FROM county_key ORDER BY county`)
 
 countyNames = counties.map((d) => d.county)
+```
+
+```{ojs}
+title_outlook = _lang(nbText.sections.b5.outlookTitle)
+```
+
+```{ojs}
+// ---- Block-5 analogue outlook. Self-contained on the three driver/outlook
+// parquets (built by data/KE-enso-explorer/_sources/enso_*_build.py). The
+// ENSO-STATE forecast (NOAA CPC) is a global driver-index forecast -> allowed
+// (D14); the Kenya rainfall side stays analogue/historical (D11). No number
+// typed by a model — all parsed/derived in the pipeline.
+dbOutlook = DuckDBClient.of({
+  outlook_base: FileAttachment("/data/KE-enso-explorer/enso_outlook_base.parquet"),
+  state_probs: FileAttachment("/data/KE-enso-explorer/enso_state_probabilities.parquet"),
+})
+```
+
+```{ojs}
+// cast INT64 -> INTEGER/DOUBLE so year + gaul1_code return as JS Number, not BigInt
+outlookBase = dbOutlook.query(`
+  SELECT season, CAST(year AS INTEGER) AS year, county,
+         CAST(gaul1_code AS DOUBLE) AS gaul1_code, is_county,
+         anomaly_pct, tercile, roni_conc
+  FROM outlook_base`)
+```
+
+```{ojs}
+stateProbs = dbOutlook.query(`SELECT * FROM state_probs`)
+```
+
+```{ojs}
+a1Topo = FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json()
+```
+
+```{ojs}
+kenyaA1 = topojsonClient.feature(a1Topo, a1Topo.objects["atlas_gaul24_a1_africa"])
+  .features.filter((f) => f.properties.iso3 === "KEN")
+```
+
+```{ojs}
+outlookTarget = outlookSeason.startsWith("OND") ? "OND" : "MAM"
+```
+
+```{ojs}
+// forecast ENSO phase for the target season, from the CPC probabilities. OND
+// is inside the current CPC window; MAM is not (window is JJA..FMA), so FMA is
+// used as the nearest proxy and flagged low-confidence in the caption.
+outlookForecast = {
+  const row = stateProbs.find((d) => d.season === (outlookTarget === "OND" ? "OND" : "FMA"));
+  if (!row) return {phase: "Neutral", el_nino: null, neutral: null, la_nina: null, proxy: outlookTarget === "MAM"};
+  const phase = row.el_nino >= row.neutral && row.el_nino >= row.la_nina ? "El Niño"
+    : row.la_nina >= row.neutral ? "La Niña" : "Neutral";
+  return {phase, el_nino: row.el_nino, neutral: row.neutral, la_nina: row.la_nina,
+          issued: row.issued, proxy: outlookTarget === "MAM"};
+}
+```
+
+```{ojs}
+ensoPhaseOf = (roni) => roni == null ? null : roni > 0.5 ? "El Niño" : roni < -0.5 ? "La Niña" : "Neutral"
+```
+
+```{ojs}
+// analogue years = historical target-season years whose concurrent ENSO phase
+// matches the forecast phase, ranked by RONI magnitude (strongest first), max 8.
+analogueYears = {
+  const yrs = new Map();
+  for (const r of outlookBase) {
+    if (r.season !== outlookTarget || r.roni_conc == null) continue;
+    if (!yrs.has(r.year)) yrs.set(r.year, r.roni_conc);
+  }
+  const target = outlookForecast.phase;
+  const matched = [...yrs.entries()]
+    .filter((e) => ensoPhaseOf(e[1]) === target)
+    .map((e) => ({year: e[0], roni: e[1]}));
+  matched.sort((a, b) => target === "Neutral"
+    ? Math.abs(a.roni) - Math.abs(b.roni) : Math.abs(b.roni) - Math.abs(a.roni));
+  return matched.slice(0, 8);
+}
+```
+
+```{ojs}
+analogueYearSet = new Set(analogueYears.map((d) => d.year))
+```
+
+```{ojs}
+// per-county likely outcome across the analogue years: modal tercile + share
+countyOutlook = {
+  const byCty = d3.group(
+    outlookBase.filter((r) => r.season === outlookTarget && analogueYearSet.has(r.year)),
+    (r) => r.gaul1_code);
+  const out = new Map();
+  for (const [gaul, rows] of byCty) {
+    const counts = {Dry: 0, Near: 0, Wet: 0};
+    for (const r of rows) counts[r.tercile]++;
+    const n = rows.length;
+    const modal = ["Wet", "Near", "Dry"].reduce((a, b) => counts[b] > counts[a] ? b : a, "Near");
+    out.set(gaul, {gaul, county: rows[0].county, is_county: rows[0].is_county,
+      counts, n, modal, share: n ? counts[modal] / n : 0});
+  }
+  return out;
+}
+```
+
+```{ojs}
+// selected county's outlook + its per-analogue-year tercile dots (the card)
+selectedOutlook = {
+  const rec = counties.find((c) => c.county === county) || {};
+  const key = rec.gaul1_code != null ? +rec.gaul1_code : null;
+  const o = key != null ? countyOutlook.get(key) : null;
+  const dots = analogueYears.map((a) => {
+    const row = outlookBase.find((r) => r.season === outlookTarget && r.year === a.year && r.gaul1_code === key);
+    return {year: a.year, tercile: row ? row.tercile : null};
+  });
+  return {outlook: o, dots};
+}
 ```
 
 ```{ojs}
