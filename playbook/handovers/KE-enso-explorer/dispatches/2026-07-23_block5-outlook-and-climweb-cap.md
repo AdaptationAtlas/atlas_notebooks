@@ -97,3 +97,31 @@ Data layer (Python, `_sources/enso_*_build.py`) + Block-5 figure built and commi
 browser — headless mis-reproduces gated DuckDB-WASM render outcomes (memory
 `feedback_headless-mis-reproduces-duckdb-wasm-sections`), so Pete's real-browser preview is the gate.
 Next build step: live KMD CAP layer (KE-08) once Ani confirms the endpoint contract.
+
+## Ani reply (2026-07-23) — endpoint answers
+
+Ani Ghosh answered the three endpoint Qs:
+1. **CAP:** no API beyond the RSS + per-alert XML *at this point*; a feature request to improve
+   subscription/API for bulletins, maps and warnings is upcoming. → build on RSS + per-alert XML now;
+   GeoJSON/list-filter is future.
+2. **Seasonal (MAM/OND) outlook as structured data:** *in the pipeline*; current bottleneck = internal
+   data infrastructure. They are working to get the **forecast products into the cloud as icechunk**
+   (cloud-native Zarr). → the KMD-native seasonal outlook is not machine-readable yet; ingest the
+   icechunk products when they land. Our analogue + CPC ENSO-state figure stands as the forward view
+   meanwhile.
+3. **Maproom (`kmddl.meteo.go.ke:8081`):** not sure it is maintained after the IRI Data Library sunset;
+   new services coming. → **dead end, do not build on the Maproom.**
+
+Net: CAP layer buildable now; seasonal-outlook ingestion waits for KMD's icechunk cloud products;
+point Block 5's forward section at KMD's AA page (#710) as the authoritative KMD outlook.
+
+## Also this session — notebook polish (Pete review of the live preview)
+
+- **Produce table "looked wrong":** confirmed NOT a data bug — Marsabit-class arid counties genuinely
+  contribute 0.001–0.07% of national crop production, and `toFixed(1)` rounded every % cell to a
+  misleading "0". Fix `prodPctFmt` (2 sig figs below 1%, 1dp above; true 0 stays 0, null blank). Added a
+  visible incompleteness disclaimer to `produceNote` (KNBS county figures may be incomplete; blank =
+  "not reported" ≠ zero). Commit f82c43e.
+- **Numbered headings + figures** (Pete: for stable dev/user references). Hierarchical N.M: H1 sections
+  1–9, H2 chart titles N.M, every figure caption "Figure N.M — …" (trade's two = 5.6a/5.6b). Numbers in
+  nbText (H1/plain-H2/captions) + qmd templates (dynamic H2 titles with county/season prefixes).

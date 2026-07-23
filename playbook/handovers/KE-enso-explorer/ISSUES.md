@@ -34,12 +34,15 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   meteo.go.ke is a **ClimWeb** site ("Powered by Climweb v1.2.1", `wmo-raf/nmhs-cms`) → machine-readable
   Kenya-Met feeds exist after all. **CAP warning feed LIVE** `meteo.go.ke/api/cap/rss.xml` + per-alert
   CAP XML (geolocated, severity/onset/expiry) — D11-clean, parseable now, generalizes to 40+ agencies.
-  Wagtail `/api/v2/pages/` = 404; **seasonal (MAM/OND) outlook still PDF or Maproom** (`kmddl.meteo.go.ke
-  :8081`, unprobed). CAP = hazard warnings not seasonal outlook. Colleague **Ani Ghosh** (WMO web team)
-  is the shortcut for endpoint docs + is co-driving `wmo-raf/climweb` **#710** (AA page, KMD+CGIAR — ≈
-  our Block-5 outlook → coordinate). Old PDF/ICPAC paths + rejected `jemsethio` repos: DECISIONS D13,
-  dispatch `2026-07-22_kenya-met-forecast-and-jemal-repos.md`. Full: `2026-07-23_block5-outlook-and-
-  climweb-cap.md`, DECISIONS D14.
+  Wagtail `/api/v2/pages/` = 404. **Ani Ghosh (WMO web team) answered 2026-07-23:** (1) no CAP API
+  beyond RSS + per-alert XML *yet* — a feature request for bulletins/maps/warnings via API is upcoming;
+  (2) **seasonal (MAM/OND) outlook as structured data = in the pipeline**, bottleneck is internal data
+  infra — they are moving forecast products to the cloud as **icechunk** (cloud-native Zarr) → ingest
+  that when it lands; (3) **Maproom (`kmddl:8081`) is a dead end** — not maintained post the IRI Data
+  Library sunset, new services coming. So: build the CAP layer on RSS+XML now; the KMD-native seasonal
+  outlook waits for the icechunk cloud products; point Block 5's forward section at KMD's AA page (#710,
+  KMD+CGIAR — ≈ our Block-5 outlook, coordinate). Old PDF/ICPAC paths + rejected `jemsethio` repos:
+  DECISIONS D13. Full: `2026-07-23_block5-outlook-and-climweb-cap.md`, DECISIONS D14.
 
 - **KE-09 · Block-5 outlook figure · BUILT (browser render-verify pending).** Analogue-anchored "what
   are the coming rains likely to do?" shipped to Block 5 (commit 8080334): 47-county choropleth (likely
