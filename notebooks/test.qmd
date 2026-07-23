@@ -1,0 +1,687 @@
+---
+title: OJS Sandbox test
+---
+
+```{ojs}
+viewof test = Inputs.radio(["hi", "bye"]) // Can access directly through await _ojs.runtime.value("test")
+
+window.anotherTest = "Hello World" // Can be accessed through console
+
+{
+  window.livetest = test // Can also be accessed through console
+}
+
+{ // Dispatch an event to be able to get the value from js console and trigger a js event.
+  window.livetest = test
+  window.dispatchEvent(new CustomEvent("livetest-change", { detail: test }))
+  return test
+}
+// Then in JS console:
+// window.addEventListener("livetest-change", (e) => {
+//   console.log("livetest changed:", e.detail)
+// })
+
+
+livetest = Generators.observe((notify) => {
+  const handler = (e) => notify(e.detail)
+  window.addEventListener("livetest-change", handler)
+  return () => window.removeEventListener("livetest-change", handler)
+})
+// Then in JS console:
+// window.dispatchEvent(new CustomEvent("livetest-change", { detail: 5 }))
+
+livetest
+
+livetest + 5
+```
+
+```{ojs}
+ojsBridge = (id, value) => {
+  const key = `ojs_${id}`;
+  const eventName = `ojs:${id}:change`;
+
+  // Push current OJS value out to regular JS
+  window[key] = value;
+  window.dispatchEvent(new CustomEvent(eventName, { detail: value }));
+
+  // Return an observable that can receive updates from JS/console
+  return Generators.observe((notify) => {
+    const handler = (e) => notify(e.detail);
+    window.addEventListener(eventName, handler);
+
+    // Initialize from current global if present
+    if (key in window) notify(window[key]);
+
+    return () => window.removeEventListener(eventName, handler);
+  });
+};
+
+// viewof initialVar = Input.input(["Hi Brayden"])
+
+viewof inputVar = Inputs.radio(["Hi World", "Hi Brayden"]);
+
+testBridge = ojsBridge("bridgetest", inputVar);
+
+md`Say hello from JS and OJS: ${testBridge}`;
+
+// IN JS console:
+
+// To get/watch value:
+// window.addEventListener("ojs:bridgetest:change", (e) => {
+//   console.log("livetest changed:", e.detail)
+// })
+
+// To set value:
+// window.ojs_bridgetest = "Hello World"
+// window.dispatchEvent(new CustomEvent("ojs:bridgetest:change", { detail: "Hello World" }))
+```
+
+# Observable input CSS regression checks
+
+Use this section after changing `styles/observable-inputs.css` or the enhanced
+multiselect. Check it at desktop width and again with a narrow browser window.
+
+## Native Observable inputs
+
+Check that labels, borders, hover/focus states, controls, and the native button
+still match the Atlas styling. The plain custom button underneath should not
+inherit the green Observable button hover style.
+
+```{ojs}
+nativeInputChecks = {
+  const controls = [
+    Inputs.text({ label: "Text input", value: "Atlas input" }),
+    Inputs.select(["Kenya", "Tanzania", "Uganda"], {
+      label: "Single select",
+      value: "Kenya",
+    }),
+    Inputs.range([0, 100], {
+      label: "Range",
+      value: 40,
+      step: 5,
+    }),
+    Inputs.radio(["Map", "Chart", "Table"], {
+      label: "Radio group",
+      value: "Map",
+    }),
+    Inputs.checkbox(["Crops", "Livestock"], {
+      label: "Checkbox group",
+      value: ["Crops"],
+    }),
+    Inputs.toggle({ label: "Toggle", value: true }),
+    Inputs.textarea({
+      label: "Textarea",
+      value: "Nested divs should not receive global vertical padding.",
+      rows: 3,
+    }),
+    Inputs.button("Native Observable button"),
+  ];
+
+  return html`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2rem;align-items:start;">${controls}</div>`;
+}
+```
+
+```{ojs}
+customButtonCheck = html`<div style="margin:1rem 0 2rem;">
+  <button type="button" style="padding:0.5rem 0.75rem;">Plain custom button</button>
+</div>`;
+```
+
+# Canonical table and utility checks
+
+The searchable and static examples should share the same Atlas table styling.
+The first table should include search and zebra striping; the second should
+render without a search control. The tooltip should work with hover and
+keyboard focus, and the loader should use the shared spinner animation.
+
+```{ojs}
+import { atlasTable } from "/helpers/atlasTable.ojs";
+import { makeTooltipLabel } from "/helpers/uiComponents.ojs";
+import { loaderDiv } from "/helpers/std.ojs";
+
+atlasTableCheckData = [
+  { region: "Central", crop: "Beans", score: 72 },
+  { region: "Eastern", crop: "Maize", score: 64 },
+  { region: "Northern", crop: "Sorghum", score: 81 },
+  { region: "Western", crop: "Rice", score: 58 },
+];
+```
+
+```{ojs}
+atlasSearchableTableCheck = atlasTable(atlasTableCheckData, {
+  searchable: true,
+  zebra: true,
+  columns: ["region", "crop", "score"],
+  format: { score: (value) => `${value}%` },
+});
+```
+
+```{ojs}
+atlasStaticTableCheck = atlasTable(atlasTableCheckData.slice(0, 2), {
+  searchable: false,
+  columns: ["region", "crop", "score"],
+});
+```
+
+```{ojs}
+atlasUtilityStyleCheck = {
+  const loader = loaderDiv("atlas-loader-style-check");
+  loader.style.setProperty("--atlas-loader-min-height", "8rem");
+
+  return html`<div>
+    <p>${makeTooltipLabel({
+      labelText: "Keyboard-accessible tooltip",
+      tooltipText: "This tooltip is styled once through ui-components.css.",
+    })}</p>
+    ${loader}
+  </div>`;
+}
+```
+
+## Enhanced multiselects
+
+For each dropdown, verify:
+
+- its width does not change as selections are added or removed;
+- Select/Deselect All stays flush at the top;
+- only the option list scrolls, with no text visible behind the action row;
+- long selected labels truncate with an ellipsis;
+- the controls wrap instead of overflowing at narrow viewport widths;
+- Arrow keys move option focus, Space/Enter toggle, and Escape returns focus to
+  the trigger;
+- the French example uses localized action and empty-selection labels.
+
+```{ojs}
+import {
+  atlasMultiSelect,
+  enhancedMultiSelect,
+} from "/helpers/enhancedMultiSelect.ojs";
+
+makeEnhancedCheck = ({
+  label,
+  options,
+  value = [],
+  minWidth = "240px",
+  maxWidth = "400px",
+  language = "en",
+  commit = "close",
+} = {}) => {
+  return atlasMultiSelect(options, {
+    label,
+    value,
+    enableSelectAll: true,
+    requireAtLeastOne: false,
+    minWidth,
+    maxWidth,
+    language,
+    commit,
+  });
+};
+```
+
+```{ojs}
+enhancedInputChecks = {
+  const shortOptions = ["Kenya", "Tanzania", "Uganda", "Rwanda", "Burundi"];
+  const longOptions = Array.from(
+    { length: 36 },
+    (_, i) => `Administrative region ${String(i + 1).padStart(2, "0")} with a deliberately long label`,
+  );
+
+  const controls = [
+    makeEnhancedCheck({
+      label: "Typical selection",
+      options: shortOptions,
+      value: ["Kenya", "Tanzania"],
+    }),
+    makeEnhancedCheck({
+      label: "Long labels and scrolling",
+      options: longOptions,
+      value: longOptions.slice(0, 8),
+    }),
+    makeEnhancedCheck({
+      label: "Narrow configured width",
+      options: longOptions.slice(0, 12),
+      value: longOptions.slice(0, 3),
+      minWidth: "200px",
+      maxWidth: "320px",
+    }),
+    makeEnhancedCheck({
+      label: "Libellés français",
+      options: ["Kenya", "Tanzanie", "Ouganda"],
+      language: "fr",
+      value: [],
+      commit: "change",
+    }),
+  ];
+
+  return html`<div style="display:flex;flex-wrap:wrap;gap:2rem;align-items:flex-start;">${controls}</div>`;
+}
+```
+
+The lower-level enhancer remains available when an input must be created or
+bound first:
+
+```{ojs}
+advancedEnhancedCheck = {
+  const input = Inputs.select(["One", "Two", "Three"], {
+    label: "Advanced existing input",
+    multiple: true,
+    value: ["One"],
+  });
+  enhancedMultiSelect(input, {
+    searchable: true,
+    requireAtLeastOne: false,
+    commit: "change",
+  });
+  return input;
+}
+```
+
+The following checks exercise the DOM contract and commit timing without
+requiring visual inspection:
+
+```{ojs}
+multiSelectBehaviorChecks = {
+  const results = [];
+  const check = (label, pass) => results.push({ label, pass: Boolean(pass) });
+  const sandbox = document.createElement("div");
+  sandbox.style.cssText = "position:fixed;left:-10000px;top:0;width:500px;";
+  document.body.appendChild(sandbox);
+
+  const immediate = atlasMultiSelect(["Alpha", "Beta"], {
+    value: [],
+    requireAtLeastOne: false,
+    enableSelectAll: true,
+    commit: "change",
+  });
+  sandbox.appendChild(immediate);
+  let immediateEvents = 0;
+  immediate.addEventListener("input", () => immediateEvents += 1);
+  const immediateButton = immediate.querySelector("button");
+  immediateButton.click();
+  const immediateOption = immediate.querySelector('[role="option"]');
+  immediateOption.click();
+
+  check("change mode emits immediately", immediateEvents === 1);
+  check("trigger exposes expanded state", immediateButton.getAttribute("aria-expanded") === "true");
+  check("options use listbox semantics", immediate.querySelector('[role="listbox"]')?.contains(immediateOption));
+  check("all buttons have type=button", Array.from(immediate.querySelectorAll("button")).every((button) => button.type === "button"));
+
+  immediateOption.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "ArrowDown",
+    bubbles: true,
+  }));
+  check("ArrowDown moves option focus", document.activeElement === immediate.querySelectorAll('[role="option"]')[1]);
+
+  document.activeElement.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+  }));
+  check("Escape closes the menu", immediateButton.getAttribute("aria-expanded") === "false");
+  check("Escape returns trigger focus", document.activeElement === immediateButton);
+
+  const deferred = atlasMultiSelect(["Alpha", "Beta"], {
+    value: [],
+    requireAtLeastOne: false,
+    commit: "close",
+  });
+  sandbox.appendChild(deferred);
+  let deferredEvents = 0;
+  deferred.addEventListener("input", () => deferredEvents += 1);
+  deferred.atlasMultiSelect.open();
+  deferred.querySelector('[role="option"]').click();
+  check("close mode defers its event", deferredEvents === 0);
+  deferred.atlasMultiSelect.close();
+  check("close mode emits once on close", deferredEvents === 1);
+
+  const localized = atlasMultiSelect(["Un", "Deux"], {
+    value: [],
+    requireAtLeastOne: false,
+    enableSelectAll: true,
+    language: "fr",
+  });
+  sandbox.appendChild(localized);
+  check("empty label is localized", localized.querySelector("button span")?.textContent === "Aucune sélection");
+  check("action labels are localized", Array.from(localized.querySelectorAll(".button-container button"), (button) => button.textContent).join("|") === "Tout sélectionner|Tout désélectionner");
+
+  const limited = atlasMultiSelect(["One", "Two"], {
+    value: [],
+    maxSelections: 1,
+    requireAtLeastOne: false,
+    enableSelectAll: true,
+  });
+  sandbox.appendChild(limited);
+  const limitedActions = Array.from(
+    limited.querySelectorAll(".button-container button"),
+    (button) => button.textContent,
+  );
+  check("Select All is hidden when selections are limited", !limitedActions.includes("Select All"));
+  check("valid bulk actions remain available", limitedActions.join("|") === "Deselect All");
+
+  const nativeSelect = deferred.querySelector("select");
+  const addedOption = document.createElement("option");
+  addedOption.value = "Gamma";
+  addedOption.textContent = "Gamma <safe>";
+  nativeSelect.appendChild(addedOption);
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  check("option mutations rebuild the list", deferred.querySelectorAll('[role="option"]').length === 3);
+  const addedRow = deferred.querySelectorAll('[role="option"]')[2];
+  check("option labels remain text", addedRow?.textContent.includes("Gamma <safe>") && !addedRow.querySelector("*:not(span)"));
+
+  [immediate, deferred, localized, limited].forEach((input) => {
+    input.atlasMultiSelect.destroy();
+  });
+  sandbox.remove();
+
+  const list = document.createElement("ul");
+  results.forEach(({ label, pass }) => {
+    const item = document.createElement("li");
+    item.textContent = `${pass ? "PASS" : "FAIL"} — ${label}`;
+    item.style.color = pass
+      ? "var(--atlas-color-primary)"
+      : "var(--atlas-color-focus)";
+    list.appendChild(item);
+  });
+  return list;
+}
+```
+
+# Canonical TOC and hero checks
+
+The floating TOC should be rendered by the `atlas-toc` web component, include
+the H1 and H2 headings on this page, and omit the circular hero title. When
+there is not enough room beside the page, a **Regression checks** button should
+open the TOC as an overlay. Resize the window below 900px and verify that both
+the panel and its button hide cleanly.
+
+Also check that only the active H1 section's indented H2 entries are visible,
+the active parent stays green while its child is current, the thin gold
+indicator follows the exact active entry while scrolling, Escape and an outside
+click close the overlay, and keyboard focus moves into the first link when the
+overlay opens.
+
+The hero should retain a circular white content area over the image, preserve
+its proportions at narrow widths, and expose useful image alternative text.
+
+```{ojs}
+import { atlasTOC } from "/helpers/toc.ojs";
+import { atlasHero } from "/helpers/hero.js";
+import { atlasHero as legacyAtlasHero } from "/helpers/uiComponents.ojs";
+
+atlasTocCompatibilityCheck = atlasTOC({
+  selector: "h1, h2",
+  heading: "<b>Regression checks</b>",
+  skip: ["notebook-title", "appendix", "source-code"],
+});
+```
+
+```{ojs}
+atlasHeroCheck = atlasHero({
+  title: "Canonical Atlas hero",
+  image: "/images/notebooks/roi.webp",
+  group: "Shared components",
+  alt: "Fields and trees in an agricultural landscape",
+});
+```
+
+```{ojs}
+legacyHeroCompatibilityCheck = {
+  const hero = legacyAtlasHero(
+    "Legacy positional API",
+    "/images/default_crop.webp",
+  );
+  return html`<p>
+    Legacy wrapper returns the canonical hero:
+    <strong>${hero.classList.contains("atlas-hero") ? "yes" : "no"}</strong>
+  </p>`;
+}
+```
+
+# Safe shared rendering and CSV checks
+
+The contribution title, names, and organizations below deliberately contain
+HTML-special characters. They should render as ordinary text, with no markup
+created from their values. Download the CSV and check that accented names open
+correctly, quoted fields remain intact, and the columns follow the configured
+order.
+
+```{ojs}
+import {
+  downloadCsvButton,
+  serializeCsv,
+} from "/helpers/uiComponents.ojs";
+import {
+  atlasCitation,
+  atlasContributionSection,
+} from "/helpers/citation.js";
+
+csvSafetyCheckData = [
+  {
+    admin: "Côte d'Ivoire",
+    region: "North, \"Central\"",
+    note: "First line\nSecond line",
+  },
+  {
+    admin: "São Tomé & Príncipe",
+    region: "Água Grande",
+    note: "Accented administrative name",
+  },
+];
+```
+
+```{ojs}
+csvDownloadCheck = downloadCsvButton(csvSafetyCheckData, {
+  filename: "atlas-csv-regression.csv",
+  label: "Download CSV regression",
+  columns: ["admin", "region", "note"],
+});
+```
+
+```{ojs}
+csvFormatCheck = {
+  const csv = serializeCsv(csvSafetyCheckData, {
+    columns: ["admin", "region", "note"],
+  });
+
+  return html`<p>
+    UTF-8 BOM: <strong>${csv.charCodeAt(0) === 0xfeff ? "yes" : "no"}</strong>;
+    CRLF records: <strong>${csv.includes("\r\n") ? "yes" : "no"}</strong>
+  </p>`;
+}
+```
+
+```{ojs}
+safeContributionCheck = atlasContributionSection(
+  {
+    authors: [{ name: "Amina <Researcher> & Co.", orgs: [2, 1] }],
+    developers: [{ name: "Jean \"Builder\"", orgs: [1] }],
+    organizations: {
+      1: "R&D <Lab>",
+      2: "Côte d'Ivoire \"Atlas\"",
+    },
+  },
+  atlasCitation("ROI <Climate> & \"Food\""),
+);
+```
+
+# Canonical administrative selector checks
+
+The shared selector is `helpers/adminSelectors.ojs`. Test both versions below:
+
+- changing a parent removes child selections that no longer belong to it;
+- Côte d'Ivoire and names containing apostrophes work without affecting data
+  queries;
+- region and district search works with or without accents;
+- Select All is omitted when a level has a finite maximum;
+- the two synchronized multi-select displays stay in sync;
+- controls wrap cleanly in a narrow window.
+
+The public value uses one whole-area convention: `admin1: null` in single mode
+or no matching admin-1 entry in multiple mode means the selected country is
+unfiltered. The displayed **All regions (ISO)** option is therefore a
+single-mode UI choice, not a value returned to notebook code.
+
+```{ojs}
+import { createAdminSelectors } from "/helpers/adminSelectors.ojs";
+
+adminSelectorLabel = (value) =>
+  value.kind === "ssa"
+    ? "SSA"
+    : [value.iso3, value.admin1_name, value.admin2_name]
+        .filter((part) => part != null)
+        .join(" / ");
+
+adminSelectorSummary = (selection) =>
+  Object.fromEntries(
+    Object.entries(selection).map(([level, value]) => [
+      level,
+      Array.isArray(value)
+        ? value.map(adminSelectorLabel)
+        : value == null
+          ? null
+          : adminSelectorLabel(value),
+    ]),
+  );
+```
+
+## Single selection
+
+```{ojs}
+viewof adminSingleCheck = createAdminSelectors({
+  multiple: false,
+  language: "en",
+});
+```
+
+```{ojs}
+html`<pre>${JSON.stringify(adminSelectorSummary(adminSingleCheck), null, 2)}</pre>`
+```
+
+## Multiple selection and binding
+
+```{ojs}
+viewof adminMultiCheck = createAdminSelectors({
+  multiple: true,
+  language: "en",
+  maxSelections: { admin0: 3, admin1: 8, admin2: 12 },
+  selectAll: true,
+  searchable: { admin0: true, admin1: true, admin2: true },
+});
+```
+
+```{ojs}
+adminMultiBoundCheck = Inputs.bind(
+  createAdminSelectors({
+    multiple: true,
+    language: "fr",
+    maxSelections: { admin0: 3, admin1: 8, admin2: 12 },
+    selectAll: true,
+    searchable: true,
+  }),
+  viewof adminMultiCheck,
+);
+```
+
+```{ojs}
+html`<pre>${JSON.stringify(adminSelectorSummary(adminMultiCheck), null, 2)}</pre>`
+```
+
+# Atlas map helper regression checks
+
+The canonical map helpers live in `helpers/atlasMap.ojs`. Check that the map
+shows two adjacent regions, a green continuous legend, a dark outline around
+the eastern region, and a tooltip on hover. The separate bivariate legend
+should show a complete rotated three-by-three grid.
+
+```{ojs}
+import {
+  makeBivariateLegend,
+  makeChoropleth,
+  mergeDataToBoundaries,
+} from "/helpers/atlasMap.ojs";
+
+atlasMapBoundaries = ({
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      properties: { region_id: "west" },
+      geometry: {
+        type: "Polygon",
+        coordinates: [[[30, -2], [34, -2], [34, 2], [30, 2], [30, -2]]],
+      },
+    },
+    {
+      type: "Feature",
+      properties: { region_id: "east" },
+      geometry: {
+        type: "Polygon",
+        coordinates: [[[34, -2], [38, -2], [38, 2], [34, 2], [34, -2]]],
+      },
+    },
+  ],
+});
+
+atlasMapData = [
+  { region_id: "west", region: "Western example", score: 28 },
+  { region_id: "east", region: "Eastern example", score: 76 },
+];
+
+atlasMapFeatures = mergeDataToBoundaries({
+  boundaries: atlasMapBoundaries,
+  data: atlasMapData,
+  boundaryKey: "region_id",
+  dataKey: "region_id",
+});
+```
+
+```{ojs}
+atlasMapCheck = makeChoropleth({
+  // Passing the feature array exercises vulnerability-style input.
+  features: atlasMapFeatures.features,
+  width: Math.min(width, 720),
+  height: 320,
+  projection: { type: "mercator" },
+  fill: (d) => d.properties.data?.score,
+  color: {
+    type: "linear",
+    domain: [0, 100],
+    scheme: "YlGn",
+    label: "Example score",
+  },
+  channels: {
+    region: {
+      label: "Region",
+      value: (d) => d.properties.data?.region,
+    },
+    score: {
+      label: "Score",
+      value: (d) => d.properties.data?.score,
+    },
+  },
+  tooltip: { region: true, score: true },
+  adminHighlight: {
+    filter: (d) => d.properties.region_id === "east",
+    stroke: "#333",
+    strokeWidth: 2.5,
+  },
+});
+```
+
+```{ojs}
+atlasBivariateLegendCheck = makeBivariateLegend({
+  xLabel: "Readiness",
+  yLabel: "Exposure",
+  colors: {
+    "Low × Low": "#e8f4d9",
+    "Moderate × Low": "#b7d99c",
+    "High × Low": "#77b77a",
+    "Low × Moderate": "#f4df9d",
+    "Moderate × Moderate": "#d8bd72",
+    "High × Moderate": "#9c945d",
+    "Low × High": "#efb0a1",
+    "Moderate × High": "#d27a70",
+    "High × High": "#a8444f",
+  },
+});
+```

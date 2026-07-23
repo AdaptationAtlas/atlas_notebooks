@@ -1,10 +1,17 @@
-// Bar logo for atlas data explorations
-const stacked_bars = `<svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 32 27"
-style="width: 20px; height: 20px; display: block">
-  <path id="Imported Path"
-        fill="white" stroke="white" stroke-width=".5"
-        d="M 31.60,25.63
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
+function stackedBarsIcon() {
+  const icon = document.createElementNS(SVG_NAMESPACE, "svg");
+  icon.classList.add("atlas-hero__mark");
+  icon.setAttribute("viewBox", "0 0 32 27");
+
+  const bars = document.createElementNS(SVG_NAMESPACE, "path");
+  bars.setAttribute("fill", "white");
+  bars.setAttribute("stroke", "white");
+  bars.setAttribute("stroke-width", ".5");
+  bars.setAttribute(
+    "d",
+    `M 31.60,25.63
            C 31.60,25.84 31.52,26.03 31.38,26.18
              31.23,26.32 31.04,26.40 30.84,26.40
              30.84,26.40 1.16,26.40 1.16,26.40
@@ -38,22 +45,66 @@ style="width: 20px; height: 20px; display: block">
              29.40,0.77 29.40,24.87 29.40,24.87
              29.40,24.87 30.84,24.87 30.84,24.87
              31.04,24.87 31.23,24.95 31.38,25.09
-             31.52,25.24 31.60,25.43 31.60,25.63 Z" />
-</svg>`;
+             31.52,25.24 31.60,25.43 31.60,25.63 Z`,
+  );
+  icon.appendChild(bars);
+  return icon;
+}
 
-// Function to make atlas hero image
-export const heroImage = (title, bg_image, group = "") => {
-  return `<div id="hero-image" style="position: relative; width: 100%; height: 500px; display: flex; justify-content: center; align-items: center;">
-    <img
-        src="${bg_image}"
-        style="position: absolute; width: 100%; height: 100%; object-fit: cover;"
-    />
-    <div style="position: relative; height: 340px; width: 340px; padding: 40px; display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center; border-radius: 50%; background-color: white; z-index: 10;">
-        <div style="display: inline-block; padding: .5rem; margin-bottom: .5rem; background-color: black;">
-            ${stacked_bars}
-        </div>
-        <span style="text-transform: uppercase; font-weight: 500; margin-bottom: 20px;">${group.toUpperCase()}</span>
-        <div style="margin-bottom: 12px; font-size: 1.1rem; font-weight: 700;">${title.toUpperCase()}</div>
-    </div>
-</div>`;
-};
+/**
+ * Create the canonical circular Atlas notebook hero.
+ *
+ * @param {object} options
+ * @param {string} options.title - Notebook title.
+ * @param {string} options.image - Background image URL.
+ * @param {string} [options.group=""] - Optional notebook group or category.
+ * @param {string} [options.alt=""] - Background image alternative text. Leave
+ * empty when the image is decorative.
+ * @returns {HTMLElement}
+ */
+export function atlasHero({ title, image, group = "", alt = "" } = {}) {
+  if (!title) throw new TypeError("atlasHero requires a title");
+  if (!image) throw new TypeError("atlasHero requires an image");
+
+  const hero = document.createElement("section");
+  hero.id = "hero-image";
+  hero.className = "atlas-hero";
+  hero.setAttribute("aria-labelledby", "notebook-title");
+
+  const background = document.createElement("img");
+  background.className = "atlas-hero__image";
+  background.src = image;
+  background.alt = alt;
+
+  const content = document.createElement("div");
+  content.className = "atlas-hero__content";
+
+  const icon = document.createElement("div");
+  icon.className = "atlas-hero__icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.appendChild(stackedBarsIcon());
+  content.appendChild(icon);
+
+  if (group) {
+    const groupLabel = document.createElement("span");
+    groupLabel.className = "atlas-hero__group";
+    groupLabel.textContent = String(group);
+    content.appendChild(groupLabel);
+  }
+
+  const heading = document.createElement("h1");
+  heading.id = "notebook-title";
+  heading.className = "atlas-hero__title";
+  heading.textContent = String(title);
+  content.appendChild(heading);
+
+  hero.append(background, content);
+  return hero;
+}
+
+/**
+ * @deprecated Use `atlasHero({title, image, group, alt})`.
+ */
+export function heroImage(title, bgImage, group = "") {
+  return atlasHero({ title, image: bgImage, group });
+}

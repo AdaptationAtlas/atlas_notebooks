@@ -1,84 +1,129 @@
 //WARNING: For this file to work correctly, it must have the OJS extension, this is because of the OJS Inputs, TOC generator and similar.
 //Alternative would be to require the libraries in the module.
 
+import { atlasHero as canonicalAtlasHero } from "/helpers/hero.js";
+
 /**
- * Returns HTML for a hero image with a centered title.
+ * Compatibility wrapper for the canonical circular Atlas hero.
  *
- * The title is placed over a background color and is centered
- * horizontally and vertically.
- *
- * @param {string} nbTitle - The title to display.
- * @param {string} image_url - The URL of the hero image.
- * @returns {object} An object containing the HTML content for the hero image.
+ * Accepts both `atlasHero({title, image, group, alt})` and the previous
+ * positional `atlasHero(title, image)` signature.
  */
-function atlasHero(nbTitle, image_url) {
-  return htl.html`
-    <div id="hero-image" style="position: relative; width: 100%; max-width: 100%; overflow: visible; display: flex; justify-content: center;">
-      <img src="${image_url}" style="width: 100%; height: 175px; object-fit: cover;" />
-      <div style="position: absolute; bottom: 0; width: 60%; max-width: 90%; padding: 15px; display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center; background-color: white; z-index: 10; box-sizing: border-box;">
-        <h1 class='title' id='notebook-title' style="all: unset; font-size: 28px; font-weight: 700; word-wrap: break-word; line-height: 1.2;">${nbTitle}</h1>
-      </div>
-    </div>`
+function atlasHero(options, image, group = "", alt = "") {
+  return options !== null && typeof options === "object"
+    ? canonicalAtlasHero(options)
+    : canonicalAtlasHero({ title: options, image, group, alt });
 }
 
 
+CSV_BOM = "\uFEFF";
+
+function csvColumns(data, columns) {
+  if (columns !== undefined && !Array.isArray(columns)) {
+    throw new TypeError("CSV columns must be an array");
+  }
+
+  return columns ?? Object.keys(data[0] ?? {});
+}
+
+function escapeCsvField(value) {
+  if (value == null) return "";
+
+  const text = String(value).replace(/\r\n?|\n/g, "\r\n");
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
 /**
- * Converts an array of objects into a CSV string.
+ * Serialize object rows as an RFC 4180-compatible UTF-8 CSV.
  *
- * @param {Array<object>} data - The data to convert, where each object represents a row.
- * @returns {string} A CSV formatted string representing the input data.
- *                   Returns an empty string if the input data is empty or not provided.
+ * The UTF-8 BOM helps spreadsheet applications preserve accented
+ * administrative names. Records use CRLF and fields containing commas,
+ * quotes, CR, or LF are quoted with doubled internal quotes.
  *
- * Each object's keys are used as CSV column headers. Values are escaped if they contain
- * commas, quotes, or newlines. Null or undefined values are converted to empty strings.
+ * @param {Array<object>} data
+ * @param {object} [options]
+ * @param {string[]} [options.columns] Ordered keys to include.
+ * @returns {string}
  */
-function convertToCSV(data) {
-  if (!data?.length) return '';
+function serializeCsv(data, { columns } = {}) {
+  const rows = Array.isArray(data) ? data : [];
+  const selectedColumns = csvColumns(rows, columns);
+  if (!selectedColumns.length) return CSV_BOM;
 
-  const headers = Object.keys(data[0]);
-  const escapeValue = val => {
-    if (val == null) return '';
-    const str = String(val);
-    return str.includes(',') || str.includes('"') || str.includes('\n')
-      ? `"${str.replace(/"/g, '""')}"` : str;
-  };
+  const records = [
+    selectedColumns.map(escapeCsvField).join(","),
+    ...rows.map((row) =>
+      selectedColumns.map((column) => escapeCsvField(row?.[column])).join(","),
+    ),
+  ];
 
-  return [
-    headers.map(escapeValue).join(','),
-    ...data.map(row => headers.map(key => escapeValue(row[key])).join(','))
-  ].join('\n');
-};
+  return `${CSV_BOM}${records.join("\r\n")}\r\n`;
+}
+
+function csvFilename(filename) {
+  const name = String(filename || "atlas-data").trim() || "atlas-data";
+  return name.toLowerCase().endsWith(".csv") ? name : `${name}.csv`;
+}
+
+function downloadCsv(data, { filename = "atlas-data", columns } = {}) {
+  const blob = new Blob([serializeCsv(data, { columns })], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = csvFilename(filename);
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+}
 
 /**
- * Generate a download button for a given dataset.
- * @param {Array<object>} data - The dataset to download.
- * @param {string} filename - The name of the file to download.
+ * Create a button that downloads object rows as a CSV file.
+ *
+ * @param {Array<object>} data
+ * @param {object} [options]
+ * @param {string} [options.filename="atlas-data"]
+ * @param {string} [options.label="Download CSV"]
+ * @param {string[]} [options.columns] Ordered keys to include.
+ * @returns {Button}
+ */
+function downloadCsvButton(
+  data,
+  {
+    filename = "atlas-data",
+    label = "Download CSV",
+    columns,
+  } = {},
+) {
+  return Inputs.button(label, {
+    reduce: () => downloadCsv(data, { filename, columns }),
+  });
+}
+
+/**
+ * @deprecated Use `serializeCsv(data, {columns})`.
+ */
+function convertToCSV(data, options = {}) {
+  return serializeCsv(data, options);
+}
+
+/**
+ * @deprecated Use `downloadCsv(data, {filename, columns})`.
  */
 function downloadData(data, filename) {
-  const filename_csv = filename + ".csv";
-  const blob = new Blob([convertToCSV(data)], { type: 'text/csv;charset=utf-8;' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', filename_csv);
-  document.body.appendChild(link);
-  link.style.display = 'none';
-  link.click();
-
-  window.URL.revokeObjectURL(url);
-  document.body.removeChild(link);
+  return downloadCsv(data, { filename });
 }
 
-
 /**
- * Create a button that downloads the given dataset as a CSV file.
- * @param {Array<object>} data - The dataset to download.
- * @param {string} filename - The name of the file to download (without the .csv extension).
- * @param {string} [label="Download"] - The label to display on the button.
- * @returns {Button} - The download button.
+ * @deprecated Use `downloadCsvButton(data, {filename, label, columns})`.
  */
 function downloadButton(data, filename, label = "Download") {
-  return Inputs.button(label, {reduce: () => downloadData(data, filename)})
+  return downloadCsvButton(data, { filename, label });
 }
 
 /**
@@ -115,7 +160,7 @@ dropdown_section = (title, initiallyOpen, ...contents) => {
  * @param {string} [options.labelText="Dropdown label"] - The visible text of the label
  * @param {string} [options.tooltipText="Tooltip text"] - The text shown in the tooltip on hover
  *
- * @returns {HTMLElement} An HTML span element with tooltip functionality and associated styles
+ * @returns {HTMLElement} An Atlas-styled tooltip label
  *
  */
 function makeTooltipLabel({
@@ -124,29 +169,10 @@ function makeTooltipLabel({
 } = {}) {
   return htl.html`
     <span
-      data-title-text="${tooltipText}"
-      style="
-        position:relative;
-        cursor:pointer;
-      "
+      class="atlas-tooltip-label"
+      data-atlas-tooltip="${tooltipText}"
+      aria-label="${`${labelText}: ${tooltipText}`}"
+      tabindex="0"
     >${labelText}</span>
-    <style>
-      [data-title-text]:hover::after {
-        content: attr(data-title-text);
-        position: absolute;
-        left: 0;
-        top: 100%;
-        background: #cfcfcf;
-        color: #333;
-        font-size: 14px;
-        padding: 6px 10px;
-        border-radius: 4px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        white-space: normal;
-        min-width: 200px;
-        max-width: min(450px, calc(100vw - 20px));
-        z-index: 1;
-      }
-    </style>
   `;
 }

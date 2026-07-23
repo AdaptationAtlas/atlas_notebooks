@@ -16,7 +16,7 @@ execute:
 ```{ojs}
 import {
   dropdown_section,
-  downloadButton,
+  downloadCsvButton,
   makeTooltipLabel,
 } from "/helpers/uiComponents.ojs";
 
@@ -30,10 +30,12 @@ import {
   cleanAdminInput_SQL,
 } from "/helpers/std.ojs";
 
-import { heroImage as atlasHero } from "/helpers/hero.js";
+import { createSqlBindings } from "/helpers/sql.js";
+
+import { atlasHero } from "/helpers/hero.js";
 
 import {
-  filterableDataTable as atlasTable,
+  atlasTable,
   sparkbar,
 } from "/helpers/atlasTable.ojs";
 
@@ -41,9 +43,14 @@ import { renderMarkdownWithSlots } from "/helpers/mdTranslate.ojs";
 ```
 
 ```{ojs}
-html`${atlasHero(nbTitle, "./../../images/notebooks/roi.webp")}`;
+atlasHero({
+  title: nbTitle,
+  image: "./../../images/notebooks/roi.webp",
+  alt: "",
+});
 
 atlasTOC({
+  selector: "h1,h2",
   skip: ["notebook-title", "appendix", "source-code"], // These should be the section headings in the {# headings}
   heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
 });
@@ -83,7 +90,7 @@ md`${_lang(nbText.overview.blocks.block4)}`;
 
 ```{ojs}
 htl.html`
-<div style="display: flex; gap: 3em; margin-bottom: 1.5em;">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 3em; margin-bottom: 1.5em;">
     ${viewof select_country}
     ${viewof select_region}
     ${viewof select_crop}
@@ -431,11 +438,10 @@ bigNumbersResults();
 
 ```{ojs}
 resultTable();
-downloadButton(
-  walkthroughEconomicIndicators?.enriched,
-  "roi_data.csv",
-  _lang({ en: "Download", fr: "Télécharger" }),
-);
+downloadCsvButton(walkthroughEconomicIndicators?.enriched, {
+  filename: "roi_data.csv",
+  label: _lang({ en: "Download", fr: "Télécharger" }),
+});
 ```
 
 ```{ojs}
@@ -625,12 +631,13 @@ countries = {
 
 ```{ojs}
 dataAdminRegions = {
+  const bind = createSqlBindings();
   const regions = await db.query(`
     SELECT DISTINCT admin0_name, admin1_name, iso3
     FROM exposure
     WHERE admin1_name IS NOT null
-    AND iso3 in ('${select_country.join("', '")}')
-  `)
+    AND iso3 IN (${bind.list(select_country)})
+  `, bind.params)
 
   return regions.map(row => ({
     ...row,
@@ -691,21 +698,22 @@ viewof select_country = {
     .map((d) => ({
       value: d.iso3c, //Migrating to iso codes for future flexability
       label: _lang(d.translation)
-    }))
-  let input = dropdownInput({
-    inputLabel: makeTooltipLabel({
+    }));
+  const labels = new Map(data.map((d) => [d.value, d.label]));
+  return atlasMultiSelect(data.map((d) => d.value), {
+    label: makeTooltipLabel({
       labelText: _lang(nbText.supportNbText.words.country.plural),
       tooltipText: _lang(
         nbText.projectSetup.blocks.locations.inputs.countryDropdown.tooltip
       )
     }),
-    inputId: "positionsTest",
-    placeholderText: "Select Countries...",
-    options: data,
-    selected: ["KEN", "TZA"],
+    value: ["KEN", "TZA"],
+    format: (value) => labels.get(value) ?? value,
+    enableSelectAll: true,
+    requireAtLeastOne: false,
+    commit: "close",
+    language: masterLanguage.key,
   });
-
-  return debounce(input, 1000); // Noisy input, so delay it a bit.
 }
 ```
 
@@ -725,15 +733,16 @@ viewof select_region = {
     label: _lang(nbText.supportNbText.words.region.plural),
     tooltip: _lang(nbText.projectSetup.blocks.locations.inputs.regionDropdown.tooltip),
   }
-  const input = dropdownInput({
-    inputLabel: makeTooltipLabel({labelText: text.label, tooltipText: text.tooltip}),
-    inputId: "positionsTest",
-    placeholderText: "Select regions...",
-    options: data,
-    selected: selectedIds
+  const labels = new Map(data.map((d) => [d.value, d.label]));
+  return atlasMultiSelect(data.map((d) => d.value), {
+    label: makeTooltipLabel({labelText: text.label, tooltipText: text.tooltip}),
+    value: selectedIds,
+    format: (value) => labels.get(value) ?? value,
+    enableSelectAll: true,
+    requireAtLeastOne: false,
+    commit: "close",
+    language: masterLanguage.key,
   });
-
-  return debounce(input, 1000);
 }
 ```
 
@@ -755,18 +764,19 @@ viewof select_crop = {
       nbText.projectSetup.blocks.locations.inputs.commodityDropdown.tooltip
     )
   };
-  const input = dropdownInput({
-    inputLabel: makeTooltipLabel({
+  const labels = new Map(data.map((d) => [d.value, d.label]));
+  return atlasMultiSelect(data.map((d) => d.value), {
+    label: makeTooltipLabel({
       labelText: text.label,
       tooltipText: text.tooltip
     }),
-    inputId: "positionsTest",
-    placeholderText: "Select crops...",
-    options: data,
-    selected: selectedId
+    value: selectedId,
+    format: (value) => labels.get(value) ?? value,
+    enableSelectAll: true,
+    requireAtLeastOne: false,
+    commit: "close",
+    language: masterLanguage.key,
   });
-
-  return debounce(input, 1000);
 }
 ```
 
@@ -928,29 +938,10 @@ viewof pickMetricWalkthrough = {
 ## Elements
 
 ```{ojs}
-import { dropdownInput, dropdownCSS } from "/helpers/multiSelect.ojs";
-
-dropdownCSS;
+import { atlasMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
 ```
 
 ## Helper Functions
-
-```{ojs}
-debounce = (input, delay = 500) => {
-  class DelayedEvent extends Event {}
-  let id;
-  input.addEventListener("input", (e) => {
-    if (e instanceof DelayedEvent) return;
-    e.stopImmediatePropagation();
-    clearTimeout(id);
-    id = setTimeout(
-      () => input.dispatchEvent(new DelayedEvent("input", { bubbles: true })),
-      delay,
-    );
-  });
-  return input;
-};
-```
 
 ## Language
 
@@ -1552,12 +1543,13 @@ calcCV = async () => {
   }
 
   console.log('Running the cv analysis as inputs changed')
+  const bind = createSqlBindings();
   const cv_data = await db.query(`
     SELECT *
     FROM cv
-    WHERE crop in ('${select_crop.join("', '")}')
-    AND admin0_name in ('${admin0_names.map((d) => cleanAdminInput_SQL(d)).join("', '")}') -- This needs the a0_name rather than iso3
-`);
+    WHERE crop IN (${bind.list(select_crop)})
+    AND admin0_name IN (${bind.list(admin0_names)}) -- This needs the a0_name rather than iso3
+  `, bind.params);
 
   const cv_monteCarlo = await Promise.all(
     cv_data.map(async ({ crop, admin0_name, cv }) => {
@@ -1589,13 +1581,14 @@ calcCV = async () => {
 exposure_data = {
   let crops = select_crop;
   let countries = select_country;
+  const bind = createSqlBindings();
   let data = await db.query(`
     SELECT *
     FROM exposure
-    WHERE crop in ('${crops.join("', '")}')
-    AND iso3 in ('${countries.join("', '")}')
+    WHERE crop IN (${bind.list(crops)})
+    AND iso3 IN (${bind.list(countries)})
     -- POSSIBLY add admin1 name filter, but defaults to full country, so maybe bigger query is better.
-  `);
+  `, bind.params);
   return data;
 };
 ```

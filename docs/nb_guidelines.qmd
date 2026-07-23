@@ -8,11 +8,15 @@ format:
 
 ```{ojs}
 //| echo: false
-import { atlasHero } from "/helpers/uiComponents.ojs"
+import { atlasHero } from "/helpers/hero.js"
 
 {
   let hero_url = "./../../images/default_crop.webp"
-  return atlasHero(nbTitle, hero_url)
+  return atlasHero({
+    title: nbTitle,
+    image: hero_url,
+    alt: "",
+  })
 }
 
 ```
@@ -65,7 +69,20 @@ heading1 = _lang({en: "Heading 1", fr: "Titre 1"}) // define ojs var for heading
 Note that the id for the heading is assigned. This is important for the TOC generation and is required.
 
 ## Table of Contents
-We have put together a table of contents function that should be used across notebooks. This can be imported from the 'helpers' directory. Below is an example of its use:
+The canonical table of contents is the `<atlas-toc>` web component. Static
+pages can use it directly:
+
+```html
+<atlas-toc
+  selector="h1,h2"
+  heading="In This Notebook"
+  ids-to-ignore="notebook-title,appendix,source-code"
+></atlas-toc>
+```
+
+For translated or otherwise dynamic notebook headings, the existing
+`atlasTOC()` helper remains available as a compatibility wrapper around the
+same component:
 
 ```{ojs}
 //| echo: true
@@ -75,11 +92,16 @@ import { atlasTOC } from "/helpers/toc.ojs"
 atlasTOC({
   skip: ['notebook-title', 'appendix', 'source-code'], // heading ids to skip
   heading: `<b>In This Notebook</b>`,
-  selector: "h1", // Selectors to include (e.g., "h1,h2,h3")
+  selector: "h1,h2", // Selectors to include (e.g., "h1,h2,h3")
 })
 ```
 
-Notice that by defining the id's for each header, we can specify which ones to ignore in the TOC. The function defaults to only show h1 headers but this can be adjusted by changing the selector variable, but in general it should stay as h1.
+Defining IDs for each header makes it possible to specify which ones to ignore.
+The helper defaults to H1 headings only; include H2 or H3 in `selector` when
+readers benefit from more detail.
+When multiple levels are selected, the least-indented headings remain visible
+and their child headings appear only while that parent section is active.
+Ignoring or hiding a parent section also removes its descendant headings.
 You can copy the code above to use in notebooks and it should work with no modifications.
 
 ## Dynamic Insights
@@ -140,17 +162,49 @@ crop selection, provided no data is unavailable.
 not overwhelm the main plot. Plots should generally convey information succinctly and
 effectively.
 
+## Tables
+
+Use the shared `atlasTable()` helper for searchable and static data tables.
+It applies the Atlas table styling without injecting per-instance CSS:
+
+````markdown
+```{ojs}
+import { atlasTable } from "/helpers/atlasTable.ojs"
+
+atlasTable(data, {
+  searchable: true,
+  zebra: false,
+  columns: ["region", "crop", "value"],
+  format: {
+    value: (value) => value.toLocaleString(),
+  },
+})
+```
+````
+
+Set `searchable: false` when a search control is unnecessary. The previous
+`dataTable()` and `filterableDataTable()` names remain available only as
+compatibility wrappers; new notebooks should import `atlasTable` directly.
+
 ## Data Download buttons
 Every figure should include a data download button that can be used to download the data used in the figure. For consistency and ease, there is a function in the `/helpers` folder that can be used to create the download button.
 
 ````markdown
 ```{ojs}
-import { downloadButton } from "/helpers/uiComponents.ojs"
+import { downloadCsvButton } from "/helpers/uiComponents.ojs"
 data = [{a: 1, b: 2}, {a: 3, b: 4}, {a: 5, b: 6}]
-downloadButton(data, filename, label = "Download")
+downloadCsvButton(data, {
+  filename: "figure-data",
+  label: "Download CSV",
+  columns: ["a", "b"],
+})
 
 ```
 ````
+
+`columns` is optional, but setting it makes the exported column order explicit.
+The shared serializer handles quoting and line endings and includes the UTF-8
+marker needed for accented place names in spreadsheet applications.
 
 ## Selectors
 
@@ -158,6 +212,39 @@ The Observable standard library comes with many inputs/selectors pre-included. T
 Documentation on these selectors can be found [here](https://observablehq.com/documentation/inputs/overview) with many examples on [ObservableHQ](https://observablehq.com/collection/@observablehq/inputs). We use a custom CSS to modify the styling of these inputs, these should be automatically applied on quarto render and preview.
 
 When multiple selectors are used together - such as to select multiple admin levels - they should be grouped together in a single horizontal block using an `Inputs.form`, or other methods where necessary. When multiple selectors are used across a notebook to select the same variable in different places, there should be one master selector that is updated when other selectors are used (using `Inputs.bind()`). The below example shows how to do this, along with how to use the `Inputs.form` selector to group selectors together:
+
+Use `atlasMultiSelect()` for a normal multiple selector. `commit: "change"`
+updates dependent cells after every selection; `commit: "close"` waits until
+the menu closes and is preferable when each update triggers an expensive
+query.
+
+````markdown
+```{ojs}
+import { atlasMultiSelect } from "/helpers/enhancedMultiSelect.ojs"
+
+viewof countries = atlasMultiSelect(countryOptions, {
+  label: "Countries",
+  value: ["KEN", "TZA"],
+  format: (iso3) => countryLabels.get(iso3) ?? iso3,
+  enableSelectAll: true,
+  searchable: true,
+  requireAtLeastOne: false,
+  commit: "close",
+  labels: {
+    selectAll: "Select all countries",
+    deselectAll: "Deselect all countries",
+    noneSelected: "No countries selected",
+  },
+})
+```
+````
+
+When `maxSelections` is finite, the component omits **Select All** rather than
+silently selecting only the first items. **Deselect All** remains available
+when empty selections are allowed.
+
+The lower-level `enhancedMultiSelect()` remains available for advanced cases
+where the native Observable input must be constructed or bound first.
 
 ```{ojs}
 viewof var1_master = Inputs.radio(["var1", "var2", "var3"], {label: "Variable 1", value: "var1"})
@@ -184,13 +271,28 @@ var1_master
 ```
 
 ## Images
-Each notebook should include a single hero image in `.webp` format, optimized for minimal file size without noticeable quality loss. Save the image in the `/images` directory using the notebook's name as the filename. Included in the `/scripts/assets` folder is a function to crop an image to the required size of 800x175 pixels and convert it to `webP`, if not already in this format. It is not required to use this function, but images do need to be in webP and cropped to this size for best performance. If a specific part of the image should be used, it should be manually cropped, rather than using the function.
+Each notebook should include a single hero image in `.webp` format, optimized
+for minimal file size without noticeable quality loss. Save the image in the
+`/images` directory using the notebook's name as the filename. Landscape images
+with enough height to support responsive cropping work best for the circular
+Atlas hero.
 
-The below example shows how to use this function:
+Use the canonical hero helper:
 
-```sh
-quarto run scripts/assets/cropToWebP.ts 'default_im.webp' 'default_crop.webp'
+````markdown
+```{ojs}
+import { atlasHero } from "/helpers/hero.js"
+
+atlasHero({
+  title: "Notebook title",
+  image: "/images/notebook-name.webp",
+  group: "Optional notebook group",
+  alt: "A concise description of the image",
+})
 ```
+````
+
+Use `alt: ""` only when the background image is decorative.
 
 # Data
 
@@ -355,7 +457,7 @@ To import a local JS module or code in an OJS file (documented [here](https://qu
 import { lang as Lang } from "/helpers/lang.js"
 
 import { atlasTOC } from "/helpers/toc.ojs"
-import { atlasHero } from "/helpers/uiComponents.ojs"
+import { atlasHero } from "/helpers/hero.js"
 ```
 ````
 
