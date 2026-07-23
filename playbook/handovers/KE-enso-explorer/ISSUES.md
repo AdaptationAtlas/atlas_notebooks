@@ -30,14 +30,23 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   acres only, converted to ha). It's in the parquet but won't chart in the production/value figure.
   Fine; noted for awareness.
 
-- **KE-08 · Kenya Met forecast layer · OPEN (scoped, not started).** Kenya Met forecasts are PDF-only
-  (no API) — 47 county seasonal PDFs + national zonal tercile tables at `meteo.go.ke/documents/`. Two
-  build paths if a forecast layer is wanted: (a) NAPR-style PDF extractor over the county seasonal PDFs;
-  (b) ICPAC as KMD-endorsed machine-readable form (current tercile grids behind undocumented
-  eahazardswatch API, regional grid → zonal-aggregate to counties). Candidate repos
-  `jemsethio/AgClimateAF_indices` + `Seas_AgroClimIndices` REJECTED (third-party SEAS5/C3S forecasts →
-  fail D11; no historical/projections despite framing). See
-  `dispatches/2026-07-22_kenya-met-forecast-and-jemal-repos.md` + DECISIONS D13.
+- **KE-08 · Kenya Met forecast layer · OPEN (path found via ClimWeb/CAP).** UPDATE 2026-07-23:
+  meteo.go.ke is a **ClimWeb** site ("Powered by Climweb v1.2.1", `wmo-raf/nmhs-cms`) → machine-readable
+  Kenya-Met feeds exist after all. **CAP warning feed LIVE** `meteo.go.ke/api/cap/rss.xml` + per-alert
+  CAP XML (geolocated, severity/onset/expiry) — D11-clean, parseable now, generalizes to 40+ agencies.
+  Wagtail `/api/v2/pages/` = 404; **seasonal (MAM/OND) outlook still PDF or Maproom** (`kmddl.meteo.go.ke
+  :8081`, unprobed). CAP = hazard warnings not seasonal outlook. Colleague **Ani Ghosh** (WMO web team)
+  is the shortcut for endpoint docs + is co-driving `wmo-raf/climweb` **#710** (AA page, KMD+CGIAR — ≈
+  our Block-5 outlook → coordinate). Old PDF/ICPAC paths + rejected `jemsethio` repos: DECISIONS D13,
+  dispatch `2026-07-22_kenya-met-forecast-and-jemal-repos.md`. Full: `2026-07-23_block5-outlook-and-
+  climweb-cap.md`, DECISIONS D14.
+
+- **KE-09 · Block-5 outlook figure · OPEN (designed, ready to build).** Low-burden "next season likely
+  what?" = analogue-anchored: current ENSO+IOD state + N nearest historical analogue seasons + Kenya
+  MAM/OND CHIRPS outcome (wet/near/dry) + allowed ENSO-state prob bar (D14). OND high-confidence, MAM
+  low. Data: NOAA CPC (ONI/Niño 3.4), BoM (SOI, DMI), CHIRPS 1981+, IRI/CPC ENSO probs. Pull in Python
+  → parquet. Plus a live KMD CAP layer (KE-08). Design: dispatch `2026-07-23_block5-outlook-and-climweb-
+  cap.md`.
 
 - **KE-07 · IWMI ENSO Outlook API · CLOSED (not worth building).** Live
   public API (`https://enso.iwmi.org/ENSO_api/api/v1`, 34 layers) scanned 2026-07-22 — see

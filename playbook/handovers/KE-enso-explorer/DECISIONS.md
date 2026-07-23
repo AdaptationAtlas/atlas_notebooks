@@ -92,6 +92,19 @@ Pete is the sole human owner of this branch (notebook + data pipeline) — no ot
     despite the framing. No Kenya config. Reusable only as index-formula reference, not as data. No code
     pulled. If a forecast layer is ever built, start from the dispatch (KMD PDF parse or ICPAC route).
 
+## D14 — ENSO-state forecast allowed; Kenya-rainfall forecast stays Kenya-Met-only (Pete, 2026-07-23)
+- **STANDING (refines D11).** The **ENSO-state forecast** (Niño 3.4 / El Niño–Neutral–La Niña
+  probabilities from IRI/CPC/NOAA) is a **global climate-driver index**, not a Kenya weather forecast —
+  so it is **allowed** even though the provider is third-party (no national met service forecasts
+  Niño 3.4). D11 still binds the **Kenya rainfall / seasonal outlook** forecast to Kenya Met (county
+  PDFs / ICPAC, KE-08). Rule of thumb: forecasting the *driver* (ENSO/IOD state) = OK from IRI/NOAA/BoM;
+  forecasting *Kenya's weather/season* = Kenya Met only.
+- Context: scoping a low-cognitive-burden Block-5 outlook figure — current ENSO+IOD state → nearest
+  historical **analogue** seasons → what Kenya MAM/OND rainfall did in those years (CHIRPS), + a small
+  allowed ENSO-state probability bar. Analogue backbone is historical (needs no forecast). Target both
+  seasons w/ confidence flag: **OND high-confidence** (strong ENSO+IOD teleconnection), **MAM
+  low-confidence** (weaker/noisier). See dispatch `2026-07-23_block5-outlook-analogue-design.md`.
+
 ## Open
 - **D10 — 2026 NAPR refresh (OPEN).** When KNBS releases the 2026 edition: run `/extract-knbs-napr`
   (add the path + new year to the `Y*` lists, re-audit, shift pages). See ISSUES KE-01.
