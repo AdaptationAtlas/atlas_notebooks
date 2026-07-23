@@ -41,19 +41,60 @@ style="width: 20px; height: 20px; display: block">
              31.52,25.24 31.60,25.43 31.60,25.63 Z" />
 </svg>`;
 
-// Function to make atlas hero image
-export const heroImage = (title, bg_image, group = "") => {
-  return `<div id="hero-image" style="position: relative; width: 100%; height: 500px; display: flex; justify-content: center; align-items: center;">
-    <img
-        src="${bg_image}"
-        style="position: absolute; width: 100%; height: 100%; object-fit: cover;"
-    />
-    <div style="position: relative; height: 340px; width: 340px; padding: 40px; display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center; border-radius: 50%; background-color: white; z-index: 10;">
-        <div style="display: inline-block; padding: .5rem; margin-bottom: .5rem; background-color: black;">
-            ${stacked_bars}
-        </div>
-        <span style="text-transform: uppercase; font-weight: 500; margin-bottom: 20px;">${group.toUpperCase()}</span>
-        <div style="margin-bottom: 12px; font-size: 1.1rem; font-weight: 700;">${title.toUpperCase()}</div>
-    </div>
-</div>`;
-};
+/**
+ * Create the canonical circular Atlas notebook hero.
+ *
+ * @param {object} options
+ * @param {string} options.title - Notebook title.
+ * @param {string} options.image - Background image URL.
+ * @param {string} [options.group=""] - Optional notebook group or category.
+ * @param {string} [options.alt=""] - Background image alternative text. Leave
+ * empty when the image is decorative.
+ * @returns {HTMLElement}
+ */
+export function atlasHero({ title, image, group = "", alt = "" } = {}) {
+  if (!title) throw new TypeError("atlasHero requires a title");
+  if (!image) throw new TypeError("atlasHero requires an image");
+
+  const hero = document.createElement("section");
+  hero.id = "hero-image";
+  hero.className = "atlas-hero";
+  hero.setAttribute("aria-labelledby", "notebook-title");
+
+  const background = document.createElement("img");
+  background.className = "atlas-hero__image";
+  background.src = image;
+  background.alt = alt;
+
+  const content = document.createElement("div");
+  content.className = "atlas-hero__content";
+
+  const icon = document.createElement("div");
+  icon.className = "atlas-hero__icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = stacked_bars;
+  content.appendChild(icon);
+
+  if (group) {
+    const groupLabel = document.createElement("span");
+    groupLabel.className = "atlas-hero__group";
+    groupLabel.textContent = String(group);
+    content.appendChild(groupLabel);
+  }
+
+  const heading = document.createElement("h1");
+  heading.id = "notebook-title";
+  heading.className = "atlas-hero__title";
+  heading.textContent = String(title);
+  content.appendChild(heading);
+
+  hero.append(background, content);
+  return hero;
+}
+
+/**
+ * @deprecated Use `atlasHero({title, image, group, alt})`.
+ */
+export function heroImage(title, bgImage, group = "") {
+  return atlasHero({ title, image: bgImage, group });
+}
