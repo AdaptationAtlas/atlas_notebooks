@@ -1,99 +1,71 @@
-function dataTable(
+/**
+ * Render an Atlas-styled Observable table.
+ *
+ * @param {Array<object>} data
+ * @param {object} options
+ * @param {boolean} [options.searchable=true]
+ * @param {boolean} [options.zebra=false]
+ * @param {Array<string>} [options.columns]
+ * @param {object} [options.format]
+ */
+function atlasTable(
   data,
   {
+    searchable = true,
     height = "400px",
     zebra = false,
     rows = 25,
-    width, // default to max available
-    ...tableOptions // passed to Inputs.table
-  } = {}
+    width,
+    columns,
+    format,
+    ...tableOptions
+  } = {},
 ) {
-  const table = Inputs.table(data, {
+  const options = {
     height,
     rows,
     width,
-    select: false, // disable checkbox
-    ...tableOptions
-  });
+    select: false,
+    ...tableOptions,
+  };
+  if (columns !== undefined) options.columns = columns;
+  if (format !== undefined) options.format = format;
 
-  table.classList.add("atlasDataTable");
+  const renderTable = (rowsToRender) => {
+    const table = Inputs.table(rowsToRender, options);
+    table.classList.add("atlas-table", "atlasDataTable");
+    table.classList.toggle("atlas-table--zebra", zebra);
+    return table;
+  };
 
-  const style = document.createElement("style");
+  if (!searchable) return renderTable(data);
 
-  style.textContent = `
-    .atlasDataTable,
-    .atlasDataTable table {
-      width: 100%;
-    }
-
-    /* Header */
-    .atlasDataTable thead th {
-      background-color: #f3f4f6 !important;
-      padding: 14px 12px !important;
-      line-height: 1.4;
-      position: sticky;
-      top: 0;
-      z-index: 2;
-    }
-
-    /* Cells */
-    .atlasDataTable td {
-      padding-left: 15px !important;
-    }
-
-    /* Add margin between sort chevron and header */
-    .atlasDataTable thead th > span {
-      margin-right: 6px;
-    }
-
-    /* Hide leftover checkbox column */
-    .atlasDataTable th:first-child,
-    .atlasDataTable td:first-child {
-      display: none;
-    }
-
-    /* Hover */
-    .atlasDataTable tbody tr:hover {
-      background-color: #f1f5f9 !important;
-    }
-
-    /* Optional Zebra striping */
-    ${
-      zebra
-        ? `
-      .atlasDataTable tbody tr:nth-child(odd) {
-        background: #f9fafb !important;
-      }`
-        : ""
-    }
-  `;
-
-  table.appendChild(style);
-  return table;
-}
-
-function filterableDataTable(
-  data,
-  {
-    ...tableArgs // passed to Inputs.table
-  } = {}
-) {
   const filter = Inputs.search(data);
-
-  const tableHost = html`<div style="min-width:0;"></div>`;
-  const container = html`<div style="display:grid; gap:8px; padding-top:50px"></div>`;
-  container.append(filter, tableHost);
+  const tableHost = html`<div class="atlas-table__host"></div>`;
+  const container = html`<div class="atlas-table-shell"></div>`;
 
   const render = () => {
-    //HACK: get OJS inputs working together when defined in the same cell
-
-    tableHost.replaceChildren(dataTable(filter.value, tableArgs));
+    tableHost.replaceChildren(renderTable(filter.value));
   };
 
   filter.addEventListener("input", render);
+  container.append(filter, tableHost);
   render();
-
   return container;
+}
+
+/**
+ * Compatibility wrapper for the previous unfiltered table API.
+ */
+function dataTable(data, options = {}) {
+  return atlasTable(data, { ...options, searchable: false });
+}
+
+/**
+ * Compatibility wrapper for the previous searchable table API.
+ */
+function filterableDataTable(data, options = {}) {
+  return atlasTable(data, { ...options, searchable: true });
 }
 
 function sparkbar({
@@ -107,18 +79,16 @@ function sparkbar({
     const width = Math.max(0, Math.min(100, (x / max) * 100));
 
     return htl.html`
-    <div style="
-      background: ${background};
-      width: ${width}%;
-      padding-right: 3px;
-      box-sizing: border-box;
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      color: ${color};
-      border-radius: 2px;
-      ${align === "right" ? "margin-left: auto;" : ""}
-    ">
+    <div
+      class="atlas-sparkbar ${
+        align === "right" ? "atlas-sparkbar--right" : ""
+      }"
+      style="
+        --atlas-sparkbar-width: ${width}%;
+        --atlas-sparkbar-background: ${background};
+        --atlas-sparkbar-color: ${color};
+      "
+    >
       ${formatter(x)}
     </div>
   `;
