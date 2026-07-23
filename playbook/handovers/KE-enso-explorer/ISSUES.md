@@ -61,6 +61,20 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   Also FAO ASIS + SPI/dry-spell for the ASAL drought story. Caveat: verify per-endpoint granularity
   (some "point" endpoints return a country mean); pull via the Python pipeline -> parquet, not live.
 
+## Notebook — Pete preview review (2026-07-23)
+
+- **KE-10 · Monthly CHIRPS + year/month toggle on 3.1/3.2 · OPEN (Pete: pull monthly first).** County
+  rainfall parquet holds seasonal totals only; add a monthly county-CHIRPS parquet (new pipeline pull),
+  then a year/month view toggle on 3.1 rainfall + 3.2 driver (month view = mean mm per calendar month =
+  when rain falls). Driver (3.2) already has monthly data.
+- **KE-11 · Supplemental analysis section · OPEN (Pete: separate linked section).** Move technical
+  figures (candidate: 3.3 interaction, 3.4 combined-state, 4.1/4.2 national FAOSTAT regression) to a new
+  'Supplemental analysis' section after Methods, linked from the parent sections. Keeps the core story
+  clean. Confirm the exact move-list with Pete first.
+- **DONE 2026-07-23 (preview review):** table unit header box; 2-digit year axes (3.1/3.2); sticky
+  county/season/driver bar (KE-06 fixed); honest %-formatter + incompleteness disclaimer; numbered
+  sections/figures (N.M); per-figure data attribution + §8.1 acknowledgements.
+
 ## Notebook
 
 - **KE-05 · Produce filter for 30+ commodities · DONE.** Item filter defaults to the county's top-8
