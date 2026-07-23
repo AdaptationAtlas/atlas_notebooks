@@ -16,63 +16,114 @@ function atlasHero(options, image, group = "", alt = "") {
 }
 
 
-/**
- * Converts an array of objects into a CSV string.
- *
- * @param {Array<object>} data - The data to convert, where each object represents a row.
- * @returns {string} A CSV formatted string representing the input data.
- *                   Returns an empty string if the input data is empty or not provided.
- *
- * Each object's keys are used as CSV column headers. Values are escaped if they contain
- * commas, quotes, or newlines. Null or undefined values are converted to empty strings.
- */
-function convertToCSV(data) {
-  if (!data?.length) return '';
+const CSV_BOM = "\uFEFF";
 
-  const headers = Object.keys(data[0]);
-  const escapeValue = val => {
-    if (val == null) return '';
-    const str = String(val);
-    return str.includes(',') || str.includes('"') || str.includes('\n')
-      ? `"${str.replace(/"/g, '""')}"` : str;
-  };
+function csvColumns(data, columns) {
+  if (columns !== undefined && !Array.isArray(columns)) {
+    throw new TypeError("CSV columns must be an array");
+  }
 
-  return [
-    headers.map(escapeValue).join(','),
-    ...data.map(row => headers.map(key => escapeValue(row[key])).join(','))
-  ].join('\n');
-};
-
-/**
- * Generate a download button for a given dataset.
- * @param {Array<object>} data - The dataset to download.
- * @param {string} filename - The name of the file to download.
- */
-function downloadData(data, filename) {
-  const filename_csv = filename + ".csv";
-  const blob = new Blob([convertToCSV(data)], { type: 'text/csv;charset=utf-8;' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', filename_csv);
-  document.body.appendChild(link);
-  link.style.display = 'none';
-  link.click();
-
-  window.URL.revokeObjectURL(url);
-  document.body.removeChild(link);
+  return columns ?? Object.keys(data[0] ?? {});
 }
 
+function escapeCsvField(value) {
+  if (value == null) return "";
+
+  const text = String(value).replace(/\r\n?|\n/g, "\r\n");
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
 
 /**
- * Create a button that downloads the given dataset as a CSV file.
- * @param {Array<object>} data - The dataset to download.
- * @param {string} filename - The name of the file to download (without the .csv extension).
- * @param {string} [label="Download"] - The label to display on the button.
- * @returns {Button} - The download button.
+ * Serialize object rows as an RFC 4180-compatible UTF-8 CSV.
+ *
+ * The UTF-8 BOM helps spreadsheet applications preserve accented
+ * administrative names. Records use CRLF and fields containing commas,
+ * quotes, CR, or LF are quoted with doubled internal quotes.
+ *
+ * @param {Array<object>} data
+ * @param {object} [options]
+ * @param {string[]} [options.columns] Ordered keys to include.
+ * @returns {string}
+ */
+function serializeCsv(data, { columns } = {}) {
+  const rows = Array.isArray(data) ? data : [];
+  const selectedColumns = csvColumns(rows, columns);
+  if (!selectedColumns.length) return CSV_BOM;
+
+  const records = [
+    selectedColumns.map(escapeCsvField).join(","),
+    ...rows.map((row) =>
+      selectedColumns.map((column) => escapeCsvField(row?.[column])).join(","),
+    ),
+  ];
+
+  return `${CSV_BOM}${records.join("\r\n")}\r\n`;
+}
+
+function csvFilename(filename) {
+  const name = String(filename || "atlas-data").trim() || "atlas-data";
+  return name.toLowerCase().endsWith(".csv") ? name : `${name}.csv`;
+}
+
+function downloadCsv(data, { filename = "atlas-data", columns } = {}) {
+  const blob = new Blob([serializeCsv(data, { columns })], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = csvFilename(filename);
+  link.hidden = true;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+}
+
+/**
+ * Create a button that downloads object rows as a CSV file.
+ *
+ * @param {Array<object>} data
+ * @param {object} [options]
+ * @param {string} [options.filename="atlas-data"]
+ * @param {string} [options.label="Download CSV"]
+ * @param {string[]} [options.columns] Ordered keys to include.
+ * @returns {Button}
+ */
+function downloadCsvButton(
+  data,
+  {
+    filename = "atlas-data",
+    label = "Download CSV",
+    columns,
+  } = {},
+) {
+  return Inputs.button(label, {
+    reduce: () => downloadCsv(data, { filename, columns }),
+  });
+}
+
+/**
+ * @deprecated Use `serializeCsv(data, {columns})`.
+ */
+function convertToCSV(data, options = {}) {
+  return serializeCsv(data, options);
+}
+
+/**
+ * @deprecated Use `downloadCsv(data, {filename, columns})`.
+ */
+function downloadData(data, filename) {
+  return downloadCsv(data, { filename });
+}
+
+/**
+ * @deprecated Use `downloadCsvButton(data, {filename, label, columns})`.
  */
 function downloadButton(data, filename, label = "Download") {
-  return Inputs.button(label, {reduce: () => downloadData(data, filename)})
+  return downloadCsvButton(data, { filename, label });
 }
 
 /**

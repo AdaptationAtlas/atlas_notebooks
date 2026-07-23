@@ -1,115 +1,165 @@
-/**
- * Generates a formatted HTML contribution block for an Atlas notebook,
- * including Authors, Technical Development, Affiliations, and an optional Citation.
- *
- * Layout:
- * - Left column (60%): Authors and Technical Development
- * - Right column (40%): Affiliations
- * - Optional citation displayed below the columns
- *
- * Expected data structure:
- *
- * {
- *   authors: [
- *     { name: string, orgs: number[] }
- *   ],
- *   developers: [
- *     { name: string, orgs: number[] }
- *   ],
- *   organizations: {
- *     [orgId: number]: string
- *   }
- * }
- *
- * Where:
- * - `name` is the full display name of the contributor.
- * - `orgs` is an array of numeric organization IDs.
- * - `organizations` maps numeric IDs to organization names.
- * };
- *
- * @param {Object} data - Structured contributor and affiliation data.
- * @param {string|null} [citation=null] - Optional formatted citation HTML string.
- * @param {string} [lang="en"] - Language code for translation. (default: "en")
- * @returns {string} HTML string representing the formatted contribution section.
- */
-export function atlasContributionSection(data, citation = null, lang = "en") {
-  const _translations = {
-    authors: {
-      en: "Authors",
-      fr: "Auteurs",
-    },
-    affiliations: {
-      en: "Affiliations",
-      fr: "Affiliations",
-    },
-    developers: {
-      en: "Technical Development",
-      fr: "Développement technique",
-    },
-    citation: {
-      en: "Citation",
-      fr: "Référence",
-    },
-  };
+const translations = {
+  authors: {
+    en: "Authors",
+    fr: "Auteurs",
+  },
+  affiliations: {
+    en: "Affiliations",
+    fr: "Affiliations",
+  },
+  developers: {
+    en: "Technical Development",
+    fr: "Développement technique",
+  },
+  citation: {
+    en: "Citation",
+    fr: "Référence",
+  },
+};
 
-  const t = (key) =>
-    _translations[key]?.[lang] ?? _translations[key]?.en ?? key;
-
-  const formatPeople = (people) =>
-    people
-      .map(
-        ({ name, orgs }) =>
-          `${name}<sup>${orgs.sort((a, b) => a - b).join(",")}</sup>`,
-      )
-      .join(", ");
-
-  const section = (heading, people) =>
-    people?.length
-      ? `<div style="margin-bottom: 1rem;">
-           <h4 style="font-size: 0.90rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin-bottom: 0.4rem;">${heading}</h4>
-           <div style="font-size: 0.95rem; line-height: 1.6;">${formatPeople(people)}</div>
-         </div>`
-      : "";
-
-  const affiliations = Object.entries(data.organizations)
-    .sort(([a], [b]) => Number(a) - Number(b))
-    .map(
-      ([id, name]) =>
-        `<div style="font-size: 0.85rem; line-height: 1.8; color: #4b5563;"><sup>${id}</sup> ${name}</div>`,
-    )
-    .join("");
-
-  const citationHTML = citation
-    ? `<div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e5e7eb;">
-         <h4 style="font-size: 0.90rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin-bottom: 0.4rem;">${t(
-           "citation",
-         )}</h4>
-         <div style="font-size: 0.85rem; line-height: 1.6;">${citation}</div>
-       </div>`
-    : "";
-
-  return `
-    <div style="display: flex; gap: 2rem; align-items: flex-start;">
-      <div style="flex: 6;">
-        ${section(t("authors"), data.authors)}
-        ${section(t("developers"), data.developers)}
-      </div>
-      <div style="flex: 4; border-left: 1px solid #e5e7eb; padding-left: 2rem;">
-        <h4 style="font-size: 0.90rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6b7280; margin-bottom: 0.4rem;">${t(
-          "affiliations",
-        )}</h4>
-        ${affiliations}
-      </div>
-    </div>
-    ${citationHTML}
-  `;
+function translation(key, lang) {
+  return translations[key]?.[lang] ?? translations[key]?.en ?? key;
 }
 
+function contributionHeading(text) {
+  const heading = document.createElement("h4");
+  heading.className = "atlas-contributions__heading";
+  heading.textContent = text;
+  return heading;
+}
+
+function peopleList(people) {
+  const list = document.createElement("div");
+  list.className = "atlas-contributions__people";
+
+  people.forEach(({ name = "", orgs = [] }, index) => {
+    if (index) list.append(document.createTextNode(", "));
+
+    const person = document.createElement("span");
+    person.textContent = String(name);
+
+    if (orgs.length) {
+      const affiliations = document.createElement("sup");
+      affiliations.textContent = [...orgs]
+        .sort((a, b) => Number(a) - Number(b))
+        .join(",");
+      person.appendChild(affiliations);
+    }
+
+    list.appendChild(person);
+  });
+
+  return list;
+}
+
+function peopleSection(heading, people) {
+  if (!people?.length) return null;
+
+  const section = document.createElement("section");
+  section.className = "atlas-contributions__section";
+  section.append(contributionHeading(heading), peopleList(people));
+  return section;
+}
+
+/**
+ * Create the Atlas notebook contribution and affiliation block.
+ *
+ * @param {Object} data - Contributor and affiliation data.
+ * @param {Node|string|null} [citation=null] - Optional citation node or text.
+ * @param {string} [lang="en"] - Translation language.
+ * @returns {HTMLElement}
+ */
+export function atlasContributionSection(
+  data = {},
+  citation = null,
+  lang = "en",
+) {
+  const contribution = document.createElement("div");
+  contribution.className = "atlas-contributions";
+
+  const columns = document.createElement("div");
+  columns.className = "atlas-contributions__columns";
+
+  const primary = document.createElement("div");
+  primary.className = "atlas-contributions__primary";
+  const authors = peopleSection(
+    translation("authors", lang),
+    data.authors,
+  );
+  const developers = peopleSection(
+    translation("developers", lang),
+    data.developers,
+  );
+  if (authors) primary.appendChild(authors);
+  if (developers) primary.appendChild(developers);
+
+  const affiliationColumn = document.createElement("section");
+  affiliationColumn.className = "atlas-contributions__affiliations";
+  affiliationColumn.appendChild(
+    contributionHeading(translation("affiliations", lang)),
+  );
+
+  Object.entries(data.organizations ?? {})
+    .sort(([a], [b]) => Number(a) - Number(b))
+    .forEach(([id, name]) => {
+      const affiliation = document.createElement("div");
+      affiliation.className = "atlas-contributions__affiliation";
+
+      const affiliationId = document.createElement("sup");
+      affiliationId.textContent = id;
+      affiliation.append(affiliationId, document.createTextNode(` ${name}`));
+      affiliationColumn.appendChild(affiliation);
+    });
+
+  columns.append(primary, affiliationColumn);
+  contribution.appendChild(columns);
+
+  if (citation != null && citation !== "") {
+    const citationSection = document.createElement("section");
+    citationSection.className = "atlas-contributions__citation";
+
+    const citationText = document.createElement("div");
+    citationText.className = "atlas-contributions__citation-text";
+    if (citation instanceof Node) {
+      citationText.appendChild(citation);
+    } else {
+      citationText.textContent = String(citation);
+    }
+
+    citationSection.append(
+      contributionHeading(translation("citation", lang)),
+      citationText,
+    );
+    contribution.appendChild(citationSection);
+  }
+
+  return contribution;
+}
+
+/**
+ * Create the standard Atlas citation.
+ *
+ * @param {string} [nbTitle=""] - Notebook title.
+ * @returns {HTMLElement}
+ */
 export function atlasCitation(nbTitle = "") {
-  const title = nbTitle && `<em>${nbTitle}</em>.`;
-  const parts = [title, "Africa Agriculture Adaptation Atlas."]
-    .filter(Boolean)
-    .join(" ");
-  const url = `<a href="https://adaptationatlas.cgiar.org">https://adaptationatlas.cgiar.org</a>`;
-  return `CGIAR. (2025). ${parts} ${url}`;
+  const citation = document.createElement("span");
+  citation.append(document.createTextNode("CGIAR. (2025). "));
+
+  if (nbTitle) {
+    const title = document.createElement("em");
+    title.textContent = String(nbTitle);
+    citation.append(title, document.createTextNode(". "));
+  }
+
+  citation.append(
+    document.createTextNode("Africa Agriculture Adaptation Atlas. "),
+  );
+
+  const link = document.createElement("a");
+  link.href = "https://adaptationatlas.cgiar.org";
+  link.textContent = "https://adaptationatlas.cgiar.org";
+  citation.appendChild(link);
+
+  return citation;
 }

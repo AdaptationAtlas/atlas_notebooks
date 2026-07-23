@@ -1,10 +1,17 @@
-// Bar logo for atlas data explorations
-const stacked_bars = `<svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 32 27"
-style="width: 20px; height: 20px; display: block">
-  <path id="Imported Path"
-        fill="white" stroke="white" stroke-width=".5"
-        d="M 31.60,25.63
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
+function stackedBarsIcon() {
+  const icon = document.createElementNS(SVG_NAMESPACE, "svg");
+  icon.classList.add("atlas-hero__mark");
+  icon.setAttribute("viewBox", "0 0 32 27");
+
+  const bars = document.createElementNS(SVG_NAMESPACE, "path");
+  bars.setAttribute("fill", "white");
+  bars.setAttribute("stroke", "white");
+  bars.setAttribute("stroke-width", ".5");
+  bars.setAttribute(
+    "d",
+    `M 31.60,25.63
            C 31.60,25.84 31.52,26.03 31.38,26.18
              31.23,26.32 31.04,26.40 30.84,26.40
              30.84,26.40 1.16,26.40 1.16,26.40
@@ -38,8 +45,11 @@ style="width: 20px; height: 20px; display: block">
              29.40,0.77 29.40,24.87 29.40,24.87
              29.40,24.87 30.84,24.87 30.84,24.87
              31.04,24.87 31.23,24.95 31.38,25.09
-             31.52,25.24 31.60,25.43 31.60,25.63 Z" />
-</svg>`;
+             31.52,25.24 31.60,25.43 31.60,25.63 Z`,
+  );
+  icon.appendChild(bars);
+  return icon;
+}
 
 /**
  * Create the canonical circular Atlas notebook hero.
@@ -72,7 +82,7 @@ export function atlasHero({ title, image, group = "", alt = "" } = {}) {
   const icon = document.createElement("div");
   icon.className = "atlas-hero__icon";
   icon.setAttribute("aria-hidden", "true");
-  icon.innerHTML = stacked_bars;
+  icon.appendChild(stackedBarsIcon());
   content.appendChild(icon);
 
   if (group) {
