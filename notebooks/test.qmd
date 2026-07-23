@@ -186,10 +186,16 @@ For each dropdown, verify:
 - Select/Deselect All stays flush at the top;
 - only the option list scrolls, with no text visible behind the action row;
 - long selected labels truncate with an ellipsis;
-- the controls wrap instead of overflowing at narrow viewport widths.
+- the controls wrap instead of overflowing at narrow viewport widths;
+- Arrow keys move option focus, Space/Enter toggle, and Escape returns focus to
+  the trigger;
+- the French example uses localized action and empty-selection labels.
 
 ```{ojs}
-import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
+import {
+  atlasMultiSelect,
+  enhancedMultiSelect,
+} from "/helpers/enhancedMultiSelect.ojs";
 
 makeEnhancedCheck = ({
   label,
@@ -197,21 +203,19 @@ makeEnhancedCheck = ({
   value = [],
   minWidth = "240px",
   maxWidth = "400px",
+  language = "en",
+  commit = "close",
 } = {}) => {
-  const input = Inputs.select(options, {
+  return atlasMultiSelect(options, {
     label,
-    multiple: true,
     value,
-  });
-
-  enhancedMultiSelect(input, {
     enableSelectAll: true,
     requireAtLeastOne: false,
     minWidth,
     maxWidth,
+    language,
+    commit,
   });
-
-  return input;
 };
 ```
 
@@ -241,9 +245,144 @@ enhancedInputChecks = {
       minWidth: "200px",
       maxWidth: "320px",
     }),
+    makeEnhancedCheck({
+      label: "Libellés français",
+      options: ["Kenya", "Tanzanie", "Ouganda"],
+      language: "fr",
+      value: [],
+      commit: "change",
+    }),
   ];
 
   return html`<div style="display:flex;flex-wrap:wrap;gap:2rem;align-items:flex-start;">${controls}</div>`;
+}
+```
+
+The lower-level enhancer remains available when an input must be created or
+bound first:
+
+```{ojs}
+advancedEnhancedCheck = {
+  const input = Inputs.select(["One", "Two", "Three"], {
+    label: "Advanced existing input",
+    multiple: true,
+    value: ["One"],
+  });
+  enhancedMultiSelect(input, {
+    searchable: true,
+    requireAtLeastOne: false,
+    commit: "change",
+  });
+  return input;
+}
+```
+
+The following checks exercise the DOM contract and commit timing without
+requiring visual inspection:
+
+```{ojs}
+multiSelectBehaviorChecks = {
+  const results = [];
+  const check = (label, pass) => results.push({ label, pass: Boolean(pass) });
+  const sandbox = document.createElement("div");
+  sandbox.style.cssText = "position:fixed;left:-10000px;top:0;width:500px;";
+  document.body.appendChild(sandbox);
+
+  const immediate = atlasMultiSelect(["Alpha", "Beta"], {
+    value: [],
+    requireAtLeastOne: false,
+    enableSelectAll: true,
+    commit: "change",
+  });
+  sandbox.appendChild(immediate);
+  let immediateEvents = 0;
+  immediate.addEventListener("input", () => immediateEvents += 1);
+  const immediateButton = immediate.querySelector("button");
+  immediateButton.click();
+  const immediateOption = immediate.querySelector('[role="option"]');
+  immediateOption.click();
+
+  check("change mode emits immediately", immediateEvents === 1);
+  check("trigger exposes expanded state", immediateButton.getAttribute("aria-expanded") === "true");
+  check("options use listbox semantics", immediate.querySelector('[role="listbox"]')?.contains(immediateOption));
+  check("all buttons have type=button", Array.from(immediate.querySelectorAll("button")).every((button) => button.type === "button"));
+
+  immediateOption.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "ArrowDown",
+    bubbles: true,
+  }));
+  check("ArrowDown moves option focus", document.activeElement === immediate.querySelectorAll('[role="option"]')[1]);
+
+  document.activeElement.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+  }));
+  check("Escape closes the menu", immediateButton.getAttribute("aria-expanded") === "false");
+  check("Escape returns trigger focus", document.activeElement === immediateButton);
+
+  const deferred = atlasMultiSelect(["Alpha", "Beta"], {
+    value: [],
+    requireAtLeastOne: false,
+    commit: "close",
+  });
+  sandbox.appendChild(deferred);
+  let deferredEvents = 0;
+  deferred.addEventListener("input", () => deferredEvents += 1);
+  deferred.atlasMultiSelect.open();
+  deferred.querySelector('[role="option"]').click();
+  check("close mode defers its event", deferredEvents === 0);
+  deferred.atlasMultiSelect.close();
+  check("close mode emits once on close", deferredEvents === 1);
+
+  const localized = atlasMultiSelect(["Un", "Deux"], {
+    value: [],
+    requireAtLeastOne: false,
+    enableSelectAll: true,
+    language: "fr",
+  });
+  sandbox.appendChild(localized);
+  check("empty label is localized", localized.querySelector("button span")?.textContent === "Aucune sélection");
+  check("action labels are localized", Array.from(localized.querySelectorAll(".button-container button"), (button) => button.textContent).join("|") === "Tout sélectionner|Tout désélectionner");
+
+  const limited = atlasMultiSelect(["One", "Two"], {
+    value: [],
+    maxSelections: 1,
+    requireAtLeastOne: false,
+    enableSelectAll: true,
+  });
+  sandbox.appendChild(limited);
+  const limitedActions = Array.from(
+    limited.querySelectorAll(".button-container button"),
+    (button) => button.textContent,
+  );
+  check("Select All is hidden when selections are limited", !limitedActions.includes("Select All"));
+  check("valid bulk actions remain available", limitedActions.join("|") === "Deselect All");
+
+  const nativeSelect = deferred.querySelector("select");
+  const addedOption = document.createElement("option");
+  addedOption.value = "Gamma";
+  addedOption.textContent = "Gamma <safe>";
+  nativeSelect.appendChild(addedOption);
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  check("option mutations rebuild the list", deferred.querySelectorAll('[role="option"]').length === 3);
+  const addedRow = deferred.querySelectorAll('[role="option"]')[2];
+  check("option labels remain text", addedRow?.textContent.includes("Gamma <safe>") && !addedRow.querySelector("*:not(span)"));
+
+  [immediate, deferred, localized, limited].forEach((input) => {
+    input.atlasMultiSelect.destroy();
+  });
+  sandbox.remove();
+
+  const list = document.createElement("ul");
+  results.forEach(({ label, pass }) => {
+    const item = document.createElement("li");
+    item.textContent = `${pass ? "PASS" : "FAIL"} — ${label}`;
+    item.style.color = pass
+      ? "var(--atlas-color-primary)"
+      : "var(--atlas-color-focus)";
+    list.appendChild(item);
+  });
+  return list;
 }
 ```
 
@@ -373,25 +512,34 @@ The shared selector is `helpers/adminSelectors.ojs`. Test both versions below:
 - Côte d'Ivoire and names containing apostrophes work without affecting data
   queries;
 - region and district search works with or without accents;
-- Select All respects each level's maximum;
+- Select All is omitted when a level has a finite maximum;
 - the two synchronized multi-select displays stay in sync;
 - controls wrap cleanly in a narrow window.
+
+The public value uses one whole-area convention: `admin1: null` in single mode
+or no matching admin-1 entry in multiple mode means the selected country is
+unfiltered. The displayed **All regions (ISO)** option is therefore a
+single-mode UI choice, not a value returned to notebook code.
 
 ```{ojs}
 import { createAdminSelectors } from "/helpers/adminSelectors.ojs";
 
+adminSelectorLabel = (value) =>
+  value.kind === "ssa"
+    ? "SSA"
+    : [value.iso3, value.admin1_name, value.admin2_name]
+        .filter((part) => part != null)
+        .join(" / ");
+
 adminSelectorSummary = (selection) =>
   Object.fromEntries(
-    Object.entries(selection).map(([level, values]) => [
+    Object.entries(selection).map(([level, value]) => [
       level,
-      (Array.isArray(values) ? values : values ? [values] : []).map(
-        (value) =>
-          value.kind === "ssa"
-            ? "SSA"
-            : [value.iso3, value.admin1_name, value.admin2_name]
-                .filter((part) => part != null)
-                .join(" / "),
-      ),
+      Array.isArray(value)
+        ? value.map(adminSelectorLabel)
+        : value == null
+          ? null
+          : adminSelectorLabel(value),
     ]),
   );
 ```

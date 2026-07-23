@@ -1,4 +1,6 @@
-import { enhancedMultiSelect } from "/helpers/enhancedMultiSelect.ojs";
+import {
+  enhancedMultiSelect as enhanceSelect,
+} from "/helpers/enhancedMultiSelect.js";
 
 _adminSelectorTranslations = ({
   en: {
@@ -6,7 +8,7 @@ _adminSelectorTranslations = ({
     region: "Region",
     district: "District",
     ssa: "Sub-Saharan Africa",
-    fullCountry: "Full country",
+    allRegions: "All regions",
     allDistricts: "All districts",
     selectAll: "Select All",
     deselectAll: "Deselect All",
@@ -19,7 +21,7 @@ _adminSelectorTranslations = ({
     region: "Région",
     district: "District",
     ssa: "Afrique subsaharienne",
-    fullCountry: "Pays entier",
+    allRegions: "Toutes les régions",
     allDistricts: "Tous les districts",
     selectAll: "Tout sélectionner",
     deselectAll: "Tout désélectionner",
@@ -181,11 +183,15 @@ function _adminSelectorAsArray(value) {
  * @param {string} [config.language="en"]
  * @param {object} [config.value] Initial `{admin0,admin1,admin2}` selection.
  * @param {boolean} [config.includeSSA] Include an SSA option in single mode.
- * @param {boolean} [config.includeFullCountry=true]
+ * @param {boolean} [config.includeFullCountry] Show the internal whole-country
+ * option in single-select mode. Defaults to `true` in single mode and is
+ * ignored in multiple mode, where an absent admin-1 selection means whole
+ * country.
  * @param {boolean} [config.includeAllDistricts=true]
  * @param {number|object} [config.maxSelections=Infinity]
  * @param {boolean|object} [config.requireAtLeastOne=false]
- * @param {boolean|object} [config.selectAll=false]
+ * @param {boolean|object} [config.selectAll=false] Enable valid bulk actions.
+ * Select All is omitted for levels with a finite selection limit.
  * @param {boolean|object} [config.searchable]
  * @param {string[]} [config.includeIso3]
  * @param {string[]} [config.excludeIso3=["SDN"]]
@@ -198,7 +204,7 @@ function createAdminSelectors({
   language = "en",
   value,
   includeSSA = !multiple,
-  includeFullCountry = true,
+  includeFullCountry = !multiple,
   includeAllDistricts = true,
   maxSelections = Infinity,
   requireAtLeastOne = false,
@@ -321,7 +327,9 @@ function createAdminSelectors({
         if (!selectedCountry?.iso3) continue;
         const country = countryByIso.get(selectedCountry.iso3);
         if (!country) continue;
-        if (includeFullCountry) options.push(fullCountryOption(country));
+        if (!multiple && includeFullCountry) {
+          options.push(fullCountryOption(country));
+        }
         options.push(
           ...(_adminSelectorIndex.admin1ByIso.get(country.iso3) || []),
         );
@@ -400,7 +408,7 @@ function createAdminSelectors({
     if (option.kind === "ssa") return text.ssa;
     if (level === 0) return countryLabel(option);
     if (option.kind === "full-country") {
-      return `${text.fullCountry} (${option.iso3})`;
+      return `${text.allRegions} (${option.iso3})`;
     }
     if (option.kind === "all-districts") {
       return `${text.allDistricts} (${option.iso3})`;
@@ -411,6 +419,33 @@ function createAdminSelectors({
 
   function labelFor(level) {
     return level === 0 ? text.country : level === 1 ? text.region : text.district;
+  }
+
+  function emptyLabelFor(level) {
+    if (!multiple || level === 0) return text.noneSelected;
+    return level === 1 ? text.allRegions : text.allDistricts;
+  }
+
+  function admin1SelectionLabel(selectedRegions) {
+    if (!state.admin0.length) return text.noneSelected;
+
+    const summary = [];
+    for (const country of state.admin0) {
+      const regions = selectedRegions.filter(
+        (label) => label.endsWith(` (${country.iso3})`),
+      );
+      if (regions.length) {
+        summary.push(...regions);
+      } else {
+        summary.push(`${text.allRegions} (${country.iso3})`);
+      }
+    }
+
+    return summary.length > 5
+      ? typeof text.selected === "function"
+        ? text.selected(summary.length)
+        : String(text.selected).replace("{count}", summary.length)
+      : summary.join(", ");
   }
 
   function renderControl(level) {
@@ -428,7 +463,7 @@ function createAdminSelectors({
     nativeSelect.disabled = options.length === 0;
 
     if (multiple) {
-      enhancedMultiSelect(input, {
+      enhanceSelect(input, {
         maxSelections: _adminSelectorLevelConfig(
           maxSelections,
           name,
@@ -445,12 +480,16 @@ function createAdminSelectors({
         searchable:
           options.length > 0 &&
           _adminSelectorLevelConfig(searchable, name, false),
-        emitOnChange: true,
+        commit: "change",
         compactLabelThreshold: 5,
+        formatSelection:
+          level === 1
+            ? ({ labels }) => admin1SelectionLabel(labels)
+            : undefined,
         labels: {
           selectAll: text.selectAll,
           deselectAll: text.deselectAll,
-          noneSelected: text.noneSelected,
+          noneSelected: emptyLabelFor(level),
           search: text.search,
           selected: text.selected,
         },
@@ -488,15 +527,25 @@ function createAdminSelectors({
     if (multiple) {
       return {
         admin0: [...state.admin0],
-        admin1: [...state.admin1],
-        admin2: [...state.admin2],
+        admin1: state.admin1.filter(
+          (option) => option.kind !== "full-country",
+        ),
+        admin2: state.admin2.filter(
+          (option) => option.kind !== "all-districts",
+        ),
       };
     }
 
     return {
       admin0: state.admin0[0] || null,
-      admin1: state.admin1[0] || null,
-      admin2: state.admin2[0] || null,
+      admin1:
+        state.admin1[0]?.kind === "full-country"
+          ? null
+          : state.admin1[0] || null,
+      admin2:
+        state.admin2[0]?.kind === "all-districts"
+          ? null
+          : state.admin2[0] || null,
     };
   }
 
