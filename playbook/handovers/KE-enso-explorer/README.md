@@ -49,9 +49,11 @@ notebook. Reusable via the `extract-knbs-napr` skill for the 2026 edition. See `
 ### Known gaps — do NOT claim these are done
 - **County crop production now 2019–2024** (was 2020–24) but still short for a county-level
   teleconnection; Block 3 still falls back to *national* FAOStat until the county series is longer.
-- **GESI gate validates the extractor, not the county column** (47-way consensus gates the Kenya
-  benchmark; dual-engine not yet run on GESI county values). Don't count GESI as fully
-  LLM-independent-gated yet.
+- **GESI re-extracted + gated (2026-07-24).** Rebuilt from the 47 KNBS County Gender Data Sheets by a
+  code-keyed deterministic extractor (`_sources/gesi_extract.py`, skill `extract-knbs-gender-sheets`);
+  gate = the Kenya national value is identical on all 47 sheets per indicator. **35 served series / 24
+  codes**, Male/Female subs intact; chart-style indicators dropped (honest gap). Replaces the old
+  fragmented `gesi.parquet` (142 label-variants); notebook §2.1 now a 47-county distribution strip.
 - **Climate-conflict signal is exploratory** — small n (24 drought-year obs), forking-path
   specification; needs a permutation/placebo test before any figure reaches policymakers.
 - **ReliefWeb:** appname approved 2026-07-09 (`steward-cgiar-aaa-atlas-enso-a7f3rei353j`); first
