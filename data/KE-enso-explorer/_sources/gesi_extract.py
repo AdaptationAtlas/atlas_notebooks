@@ -134,22 +134,42 @@ def main():
     args = sys.argv[1:]
     if args and args[0] == "--all":
         pdfs = sorted(glob.glob(os.path.join(args[1], "*.pdf")))
-        allrows, cover = [], collections.Counter()
+        allrows = []
         for p in pdfs:
-            cty, rows = parse_pdf(p)
-            allrows += rows
-            cover[cty] = len({r["code"] for r in rows})
-        codes = collections.Counter(r["code"] for r in allrows)
-        print(f"counties={len(pdfs)} rows={len(allrows)} distinct_codes={len(codes)}")
-        print("codes reaching all 47:", sum(1 for c, n in codes.items() if n >= 47), "/", len(codes))
-        print("per-county code coverage min/max:", min(cover.values()), max(cover.values()))
-        try:
-            import pyarrow as pa, pyarrow.parquet as pq
-            pq.write_table(pa.Table.from_pylist(allrows),
-                           "data/KE-enso-explorer/gesi_v2.parquet")
-            print("wrote data/KE-enso-explorer/gesi_v2.parquet")
-        except Exception as e:
-            print("parquet skipped:", e)
+            allrows += parse_pdf(p)[1]
+        # canonical label per code = the longest seen (fullest)
+        canon = {}
+        for r in allrows:
+            if len(r["label"]) > len(canon.get(r["code"], "")):
+                canon[r["code"]] = r["label"]
+        # VALIDATION GATE: the Kenya national value is identical on all 47 sheets
+        # for a given (code,sub). Keep only county rows whose Kenya value matches
+        # the modal Kenya (misparses drop out); a series is SERVED if >=40/47
+        # counties survive. This is the LLM-independent quality proof.
+        byks = collections.defaultdict(list)
+        for r in allrows:
+            byks[(r["code"], r["sub"])].append(r)
+        served, dropped = [], []
+        for (code, sub), grp in byks.items():
+            ks = [round(x["kenya"], 2) for x in grp]
+            modal = collections.Counter(ks).most_common(1)[0][0]
+            kept = [x for x in grp if round(x["kenya"], 2) == modal]
+            if len(kept) >= 40:
+                for x in kept:
+                    served.append({"county": x["county"], "code": code, "sub": sub,
+                                   "label": canon[code], "kenya": modal,
+                                   "county_value": x["county_value"]})
+            else:
+                dropped.append((code, sub, len(kept)))
+        nseries = len({(r["code"], r["sub"]) for r in served})
+        ncodes = len({r["code"] for r in served})
+        print(f"counties={len(pdfs)} served_rows={len(served)} "
+              f"served_series={nseries} served_codes={ncodes}")
+        print(f"dropped series (chart-style / inconsistent): {len(dropped)} -> "
+              f"{sorted(set(c for c, s, n in dropped))}")
+        import pyarrow as pa, pyarrow.parquet as pq
+        pq.write_table(pa.Table.from_pylist(served), "data/KE-enso-explorer/gesi_v2.parquet")
+        print("wrote data/KE-enso-explorer/gesi_v2.parquet (served, gated)")
     else:
         cty, rows = parse_pdf(args[0])
         print(f"county={cty}  indicators={len({r['code'] for r in rows})}  rows={len(rows)}")
