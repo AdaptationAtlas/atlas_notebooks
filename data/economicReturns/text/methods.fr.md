@@ -1,3 +1,7 @@
+---
+title: "Méthodes & Sources"
+---
+
 L'outil utilise les meilleurs ensembles de données disponibles sur la valeur de
 la production couvrant l'ensemble de l'Afrique subsaharienne, ce qui permet des
 comparaisons entre les pays, les cultures et le bétail. S'il convient à

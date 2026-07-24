@@ -51,6 +51,13 @@ class BackToTop extends HTMLElement {
     `;
 
     const btn = this.shadowRoot.querySelector(".back-to-top");
+
+    // Localize the label and follow the language toggle (components/langSwitcher.js)
+    const label = (lang) => (lang === "fr" ? "Retour en haut" : "Back to top");
+    btn.setAttribute("aria-label", label(document.documentElement.lang));
+    const onLang = (e) => btn.setAttribute("aria-label", label(e.detail));
+    window.addEventListener("atlas:lang", onLang);
+
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
     // Throttle scroll work with RAF.
@@ -86,6 +93,7 @@ class BackToTop extends HTMLElement {
     // Cleanup
     this._cleanup = () => {
       window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("atlas:lang", onLang);
       btn.removeEventListener("click", onClick);
     };
   }

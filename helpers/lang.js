@@ -1,5 +1,5 @@
 // Authors: Zach Bogart, Brayden Youngberg
-const VERSION = "2.0.1";
+const VERSION = "3.0.0";
 
 // FUNCTIONS
 
@@ -42,6 +42,78 @@ export function reduceReplaceTemplateItems(template, items, { templateNameField 
       item[templateValueField]
     );
   }, template);
+}
+
+/**
+ * Parse one prose block file (data/<notebook>/text/<id>.<locale>.md) into
+ * { title, body }. The front matter is a deliberately narrow contract —
+ * exactly one single-line `title:` field:
+ *
+ *   ---
+ *   title: "Overview"
+ *   ---
+ *
+ *   the prose...
+ *
+ * scripts/build/checkTranslations.ts rejects anything else in CI, so this
+ * only has to handle the three single-line YAML scalar forms (plain,
+ * 'single', "double").
+ */
+export function parseBlock(markdown) {
+  const m = markdown.match(/^---\r?\ntitle:[ \t]*(.*?)[ \t]*\r?\n---\r?\n?/);
+  if (!m) throw new Error("prose block must start with `---\\ntitle: ...\\n---` front matter");
+  let title = m[1];
+  if (title.startsWith('"') && title.endsWith('"')) title = JSON.parse(title);
+  else if (title.startsWith("'") && title.endsWith("'")) title = title.slice(1, -1).replaceAll("''", "'");
+  return { title, body: markdown.slice(m[0].length).trim() };
+}
+
+/**
+ * Bind translated text onto the statically rendered page: set <html lang>,
+ * retitle section headings from their prose blocks, and swap `.nb-prose`
+ * nodes to the given language — restoring the build-time markup when back on
+ * the default language. Pass the OJS `md` tag for client-side rendering, and
+ * `headings` for extra ids whose titles come from elsewhere.
+ */
+export function applyTranslations({ sections, md, lang, defaultLang = "en", headings = {} }) {
+  document.documentElement.lang = lang;
+
+  const titles = {
+    ...Object.fromEntries(Object.entries(sections).map(([id, s]) => [id, s.title])),
+    ...headings,
+  };
+  for (const [id, title] of Object.entries(titles)) {
+    const h = document.querySelector(`section#${id} > :is(h1,h2,h3)`);
+    if (h) h.textContent = title;
+  }
+
+  for (const node of document.querySelectorAll(".nb-prose")) {
+    if (node._original === undefined) node._original = node.innerHTML;
+    if (lang === defaultLang) {
+      node.innerHTML = node._original;
+    } else {
+      const text = sections[node.dataset.section]?.body;
+      if (text) node.replaceChildren(md`${text}`);
+    }
+  }
+}
+
+/**
+ * Deep-merge fallback values into a translation tree: any key missing in
+ * `obj` is filled from `fallback`. For per-locale text files (en.json,
+ * fr.json), pass the English tree as the fallback so untranslated strings
+ * render in English instead of `undefined`.
+ */
+export function withFallback(obj, fallback) {
+  if (obj === undefined || obj === null) return fallback;
+  if (typeof obj !== "object" || typeof fallback !== "object" || fallback === null) {
+    return obj;
+  }
+  const out = { ...obj };
+  for (const key of Object.keys(fallback)) {
+    out[key] = withFallback(obj[key], fallback[key]);
+  }
+  return out;
 }
 
 /**
@@ -122,10 +194,13 @@ export function toSentenceCase(str) {
 
 export const lang = {
   version: VERSION,
+  applyTranslations,
   lg,
   getText,
   getRegexForNamedInsertion,
   reduceReplaceTemplateItems,
+  parseBlock,
+  withFallback,
   listLeavesMissingObjectKeys,
   getParamFromList,
   toTitleCase,

@@ -1,3 +1,7 @@
+---
+title: "Methods & Sources"
+---
+
 The tool utilizes the best available production value datasets covering all of
 sub-Saharan Africa, enabling cross-country, crop, and livestock comparisons.
 While suitable for macro-scale analysis to determine economic viability and
@@ -25,7 +29,7 @@ CGIAR Climate Research in Africa (AICCRA) program.
   are provided by geoBoundaries 6.0.0. The gbHumanitarian boundaries are used
   and if not available then the gbOpen boundaries are substituted.
 
-## Methods
+## Methodology
 
 This tool implements the methodology developed by
 [Philip Thorton](https://scholar.google.com/citations?user=Wx_me7EAAAAJ&hl=en)
