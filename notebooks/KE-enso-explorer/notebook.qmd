@@ -333,28 +333,12 @@ plotFooter(_lang(nbText.sections.b1.gesiCaption), gesiTable, {
 ## `{ojs} title_maize`
 
 ```{ojs}
-md`${_lang(nbText.sections.b1.maizeSources)}`
-```
-
-::: {.controls-row}
-
-```{ojs}
-viewof maizeSource = Inputs.radio(["KNBS (NAPR)", "AFA"], {
-  label: _lang(nbText.sections.controls.maizeSource),
-  value: "KNBS (NAPR)",
-})
-```
-
-:::
-
-```{ojs}
 maizeChart = Plot.plot({
   height: 320, width: 700, marginLeft: 60,
   x: {tickFormat: (d) => "'" + String(d).slice(-2), label: "year"},
   y: {label: "production (tonnes)"},
   marks: [
-    Plot.barY(maizeData, {x: "year", y: "value",
-      fill: maizeSource.startsWith("KNBS") ? "#2c7fb8" : "#5aae61", tip: true}),
+    Plot.barY(knbsMaize, {x: "year", y: "value", fill: "#2c7fb8", tip: true}),
     Plot.ruleY([0]),
   ],
 })
@@ -362,8 +346,8 @@ maizeChart = Plot.plot({
 
 ```{ojs}
 plotFooter(_lang(nbText.sections.b1.maizeCaption), maizeChart, {
-  filename: `${county}_maize_production_${maizeSource.startsWith("KNBS") ? "knbs" : "afa"}`,
-  data: maizeData,
+  filename: `${county}_maize_production_knbs`,
+  data: knbsMaize,
 })
 ```
 
@@ -1483,27 +1467,13 @@ gesiExport = gesiSeries.map((s) => ({indicator: s.indicator, code: s.code, sub: 
 ```
 
 ```{ojs}
-dbAfa = DuckDBClient.of({
-  afa_production: FileAttachment("/data/KE-enso-explorer/afa_production.parquet"),
-})
-
-// Year is a VARCHAR in the parquet and includes split-year strings like
-// '2022/23' for some crops — but Dry Maize / Production rows are all
-// plain years (verified 2026-07-15), so the CAST is safe here.
-afaMaize = dbAfa.query(`
-  SELECT CAST("Year" AS INT) AS year, "Value" AS value
-  FROM afa_production
-  WHERE ${normExpr("County")} = '${countyNorm(county)}'
-    AND Crop = 'Dry Maize' AND Metric = 'Production'
-  ORDER BY year`)
-
-// KNBS NAPR maize (same crop, other agency) — the toggle's second source
+// County maize trend (KNBS NAPR). AFA reports the same figures (folded into the
+// NAPR — 233/234 county-years matched exactly), so we serve KNBS only; AFA's one
+// unique crop (Rice) is folded into the produce set instead. See afa_rice_build.py.
 knbsMaize = dbNapr.query(`
   SELECT year, production_t AS value FROM napr
   WHERE ${normExpr("county")} = '${countyNorm(county)}' AND crop = 'Maize'
     AND production_t IS NOT NULL ORDER BY year`)
-
-maizeData = maizeSource.startsWith("KNBS") ? knbsMaize : afaMaize
 ```
 
 ```{ojs}
@@ -1683,13 +1653,29 @@ ndviDomain = {
 
 ```{ojs}
 // ---- KNBS NAPR county production + livestock + products (Key Facts multi-view) ----
-dbNapr = DuckDBClient.of({napr: FileAttachment("/data/KE-enso-explorer/knbs_napr_county_production.parquet")})
+dbNapr = DuckDBClient.of({
+  napr: FileAttachment("/data/KE-enso-explorer/knbs_napr_county_production.parquet"),
+  afa_rice: FileAttachment("/data/KE-enso-explorer/afa_rice.parquet"),
+})
 dbLive = DuckDBClient.of({live: FileAttachment("/data/KE-enso-explorer/knbs_napr_livestock.parquet")})
 dbProd = DuckDBClient.of({prod: FileAttachment("/data/KE-enso-explorer/knbs_napr_livestock_products.parquet")})
 
 // all three sources normalized to {item, year, val, pdf_page}
-naprCty = dbNapr.query(`SELECT crop AS item, year, production_t AS val, pdf_page FROM napr WHERE ${normExpr("county")} = '${countyNorm(county)}' AND production_t IS NOT NULL ORDER BY item, year`)
-naprNatl = dbNapr.query(`SELECT crop AS item, year, SUM(production_t) AS natl FROM napr GROUP BY crop, year`)
+// KNBS NAPR crops + AFA Rice (the one crop KNBS county tables lack) folded in
+naprCty = dbNapr.query(`
+  SELECT item, year, val, pdf_page FROM (
+    SELECT crop AS item, county, year, production_t AS val, pdf_page FROM napr
+    UNION ALL
+    SELECT crop AS item, county, year, production_t AS val, pdf_page FROM afa_rice
+  ) t
+  WHERE ${normExpr("county")} = '${countyNorm(county)}' AND val IS NOT NULL
+  ORDER BY item, year`)
+naprNatl = dbNapr.query(`
+  SELECT item, year, SUM(val) AS natl FROM (
+    SELECT crop AS item, year, production_t AS val FROM napr
+    UNION ALL
+    SELECT crop AS item, year, production_t AS val FROM afa_rice
+  ) t GROUP BY item, year`)
 liveCty = dbLive.query(`SELECT species AS item, year, head AS val, pdf_page FROM live WHERE ${normExpr("county")} = '${countyNorm(county)}' ORDER BY item, year`)
 liveNatl = dbLive.query(`SELECT species AS item, year, SUM(head) AS natl FROM live GROUP BY species, year`)
 // products: value (KSh) is the cross-product comparable (quantity units differ)
