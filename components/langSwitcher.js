@@ -32,16 +32,14 @@ function initialLang() {
   return LANGS.some((l) => l.key === docLang) ? docLang : LANGS[0].key;
 }
 
-function setLang(key, buttons) {
+function setLang(key, select) {
   window.atlasLang = key;
   document.documentElement.lang = key;
   const url = new URL(location);
   if (key === LANGS[0].key) url.searchParams.delete("lang");
   else url.searchParams.set("lang", key);
   history.replaceState(null, "", url);
-  for (const b of buttons) {
-    b.setAttribute("aria-pressed", String(b.dataset.lang === key));
-  }
+  if (select) select.value = key;
   window.dispatchEvent(new CustomEvent("atlas:lang", { detail: key }));
 }
 
@@ -51,29 +49,37 @@ function init() {
 
   const style = document.createElement("style");
   style.textContent = `
-    #nav-lang-selector { display: flex; align-items: center; gap: 0.25rem; margin-left: 10px; }
-    #nav-lang-selector button { background: none; border: none; padding: 0.25rem 0.4rem; cursor: pointer; font: inherit; color: inherit; opacity: 0.6; }
-    #nav-lang-selector button[aria-pressed="true"] { opacity: 1; font-weight: 600; text-decoration: underline; }
+    #nav-lang-selector {
+      margin-left: 10px;
+      font: inherit;
+      color: #000;
+      background: transparent;
+      border: none;
+      padding: 0.15rem 0.3rem;
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+    #nav-lang-selector:hover,
+    #nav-lang-selector:focus-visible {
+      color: var(--atlas-color-primary, #2e7636);
+    }
+    #nav-lang-selector option { color: initial; }
   `;
   document.head.appendChild(style);
 
-  const wrap = document.createElement("div");
-  wrap.id = "nav-lang-selector";
-  wrap.setAttribute("role", "group");
-  wrap.setAttribute("aria-label", "Language");
+  const select = document.createElement("select");
+  select.id = "nav-lang-selector";
+  select.setAttribute("aria-label", "Language");
+  for (const lang of LANGS) {
+    const opt = document.createElement("option");
+    opt.value = lang.key;
+    opt.textContent = lang.label;
+    select.appendChild(opt);
+  }
+  select.addEventListener("change", () => setLang(select.value, select));
 
-  const buttons = LANGS.map((lang) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.dataset.lang = lang.key;
-    b.textContent = lang.label;
-    b.addEventListener("click", () => setLang(lang.key, buttons));
-    wrap.appendChild(b);
-    return b;
-  });
-
-  navEnd.parentNode.appendChild(wrap);
-  setLang(initialLang(), buttons);
+  navEnd.parentNode.appendChild(select);
+  setLang(initialLang(), select);
 }
 
 if (document.readyState === "loading") {
