@@ -14,21 +14,11 @@ Employment shares by sex come from the FAOSTAT [Gender in Agrifood Systems domai
 
 ### Adaptive Capacity Indicators
 
-The sex-disaggregated adaptive-capacity indicators also come from the FAOSTAT [Gender in Agrifood Systems domain](https://www.fao.org/faostat/en/#data/SXS): rural adult literacy (UNESCO), secure rights over agricultural land (SDG 5.a.1), bank account ownership and payments received for agricultural sales (World Bank Global Findex), formal employment in agrifood systems (ILO), internet use, and food security. All are shares of people of each sex, shown for each country's latest available year, and oriented so that higher values indicate greater ability to adapt — food security is expressed as the share of people who are *not* moderately or severely food insecure (inverse of SDG 2.1.2 prevalence).
+The sex-disaggregated adaptive-capacity indicators also come from the FAOSTAT [Gender in Agrifood Systems domain](https://www.fao.org/faostat/en/#data/SXS): rural primary-school completion (UNESCO), secure rights over agricultural land (SDG 5.a.1), bank account ownership and payments received for agricultural sales (World Bank Global Findex), formal employment in agrifood systems (ILO), internet use, and food security. All are shares of people of each sex, shown for each country's latest available year, and oriented so that higher values indicate greater ability to adapt — food security is expressed as the share of people who are *not* moderately or severely food insecure (inverse of SDG 2.1.2 prevalence).
 
-### Heat Stress for Human, Crops, and Livestock
+### Human Heat Stress (WBGT)
 
-The Heat Stress Data is a subset of a [climate hazard dataset](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/hazard_catalog/hazard_timeseries_mean_annual/hazard_timeseries_mean_pq_annual/hazard_timeseries_mean_pq_annual.json?.language=fr), detailed [here](https://observablehq.com/d/d8c0692154e6c87e?collection=@adaptationatlas/data-spotlights#methods-sources), which includes climate hazard averages for each administrative boundary, across the SSPs and time periods. Historical heat stress refers to the period 1995-2014 (aligned with IPCC AR 6), while future heat stress utilizes the CMIP 6 ensemble average for the 2050s (2041-2060).
-
-- **Human heat stress** is based on heat index equations from Steadman ([1979a](https://doi.org/10.1175/1520-0450%281979%29018%3C0861:TAOSPI%3E2.0.CO;2); [1979b](https://doi.org/10.1175/1520-0450%281979%29018%3C0874:TAOSPI%3E2.0.CO;2)) and uses a combination of **mean** air temperature (dry-bulb) and relative humidity.
-- **Crop heat stress** is based on heat stress for maize. It is defined as the number of days with daily **maximum** temperatures (dry-bulb) above a given threshold of 35ºC during the flowering period. The growing season is based on the maize crop calendar from  [Sacks et al. (2010)](https://sage.nelson.wisc.edu/data-and-models/datasets/crop-calendar-dataset/). 
-- **Livestock heat stress** is calculated using the Thermal Humidity Index for cattle from [Rahimi et al. (2020)](https://doi.org/10.1007/s10584-020-02733-2). It uses the **maximum** air temperature (dry-bulb) and relative humidity.
-
-More details and the equations used can be found [here](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions).
-
-### Female Well-being and Empowerment data
-
-The [Female Empowerment Index](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/adaptive-capacity/women-and-gender/female-empowerment/collection.json) combines data on domestic violence, employment, reproductive healthcare, decision-making power, and family planning. The index, and the variables it is derived from, are from [Rettig, Erica (2022)](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/8GJKYW) and are build using data from [DHS Program](https://dhsprogram.com). The individual variables and the Empowerment Index are based on the 2015 calculations. All of these have been normalized between 0 and 1, where 0 represents lowest empowerment and 1 represents highest empowerment
+Human heat stress is measured as the number of days per year on which the wet-bulb globe temperature (WBGT), a heat index that combines temperature and humidity, exceeds 28°C or 30°C, two standard occupational heat-risk thresholds. The data are global 0.05° rasters covering a historic baseline (2000s) and the 2030s and 2050s under the SSP2-4.5 (medium emissions) and SSP5-8.5 (high emissions) scenarios. Source: [Ormaza Zulueta, N. and Mehrabi, Z. (2025). Reductions in the future agricultural workday due to climate change. Research Square preprint](https://doi.org/10.21203/rs.3.rs-5983106/v1); dataset on [Zenodo](https://doi.org/10.5281/zenodo.14853836).
 
 ### Number of Women Involved In Agriculture
 
@@ -41,31 +31,21 @@ The solution data is based on a systematic review of adaptation solutions and ev
 
 ### Climate-Agriculture-Gender Hotspot Index
 
-The hotspot index comes from an IFPRI analysis covering 87 countries, built on the IPCC risk framework. It combines the share of rural population likely to face specific climate hazard types (CGIAR Research Program on Climate Change, Agriculture and Food Security), women's exposure measured from labor participation and hours worked in agriculture (Labor Force Survey data), and women's vulnerability proxied by five discriminatory social institutions from the Social Institutions and Gender Index (SIGI) 2014. Principal component analysis is used to construct an ordinal hotspot index from these indicators. Ranks shown in this notebook are recomputed across the African countries included; the original global rank (out of 87 countries) is included in the data download. TODO: add the full citation and link.
+The hotspot index comes from an IFPRI analysis covering 87 countries, built on the IPCC risk framework. It combines the share of rural population likely to face specific climate hazard types (CGIAR Research Program on Climate Change, Agriculture and Food Security), women's exposure measured from labor participation and hours worked in agriculture (Labor Force Survey data), and women's vulnerability proxied by five discriminatory social institutions from the Social Institutions and Gender Index (SIGI) 2014. Principal component analysis is used to construct an ordinal hotspot index from these indicators. Ranks shown in this notebook are recomputed across the African countries included; the original global rank (out of 87 countries) is included in the data download. Source: [Lecoutere, E., Mishra, A., Singaraju, N., Koo, J., Azzarri, C., Chanana, N., Nico, G. and Puskur, R. (2023). Where women in agri-food systems are at highest climate risk: a methodology for mapping climate–agriculture–gender inequality hotspots. *Frontiers in Sustainable Food Systems*, 7, 1197809](https://doi.org/10.3389/fsufs.2023.1197809).
 
 ### Boundaries
 
-[Administrative areas](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/boundary_catalog/geoBoundaries_SSA/collection.json) used in this notebook come from [geoBoundaries 6.0.0](https://github.com/wmgeolab/geoBoundaries). The gbHumanitarian boundaries are used and if not available then the gbOpen boundaries are substituted.
+Administrative areas used in this notebook come from the Adaptation Atlas boundary dataset, derived from the FAO Global Administrative Unit Layers (GAUL) 2024 with Atlas-specific modifications so that countries are shown as they represent themselves.
 
 ## Methods
 
 ### Number of Women in Agriculture
 
-The female population data was multiplied by the estimated percentage of women involved with agriculture for each respective region. We then extracted this data by admin 1 boundaries to create the final dataset showing the total number of women working in agriculture within each country and admin 1 region.
+The share of women working in agriculture per admin 1 region is the female-population-weighted mean of the combined LivWell/ILO layer. Multiplying the female population raster by this share and summing per region gives the total number of women working in agriculture in each country and admin 1 region.
 
 ### Heat Stress and Gender Hot Spots
 
-Human, crop, and livestock heat stress and the female empowerment datasets were extracted to admin boundaries to get the average value for each region. Following this, we classified the heat stress data according to the following severity thresholds:
-
-| Category | Low Threshold | Moderate Threshold | High Threshold |
-|---|---|---|---|
-| Human | <27 | 27-41 | >41 |
-| Crop | <9 | 9-25 | >25 |
-| Livestock | <72| 72-90 | >90 |
-
-The number of Women involved in agriculture, along with the female empowerment and well-being variables were classified according to the tertile distribution of the datasets. 
-
-We then overlaid these two classified datasets to highlight regions of high heat stress and high numbers of women involved in agriculture and areas with high heat stress and low female empowerment and well-being.
+The WBGT heat-stress rasters and the women-in-agriculture layer were summarized to admin 1 boundaries: heat stress as the area mean, and the share of women working in agriculture as the female-population-weighted mean. Each was then classified into three levels using fixed breaks: heat stress at **30 and 90 days per year** above the selected WBGT threshold (roughly, more than a month and more than a quarter of the year), and women's participation at **20% and 50%**. The same breaks apply to every time period, scenario, and WBGT threshold, so map colors are directly comparable across selections. Overlaying the two classifications gives the nine bivariate map classes, highlighting regions where high heat stress coincides with high female participation in agriculture.
 
 ### Adaptation Solutions
 
@@ -78,3 +58,7 @@ The solutions data was subset by studies that were focused on agriculture and lo
 - Livelihood diversification
 
 The adaptation category, intervention, gender outcome score (SDG 5 score), geography, risk, and degree of agreement from each of these studies was extracted for inclusion in the table.
+
+### A Note on the Data
+
+Most employment figures in this notebook come from labour force surveys and ILO models. These are known to undercount informal and unpaid farm work, which falls mostly to women, so women's actual agricultural labour is likely higher than the numbers shown here. The source data are disaggregated by sex (female and male); we use them to describe gender roles in agriculture, which the underlying surveys can only partly capture. National averages also hide differences between regions, age groups, and income levels.

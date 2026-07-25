@@ -84,15 +84,15 @@ afsEmploymentChart = {
       const m = sexes.get("M")?.[0];
       if (!f || !m) return [];
       return [
-        { country: countryNameN(f), segment: t.segments.onFarm, pct: +(f.pctAgr - m.pctAgr).toFixed(1) },
-        { country: countryNameN(f), segment: t.segments.offFarm, pct: +(f.pctOffFarm - m.pctOffFarm).toFixed(1) },
+        { country: countryNameN(f.iso3n, f.area), segment: t.segments.onFarm, pct: +(f.pctAgr - m.pctAgr).toFixed(1) },
+        { country: countryNameN(f.iso3n, f.area), segment: t.segments.offFarm, pct: +(f.pctOffFarm - m.pctOffFarm).toFixed(1) },
       ];
     });
   } else {
     const rows = afsEmployment.filter((d) => d.sex === afsSex);
     long = rows.flatMap((d) => [
-      { country: countryNameN(d), segment: t.segments.onFarm, pct: d.pctAgr, empl: d.emplAgrK },
-      { country: countryNameN(d), segment: t.segments.offFarm, pct: d.pctOffFarm, empl: d.emplOffFarmK },
+      { country: countryNameN(d.iso3n, d.area), segment: t.segments.onFarm, pct: d.pctAgr, empl: d.emplAgrK },
+      { country: countryNameN(d.iso3n, d.area), segment: t.segments.offFarm, pct: d.pctOffFarm, empl: d.emplOffFarmK },
     ]);
   }
   return Plot.plot({
@@ -225,7 +225,7 @@ biVarMap = {
     channels: {
       region: {
         label: " ",
-        value: (d) => `${d.properties.admin1_name} — ${countryName(d.properties.iso3)}`,
+        value: (d) => `${d.properties.admin1_name} — ${countryNameN(d.properties.iso3n)}`,
       },
       heat: { label: heatTooltip, value: (d) => d.properties.data?.value },
       women: {
@@ -279,7 +279,7 @@ hotspotMap = makeChoropleth({
   channels: {
     country: {
       label: " ",
-      value: (d) => countryName(d.properties.iso3),
+      value: (d) => countryNameN(d.properties.iso3n),
     },
     rank: {
       label: nbText.GlobalHotspots.rankLabel,
@@ -351,7 +351,7 @@ adaptiveCapacityChart = {
     caption: t.caption,
   });
   return htl.html`<div>
-    <h4 style="margin:0 0 0.25rem;">${countryNameN({ iso3n: capCountry, area: "" })}</h4>
+    <h4 style="margin:0 0 0.25rem;">${countryNameN(capCountry)}</h4>
     ${plot}
   </div>`;
 }
@@ -413,7 +413,7 @@ adaptiveCapacityMap = {
       ? { type: "linear", scheme: "RdBu", domain: [-maxGap, maxGap], unknown: "#e0e0e0", label: t.map.legendGap }
       : { type: "linear", scheme: "YlGnBu", domain: [0, 100], unknown: "#e0e0e0", label: `${t.indicators[indicator]} (%)` },
     channels: {
-      country: { label: " ", value: (d) => countryName(d.properties.iso3) },
+      country: { label: " ", value: (d) => countryNameN(d.properties.iso3n) },
       women: { label: t.sexes.F, value: (d) => d.properties.data?.F },
       men: { label: t.sexes.M, value: (d) => d.properties.data?.M },
     },
@@ -576,28 +576,25 @@ hotspotFeatures = mergeDataToBoundaries({
   dataKey: "iso3",
 })
 
-// Localized country names come from the boundary properties (un_a0_en/fr).
-countryNames = new Map(
-  africaA0.features.map((f) => [
-    f.properties.iso3,
-    { en: f.properties.un_a0_en, fr: f.properties.un_a0_fr },
-  ]),
-)
+// Localized country names, keyed by UN M49 numeric code (`iso3n`, present on
+// both the boundaries and the FAOSTAT rows). Prefers the shared translations
+// file, falls back to the boundary names.
+countryNamesByN = {
+  const atlas = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const byIso3 = new Map(atlas.map((r) => [r.iso3c, r.translation]));
+  return new Map(
+    africaA0.features.map((f) => {
+      const tr = byIso3.get(f.properties.iso3) ?? {};
+      return [f.properties.iso3n, {
+        en: tr.en ?? f.properties.un_a0_en,
+        fr: tr.fr ?? f.properties.un_a0_fr,
+      }];
+    }),
+  );
+}
 
-countryName = (iso3) =>
-  countryNames.get(iso3)?.[language.key] ?? countryNames.get(iso3)?.en ?? iso3
-
-// Same, keyed by UN M49 numeric code (`iso3n`) for FAOSTAT rows; falls back
-// to the FAOSTAT area name for countries not on the atlas boundaries.
-countryNamesByN = new Map(
-  africaA0.features.map((f) => [
-    f.properties.iso3n,
-    { en: f.properties.un_a0_en, fr: f.properties.un_a0_fr },
-  ]),
-)
-
-countryNameN = (d) =>
-  countryNamesByN.get(d.iso3n)?.[language.key] ?? countryNamesByN.get(d.iso3n)?.en ?? d.area
+countryNameN = (iso3n, fallback = "") =>
+  countryNamesByN.get(iso3n)?.[language.key] ?? countryNamesByN.get(iso3n)?.en ?? fallback
 
 // Keys double as the field names in hotspotData.
 hotspotIndicators = nbText.GlobalHotspots.indicators
@@ -642,22 +639,8 @@ adaptiveCapacity = {
   return hypq.parquetQuery({ file: buf });
 }
 
-// Localized country names for the FAOSTAT data, preferring the shared
-// translations file; boundary names are the fallback.
-atlasCountryNames = {
-  const rows = await FileAttachment("/data/shared/atlas_countries.json").json();
-  return new Map(rows.map((r) => [r.iso3c, r.translation]));
-}
-
-nToIso3 = new Map(
-  africaA0.features.map((f) => [f.properties.iso3n, f.properties.iso3]),
-)
-
 capCountryNames = new Map(
-  adaptiveCapacity.map((d) => {
-    const tr = atlasCountryNames.get(nToIso3.get(d.iso3n));
-    return [d.iso3n, tr?.[language.key] ?? tr?.en ?? countryNameN(d)];
-  }),
+  adaptiveCapacity.map((d) => [d.iso3n, countryNameN(d.iso3n, d.area)]),
 )
 
 // Gender outcomes of adaptation solutions: 24 coded studies on African
@@ -691,11 +674,10 @@ biVarRows = {
       d.scenario === scen &&
       d.threshold === heatThreshold
     )
-    .map((d) => ({
-      ...d,
-      pct_women_agri: womenByGaul1.get(d.gaul1_code)?.pct_women_agri ?? null,
-      women_agri_count: womenByGaul1.get(d.gaul1_code)?.women_agri_count ?? null,
-    }));
+    .map((d) => {
+      const w = womenByGaul1.get(d.gaul1_code);
+      return { ...d, pct_women_agri: w?.pct_women_agri ?? null, women_agri_count: w?.women_agri_count ?? null };
+    });
 }
 
 biVarFeatures = mergeDataToBoundaries({
@@ -705,27 +687,12 @@ biVarFeatures = mergeDataToBoundaries({
   dataKey: "gaul1_code",
 })
 
-// Class breaks: heat tertiles come from the HISTORIC distribution for the
-// selected threshold and stay fixed across timeframe/scenario, so colors are
-// comparable over time; women tertiles span all admin1 units.
-heatTertile = {
-  const vals = wbgtData
-    .filter((d) =>
-      d.admin1_name != null &&
-      d.timeframe === "historic" &&
-      d.threshold === heatThreshold &&
-      Number.isFinite(d.value)
-    )
-    .map((d) => d.value);
-  return d3.scaleQuantile(vals, d3.range(3));
-}
+// Fixed class breaks, identical for every WBGT threshold, timeframe, and
+// scenario so colors compare directly across selections: heat = 30/90 days
+// per year (about a month / a quarter of the year), women = 20/50%.
+heatClass = d3.scaleThreshold([30, 90], d3.range(3))
 
-womenTertile = {
-  const vals = womenAgriData
-    .filter((d) => d.admin1_name != null && Number.isFinite(d.pct_women_agri))
-    .map((d) => d.pct_women_agri);
-  return d3.scaleQuantile(vals, d3.range(3));
-}
+womenClass = d3.scaleThreshold([20, 50], d3.range(3))
 
 // 3x3 bivariate ramp from the previous notebook version (women axis = rows,
 // heat axis = columns; index 0 = both low, 8 = both high).
@@ -735,7 +702,7 @@ biVarColor = (row) => {
   if (!row || !Number.isFinite(row.value) || !Number.isFinite(row.pct_women_agri)) {
     return "#e0e0e0";
   }
-  return biVarPalette[womenTertile(row.pct_women_agri) * 3 + heatTertile(row.value)];
+  return biVarPalette[womenClass(row.pct_women_agri) * 3 + heatClass(row.value)];
 }
 
 // makeBivariateLegend expects colors keyed "<x> × <y>" (x = women, y = heat).

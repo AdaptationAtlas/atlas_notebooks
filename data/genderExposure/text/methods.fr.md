@@ -14,21 +14,11 @@ Les parts d'emploi par sexe proviennent du domaine [Genre dans les systèmes agr
 
 ### Indicateurs de capacité d'adaptation
 
-Les indicateurs de capacité d'adaptation désagrégés par sexe proviennent également du domaine [Genre dans les systèmes agroalimentaires](https://www.fao.org/faostat/en/#data/SXS) de FAOSTAT : alphabétisation des adultes en milieu rural (UNESCO), droits fonciers agricoles sûrs (ODD 5.a.1), possession d'un compte bancaire et paiements reçus pour des ventes agricoles (Global Findex de la Banque mondiale), emploi formel dans les systèmes agroalimentaires (OIT), utilisation d'Internet et sécurité alimentaire. Tous sont des parts de personnes de chaque sexe, présentés pour la dernière année disponible de chaque pays, et orientés de sorte que des valeurs plus élevées indiquent une plus grande capacité d'adaptation — la sécurité alimentaire est exprimée comme la part des personnes qui ne sont *pas* en insécurité alimentaire modérée ou grave (inverse de la prévalence ODD 2.1.2).
+Les indicateurs de capacité d'adaptation désagrégés par sexe proviennent également du domaine [Genre dans les systèmes agroalimentaires](https://www.fao.org/faostat/en/#data/SXS) de FAOSTAT : achèvement de l'enseignement primaire en milieu rural (UNESCO), droits fonciers agricoles sûrs (ODD 5.a.1), possession d'un compte bancaire et paiements reçus pour des ventes agricoles (Global Findex de la Banque mondiale), emploi formel dans les systèmes agroalimentaires (OIT), utilisation d'Internet et sécurité alimentaire. Tous sont des parts de personnes de chaque sexe, présentés pour la dernière année disponible de chaque pays, et orientés de sorte que des valeurs plus élevées indiquent une plus grande capacité d'adaptation — la sécurité alimentaire est exprimée comme la part des personnes qui ne sont *pas* en insécurité alimentaire modérée ou grave (inverse de la prévalence ODD 2.1.2).
 
-### Stress thermique pour les humains, les cultures et le bétail
+### Stress thermique humain (WBGT)
 
-Les données sur le stress thermique sont un sous-ensemble d'un jeu [de données sur les aléas climatiques](https://observablehq.com/d/d8c0692154e6c87e?collection=@adaptationatlas/data-spotlights#methods-sources), détaillé [ici](https://observablehq.com/d/d8c0692154e6c87e?collection=@adaptationatlas/data-spotlights#methods-sources), qui comprend les moyennes des aléas climatiques pour chaque limite administrative, à travers les SSP (Shared Socioeconomic Pathways) et les périodes temporelles. Le stress thermique historique se réfère à la période 1995-2014 (alignée avec le rapport AR6 du GIEC), tandis que le stress thermique futur utilise la moyenne de l'ensemble CMIP6 pour les années 2050 (2041-2060).
-
-- **Le stress thermique humain** est basé sur les équations de l'indice de chaleur de Steadman ([1979a](https://doi.org/10.1175/1520-0450%281979%29018%3C0861:TAOSPI%3E2.0.CO;2); [1979b](https://doi.org/10.1175/1520-0450%281979%29018%3C0874:TAOSPI%3E2.0.CO;2)) et utilise une combinaison de la température **moyenne** de l'air (à bulbe sec) et de l'humidité relative. 
-- **Le stress thermique des cultures** est basé sur le stress thermique pour le maïs. Il est défini comme le nombre de jours avec des températures **maximales** quotidiennes (à bulbe sec) supérieures à un seuil donné de 35ºC pendant la période de floraison. La saison de croissance est basée sur le calendrier des cultures de maïs de [Sacks et al. (2010)](https://sage.nelson.wisc.edu/data-and-models/datasets/crop-calendar-dataset/).
-- Le stress thermique du bétail est calculé en utilisant l'indice thermique d'humidité pour le bétail de [Rahimi et al. (2020)](https://doi.org/10.1007/s10584-020-02733-2). Il utilise la température **maximale** de l'air (à bulbe sec) et l'humidité relative.
-
-Plus de détails et les équations utilisées peuvent être trouvés [ici](https://github.com/AdaptationAtlas/hazards/wiki/Hazards-definitions).
-
-### Données sur le bien-être et l'autonomisation des femmes
-
-[L'Indice d'Autonomisation des Femmes](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/adaptive-capacity/women-and-gender/female-empowerment/collection.json?.language=fr) combine des données sur la violence domestique, l'emploi, les soins de santé reproductive, le pouvoir de décision et la planification familiale. L'indice, et les variables dont il est dérivé, proviennent de [Rettig, Erica (2022)](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/8GJKYW) et sont construits à partir des données du [programme DHS](https://dhsprogram.com). Les variables individuelles et l'Indice d'Autonomisation sont basés sur les calculs de 2015. Tous ces éléments ont été normalisés entre 0 et 1, où 0 représente le plus faible niveau d'autonomisation et 1 le plus élevé.
+Le stress thermique humain est mesuré comme le nombre de jours par an où la température au thermomètre-globe mouillé (WBGT), un indice de chaleur qui combine température et humidité, dépasse 28°C ou 30°C, deux seuils standards de risque thermique au travail. Les données sont des rasters mondiaux à 0,05° couvrant une base historique (années 2000) ainsi que les années 2030 et 2050 selon les scénarios SSP2-4.5 (émissions moyennes) et SSP5-8.5 (émissions élevées). Source : [Ormaza Zulueta, N. et Mehrabi, Z. (2025). Reductions in the future agricultural workday due to climate change. Préimpression Research Square](https://doi.org/10.21203/rs.3.rs-5983106/v1); jeu de données sur [Zenodo](https://doi.org/10.5281/zenodo.14853836).
 
 ### Nombre de femmes impliquées dans l'agriculture
 
@@ -41,31 +31,21 @@ Les données sur les solutions sont basées sur une revue systématique des solu
 
 ### Indice des points chauds climat-agriculture-genre
 
-L'indice des points chauds provient d'une analyse de l'IFPRI couvrant 87 pays, fondée sur le cadre d'analyse des risques du GIEC. Il combine la part de la population rurale susceptible de faire face à des types spécifiques d'aléas climatiques (programme de recherche du CGIAR sur le changement climatique, l'agriculture et la sécurité alimentaire), l'exposition des femmes mesurée par leur participation au travail et les heures travaillées dans l'agriculture (données des enquêtes sur la main-d'œuvre), et la vulnérabilité des femmes approchée par cinq institutions sociales discriminatoires de l'indice SIGI 2014. Une analyse en composantes principales est utilisée pour construire un indice ordinal des points chauds à partir de ces indicateurs. Les rangs affichés dans ce notebook sont recalculés parmi les pays africains inclus; le rang mondial d'origine (sur 87 pays) figure dans le téléchargement des données. TODO: ajouter la référence complète et le lien.
+L'indice des points chauds provient d'une analyse de l'IFPRI couvrant 87 pays, fondée sur le cadre d'analyse des risques du GIEC. Il combine la part de la population rurale susceptible de faire face à des types spécifiques d'aléas climatiques (programme de recherche du CGIAR sur le changement climatique, l'agriculture et la sécurité alimentaire), l'exposition des femmes mesurée par leur participation au travail et les heures travaillées dans l'agriculture (données des enquêtes sur la main-d'œuvre), et la vulnérabilité des femmes approchée par cinq institutions sociales discriminatoires de l'indice SIGI 2014. Une analyse en composantes principales est utilisée pour construire un indice ordinal des points chauds à partir de ces indicateurs. Les rangs affichés dans ce notebook sont recalculés parmi les pays africains inclus; le rang mondial d'origine (sur 87 pays) figure dans le téléchargement des données. Source : [Lecoutere, E., Mishra, A., Singaraju, N., Koo, J., Azzarri, C., Chanana, N., Nico, G. et Puskur, R. (2023). Where women in agri-food systems are at highest climate risk: a methodology for mapping climate–agriculture–gender inequality hotspots. *Frontiers in Sustainable Food Systems*, 7, 1197809](https://doi.org/10.3389/fsufs.2023.1197809).
 
 ### Délimitations
 
-[Les zones administratives](https://radiantearth.github.io/stac-browser/#/external/digital-atlas.s3.amazonaws.com/stac/public_stac/boundary_catalog/geoBoundaries_SSA/collection.json?.language=fr) utilisées dans ce notebook proviennent de [geoBoundaries 6.0.0](https://github.com/wmgeolab/geoBoundaries). Les frontières gbHumanitarian sont utilisées et, si elles ne sont pas disponibles, les frontières gbOpen sont substituées.
+Les zones administratives utilisées dans ce notebook proviennent du jeu de données de délimitations de l'Adaptation Atlas, dérivé des couches administratives mondiales (GAUL) 2024 de la FAO, avec des modifications propres à l'Atlas afin que les pays soient représentés tels qu'ils se représentent eux-mêmes.
 
 ## Méthodologie
 
 ### Nombre de femmes dans l'agriculture
 
-Les données sur la population féminine ont été multipliées par le pourcentage estimé de femmes impliquées dans l'agriculture pour chaque région respective. Nous avons ensuite extrait ces données par limites administratives de niveau 1 pour créer le jeu de données final montrant le nombre total de femmes travaillant dans l'agriculture dans chaque pays et région administrative de niveau 1.
+La part des femmes travaillant dans l'agriculture par région administrative de niveau 1 est la moyenne pondérée par la population féminine de la couche combinée LivWell/OIT. En multipliant le raster de population féminine par cette part puis en sommant par région, on obtient le nombre total de femmes travaillant dans l'agriculture dans chaque pays et région administrative de niveau 1.
 
 ### Stress thermique et zones critiques genrées
 
-Le stress thermique pour les humains, les cultures et le bétail, ainsi que les jeux de données sur l'autonomisation des femmes, ont été extraits aux limites administratives pour obtenir la valeur moyenne de chaque région. Ensuite, nous avons classé les données sur le stress thermique selon les seuils de gravité suivants:
-
-| Catégorie | Seuil faible | Seuil modéré	 | Seuil élevé |
-|---|---|---|---|
-| Humain | <27 | 27-41 | >41 |
-| Culture | <9 | 9-25 | >25 |
-| Bétail | <72| 72-90 | >90 |
-
-Le nombre de femmes impliquées dans l'agriculture, ainsi que les variables d'autonomisation et de bien-être des femmes, ont été classés selon la distribution en tertiles des jeux de données.
-
-Nous avons ensuite superposé ces deux jeux de données classifiés pour mettre en évidence les régions de fort stress thermique et de fort nombre de femmes impliquées dans l'agriculture, ainsi que les zones de fort stress thermique et de faible autonomisation et bien-être des femmes.
+Les rasters de stress thermique WBGT et la couche des femmes dans l'agriculture ont été résumés aux limites administratives de niveau 1 : le stress thermique comme moyenne de surface, et la part des femmes travaillant dans l'agriculture comme moyenne pondérée par la population féminine. Chacun a ensuite été classé en trois niveaux selon des seuils fixes : le stress thermique à **30 et 90 jours par an** au-dessus du seuil WBGT sélectionné (environ plus d'un mois et plus d'un quart de l'année), et la participation des femmes à **20 % et 50 %**. Les mêmes seuils s'appliquent à toutes les périodes, à tous les scénarios et aux deux seuils WBGT, de sorte que les couleurs de la carte sont directement comparables d'une sélection à l'autre. La superposition des deux classifications donne les neuf classes bivariées de la carte, mettant en évidence les régions où un fort stress thermique coïncide avec une forte participation des femmes à l'agriculture.
 
 ### Solutions d'adaptation
 
@@ -78,3 +58,7 @@ Les données sur les solutions ont été extraites d'études centrées sur l'agr
 - Diversification des moyens de subsistance
 
 La catégorie d'adaptation, l'intervention, le score de résultat en matière de genre (score ODD 5), la géographie, le risque et le degré d'accord de chacune de ces études ont été extraits pour inclusion dans le tableau.
+
+### Remarque sur les données
+
+La plupart des chiffres d'emploi de ce notebook proviennent d'enquêtes sur la main-d'œuvre et de modèles de l'OIT. Ces sources sous-estiment le travail agricole informel et non rémunéré, qui revient surtout aux femmes; le travail agricole réel des femmes est donc probablement plus élevé que les chiffres présentés ici. Les données sources sont désagrégées par sexe (femmes et hommes); nous les utilisons pour décrire les rôles de genre dans l'agriculture, que les enquêtes sous-jacentes ne peuvent saisir que partiellement. Les moyennes nationales masquent aussi des différences entre régions, groupes d'âge et niveaux de revenu.
