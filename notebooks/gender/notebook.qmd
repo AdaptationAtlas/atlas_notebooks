@@ -152,30 +152,48 @@ downloadCsvButton(afsEmployment, {
 {{< prose women-dominate level=2 >}}
 
 ```{ojs}
+// Heatmap marks with marginal averages: the cell grid, plus an "Average" row
+// (mean down each column), an "Average" column (mean across each row), and a
+// grand-mean corner — with the mean values labelled in bold. `x`/`y`/`v` map a
+// row to its column label, row label, and value; `avg` is the "Average" tick.
+heatmapMeanMarks = (rows, { x, y, v, avg, textThreshold = 50 }) => {
+  const cells = rows.map((d) => ({ x: x(d), y: y(d), v: v(d) }));
+  const mean = (subset) => (subset.length ? Math.round(d3.mean(subset, (c) => c.v) * 10) / 10 : null);
+  const columns = [...new Set(cells.map((c) => c.x))];
+  const countries = [...new Set(cells.map((c) => c.y))];
+  const means = [
+    ...columns.map((xv) => ({ x: xv, y: avg, v: mean(cells.filter((c) => c.x === xv)) })),
+    ...countries.map((yv) => ({ x: avg, y: yv, v: mean(cells.filter((c) => c.y === yv)) })),
+    { x: avg, y: avg, v: mean(cells) },
+  ].filter((c) => c.v != null);
+  return [
+    Plot.cell([...cells, ...means], { x: "x", y: "y", fill: "v", inset: 1, tip: true }),
+    Plot.text(means, {
+      x: "x", y: "y", text: (c) => c.v, fontWeight: "bold",
+      fill: (c) => (c.v >= textThreshold ? "white" : "#222"),
+    }),
+  ];
+}
+
 womenCropsChart = {
   const t = nbText.GenderedAfriAG.FemaleParticipationCrops;
+  const avg = t.average;
+  const country = (d) => nbText.General.adminNames[d.country] ?? d.country;
   const rows = cropGenderData.filter((d) => d.pctFemale != null);
-  const cropLabel = (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup;
-  const countryLabel = (d) => nbText.General.adminNames[d.country] ?? d.country;
-  const order = d3.groupSort(rows, (g) => -d3.mean(g, (d) => d.pctFemale), countryLabel);
+  const order = d3.groupSort(rows, (g) => -d3.mean(g, (d) => d.pctFemale), country);
   return Plot.plot({
     style: chartStyle,
     width: Math.min(width, 760),
-    height: 70 + order.length * 44,
+    height: 70 + (order.length + 1) * 44,
     marginLeft: 95,
     marginBottom: 55,
-    x: { label: null, domain: Object.values(t.plot.crops), tickFormat: (d) => wrapTickLabel(d, 14) },
-    y: { label: null, domain: order },
+    x: { label: null, domain: [...Object.values(t.plot.crops), avg], tickFormat: (d) => wrapTickLabel(d, 14) },
+    y: { label: null, domain: [...order, avg] },
     color: { type: "linear", range: ["#F7D732", "#216729"], legend: true, label: t.legend },
-    marks: [
-      Plot.cell(rows, {
-        x: cropLabel,
-        y: countryLabel,
-        fill: "pctFemale",
-        inset: 1,
-        tip: true,
-      }),
-    ],
+    marks: heatmapMeanMarks(rows, {
+      x: (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup,
+      y: country, v: (d) => d.pctFemale, avg, textThreshold: 45,
+    }),
     caption: t.caption,
   });
 }
@@ -186,27 +204,21 @@ womenCropsChart = {
 ```{ojs}
 womenLivestockChart = {
   const t = nbText.GenderedAfriAG.livestockControl;
-  const speciesLabel = (d) => t.species[d.species] ?? d.species;
-  const countryLabel = (d) => countryNameN(iso3ToN.get(d.iso3), d.iso3);
-  const order = d3.groupSort(livestockControl, (g) => -d3.mean(g, (d) => d.pctFemale), countryLabel);
+  const avg = t.average;
+  const country = (d) => countryNameN(iso3ToN.get(d.iso3), d.iso3);
+  const order = d3.groupSort(livestockControl, (g) => -d3.mean(g, (d) => d.pctFemale), country);
   return Plot.plot({
     style: chartStyle,
     width: Math.min(width, 640),
-    height: 70 + order.length * 32,
+    height: 70 + (order.length + 1) * 32,
     marginLeft: 110,
-    x: { label: null, domain: Object.values(t.species) },
-    y: { label: null, domain: order, tickFormat: (d) => wrapTickLabel(d, 16) },
+    x: { label: null, domain: [...Object.values(t.species), avg] },
+    y: { label: null, domain: [...order, avg], tickFormat: (d) => wrapTickLabel(d, 16) },
     color: { type: "linear", domain: [0, 100], range: ["#F7D732", "#216729"], legend: true, label: t.legend },
-    marks: [
-      Plot.cell(livestockControl, {
-        x: speciesLabel,
-        y: countryLabel,
-        fill: "pctFemale",
-        inset: 1,
-        tip: true,
-        channels: { [t.tooltip.n]: "n" },
-      }),
-    ],
+    marks: heatmapMeanMarks(livestockControl, {
+      x: (d) => t.species[d.species] ?? d.species,
+      y: country, v: (d) => d.pctFemale, avg,
+    }),
     caption: t.caption,
   });
 }
