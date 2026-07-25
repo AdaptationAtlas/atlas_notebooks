@@ -11,16 +11,26 @@
 --    reader. The block id is the filename; authors never see or edit it.
 --
 --      front matter:  nb-text-dir: data/economicReturns/text
---      marker:        ::: {.nb-prose data-section="overview"}
+--
+--    Notebooks place blocks with the {{< prose <id> >}} shortcode
+--    (scripts/build/proseShortcode.lua) — `level=N` sets the heading level,
+--    `heading=false` drops the heading for free-floating blocks. The
+--    shortcode expands to the markers this filter consumes: a heading whose
+--    {#id} matches a block file is retitled from the block's `title:` and
+--    the block body is injected right after it, wrapped in
+--    <div class="nb-prose" data-section="id">; an explicit
+--    ::: {.nb-prose data-section="id"} div is filled in place.
+--    (Shortcodes expand in Quarto's built-in pass, so _quarto.yml lists
+--    `- quarto` before this filter.)
 --
 --    Default-language prose is baked in as static HTML — crawlable and
 --    visible before the OJS runtime boots; the client-side language toggle
 --    swaps the same nodes at runtime (Lang.applyTranslations /
---    Lang.parseBlock in helpers/lang.js). Headings: developers control level
---    and placement in the .qmd; authors control the displayed text via the
---    block file's `title:`. Any heading whose {#id} matches a block file is
---    retitled from it in EVERY language (the .qmd heading text is a
---    structural fallback only).
+--    Lang.parseBlock in helpers/lang.js). Developers control heading level
+--    and placement in the .qmd; authors control the displayed text.
+--    A heading anchor that matches no block file is left alone —
+--    scripts/build/checkTranslations.ts flags block files nothing
+--    references, which catches typo'd anchors in CI.
 --
 -- 2. Docs data pages (FAQ / glossary) — structured JSON with side-by-side
 --    languages per entry. BOTH languages are baked in as lang-tagged nodes;
@@ -97,16 +107,22 @@ local function injectProse(div)
 	return div
 end
 
-local function translateHeader(el)
+local function expandHeader(el)
 	if el.identifier == "" then
 		return nil
 	end
 	local block = loadBlock(el.identifier)
-	if not block or not block.title then
+	if not block then
 		return nil
 	end
-	el.content = block.title
-	return el
+	if block.title then
+		el.content = block.title
+	end
+	if #block.body == 0 then
+		return el
+	end
+	local div = pandoc.Div(block.body, pandoc.Attr("", { "nb-prose" }, { ["data-section"] = el.identifier }))
+	return { el, div }
 end
 
 -- ---------- docs data pages ----------
@@ -218,5 +234,5 @@ end
 
 return {
 	{ Meta = getMeta },
-	{ Div = fillDiv, Header = translateHeader },
+	{ Div = fillDiv, Header = expandHeader },
 }

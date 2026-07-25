@@ -4,8 +4,10 @@
 //  - block ids (filenames) match [A-Za-z0-9_-]+
 //  - every block's front matter is exactly `---\ntitle: <non-empty scalar>\n---`
 //    (the narrow contract Lang.parseBlock relies on in the browser)
-//  - every block referenced by a .qmd (data-section="id", sections.id,
-//    sections["id"]) has a matching file
+//  - every block referenced by a .qmd ({{< prose id >}} marker, sections.id,
+//    sections["id"]) has a matching file, and every block file is referenced
+//    by something — an unreferenced block usually means a typo'd id (which
+//    would otherwise fail silently at render)
 // Usage: deno run --allow-read scripts/build/checkTranslations.ts
 
 import { expandGlob } from "https://deno.land/std@0.224.0/fs/expand_glob.ts";
@@ -59,6 +61,7 @@ for await (const f of expandGlob("data/*/text/en.json")) {
 }
 
 const blocksByDir = new Map<string, Set<string>>();
+const referencedByDir = new Map<string, Set<string>>();
 
 for (const dir of textDirs) {
   const rel = relative(Deno.cwd(), dir);
@@ -106,6 +109,7 @@ for (const dir of textDirs) {
     }
   }
   blocksByDir.set(rel, new Set(ids.keys()));
+  referencedByDir.set(rel, new Set());
 
   console.log(`${rel}: ${en.size} keys, ${ids.size} prose blocks`);
 }
@@ -122,10 +126,13 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
     continue;
   }
   const refs = new Set<string>([
-    ...[...qmd.matchAll(/data-section="([^"]+)"/g)].map((m) => m[1]),
+    // {{< prose <id> >}} markers (scripts/build/proseShortcode.lua) place
+    // blocks on the page; sections.<id> / sections["<id>"] consume them in code
+    ...[...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
     ...[...qmd.matchAll(/\bsections\.([A-Za-z0-9_]+)/g)].map((m) => m[1]),
     ...[...qmd.matchAll(/\bsections\[["']([^"']+)["']\]/g)].map((m) => m[1]),
   ]);
+  for (const id of refs) referencedByDir.get(textDir)?.add(id);
 
   // The notebook's runtime FileAttachment map (proseFiles) must cover every
   // referenced block in every locale — a missing entry passes the file checks
@@ -150,6 +157,18 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
       if (!mapped.get(id)?.has(loc)) {
         problems.push(`${rel}: proseFiles map is missing FileAttachment for '${id}' (${loc})`);
       }
+    }
+  }
+}
+
+// Unreferenced block files: usually a typo'd id in a {{< prose >}} marker
+// (a marker matching no block errors at render, but a block matching no
+// marker would otherwise go unnoticed) or dead content
+for (const [dir, ids] of blocksByDir) {
+  const referenced = referencedByDir.get(dir)!;
+  for (const id of ids) {
+    if (!referenced.has(id)) {
+      problems.push(`${dir}/${id}.*.md is referenced by no .qmd (typo'd {{< prose >}} id? dead content?)`);
     }
   }
 }
