@@ -25,6 +25,10 @@ Le stress thermique humain est mesuré comme le nombre de jours par an où la te
 - Les données sur la population féminine sont basées sur le jeu de données sur la structure par âge/sexe de WorldPop, et incluent toutes les femmes âgées de 65 ans ou moins [(WorldPop, 2016)](https://hub.worldpop.org/geodata/summary?id=1276). Ces données ont une résolution spatiale de 1 km et sont basées sur les estimations de WorldPop pour 2015.
 - Le pourcentage de femmes travaillant dans l'agriculture par limite administrative de niveau 1 est tiré du jeu de données LivWell [(Belmin et al., 2022)](https://doi.org/10.1038/s41597-022-01824-2). Dans les régions non couvertes par les données LivWell, les données à l'échelle nationale de l'estimation modélisée de l'emploi dans l'agriculture de l'ILO stat sont utilisées [(International Labour Organization, 2022)](https://ilostat.ilo.org/fr/methods/concepts-and-definitions/ilo-modelled-estimates/).
 
+### Revenu des ventes de bétail des femmes
+
+Les données sur le revenu des ventes de bétail proviennent de l'enquête Rural Household Multi-Indicator Survey ([RHoMIS](https://doi.org/10.7910/DVN/WS38SA); Gorman et al., 2024), qui couvre 53 144 ménages agricoles enquêtés entre 2015 et 2023, pour la plupart en Afrique. Pour chaque ménage ayant vendu un type de bétail donné, nous prenons la part de ce revenu attribuée aux femmes adultes et jeunes, puis nous faisons la moyenne de cette part entre les ménages du pays. Les enquêtes RHoMIS sont menées dans le cadre de projets de développement; les résultats décrivent donc les sites enquêtés plutôt que les populations nationales.
+
 ### Solutions d'adaptation et résultats en matière de genre
 
 Les données sur les solutions sont basées sur une revue systématique des solutions d'adaptation et des preuves de leurs résultats en matière de genre réalisée par [Roy, J., Prakash, A., Some, S. et al. (2022)](https://doi.org/10.1057/s41599-022-01266-6). Cette revue comprend plus de 17 000 études sur le genre et l'adaptation au climat à l'échelle mondiale.

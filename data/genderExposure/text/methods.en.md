@@ -25,6 +25,10 @@ Human heat stress is measured as the number of days per year on which the wet-bu
 - Female population data is based on the WorldPop age/sex structure dataset, and includes all females aged 65 or younger [(WorldPop, 2016)](https://hub.worldpop.org/geodata/summary?id=1276). This data has a spatial resolution of 1 km and is based on the WorldPop 2015 estimates. 
 - Percentage of women working in agriculture per admin level 1 boundary is taken from the LivWell dataset [(Belmin et al., 2022)](https://doi.org/10.1038/s41597-022-01824-2). In regions not covered by the Livwell data, country scale data from the ILO stat modeled estimate of employment in agriculture is used [(International Labour Organization, 2022)](https://ilostat.ilo.org/resources/concepts-and-definitions/ilo-modelled-estimates/).
 
+### Women's Livestock Sale Income
+
+Household data on livestock sale income come from the Rural Household Multi-Indicator Survey ([RHoMIS](https://doi.org/10.7910/DVN/WS38SA); Gorman et al., 2024), which covers 53,144 farm households surveyed between 2015 and 2023, most of them in Africa. For each household that sold a given type of livestock we take the portion of that income attributed to adult and youth women, then average this share across households in the country. RHoMIS surveys are run within development projects, so the results describe the surveyed sites rather than national populations.
+
 ### Adaptation Solutions and Gender Outcomes
 
 The solution data is based on a systematic review of adaptation solutions and evidence on their gender outcomes by [Roy, J., Prakash, A., Some, S. et al. (2022)](https://doi.org/10.1057/s41599-022-01266-6). This review is comprised of >17,000 studies on gender and climate adaptation globally.
