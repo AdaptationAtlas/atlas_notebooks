@@ -62,6 +62,42 @@ function peopleSection(heading, people) {
 }
 
 /**
+ * Resolve author/developer lists into the shape atlasContributionSection wants,
+ * assigning affiliation numbers from the orgs that actually appear.
+ *
+ * Each entry is either an id into `registry` (data/shared/contributors.json) or
+ * an inline `{name, org}` object for one-off contributors not worth registering.
+ * `org` may be a string or an array of strings; affiliations are numbered in
+ * first-appearance order.
+ *
+ * @param {{authors?: Array, developers?: Array}} groups
+ * @param {Record<string, {name: string, org?: string|string[]}>} [registry={}]
+ * @returns {{authors: Array, developers: Array, organizations: Record<number,string>}}
+ */
+export function resolveContributors(groups = {}, registry = {}) {
+  const orgNumbers = new Map();
+  const numberFor = (org) => {
+    if (!orgNumbers.has(org)) orgNumbers.set(org, orgNumbers.size + 1);
+    return orgNumbers.get(org);
+  };
+  const resolve = (list = []) =>
+    list.map((entry) => {
+      const person = typeof entry === "string" ? registry[entry] : entry;
+      if (!person?.name) {
+        throw new Error(`Unknown contributor: ${JSON.stringify(entry)}`);
+      }
+      return { name: person.name, orgs: [].concat(person.org ?? []).map(numberFor) };
+    });
+
+  const authors = resolve(groups.authors);
+  const developers = resolve(groups.developers);
+  const organizations = Object.fromEntries(
+    Array.from(orgNumbers, ([org, number]) => [number, org]),
+  );
+  return { authors, developers, organizations };
+}
+
+/**
  * Create the Atlas notebook contribution and affiliation block.
  *
  * @param {Object} data - Contributor and affiliation data.
