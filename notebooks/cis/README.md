@@ -127,11 +127,15 @@ deno run --allow-read scripts/build/checkTranslations.ts
 
 ## Authors
 
-- Johnson Mwakazi
 - Brayden Youngberg
 - Pete Steward
 - Shalika Vyas
 - Harold Achicanoy
+
+## Technical development
+
+- [Johnson Mwakazi](https://www.linkedin.com/in/johnson-mwakazi/) (Snapp Africa)
+- Brayden Youngberg
 
 ## License
 

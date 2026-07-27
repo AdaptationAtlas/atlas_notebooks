@@ -28,15 +28,48 @@ function contributionHeading(text) {
   return heading;
 }
 
+/**
+ * Profile links come from content files (the contributor registry or a
+ * notebook's inline entries), so only absolute http(s) URLs are allowed through:
+ * a `javascript:` href would execute on click, and resolving relative values
+ * would turn a typo into a dead same-origin link. Anything else renders as a
+ * plain name rather than a link.
+ */
+function safeProfileUrl(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(String(url)); // absolute only — no base
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function peopleList(people) {
   const list = document.createElement("div");
   list.className = "atlas-contributions__people";
 
-  people.forEach(({ name = "", orgs = [] }, index) => {
+  people.forEach(({ name = "", url, orgs = [] }, index) => {
     if (index) list.append(document.createTextNode(", "));
 
     const person = document.createElement("span");
-    person.textContent = String(name);
+
+    // An optional profile link wraps the name only, so the affiliation marker
+    // stays outside it. Opens in a new tab: navigating away from a notebook
+    // discards all of its OJS state.
+    let nameTarget = person;
+    const href = safeProfileUrl(url);
+    if (href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      person.appendChild(link);
+      nameTarget = link;
+    }
+    nameTarget.textContent = String(name);
 
     if (orgs.length) {
       const affiliations = document.createElement("sup");
@@ -66,12 +99,14 @@ function peopleSection(heading, people) {
  * assigning affiliation numbers from the orgs that actually appear.
  *
  * Each entry is either an id into `registry` (data/shared/contributors.json) or
- * an inline `{name, org}` object for one-off contributors not worth registering.
+ * an inline `{name, org, url}` object for one-off contributors not worth
+ * registering — the registry is for recurring and internal contributors.
  * `org` may be a string or an array of strings; affiliations are numbered in
- * first-appearance order.
+ * first-appearance order. `url` is optional and links the name to a profile
+ * (prefer a durable identifier such as ORCID or an institutional page).
  *
  * @param {{authors?: Array, developers?: Array}} groups
- * @param {Record<string, {name: string, org?: string|string[]}>} [registry={}]
+ * @param {Record<string, {name: string, org?: string|string[], url?: string}>} [registry={}]
  * @returns {{authors: Array, developers: Array, organizations: Record<number,string>}}
  */
 export function resolveContributors(groups = {}, registry = {}) {
@@ -86,7 +121,11 @@ export function resolveContributors(groups = {}, registry = {}) {
       if (!person?.name) {
         throw new Error(`Unknown contributor: ${JSON.stringify(entry)}`);
       }
-      return { name: person.name, orgs: [].concat(person.org ?? []).map(numberFor) };
+      return {
+        name: person.name,
+        url: person.url,
+        orgs: [].concat(person.org ?? []).map(numberFor),
+      };
     });
 
   const authors = resolve(groups.authors);
