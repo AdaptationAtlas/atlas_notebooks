@@ -362,6 +362,13 @@ md`${_lang(nbText.sections.b2.intro)}`
 ::: {.controls-row}
 
 ```{ojs}
+viewof rainTimeRes = Inputs.radio(["By year", "Monthly climatology"], {
+  label: _lang(nbText.sections.controls.rainTimeRes),
+  value: "By year",
+})
+```
+
+```{ojs}
 viewof rainView = Inputs.radio(["Absolute (mm)", "Anomaly (vs 1991–2020)"], {
   label: _lang(nbText.sections.controls.rainView),
   value: "Absolute (mm)",
@@ -376,7 +383,9 @@ viewof rainView = Inputs.radio(["Absolute (mm)", "Anomaly (vs 1991–2020)"], {
 // explains little of MAM); OND+MAM shows both panels side by side.
 // (Defined here in the body so the DOM node renders in place, not as an
 // inspector dump — see the appendix helpers rainPanel / rainSeasonData.)
-rainCharts = html`<div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;">${rainActiveSeasons.map((s) => rainPanel(s))}</div>`
+rainCharts = rainTimeRes.startsWith("Month")
+  ? rainMonthlyChart
+  : html`<div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;">${rainActiveSeasons.map((s) => rainPanel(s))}</div>`
 ```
 
 ```{ojs}
@@ -388,17 +397,37 @@ plotFooter(_lang(nbText.sections.b2.rainCaption), rainCharts, {
 
 ## `{ojs} title_driver`
 
+::: {.controls-row}
+
 ```{ojs}
-driverChart = Plot.plot({
-  height: 380, width: 900, marginLeft: 55,
-  x: {tickFormat: (d) => "'" + String(d).slice(-2), label: "year"},
-  color: {domain: ["El Niño", "La Niña", "Neutral"], range: ["#d73027", "#4575b4", "#bbbbbb"]},
-  marks: [
-    Plot.lineY(driverSeasonal, {x: "year", y: "v", stroke: "#999"}),
-    Plot.dot(driverSeasonal, {x: "year", y: "v", fill: "enso", r: 3, tip: true}),
-    Plot.ruleY([0]),
-  ],
+viewof driverTimeRes = Inputs.radio(["Seasonal (by year)", "Monthly"], {
+  label: _lang(nbText.sections.controls.driverTimeRes),
+  value: "Seasonal (by year)",
 })
+```
+
+:::
+
+```{ojs}
+driverChart = driverTimeRes.startsWith("Month")
+  ? Plot.plot({
+      height: 380, width: 900, marginLeft: 55,
+      x: {label: "year"}, y: {label: `${driverName} (monthly)`},
+      marks: [
+        Plot.lineY(driverMonthly, {x: "date", y: "v", stroke: "#4575b4"}),
+        Plot.ruleY([0]),
+      ],
+    })
+  : Plot.plot({
+      height: 380, width: 900, marginLeft: 55,
+      x: {tickFormat: (d) => "'" + String(d).slice(-2), label: "year"},
+      color: {domain: ["El Niño", "La Niña", "Neutral"], range: ["#d73027", "#4575b4", "#bbbbbb"]},
+      marks: [
+        Plot.lineY(driverSeasonal, {x: "year", y: "v", stroke: "#999"}),
+        Plot.dot(driverSeasonal, {x: "year", y: "v", fill: "enso", r: 3, tip: true}),
+        Plot.ruleY([0]),
+      ],
+    })
 ```
 
 ```{ojs}
@@ -1116,6 +1145,11 @@ driverSeasonal = {
     .map(([year, v]) => ({year, v, enso: ensoPhaseByYear.get(year) ?? "Neutral"}));
   return by.sort((a, b) => a.year - b.year);
 }
+
+// same driver at monthly resolution (for the 3.2 "Monthly" view)
+driverMonthly = drivers.filter((d) => d[driverCol] != null)
+  .map((d) => ({date: new Date(d.date), v: d[driverCol]}))
+  .sort((a, b) => a.date - b.date)
 ```
 
 ```{ojs}
@@ -1424,6 +1458,38 @@ rainPanel = (s) => {
 ```
 
 ```{ojs}
+// ---- monthly CHIRPS county rainfall (for the 3.1 "Monthly climatology" view) ----
+dbChirpsMonthly = DuckDBClient.of({
+  m: FileAttachment("/data/KE-enso-explorer/chirps_county_monthly.parquet"),
+})
+
+// mean rainfall per calendar month for the county (1981–present) — the county's
+// rainfall seasonality: when the long (MAM) and short (OND) rains fall.
+rainMonthlyClim = dbChirpsMonthly.query(`
+  SELECT month, AVG(ptot) AS mm, STDDEV(ptot) AS sd
+  FROM m WHERE ${normExpr("county")} = '${countyNorm(county)}'
+  GROUP BY month ORDER BY month`)
+
+rainMonthlyChart = {
+  const mn = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const seasonOf = {3: "MAM long rains", 4: "MAM long rains", 5: "MAM long rains",
+    10: "OND short rains", 11: "OND short rains", 12: "OND short rains"};
+  const data = rainMonthlyClim.map((d) => ({month: mn[d.month], mm: d.mm,
+    season: seasonOf[d.month] ?? "other"}));
+  return Plot.plot({
+    height: 340, width: 760, marginLeft: 55,
+    x: {domain: mn.slice(1), label: "month"},
+    y: {label: "mean rainfall (mm)", grid: true},
+    color: {domain: ["MAM long rains", "OND short rains", "other"],
+      range: ["#1b9e77", "#d73027", "#cccccc"], legend: true},
+    marks: [
+      Plot.barY(data, {x: "month", y: "mm", fill: "season",
+        tip: {format: {y: (v) => Math.round(v) + " mm", x: true}}}),
+      Plot.ruleY([0]),
+    ],
+  });
+}
+
 dbGesi = DuckDBClient.of({
   gesi: FileAttachment("/data/KE-enso-explorer/gesi_v2.parquet"),
 })
