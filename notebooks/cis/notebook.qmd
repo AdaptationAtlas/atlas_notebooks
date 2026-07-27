@@ -57,7 +57,7 @@ import { downloadButton } from "/helpers/uiComponents.ojs";
 
 import { filterableDataTable } from "/helpers/atlasTable.ojs";
 
-import { inputTemplate } from "/helpers/std.ojs";
+import { createAdminSelectors } from "/helpers/adminSelectors.ojs";
 
 import {
   makeBivariateLegend,
@@ -228,22 +228,29 @@ contributors = FileAttachment("/data/shared/contributors.json").json()
 ## Admin selectors
 
 ```{ojs}
-// MASTER ADMIN SELECTORS and values across the notebook. Each section renders
-// its own bound copy with renderA*Multi(), so selections stay synchronized.
-//TODO: migrate to the canonical helpers/adminSelectors.ojs createAdminSelectors()
-// factory, which also owns its own label translations.
-import {
-  renderA0Multi,
-  renderA1Multi,
-  renderA2Multi,
-  admin0Select,
-  admin1Select,
-  admin2Select,
-} from "/components/_adminSelectorsMulti.ojs";
+// One canonical selector configuration, used for the master and every display.
+// The component owns its own label translations, cascade invalidation, search and
+// bulk actions (helpers/adminSelectors.ojs).
+adminSelectorConfig = ({
+  levels: [0, 1, 2],
+  multiple: true,
+  language: language.key,
+  selectAll: true,
+})
 
-selectedAdmin0 = admin0Select.map((d) => d?.admin0_name);
-selectedAdmin1 = admin1Select.map((d) => d?.admin1_name);
-selectedAdmin2 = admin2Select.map((d) => d?.admin2_name);
+// MASTER ADMIN SELECTION for the whole notebook. It lives in this hidden
+// appendix section and is never interacted with directly; each section renders
+// its own copy bound to it, so every display stays in sync.
+viewof adminSelection = createAdminSelectors(adminSelectorConfig)
+
+// Sections call this for their own visible, synchronized copy.
+adminSelectorDisplay = () =>
+  Inputs.bind(createAdminSelectors(adminSelectorConfig), viewof adminSelection)
+
+// Downstream code works in plain admin names at whichever level is selected.
+selectedAdmin0 = adminSelection.admin0.map((d) => d.admin0_name);
+selectedAdmin1 = adminSelection.admin1.map((d) => d.admin1_name);
+selectedAdmin2 = adminSelection.admin2.map((d) => d.admin2_name);
 ```
 
 ## Boundaries
@@ -251,9 +258,20 @@ selectedAdmin2 = admin2Select.map((d) => d?.admin2_name);
 ```{ojs}
 import { getAdminBoundaries } from "/components/_atlasBoundaries.ojs";
 
-atlasBoundaries = await getAdminBoundaries([0, 1, 2]);
+// Levels 0 and 1 are small (14 KB and 48 KB over the wire) and always drawn.
+atlasBoundaries = await getAdminBoundaries([0, 1]);
 
 admin0Boundaries = atlasBoundaries.admin0;
 admin1Boundaries = atlasBoundaries.admin1;
-admin2Boundaries = atlasBoundaries.admin2;
+
+// Admin 2 is 336 KB over the wire and 6670 geometries to parse, and nothing
+// draws it until a region is selected (currentAdminLevel === 2). Load it on
+// first use and hold the promise, so the parse happens at most once per session
+// however often the reader moves in and out of district view.
+loadAdmin2Boundaries = {
+  let pending = null;
+  return () => (pending ??= getAdminBoundaries(2).then((b) => b.admin2));
+}
+
+admin2Boundaries = currentAdminLevel === 2 ? await loadAdmin2Boundaries() : null;
 ```
