@@ -7,9 +7,15 @@ Repository automation scripts are organized by purpose.
 - `scripts/build/optimize.ts`
   - Purpose: post-render minification for `_site` HTML/CSS/JS.
   - Run: configured in `_quarto.yml` post-render hook.
-- `scripts/build/csv2json.lua`
-  - Purpose: Quarto filter used to convert CSV sources to JSON during render.
+- `scripts/build/cmsContent.lua`
+  - Purpose: Quarto filter that embeds CMS-managed content (notebook prose, FAQ/glossary) at render.
   - Run: configured in `_quarto.yml` filters.
+- `scripts/build/proseShortcode.lua`
+  - Purpose: `{{< prose <id> >}}` sugar for the cmsContent.lua prose markers.
+  - Run: configured in `_quarto.yml` shortcodes.
+- `scripts/build/checkTranslations.ts`
+  - Purpose: verify per-locale notebook text under `data/*/text/` against the content contract.
+  - Run: `deno run --allow-read scripts/build/checkTranslations.ts`
 
 ## Assets
 
