@@ -215,7 +215,7 @@ scenarioLabel = (k) => nbText.Ensembles.scenarios[k] ?? k
 modelLabel = (k) => nbText.LossByFarmType.selectors.model.options[k] ?? k
 thresholdLabel = (k) => nbText.LossByFarmType.legend.options[k] ?? k
 
-// ponytail: country names stay as the raw `nm_slc0` data values — translating them
+//TODO: country names stay as the raw `nm_slc0` data values — translating them
 // needs an nm_slc0 -> iso3 -> data/shared/atlas_countries.json lookup, and the
 // aggregate ("Sub-Saharan Africa") has no iso3. Add when a French review asks.
 
@@ -236,7 +236,9 @@ hypq = import("https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/+esm")
 
 hypq_compress = import("https://cdn.jsdelivr.net/npm/hyparquet-compressors/+esm")
 
-turfRewind = require("@turf/turf").then((t) => t.rewind)
+// Rewinding is load-bearing, not cosmetic: the source rings wind the other way,
+// so d3 reads each polygon as the whole sphere minus the region (geoArea 4π).
+turfRewind = (await import("https://cdn.jsdelivr.net/npm/@turf/rewind/+esm")).default
 
 // Shared contributor registry (id -> {name, org}); see the contributors cell.
 contributors = FileAttachment("/data/shared/contributors.json").json()
@@ -247,7 +249,7 @@ bound_arrayBuf = await FileAttachment(
   "/data/lossDamage/bounds.parquet",
 ).arrayBuffer();
 
-getBounds = async (country) => {
+loadBounds = async (country) => {
   const bounds = await hypq.parquetQuery({
     file: bound_arrayBuf,
     compressors: hypq_compress.compressors,
@@ -270,6 +272,17 @@ getBounds = async (country) => {
   };
 };
 
+boundsCache = new Map()
+
+// Sections 1 and 4 pick a country independently but start on the same one, so
+// without this the ~100ms decode+rewind of the 1.4MB boundary file runs twice on
+// load and again whenever the two selections coincide. Caching the promise (not
+// the result) also collapses the two concurrent first calls into one read.
+getBounds = (country) => {
+  if (!boundsCache.has(country)) boundsCache.set(country, loadBounds(country));
+  return boundsCache.get(country);
+};
+
 fig1_mapBounds = await getBounds(fig1_inputs.country);
 fig4_mapBounds = await getBounds(fig4_inputs.country);
 ```
@@ -283,21 +296,19 @@ fig1_arrayBuf = await FileAttachment(
   "/data/lossDamage/fig1_allshps.parquet",
 ).arrayBuffer();
 
-fig1_selVars = (async () => {
+fig1_selVars = {
   const _data = await hypq.parquetQuery({
     file: fig1_arrayBuf,
     compressors: hypq_compress.compressors,
-    columns: ["nm_slc0", "GID_0", "NAME_0", "farm_sz2", "variable"],
+    columns: ["nm_slc0", "farm_sz2", "variable"],
   });
 
   return {
-    iso3: Array.from(new Set(_data.map((d) => d.GID_0))),
     country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
-    admin1_name: Array.from(new Set(_data.map((d) => d.NAME_0))),
     farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
     variable: Array.from(new Set(_data.map((d) => d.variable))),
   };
-})();
+}
 ```
 
 ```{ojs}
@@ -350,10 +361,12 @@ fig1a_spatial = mergeDataToBoundaries({
 ```
 
 ```{ojs}
+fig1b_arrayBuf = await FileAttachment(
+  "/data/lossDamage/fig1_farmsizelookup.parquet",
+).arrayBuffer();
+
 fig1b_filtered = await hypq.parquetQuery({
-  file: await FileAttachment(
-    "/data/lossDamage/fig1_farmsizelookup.parquet",
-  ).arrayBuffer(),
+  file: fig1b_arrayBuf,
   compressors: hypq_compress.compressors,
   filter: {
     nm_slc0: {
@@ -377,8 +390,18 @@ renderS1_insight = () => {
   const sumpr = sum(_present.map((d) => d.value));
   const sumfr = sum(_future.map((d) => d.value));
 
-  const pct = ((sumfr - sumpr) / sumpr) * 100;
   const t = nbText.FarmSize.insight;
+  const pct = ((sumfr - sumpr) / sumpr) * 100;
+
+  // 18 of the 357 country/size combinations have no farms in the baseline
+  // (e.g. Djibouti, 10-20 ha), so the percent change is Infinity — say how many
+  // farms are projected and leave the change out.
+  const change = !sumpr
+    ? ""
+    : tmpl(t.change, {
+        trend: pct > 0 ? t.trend.increase : t.trend.decrease,
+        pct: pct.toLocaleString(language.locale, { maximumFractionDigits: 1 }),
+      });
 
   return md`#### ${tmpl(nbText.General.quickInsights, { subject: fig1_inputs.country })}
 
@@ -388,11 +411,7 @@ ${tmpl(t.baseline, {
   size: farmSizeLabel(fig1_inputs.fSize),
 })}
 
-${tmpl(t.projection, {
-  future: numFormat(sumfr),
-  trend: pct > 0 ? t.trend.increase : t.trend.decrease,
-  pct: pct.toFixed(1),
-})}
+${tmpl(t.projection, { future: numFormat(sumfr) })} ${change}
 `;
 };
 ```
@@ -604,22 +623,20 @@ fig4a_arrayBuf = await FileAttachment(
   "/data/lossDamage/fig4_map_fin_spei12_high.parquet",
 ).arrayBuffer();
 
-fig4_selVars = (async () => {
+fig4_selVars = {
   const _data = await hypq.parquetQuery({
     file: fig4a_arrayBuf,
     compressors: hypq_compress.compressors,
-    columns: ["nm_slc0", "GID_0", "NAME_0", "farm_sz2", "extEvent", "model"],
+    columns: ["nm_slc0", "farm_sz2", "extEvent", "model"],
   });
 
   return {
-    iso3: Array.from(new Set(_data.map((d) => d.GID_0))),
     country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
-    admin1_name: Array.from(new Set(_data.map((d) => d.NAME_0))),
     farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
     event: Array.from(new Set(_data.map((d) => d.extEvent))),
     model: Array.from(new Set(_data.map((d) => d.model))),
   };
-})();
+}
 
 renderS4_inputs = () => {
   return Inputs.form(
@@ -681,29 +698,46 @@ fig4a_spatial = mergeDataToBoundaries({
 #### 4b code
 
 ```{ojs}
-fig4b_arrayBuf = await FileAttachment(
-  "/data/lossDamage/fig4b.parquet",
-).arrayBuffer();
+// 126k rows across the 2100 selector combinations, and hyparquet applies `filter`
+// after decoding — so filtering in the query costs a full decode (~175ms) on every
+// selector change. Decode once into a lookup instead; each combination is ~60 rows.
+fig4b_byCombo = {
+  const rows = await hypq.parquetQuery({
+    file: await FileAttachment("/data/lossDamage/fig4b.parquet").arrayBuffer(),
+    compressors: hypq_compress.compressors,
+    columns: [
+      "nm_slc0",
+      "farm_sz2",
+      "Event",
+      "model",
+      "year",
+      "losstype",
+      "threshold",
+      "threshold2",
+      "cum_sum",
+    ],
+  });
 
-fig4b_filtered = await hypq.parquetQuery({
-  file: fig4b_arrayBuf,
-  compressors: hypq_compress.compressors,
-  filter: {
-    nm_slc0: {
-      $eq: fig4_inputs.country,
-    },
-    farm_sz2: {
-      $eq: fig4_inputs.fSize,
-    },
-    Event: {
-      $eq: fig4_inputs.event,
-    },
-    model: {
-      $eq: fig4_inputs.time,
-    },
-  },
-  //TODO: Select only the applicable columns to boost perf.
-});
+  const byCombo = new Map();
+  for (const row of rows) {
+    const key = [row.nm_slc0, row.farm_sz2, row.Event, row.model].join("|");
+    const bucket = byCombo.get(key);
+    bucket ? bucket.push(row) : byCombo.set(key, [row]);
+  }
+  return byCombo;
+}
+
+// Every combination the section 4 selectors can produce is present here (checked
+// against fig4_map_fin_spei12_high.parquet: 2100 combinations on both sides), so a
+// miss means the two files have drifted apart and should fail loudly.
+fig4b_filtered = fig4b_byCombo.get(
+  [
+    fig4_inputs.country,
+    fig4_inputs.fSize,
+    fig4_inputs.event,
+    fig4_inputs.time,
+  ].join("|"),
+)
 ```
 
 ```{ojs}
