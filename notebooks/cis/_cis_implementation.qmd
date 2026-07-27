@@ -123,10 +123,7 @@ viewof s3AccessType = Inputs.radio(
   {
     label: nbText.s3AccessSelector,
     value: "combined",
-    format: x => x === "combined" ? nbText.s3AccessCombined :
-                 x === "internet" ? nbText.s3AccessInternet :
-                 x === "tv" ? nbText.s3AccessTV :
-                 nbText.s3AccessCellphone
+    format: (x) => S3_ACCESS_TYPES[x].label
   }
 )
 ```
@@ -181,38 +178,27 @@ viewof s3SortBy = {
     {
       label: nbText.s3SortBy,
       value: "readiness",
-      format: x => x === "readiness" ? nbText.s3SortReadiness :
-                   x === "combined" ? nbText.s3AccessCombined :
-                   x === "internet" ? nbText.s3AccessInternet :
-                   x === "tv" ? nbText.s3AccessTV :
-                   nbText.s3AccessCellphone
+      format: (x) =>
+        x === "readiness" ? nbText.s3SortReadiness : S3_ACCESS_TYPES[x].label
     }
   );
 }
 ```
 
 ```{ojs}
-// View Toggle
+// The access types, their columns and their labels in one place. Insertion order
+// is the display order for the radio and the scatter facets. Depends on nbText,
+// so the labels follow the language toggle.
+S3_ACCESS_TYPES = new Object({
+  combined: { norm: "combined_norm", pct: "combined_pct", label: nbText.s3AccessCombined },
+  internet: { norm: "internet_norm", pct: "internet_pct", label: nbText.s3AccessInternet },
+  tv: { norm: "tv_norm", pct: "tv_pct", label: nbText.s3AccessTV },
+  cellphone: { norm: "cellphone_norm", pct: "cellphone_pct", label: nbText.s3AccessCellphone },
+})
 
-// Helper to get current access field name
-s3CurrentAccessField =
-  s3AccessType === "combined"
-    ? "combined_norm"
-    : s3AccessType === "internet"
-      ? "internet_norm"
-      : s3AccessType === "tv"
-        ? "tv_norm"
-        : "cellphone_norm";
+s3CurrentAccessField = S3_ACCESS_TYPES[s3AccessType].norm
 
-// Helper to get current access label
-s3CurrentAccessLabel =
-  s3AccessType === "combined"
-    ? nbText.s3AccessCombined
-    : s3AccessType === "internet"
-      ? nbText.s3AccessInternet
-      : s3AccessType === "tv"
-        ? nbText.s3AccessTV
-        : nbText.s3AccessCellphone;
+s3CurrentAccessLabel = S3_ACCESS_TYPES[s3AccessType].label
 ```
 
 ```{ojs}
@@ -428,10 +414,7 @@ function renderS3MapDisplay() {
         ${makeBivariateLegend({
           colors: s3BivariateColors,
           xLabel: "CIS Readiness",
-          yLabel:
-            s3AccessType === "combined"
-              ? "Combined Access"
-              : s3CurrentAccessLabel,
+          yLabel: s3CurrentAccessLabel,
           width: 220,
           height: 210,
           fontSize: 14,
@@ -700,56 +683,21 @@ function renderS3DumbbellView() {
 }
 
 function getS3ScatterFacetData() {
-  const facetData = [];
-
-  s3ProcessedData.forEach(d => {
-    if (d.combined_norm != null && !isNaN(d.combined_norm)) {
-      facetData.push({
+  // One row per admin unit per access type that has a value.
+  return s3ProcessedData.flatMap((d) =>
+    Object.entries(S3_ACCESS_TYPES)
+      .filter(([, type]) => d[type.norm] != null && !isNaN(d[type.norm]))
+      .map(([key, type]) => ({
         ...d,
-        accessType: nbText.s3AccessCombined,
-        accessValue: d.combined_norm,
-        accessKey: "combined"
-      });
-    }
-
-    if (d.internet_norm != null && !isNaN(d.internet_norm)) {
-      facetData.push({
-        ...d,
-        accessType: nbText.s3AccessInternet,
-        accessValue: d.internet_norm,
-        accessKey: "internet"
-      });
-    }
-
-    if (d.tv_norm != null && !isNaN(d.tv_norm)) {
-      facetData.push({
-        ...d,
-        accessType: nbText.s3AccessTV,
-        accessValue: d.tv_norm,
-        accessKey: "tv"
-      });
-    }
-
-    if (d.cellphone_norm != null && !isNaN(d.cellphone_norm)) {
-      facetData.push({
-        ...d,
-        accessType: nbText.s3AccessCellphone,
-        accessValue: d.cellphone_norm,
-        accessKey: "cellphone"
-      });
-    }
-  });
-
-  return facetData;
+        accessType: type.label,
+        accessValue: d[type.norm],
+        accessKey: key,
+      })),
+  );
 }
 
 function getS3ScatterAccessTypes() {
-  return [
-    nbText.s3AccessCombined,
-    nbText.s3AccessInternet,
-    nbText.s3AccessTV,
-    nbText.s3AccessCellphone
-  ];
+  return Object.values(S3_ACCESS_TYPES).map((type) => type.label);
 }
 
 function getS3ScatterFacetLayout(accessTypes) {

@@ -169,6 +169,80 @@ highlightedAdmin2 = selectedAdmin2.length > 0 ? selectedAdmin2 : []
 ```
 
 ```{ojs}
+// Every section 1 map needs the same thing: the boundaries for whichever admin
+// level the selection implies, narrowed to the selection, joined to filteredData,
+// with a display name and the admin-2 highlight flag precomputed. The only part
+// that differs per map is which columns to read off the joined row, so that is
+// the one argument: `fields(dataRow)` returns the properties for this map, and
+// receives undefined where a boundary has no matching row.
+buildLevelFeatures = (fields) => {
+  const gaulCodeField =
+    currentAdminLevel === 2
+      ? "gaul2_code"
+      : currentAdminLevel === 1
+        ? "gaul1_code"
+        : "gaul0_code";
+
+  // Drop boundaries the selection cannot reach. Matching on the gaul code catches
+  // rows whose names differ from the boundary file; the name checks catch the
+  // reverse. At admin 0 everything in view is already in scope.
+  const scopedBoundaries = (() => {
+    if (currentAdminLevel === 0) return currentBoundaries;
+
+    const codesInData = new Set(
+      filteredData.map((d) => d[gaulCodeField]).filter((c) => c != null),
+    );
+
+    return {
+      ...currentBoundaries,
+      features: currentBoundaries.features.filter(
+        (f) =>
+          codesInData.has(f.properties[gaulCodeField]) ||
+          inCurrentSelection(f.properties),
+      ),
+    };
+  })();
+
+  const joinKey = (d) =>
+    currentAdminLevel === 2
+      ? `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
+      : currentAdminLevel === 1
+        ? `${d.admin0_name}|${d.admin1_name}`
+        : `${d.admin0_name}`;
+
+  const geoData = mergeDataToBoundaries({
+    boundaries: scopedBoundaries,
+    data: filteredData,
+    boundaryKey: (feature) => joinKey(feature.properties),
+    dataKey: joinKey,
+  });
+
+  return geoData.features.map((feature) => {
+    const p = feature.properties;
+
+    return {
+      ...feature,
+      properties: {
+        ...p,
+        // Precomputed so tooltips do not rebuild it on every hover.
+        regionName:
+          currentAdminLevel === 0
+            ? p.admin0_name
+            : currentAdminLevel === 1
+              ? `${p.admin1_name}, ${p.admin0_name}`
+              : `${p.admin2_name}, ${p.admin1_name}, ${p.admin0_name}`,
+        isHighlighted:
+          currentAdminLevel === 2 &&
+          highlightedAdmin2.length > 0 &&
+          highlightedAdmin2.includes(p.admin2_name),
+        ...fields(p.data),
+      },
+    };
+  });
+}
+```
+
+```{ojs}
 // Breadcrumb navigation
 breadcrumb = {
   const parts = [];
@@ -215,94 +289,25 @@ viewof s11MapMode = Inputs.radio(["Raw values", "Classified"], {
 ```{ojs}
 // Prepare data for Section 1.1 maps
 s11MapData = {
-  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
-                     currentAdminLevel === 1 ? admin1Boundaries :
-                     admin0Boundaries;
-  
-  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
-                        currentAdminLevel === 1 ? 'gaul1_code' :
-                        'gaul0_code';
-  
-  // Filter boundaries based on current selection
-  // Instead of filtering by property names (which might not exist), filter by matching with filteredData
-  let filteredBoundaries = boundaries;
-  if (currentAdminLevel === 2) {
-    // When showing admin2, only include boundaries that match our filtered data
-    // This ensures we only show boundaries for selected admin1 regions
-    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        // Include if it matches filtered data OR if it's in the selected admin0/admin1
-        const matchesData = filteredGaulCodes.has(gaulCode);
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
-        return matchesData || (matchesAdmin0 && matchesAdmin1);
-      })
-    };
-  } else if (currentAdminLevel === 1) {
-    // When showing admin1, filter by admin0 and match with filtered data
-    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        return matchesData || matchesAdmin0;
-      })
-    };
-  }
-  
-  const joinKey = currentAdminLevel === 2
-    ? (d) => `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
-    : currentAdminLevel === 1
-    ? (d) => `${d.admin0_name}|${d.admin1_name}`
-    : (d) => `${d.admin0_name}`;
+  const features = buildLevelFeatures((d) => ({
+    weatherStation: d?.["wstation_density"],
+    cloudCover: d?.["cloud-coverage_meanannual"],
+    weatherStationClass: d
+      ? classifyThreshold("wstation_density", d["wstation_density"], d)
+      : "No data",
+    cloudCoverClass: d
+      ? classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d)
+      : "No data",
+  }));
 
-  const geoData = mergeDataToBoundaries({
-    boundaries: filteredBoundaries,
-    data: filteredData,
-    boundaryKey: (feature) => joinKey(feature.properties),
-    dataKey: (row) => joinKey(row)
-  });
-
-  const features = geoData.features.map(feature => {
-    const dataRow = feature.properties.data;
-
-    // Pre-compute region name for faster tooltip rendering
-    const regionName = currentAdminLevel === 0 
-      ? feature.properties.admin0_name 
-      : currentAdminLevel === 1
-      ? `${feature.properties.admin1_name}, ${feature.properties.admin0_name}`
-      : `${feature.properties.admin2_name}, ${feature.properties.admin1_name}, ${feature.properties.admin0_name}`;
-    
-    // Check if this admin2 region is highlighted
-    const isHighlighted = currentAdminLevel === 2 && 
-                          highlightedAdmin2.length > 0 && 
-                          highlightedAdmin2.includes(feature.properties.admin2_name);
-    
-    return {
-      ...feature,
-      properties: {
-        ...feature.properties,
-        regionName: regionName,
-        weatherStation: dataRow?.["wstation_density"],
-        cloudCover: dataRow?.["cloud-coverage_meanannual"],
-        weatherStationClass: dataRow ? classifyThreshold("wstation_density", dataRow["wstation_density"], dataRow) : "No data",
-        cloudCoverClass: dataRow ? classifyThreshold("cloud-coverage_meanannual", dataRow["cloud-coverage_meanannual"], dataRow) : "No data",
-        isHighlighted: isHighlighted
-      }
-    };
-  });
-  
-  // Only filter out features without data if we have some features with data
-  // This prevents removing all features if matching fails
-  const featuresWithData = features.filter(f => f.properties.weatherStation != null || f.properties.cloudCover != null);
-  
-  // If we have features with data, use those; otherwise, show all features (they'll show as "No data")
-  return { type: "FeatureCollection", features: featuresWithData.length > 0 ? featuresWithData : features };
+  // Show the no-data features rather than an empty map if nothing joined.
+  const withData = features.filter(
+    (f) => f.properties.weatherStation != null || f.properties.cloudCover != null,
+  );
+  return {
+    type: "FeatureCollection",
+    features: withData.length ? withData : features,
+  };
 }
 ```
 
@@ -403,11 +408,7 @@ s11MapData = {
   } else {
     // Table view
     const tableData = filteredData.map(d => {
-      const adminName = currentAdminLevel === 0 
-        ? d.admin0_name 
-        : currentAdminLevel === 1
-        ? `${d.admin1_name}, ${d.admin0_name}`
-        : `${d.admin2_name}, ${d.admin1_name}`;
+      const adminName = adminDisplayName(d);
       return {
         "Admin Name": adminName,
         "Weather Station (Raw)": d["wstation_density"]?.toFixed(3) || "N/A",
@@ -428,12 +429,7 @@ s11MapData = {
 // Download button for Section 1.1
 downloadCsvButton(
   filteredData.map((d) => {
-    const adminName =
-      currentAdminLevel === 0
-        ? d.admin0_name
-        : currentAdminLevel === 1
-          ? `${d.admin1_name}, ${d.admin0_name}`
-          : `${d.admin2_name}, ${d.admin1_name}`;
+    const adminName = adminDisplayName(d);
     return {
       "Weather Station Density": d["wstation_density"],
       "Weather Station Class": classifyThreshold(
@@ -504,77 +500,18 @@ viewof s12MapMode = Inputs.radio(["Raw values", "Classified"], {
 ```{ojs}
 // Prepare data for Section 1.2 map
 s12MapData = {
-  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
-                     currentAdminLevel === 1 ? admin1Boundaries :
-                     admin0Boundaries;
-  
-  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
-                        currentAdminLevel === 1 ? 'gaul1_code' :
-                        'gaul0_code';
-  
-  // Filter boundaries based on current selection
-  // Instead of filtering by property names, filter by matching with filteredData
-  let filteredBoundaries = boundaries; //TODO: This occurs multiple times, clean up/reuse 
-  if (currentAdminLevel === 2) {
-    // When showing admin2, only include boundaries that match our filtered data
-    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
-        return matchesData || (matchesAdmin0 && matchesAdmin1);
-      })
-    };
-  } else if (currentAdminLevel === 1) {
-    // When showing admin1, filter by admin0 and match with filtered data
-    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        return matchesData || matchesAdmin0;
-      })
-    };
-  }
-  
-  const joinKey = currentAdminLevel === 2
-    ? (d) => `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
-    : currentAdminLevel === 1
-    ? (d) => `${d.admin0_name}|${d.admin1_name}`
-    : (d) => `${d.admin0_name}`;
-
-  const geoData = mergeDataToBoundaries({
-    boundaries: filteredBoundaries,
-    data: filteredData,
-    boundaryKey: (feature) => joinKey(feature.properties),
-    dataKey: (row) => joinKey(row)
-  });
-
-  const features = geoData.features.map(feature => {
-    const dataRow = feature.properties.data;
-    const precipValue = dataRow ? parseFloat(dataRow["cv-precipitation_agreement"]) : null;
-    
-    // Check if this admin2 region is highlighted
-    const isHighlighted = currentAdminLevel === 2 && 
-                          highlightedAdmin2.length > 0 && 
-                          highlightedAdmin2.includes(feature.properties.admin2_name);
-    
+  const features = buildLevelFeatures((d) => {
+    const precip = d ? parseFloat(d["cv-precipitation_agreement"]) : null;
     return {
-      ...feature,
-      properties: {
-        ...feature.properties,
-        precipAgreement: precipValue,
-        precipAgreementClass: classifyThreshold("cv-precipitation_agreement", precipValue, dataRow),
-        isHighlighted: isHighlighted
-      }
+      precipAgreement: precip,
+      precipAgreementClass: classifyThreshold(
+        "cv-precipitation_agreement",
+        precip,
+        d,
+      ),
     };
-  }).filter(f => f.properties.precipAgreement != null);
-  
+  }).filter((f) => f.properties.precipAgreement != null);
+
   return { type: "FeatureCollection", features };
 }
 ```
@@ -630,11 +567,7 @@ s12MapData = {
     });
   } else {
     const tableData = filteredData.map(d => {
-      const adminName = currentAdminLevel === 0 
-        ? d.admin0_name 
-        : currentAdminLevel === 1
-        ? `${d.admin1_name}, ${d.admin0_name}`
-        : `${d.admin2_name}, ${d.admin1_name}`;
+      const adminName = adminDisplayName(d);
       return {
         "Admin Name": adminName,
       "Satellite Agreement (Raw)": parseFloat(d["cv-precipitation_agreement"])?.toFixed(1) || "N/A",
@@ -653,12 +586,7 @@ s12MapData = {
 // Download button for Section 1.2
 downloadCsvButton(
   filteredData.map((d) => {
-    const adminName =
-      currentAdminLevel === 0
-        ? d.admin0_name
-        : currentAdminLevel === 1
-          ? `${d.admin1_name}, ${d.admin0_name}`
-          : `${d.admin2_name}, ${d.admin1_name}`;
+    const adminName = adminDisplayName(d);
     return {
       "Admin Name": adminName,
       "Satellite Agreement": parseFloat(d["cv-precipitation_agreement"]),
@@ -732,77 +660,18 @@ viewof s13SortBy = {
 ```{ojs}
 // Section 1.3 Map Data Preparation
 s13MapData = {
-  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
-                     currentAdminLevel === 1 ? admin1Boundaries :
-                     admin0Boundaries;
-  
-  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
-                        currentAdminLevel === 1 ? 'gaul1_code' :
-                        'gaul0_code';
-  
-  // Filter boundaries based on current selection
-  let filteredBoundaries = boundaries;
-  if (currentAdminLevel === 2) {
-    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
-        return matchesData || (matchesAdmin0 && matchesAdmin1);
-      })
-    };
-  } else if (currentAdminLevel === 1) {
-    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        return matchesData || matchesAdmin0;
-      })
-    };
-  }
-  
-  const joinKey = currentAdminLevel === 2
-    ? (d) => `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
-    : currentAdminLevel === 1
-    ? (d) => `${d.admin0_name}|${d.admin1_name}`
-    : (d) => `${d.admin0_name}`;
-
-  const geoData = mergeDataToBoundaries({
-    boundaries: filteredBoundaries,
-    data: filteredData,
-    boundaryKey: (feature) => joinKey(feature.properties),
-    dataKey: (row) => joinKey(row)
-  });
-
-  const features = geoData.features.map(feature => {
-    const dataRow = feature.properties.data;
-    const shortTerm = dataRow ? dataRow["short-term_frcst_skill"] : null;
-    const longTerm = dataRow ? dataRow["seasonal_frcst_skill"] : null;
-    const delta = (shortTerm != null && longTerm != null) ? longTerm - shortTerm : null;
-    
-    // Check if this admin2 region is highlighted
-    const isHighlighted = currentAdminLevel === 2 && 
-                          highlightedAdmin2.length > 0 && 
-                          highlightedAdmin2.includes(feature.properties.admin2_name);
-    
+  const features = buildLevelFeatures((d) => {
+    const shortTerm = d ? d["short-term_frcst_skill"] : null;
+    const longTerm = d ? d["seasonal_frcst_skill"] : null;
     return {
-      ...feature,
-      properties: {
-        ...feature.properties,
-        shortTerm: shortTerm,
-        longTerm: longTerm,
-        delta: delta,
-        isHighlighted: isHighlighted
-      }
+      shortTerm,
+      longTerm,
+      delta: shortTerm != null && longTerm != null ? longTerm - shortTerm : null,
     };
-  }).filter(f => f.properties.shortTerm != null || f.properties.longTerm != null);
-  
+  }).filter(
+    (f) => f.properties.shortTerm != null || f.properties.longTerm != null,
+  );
+
   return { type: "FeatureCollection", features };
 }
 ```
@@ -815,11 +684,7 @@ s13Data = {
     const longTerm = d["seasonal_frcst_skill"];
     const classification = classifyForecastSkill(shortTerm, longTerm);
     
-    const adminName = currentAdminLevel === 0 
-      ? d.admin0_name 
-      : currentAdminLevel === 1
-      ? `${d.admin1_name}, ${d.admin0_name}`
-      : `${d.admin2_name}, ${d.admin1_name}`;
+    const adminName = adminDisplayName(d);
     
     return {
       admin: adminName,
@@ -1147,83 +1012,27 @@ viewof s14ViewType = Inputs.radio(["Map", "Table", "Heatmap"], {
 ```{ojs}
 // Prepare data for Section 1.4
 s14MapData = {
-  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
-                     currentAdminLevel === 1 ? admin1Boundaries :
-                     admin0Boundaries;
-  
-  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
-                        currentAdminLevel === 1 ? 'gaul1_code' :
-                        'gaul0_code';
-  
-  // Filter boundaries based on current selection
-  // Instead of filtering by property names, filter by matching with filteredData
-  let filteredBoundaries = boundaries;  //TODO: Same boundary filtering again...
-  if (currentAdminLevel === 2) {
-    // When showing admin2, only include boundaries that match our filtered data
-    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
-        return matchesData || (matchesAdmin0 && matchesAdmin1);
-      })
-    };
-  } else if (currentAdminLevel === 1) {
-    // When showing admin1, filter by admin0 and match with filtered data
-    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => {
-        const gaulCode = f.properties[gaulCodeField];
-        const matchesData = filteredGaulCodes.has(gaulCode);
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        return matchesData || matchesAdmin0;
-      })
-    };
-  }
-  
-  const joinKey = currentAdminLevel === 2
-    ? (d) => `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
-    : currentAdminLevel === 1
-    ? (d) => `${d.admin0_name}|${d.admin1_name}`
-    : (d) => `${d.admin0_name}`;
+  const features = buildLevelFeatures((d) => ({
+    cisReadiness: d?.["cis_readiness_index"],
+    cisReadinessClass: d
+      ? classifyThreshold("cis_readiness_index", d["cis_readiness_index"], d)
+      : "No data",
+    weatherStation: d?.["wstation_density"],
+    weatherStationClass: d
+      ? classifyThreshold("wstation_density", d["wstation_density"], d)
+      : "No data",
+    cloudCover: d?.["cloud-coverage_meanannual"],
+    cloudCoverClass: d
+      ? classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d)
+      : "No data",
+    precipAgreement: d ? parseFloat(d["cv-precipitation_agreement"]) : null,
+    precipAgreementClass: d
+      ? classifyThreshold("cv-precipitation_agreement", d["cv-precipitation_agreement"], d)
+      : "No data",
+    shortTerm: d?.["short-term_frcst_skill"],
+    longTerm: d?.["seasonal_frcst_skill"],
+  })).filter((f) => f.properties.cisReadiness != null);
 
-  const geoData = mergeDataToBoundaries({
-    boundaries: filteredBoundaries,
-    data: filteredData,
-    boundaryKey: (feature) => joinKey(feature.properties),
-    dataKey: (row) => joinKey(row)
-  });
-
-  const features = geoData.features.map(feature => {
-    const dataRow = feature.properties.data;
-    // Check if this admin2 region is highlighted
-    const isHighlighted = currentAdminLevel === 2 && 
-                          highlightedAdmin2.length > 0 && 
-                          highlightedAdmin2.includes(feature.properties.admin2_name);
-    
-    return {
-      ...feature,
-      properties: {
-        ...feature.properties,
-        cisReadiness: dataRow?.["cis_readiness_index"],
-        cisReadinessClass: dataRow ? classifyThreshold("cis_readiness_index", dataRow["cis_readiness_index"], dataRow) : "No data",
-        weatherStation: dataRow?.["wstation_density"],
-        weatherStationClass: dataRow ? classifyThreshold("wstation_density", dataRow["wstation_density"], dataRow) : "No data",
-        cloudCover: dataRow?.["cloud-coverage_meanannual"],
-        cloudCoverClass: dataRow ? classifyThreshold("cloud-coverage_meanannual", dataRow["cloud-coverage_meanannual"], dataRow) : "No data",
-        precipAgreement: dataRow ? parseFloat(dataRow["cv-precipitation_agreement"]) : null,
-        precipAgreementClass: dataRow ? classifyThreshold("cv-precipitation_agreement", dataRow["cv-precipitation_agreement"], dataRow) : "No data",
-        shortTerm: dataRow?.["short-term_frcst_skill"],
-        longTerm: dataRow?.["seasonal_frcst_skill"],
-        isHighlighted: isHighlighted
-      }
-    };
-  }).filter(f => f.properties.cisReadiness != null);
-  
   return { type: "FeatureCollection", features };
 }
 ```
@@ -1292,11 +1101,7 @@ s14MapData = {
     const tableData = filteredData
       .filter(d => d["cis_readiness_index"] != null)
       .map(d => {
-      const adminName = currentAdminLevel === 0 
-        ? d.admin0_name 
-        : currentAdminLevel === 1
-        ? `${d.admin1_name}, ${d.admin0_name}`
-        : `${d.admin2_name}, ${d.admin1_name}`;
+      const adminName = adminDisplayName(d);
       return {
         "Admin Name": adminName, //TODO: Admin name again
         "CIS Readiness (Raw)": d["cis_readiness_index"]?.toFixed(3) || "N/A",
@@ -1321,11 +1126,7 @@ s14MapData = {
     const heatmapData = filteredData
       .filter(d => d["cis_readiness_index"] != null)
       .map(d => {
-      const adminName = currentAdminLevel === 0 
-        ? d.admin0_name 
-        : currentAdminLevel === 1
-        ? `${d.admin1_name}, ${d.admin0_name}`
-        : `${d.admin2_name}, ${d.admin1_name}`;
+      const adminName = adminDisplayName(d);
       
       return {
         country: adminName,
@@ -1415,12 +1216,7 @@ s14MapData = {
 // Download button for Section 1.4
 downloadCsvButton(
   filteredData.map((d) => {
-    const adminName =
-      currentAdminLevel === 0
-        ? d.admin0_name
-        : currentAdminLevel === 1
-          ? `${d.admin1_name}, ${d.admin0_name}`
-          : `${d.admin2_name}, ${d.admin1_name}`;
+    const adminName = adminDisplayName(d);
     return {
       "Admin Name": adminName,
       "CIS Readiness Index": d["cis_readiness_index"],

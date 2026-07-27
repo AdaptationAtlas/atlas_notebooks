@@ -242,15 +242,6 @@ s2MapData = {
 }
 
 // Load appropriate boundaries based on Section 1's admin level
-s2Boundaries = {
-  if (currentAdminLevel === 0) {
-    return admin0Boundaries;
-  } else if (currentAdminLevel === 1) {
-    return admin1Boundaries;
-  } else {
-    return admin2Boundaries;
-  }
-}
 
 // Join boundaries with data
 s2GeoData = {
@@ -258,29 +249,17 @@ s2GeoData = {
                         currentAdminLevel === 1 ? 'gaul1_code' :
                         'gaul2_code';
   
-  // Filter boundaries based on current selection - show all regions, not just those with data
-  let filteredBoundaries = s2Boundaries; //TODO: Same admin filtering again
-  if (currentAdminLevel === 2) {
-    // When showing admin2, filter by admin selection (but keep all regions, not just those with data)
-    filteredBoundaries = {
-      ...s2Boundaries,
-      features: s2Boundaries.features.filter(f => {
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
-        return matchesAdmin0 && matchesAdmin1;
-      })
-    };
-  } else if (currentAdminLevel === 1) {
-    // When showing admin1, filter by admin0 selection
-    filteredBoundaries = {
-      ...s2Boundaries,
-      features: s2Boundaries.features.filter(f => {
-        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
-        return matchesAdmin0;
-      })
-    };
-  }
-  
+  // Narrow to the selection by name only — regions without data still draw, faded.
+  const filteredBoundaries =
+    currentAdminLevel === 0
+      ? currentBoundaries
+      : {
+          ...currentBoundaries,
+          features: currentBoundaries.features.filter((f) =>
+            inCurrentSelection(f.properties),
+          ),
+        };
+
   const features = filteredBoundaries.features.map(feature => {
     const gaulCode = feature.properties[gaulCodeField];
     let match = s2MapData.find(d => d[gaulCodeField] === gaulCode);
@@ -434,11 +413,7 @@ s2BivariateMap = {
     const hazardName = s2HazardType === "drought" ? "Drought (Days)" : "Waterlogging (Days)";
     
     const tableData = s2MapData.map(d => {
-      const adminName = currentAdminLevel === 0 
-        ? d.admin0_name 
-        : currentAdminLevel === 1
-        ? `${d.admin1_name}, ${d.admin0_name}`
-        : `${d.admin2_name}, ${d.admin1_name}`;
+      const adminName = adminDisplayName(d);
       
       let priorityLevel;
       if (d.bivariateClass === "High × High") priorityLevel = "Critical";
@@ -491,12 +466,7 @@ s2BivariateMap = {
 // Download button for Section 2
 downloadCsvButton(
   s2MapData.map((d) => {
-    const adminName =
-      currentAdminLevel === 0
-        ? d.admin0_name
-        : currentAdminLevel === 1
-          ? `${d.admin1_name}, ${d.admin0_name}`
-          : `${d.admin2_name}, ${d.admin1_name}`;
+    const adminName = adminDisplayName(d);
 
     const hazardName =
       s2HazardType === "drought" ? "Drought_Days" : "Waterlogging_Days";
