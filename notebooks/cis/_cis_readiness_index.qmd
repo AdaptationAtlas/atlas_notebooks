@@ -1,0 +1,1497 @@
+<!--
+============================================================================
+SECTION 1: CIS READINESS INDEX ANALYSIS
+============================================================================
+This file contains the core analysis of Climate Information Services (CIS)
+readiness across Sub-Saharan Africa. It loads CIS indicator data, calculates
+Africa-wide tercile classifications, and provides interactive visualizations
+for weather station density, cloud coverage, satellite agreement, and
+forecast skill at multiple administrative levels (Admin 0/1/2).
+============================================================================
+-->
+
+# Building the CIS Readiness Index {#building-readiness-index}
+
+```{ojs}
+cisDB = await DuckDBClient.of({
+  cis_data: FileAttachment("/data/cis/CIS_nb_data.parquet"),
+});
+```
+
+```{ojs}
+thresholds = await FileAttachment("/data/cis/thresholds.json").json();
+
+thresholdIndicatorByField = new Object({
+  wstation_density: "WeatherStation_idx",
+  "cloud-coverage_meanannual": "OpticalAvailability_idx",
+  "cv-precipitation_agreement": "Precipitation variability agreement",
+  "short-term_frcst_skill": "ShortTerm_idx",
+  seasonal_frcst_skill: "LongTerm_idx",
+  cis_readiness_index: "cis_dfci",
+});
+
+thresholdAdminLevel = (rowOrLevel = currentAdminLevel) => {
+  if (typeof rowOrLevel === "number") return `admin${rowOrLevel}`;
+  if (rowOrLevel?.admin2_name != null) return "admin2";
+  if (rowOrLevel?.admin1_name != null) return "admin1";
+  return "admin0";
+};
+
+thresholdRules = (field, rowOrLevel = currentAdminLevel) =>
+  thresholds[thresholdAdminLevel(rowOrLevel)].indicators[
+    thresholdIndicatorByField[field]
+  ];
+
+classifyThreshold = (field, value, rowOrLevel = currentAdminLevel) => {
+  const numericValue = Number(value);
+  if (value == null || Number.isNaN(numericValue)) return "No data";
+
+  const rules = thresholdRules(field, rowOrLevel);
+  const match = rules.find((rule, index) =>
+    "value" in rule
+      ? numericValue === rule.value
+      : numericValue >= rule.min &&
+        (index === rules.length - 1
+          ? numericValue <= rule.max
+          : numericValue < rule.max),
+  );
+
+  return match?.category ?? "No data";
+};
+
+classificationBand = (category) => {
+  const label = String(category).toLowerCase();
+  if (label.includes("weak") || label.includes("low")) return "low";
+  if (label.includes("strong") || label.includes("high")) return "high";
+  return "moderate";
+};
+
+classificationScale = (field, colors) => ({
+  type: "categorical",
+  domain: thresholdRules(field).map((rule) => rule.category),
+  range: colors,
+  label: "Classification",
+});
+```
+
+```{ojs}
+/**
+ * Interpret forecast skill based on both short-term and long-term RPSS scores
+ * RPSS (Ranked Probability Skill Score) measures forecast quality:
+ *   > 0.6 = Good/reliable forecasts
+ *   < 0.4 = Poor/unreliable forecasts
+ *
+ * The delta (difference) between short and long term indicates skill decay:
+ *   Large positive delta = Rapid skill loss at longer lead times
+ *
+ * @param {number} shortTerm - Short-term (1-2 month) forecast RPSS
+ * @param {number} longTerm - Long-term (11-12 month) forecast RPSS
+ * @returns {object} Interpretation text and CIS implication
+ */
+classifyForecastSkill = (shortTerm, longTerm) => {
+  if (shortTerm == null || longTerm == null)
+    return { interpretation: "No data", implication: "Insufficient data" };
+
+  const delta = shortTerm - longTerm;
+
+  // Case 1: Both horizons perform well - ideal for CIS deployment
+  if (shortTerm > 0.6 && longTerm > 0.6) {
+    return {
+      interpretation: "Reliable forecasts at both horizons",
+      implication: "Scale CIS for advisories + finance",
+    };
+  }
+  // Case 2: Good short-term but poor long-term - limit to operational use
+  else if (shortTerm > 0.6 && longTerm < 0.4 && delta > 0.2) {
+    return {
+      interpretation: "Rapid loss of skill",
+      implication: "Limit use to short-term planning",
+    };
+  }
+  // Case 3: Both horizons perform poorly - use historical averages instead
+  else if (shortTerm < 0.4 && longTerm < 0.4) {
+    return {
+      interpretation: "Weak predictability",
+      implication: "Use climatology / caution",
+    };
+  }
+  // Case 4: Mixed results - blend forecasts with historical data
+  else {
+    return {
+      interpretation: "Uncertain but usable",
+      implication: "Blend with historical averages",
+    };
+  }
+};
+```
+
+```{ojs}
+// ============================================================================
+// ADMIN LEVEL DETECTION: Determine Display Level Based on Selections
+// ============================================================================
+// The currentAdminLevel drives which geographic boundaries to display:
+//   Level 0: No selections → Show all countries (Admin0)
+//   Level 1: Country selected → Show regions within that country (Admin1)
+//   Level 2: Region selected → Show districts within that region (Admin2)
+//
+// Note: When Admin2 items are selected, we stay at Level 2 but highlight
+// those specific districts rather than drilling down further.
+// ============================================================================
+
+currentAdminLevel = {
+  if (selectedAdmin0.length === 0) return 0;  // No country selected → show all
+  if (selectedAdmin1.length === 0) return 1;  // Country selected, no region → admin1
+  if (selectedAdmin2.length === 0) return 2;  // Region selected, no district → admin2
+  return 2; // Districts selected → still admin2, but with highlighting
+}
+
+filteredData = {
+  const bind = createSqlBindings();
+  const adminWhere = sqlAdminWhere(
+    { admin0: selectedAdmin0, admin1: selectedAdmin1 },
+    bind,
+  );
+
+  const rows = await cisDB.query(
+    `
+    SELECT *
+    FROM cis_data
+    WHERE ${adminWhere}
+  `,
+    bind.params,
+  );
+
+  return rows;
+}
+
+// Track which Admin2 regions are selected for highlighting on maps
+highlightedAdmin2 = selectedAdmin2.length > 0 ? selectedAdmin2 : []
+```
+
+```{ojs}
+// Breadcrumb navigation
+breadcrumb = {
+  const parts = [];
+  
+  // Show SSA if no admin0 selected
+  if (selectedAdmin0.length === 0) {
+    parts.push('Sub-Saharan Africa');
+  } else {
+  if (selectedAdmin0.length === 1) parts.push(selectedAdmin0[0]);
+    else parts.push(`${selectedAdmin0.length} countries`);
+  }
+  
+  if (selectedAdmin1.length === 1) parts.push(selectedAdmin1[0]);
+  else if (selectedAdmin1.length > 1) parts.push(`${selectedAdmin1.length} admin1 regions`);
+  
+  if (selectedAdmin2.length === 1) parts.push(selectedAdmin2[0]);
+  else if (selectedAdmin2.length > 1) parts.push(`${selectedAdmin2.length} admin2 regions (highlighted)`);
+  
+  return parts.join(' → ');
+}
+```
+
+---
+
+{{< prose weather-measurement level=2 >}}
+
+```{ojs}
+Inputs.form(
+  [
+    renderA0Multi({ enableSelectAll: true }),
+    renderA1Multi({ enableSelectAll: true }),
+    renderA2Multi({ enableSelectAll: true }),
+  ],
+  {
+    template: inputTemplate(),
+  },
+);
+```
+
+```{ojs}
+// Section 1.1 Controls
+viewof s11ViewType = Inputs.radio(["Map", "Table"], {
+  label: nbText.viewTypeLabel,
+  value: "Map"
+})
+
+viewof s11MapMode = Inputs.radio(["Raw values", "Classified"], {
+  label: nbText.mapModeLabel,
+  value: "Raw values"
+})
+```
+
+```{ojs}
+// Prepare data for Section 1.1 maps
+s11MapData = {
+  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
+                     currentAdminLevel === 1 ? admin1Boundaries :
+                     admin0Boundaries;
+  
+  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul0_code';
+  
+  // Filter boundaries based on current selection
+  // Instead of filtering by property names (which might not exist), filter by matching with filteredData
+  let filteredBoundaries = boundaries;
+  if (currentAdminLevel === 2) {
+    // When showing admin2, only include boundaries that match our filtered data
+    // This ensures we only show boundaries for selected admin1 regions
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        // Include if it matches filtered data OR if it's in the selected admin0/admin1
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
+        return matchesData || (matchesAdmin0 && matchesAdmin1);
+      })
+    };
+  } else if (currentAdminLevel === 1) {
+    // When showing admin1, filter by admin0 and match with filtered data
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        return matchesData || matchesAdmin0;
+      })
+    };
+  }
+  
+  const joinKey = currentAdminLevel === 2
+    ? (d) => `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
+    : currentAdminLevel === 1
+    ? (d) => `${d.admin0_name}|${d.admin1_name}`
+    : (d) => `${d.admin0_name}`;
+
+  const geoData = mergeDataToBoundaries({
+    boundaries: filteredBoundaries,
+    data: filteredData,
+    boundaryKey: (feature) => joinKey(feature.properties),
+    dataKey: (row) => joinKey(row)
+  });
+
+  const features = geoData.features.map(feature => {
+    const dataRow = feature.properties.data;
+
+    // Pre-compute region name for faster tooltip rendering
+    const regionName = currentAdminLevel === 0 
+      ? feature.properties.admin0_name 
+      : currentAdminLevel === 1
+      ? `${feature.properties.admin1_name}, ${feature.properties.admin0_name}`
+      : `${feature.properties.admin2_name}, ${feature.properties.admin1_name}, ${feature.properties.admin0_name}`;
+    
+    // Check if this admin2 region is highlighted
+    const isHighlighted = currentAdminLevel === 2 && 
+                          highlightedAdmin2.length > 0 && 
+                          highlightedAdmin2.includes(feature.properties.admin2_name);
+    
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        regionName: regionName,
+        weatherStation: dataRow?.["wstation_density"],
+        cloudCover: dataRow?.["cloud-coverage_meanannual"],
+        weatherStationClass: dataRow ? classifyThreshold("wstation_density", dataRow["wstation_density"], dataRow) : "No data",
+        cloudCoverClass: dataRow ? classifyThreshold("cloud-coverage_meanannual", dataRow["cloud-coverage_meanannual"], dataRow) : "No data",
+        isHighlighted: isHighlighted
+      }
+    };
+  });
+  
+  // Only filter out features without data if we have some features with data
+  // This prevents removing all features if matching fails
+  const featuresWithData = features.filter(f => f.properties.weatherStation != null || f.properties.cloudCover != null);
+  
+  // If we have features with data, use those; otherwise, show all features (they'll show as "No data")
+  return { type: "FeatureCollection", features: featuresWithData.length > 0 ? featuresWithData : features };
+}
+```
+
+```{ojs}
+// Section 1.1 Maps
+{
+  if (s11ViewType === "Map") {
+    //TODO: see if this can be removed
+    const height = 600;
+    const useRaw = s11MapMode === "Raw values";
+    const highlightConfig = {
+      filter: (d) => d.properties.isHighlighted,
+      stroke: "#000",
+      strokeWidth: 2.5
+    };
+    
+    return htl.html`
+    <div style="display: flex; gap: 20px;">
+      <div style="flex: 1;">
+        <h4>${nbText.weatherStationLabel}</h4>
+        ${makeChoropleth({
+          features: s11MapData,
+          width: width / 2,
+          fill: useRaw
+            ? d => d.properties.weatherStation
+            : d => d.properties.weatherStationClass,
+          color: useRaw ? {
+            type: "linear",
+            domain: d3.extent(s11MapData.features, d => d.properties.weatherStation),
+            scheme: "YlGnBu",
+            label: "Density"
+          } : classificationScale("wstation_density", ["#fee5d9", "#fcae91", "#fb6a4a"]),
+          channels: {
+            region: {
+              //TODO: replace this with country, admin1, admin2 (also better titles and translations)
+              label: "Region", 
+              value: (d) => d.properties.regionName
+            },
+            weatherStation: {
+              label: "Weather Station",
+              value: (d) => d.properties.weatherStation != null
+                ? d.properties.weatherStation.toFixed(3)
+                : "N/A"
+            },
+            class: {
+              label: "Class",
+              value: (d) => d.properties.weatherStationClass
+            }
+          },
+          tooltip: {
+            region: true,
+            weatherStation: true,
+            class: true
+          },
+          adminHighlight: highlightConfig
+        })}
+      </div>
+      <div style="flex: 1;">
+        <h4>${nbText.cloudCoverLabel}</h4>
+        ${makeChoropleth({
+          features: s11MapData,
+          width: width / 2,
+          height,
+          fill: useRaw
+            ? d => d.properties.cloudCover
+            : d => d.properties.cloudCoverClass,
+          color: useRaw ? {
+            type: "linear",
+            domain: d3.extent(s11MapData.features, d => d.properties.cloudCover),
+            scheme: "YlGnBu",
+            label: "Coverage"
+          } : classificationScale("cloud-coverage_meanannual", ["#fee5d9", "#fcae91", "#fb6a4a"]),
+          channels: {
+            region: {
+              label: "Region",
+              value: (d) => d.properties.regionName
+            },
+            cloudCover: {
+              label: "Cloud Cover",
+              value: (d) => d.properties.cloudCover != null
+                ? d.properties.cloudCover.toFixed(3)
+                : "N/A"
+            },
+            class: {
+              label: "Class",
+              value: (d) => d.properties.cloudCoverClass
+            }
+          },
+          tooltip: {
+            region: true,
+            cloudCover: true,
+            class: true
+          },
+          adminHighlight: highlightConfig
+        })}
+      </div>
+    </div>`;
+  } else {
+    // Table view
+    const tableData = filteredData.map(d => {
+      const adminName = currentAdminLevel === 0 
+        ? d.admin0_name 
+        : currentAdminLevel === 1
+        ? `${d.admin1_name}, ${d.admin0_name}`
+        : `${d.admin2_name}, ${d.admin1_name}`;
+      return {
+        "Admin Name": adminName,
+        "Weather Station (Raw)": d["wstation_density"]?.toFixed(3) || "N/A",
+        "Weather Station (Class)": classifyThreshold("wstation_density", d["wstation_density"], d),
+        "Cloud Cover (Raw)": d["cloud-coverage_meanannual"]?.toFixed(3) || "N/A",
+        "Cloud Cover (Class)": classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d)
+      };
+    });
+    
+    return filterableDataTable(tableData, {
+      sort: "Admin Name",
+    });
+  }
+}
+```
+
+```{ojs}
+// Download button for Section 1.1
+downloadButton(
+  filteredData.map((d) => {
+    const adminName =
+      currentAdminLevel === 0
+        ? d.admin0_name
+        : currentAdminLevel === 1
+          ? `${d.admin1_name}, ${d.admin0_name}`
+          : `${d.admin2_name}, ${d.admin1_name}`;
+    return {
+      "Weather Station Density": d["wstation_density"],
+      "Weather Station Class": classifyThreshold(
+        "wstation_density",
+        d["wstation_density"],
+        d,
+      ),
+      "Cloud Coverage": d["cloud-coverage_meanannual"],
+      "Cloud Coverage Class": classifyThreshold(
+        "cloud-coverage_meanannual",
+        d["cloud-coverage_meanannual"],
+        d,
+      ),
+    };
+  }),
+  "cis_observation_capacity",
+  nbText.downloadLabel,
+);
+```
+
+```{ojs}
+// Section 1.1 Dynamic Insight
+
+s11Insight = {
+  // If admin2 regions are highlighted, only use those for insights
+  const insightData = highlightedAdmin2.length > 0 
+    ? filteredData.filter(d => highlightedAdmin2.includes(d.admin2_name))
+    : filteredData;
+  
+  const avgWeatherStation = d3.mean(insightData, d => d["wstation_density"]);
+  const avgCloudCover = d3.mean(insightData, d => d["cloud-coverage_meanannual"]);
+  
+  const wsClass = classificationBand(classifyThreshold("wstation_density", avgWeatherStation));
+  const ccClass = classificationBand(classifyThreshold("cloud-coverage_meanannual", avgCloudCover));
+  
+  const capacity = (wsClass === "high" && ccClass === "high") ? "high" :
+                   (wsClass === "low" || ccClass === "low") ? "low" : "moderate";
+  
+  return tmpl(nbText.insights.stationDensity, {
+    area: breadcrumb,
+    density: avgWeatherStation?.toFixed(3),
+    clearSky: avgCloudCover?.toFixed(3),
+    capacity,
+  });
+}
+```
+
+`{ojs} s11Insight`
+
+{{< prose weather-consistency level=2 >}}
+
+```{ojs}
+Inputs.form(
+  [
+    renderA0Multi({ enableSelectAll: true }),
+    renderA1Multi({ enableSelectAll: true }),
+    renderA2Multi({ enableSelectAll: true }),
+  ],
+  {
+    template: inputTemplate(),
+  },
+);
+```
+
+```{ojs}
+// Section 1.2 Controls
+viewof s12ViewType = Inputs.radio(["Map", "Table"], {
+  label: nbText.viewTypeLabel,
+  value: "Map"
+})
+
+viewof s12MapMode = Inputs.radio(["Raw values", "Classified"], {
+  label: nbText.mapModeLabel,
+  value: "Raw values"
+})
+```
+
+```{ojs}
+// Prepare data for Section 1.2 map
+s12MapData = {
+  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
+                     currentAdminLevel === 1 ? admin1Boundaries :
+                     admin0Boundaries;
+  
+  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul0_code';
+  
+  // Filter boundaries based on current selection
+  // Instead of filtering by property names, filter by matching with filteredData
+  let filteredBoundaries = boundaries; //TODO: This occurs multiple times, clean up/reuse 
+  if (currentAdminLevel === 2) {
+    // When showing admin2, only include boundaries that match our filtered data
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
+        return matchesData || (matchesAdmin0 && matchesAdmin1);
+      })
+    };
+  } else if (currentAdminLevel === 1) {
+    // When showing admin1, filter by admin0 and match with filtered data
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        return matchesData || matchesAdmin0;
+      })
+    };
+  }
+  
+  const joinKey = currentAdminLevel === 2
+    ? (d) => `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
+    : currentAdminLevel === 1
+    ? (d) => `${d.admin0_name}|${d.admin1_name}`
+    : (d) => `${d.admin0_name}`;
+
+  const geoData = mergeDataToBoundaries({
+    boundaries: filteredBoundaries,
+    data: filteredData,
+    boundaryKey: (feature) => joinKey(feature.properties),
+    dataKey: (row) => joinKey(row)
+  });
+
+  const features = geoData.features.map(feature => {
+    const dataRow = feature.properties.data;
+    const precipValue = dataRow ? parseFloat(dataRow["cv-precipitation_agreement"]) : null;
+    
+    // Check if this admin2 region is highlighted
+    const isHighlighted = currentAdminLevel === 2 && 
+                          highlightedAdmin2.length > 0 && 
+                          highlightedAdmin2.includes(feature.properties.admin2_name);
+    
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        precipAgreement: precipValue,
+        precipAgreementClass: classifyThreshold("cv-precipitation_agreement", precipValue, dataRow),
+        isHighlighted: isHighlighted
+      }
+    };
+  }).filter(f => f.properties.precipAgreement != null);
+  
+  return { type: "FeatureCollection", features };
+}
+```
+
+```{ojs}
+// Section 1.2 Map/Table
+{
+  if (s12ViewType === "Map") {
+    const useRaw = s12MapMode === "Raw values";
+    const highlightConfig = {
+      filter: (d) => d.properties.isHighlighted,
+      stroke: "#000",
+      strokeWidth: 2.5
+    };
+    
+    return makeChoropleth({
+      features: s12MapData,
+      width: width,
+      height: 600,
+      fill: useRaw ? d => d.properties.precipAgreement : d => d.properties.precipAgreementClass,
+      color: useRaw ? {
+        type: "linear",
+        domain: d3.extent(s12MapData.features, d => d.properties.precipAgreement),
+        scheme: "Viridis",
+        label: "Agreement"
+      } : classificationScale("cv-precipitation_agreement", ["#fff5eb", "#fdd0a2", "#fdae6b", "#e6550d", "#a63603"]),
+      channels: {
+        region: {
+          label: "Region",
+          value: (d) => {
+            const regionName = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
+            const country = d.properties.admin0_name;
+            return regionName === country ? regionName : `${regionName}, ${country}`;
+          }
+        },
+        satelliteAgreement: {
+          label: "Satellite Agreement",
+          value: (d) => d.properties.precipAgreement != null
+            ? d.properties.precipAgreement.toFixed(1)
+            : "N/A"
+        },
+        class: {
+          label: "Class",
+          value: (d) => d.properties.precipAgreementClass
+        }
+      },
+      tooltip: {
+        region: true,
+        satelliteAgreement: true,
+        class: true
+      },
+      adminHighlight: highlightConfig
+    });
+  } else {
+    const tableData = filteredData.map(d => {
+      const adminName = currentAdminLevel === 0 
+        ? d.admin0_name 
+        : currentAdminLevel === 1
+        ? `${d.admin1_name}, ${d.admin0_name}`
+        : `${d.admin2_name}, ${d.admin1_name}`;
+      return {
+        "Admin Name": adminName,
+      "Satellite Agreement (Raw)": parseFloat(d["cv-precipitation_agreement"])?.toFixed(1) || "N/A",
+      "Satellite Agreement (Class)": classifyThreshold("cv-precipitation_agreement", d["cv-precipitation_agreement"], d)
+      };
+    });
+    
+    return filterableDataTable(tableData, {
+      sort: "Admin Name",
+    });
+  }
+}
+```
+
+```{ojs}
+// Download button for Section 1.2
+downloadButton(
+  filteredData.map((d) => {
+    const adminName =
+      currentAdminLevel === 0
+        ? d.admin0_name
+        : currentAdminLevel === 1
+          ? `${d.admin1_name}, ${d.admin0_name}`
+          : `${d.admin2_name}, ${d.admin1_name}`;
+    return {
+      "Admin Name": adminName,
+      "Satellite Agreement": parseFloat(d["cv-precipitation_agreement"]),
+      Classification: classifyThreshold(
+        "cv-precipitation_agreement",
+        d["cv-precipitation_agreement"],
+        d,
+      ),
+    };
+  }),
+  "cis_precipitation_agreement",
+  nbText.downloadLabel,
+);
+```
+
+```{ojs}
+// Section 1.2 Dynamic Insight
+s12Insight = {
+  // If admin2 regions are highlighted, only use those for insights
+  const insightData = highlightedAdmin2.length > 0 
+    ? filteredData.filter(d => highlightedAdmin2.includes(d.admin2_name))
+    : filteredData;
+  
+  const avgAgreement = d3.mean(insightData, d => parseFloat(d["cv-precipitation_agreement"]));
+  
+  let agreementLevel = "no";
+  if (avgAgreement >= 3) agreementLevel = "high";
+  else if (avgAgreement >= 1) agreementLevel = "partial";
+  
+  return tmpl(nbText.insights.dataAgreement, {
+    area: breadcrumb,
+    agreement: avgAgreement?.toFixed(2),
+    level: agreementLevel,
+  });
+}
+```
+
+`{ojs} s12Insight`
+
+---
+
+{{< prose forecast-reliability level=2 >}}
+
+```{ojs}
+Inputs.form(
+  [
+    renderA0Multi({ enableSelectAll: true }),
+    renderA1Multi({ enableSelectAll: true }),
+    renderA2Multi({ enableSelectAll: true }),
+  ],
+  {
+    template: inputTemplate(),
+  },
+);
+```
+
+```{ojs}
+// Section 1.3 Controls
+viewof s13ViewType = Inputs.radio(["Map", "Chart", "Table"], {
+  label: nbText.viewTypeLabel,
+  value: "Map"
+})
+
+viewof s13SortBy = {
+  // Only show sort-by when Chart or Table view is selected
+  if (s13ViewType === "Map") {
+    const input = Inputs.radio(["Short-term skill", "Long-term skill", "Difference (Δ)"], {
+      label: nbText.sortByLabel,
+      value: "Short-term skill"
+    });
+    input.style.display = "none";
+    return input;
+  }
+  return Inputs.radio(["Short-term skill", "Long-term skill", "Difference (Δ)"], {
+    label: nbText.sortByLabel,
+    value: "Short-term skill"
+  });
+}
+```
+
+```{ojs}
+// Section 1.3 Map Data Preparation
+s13MapData = {
+  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
+                     currentAdminLevel === 1 ? admin1Boundaries :
+                     admin0Boundaries;
+  
+  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul0_code';
+  
+  // Filter boundaries based on current selection
+  let filteredBoundaries = boundaries;
+  if (currentAdminLevel === 2) {
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
+        return matchesData || (matchesAdmin0 && matchesAdmin1);
+      })
+    };
+  } else if (currentAdminLevel === 1) {
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        return matchesData || matchesAdmin0;
+      })
+    };
+  }
+  
+  const joinKey = currentAdminLevel === 2
+    ? (d) => `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
+    : currentAdminLevel === 1
+    ? (d) => `${d.admin0_name}|${d.admin1_name}`
+    : (d) => `${d.admin0_name}`;
+
+  const geoData = mergeDataToBoundaries({
+    boundaries: filteredBoundaries,
+    data: filteredData,
+    boundaryKey: (feature) => joinKey(feature.properties),
+    dataKey: (row) => joinKey(row)
+  });
+
+  const features = geoData.features.map(feature => {
+    const dataRow = feature.properties.data;
+    const shortTerm = dataRow ? dataRow["short-term_frcst_skill"] : null;
+    const longTerm = dataRow ? dataRow["seasonal_frcst_skill"] : null;
+    const delta = (shortTerm != null && longTerm != null) ? longTerm - shortTerm : null;
+    
+    // Check if this admin2 region is highlighted
+    const isHighlighted = currentAdminLevel === 2 && 
+                          highlightedAdmin2.length > 0 && 
+                          highlightedAdmin2.includes(feature.properties.admin2_name);
+    
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        shortTerm: shortTerm,
+        longTerm: longTerm,
+        delta: delta,
+        isHighlighted: isHighlighted
+      }
+    };
+  }).filter(f => f.properties.shortTerm != null || f.properties.longTerm != null);
+  
+  return { type: "FeatureCollection", features };
+}
+```
+
+```{ojs}
+// Prepare data for Section 1.3
+s13Data = {
+  const data = filteredData.map(d => {
+    const shortTerm = d["short-term_frcst_skill"];
+    const longTerm = d["seasonal_frcst_skill"];
+    const classification = classifyForecastSkill(shortTerm, longTerm);
+    
+    const adminName = currentAdminLevel === 0 
+      ? d.admin0_name 
+      : currentAdminLevel === 1
+      ? `${d.admin1_name}, ${d.admin0_name}`
+      : `${d.admin2_name}, ${d.admin1_name}`;
+    
+    return {
+      admin: adminName,
+      shortTerm: shortTerm,
+      longTerm: longTerm,
+      delta: shortTerm != null && longTerm != null ? longTerm - shortTerm : null,
+      interpretation: classification.interpretation,
+      implication: classification.implication
+    };
+  }).filter(d => d.shortTerm != null || d.longTerm != null);
+  
+  // Sort data
+  if (s13SortBy === "Short-term skill") { //TODO: We can use bulit in OJS plot fn instead
+    data.sort((a, b) => (b.shortTerm || 0) - (a.shortTerm || 0));
+  } else if (s13SortBy === "Long-term skill") {
+    data.sort((a, b) => (b.longTerm || 0) - (a.longTerm || 0));
+  } else {
+    // Sort by delta - most positive to most negative
+    data.sort((a, b) => (b.delta || 0) - (a.delta || 0));
+  }
+  
+  return data;
+}
+```
+
+```{ojs}
+// Section 1.3 Map/Chart/Table
+{
+  if (s13ViewType === "Map") {
+    const highlightConfig = {
+      filter: (d) => d.properties.isHighlighted,
+      stroke: "#000",
+      strokeWidth: 2.5
+    };
+    const regionChannel = {
+      label: "Region",
+      value: (d) => {
+        const regionName = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
+        const country = d.properties.admin0_name;
+        return regionName === country ? regionName : `${regionName}, ${country}`;
+      }
+    };
+    const shortTermMap = makeChoropleth({
+      features: s13MapData,
+      width: 400,
+      height: 450,
+      fill: d => d.properties.shortTerm,
+      color: {
+        type: "linear",
+        domain: [0, 1],
+        scheme: "RdYlGn",
+        label: "RPSS"
+      },
+      channels: {
+        region: regionChannel,
+        shortTerm: {
+          label: "Short-term",
+          value: (d) => d.properties.shortTerm != null ? d.properties.shortTerm.toFixed(3) : "N/A"
+        }
+      },
+      tooltip: {
+        region: true,
+        shortTerm: true
+      },
+      adminHighlight: highlightConfig
+    });
+    
+    const longTermMap = makeChoropleth({
+      features: s13MapData,
+      width: 400,
+      height: 450,
+      fill: d => d.properties.longTerm,
+      color: {
+        type: "linear",
+        domain: [0, 1],
+        scheme: "RdYlGn",
+        label: "RPSS"
+      },
+      channels: {
+        region: regionChannel,
+        longTerm: {
+          label: "Long-term",
+          value: (d) => d.properties.longTerm != null ? d.properties.longTerm.toFixed(3) : "N/A"
+        }
+      },
+      tooltip: {
+        region: true,
+        longTerm: true
+      },
+      adminHighlight: highlightConfig
+    });
+    
+    const deltaMap = makeChoropleth({
+      features: s13MapData,
+      width: 400,
+      height: 450,
+      fill: d => d.properties.delta,
+      color: {
+        type: "diverging",
+        domain: [-0.5, 0.5],
+        scheme: "RdBu",
+        label: "Δ (Long − Short)"
+      },
+      channels: {
+        region: regionChannel,
+        delta: {
+          label: "Difference",
+          value: (d) => d.properties.delta != null ? d.properties.delta.toFixed(3) : "N/A"
+        }
+      },
+      tooltip: {
+        region: true,
+        delta: true
+      },
+      adminHighlight: highlightConfig
+    });
+    
+    return htl.html`<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-top: 20px;">
+      <div style="text-align: center;">
+        <h4 style="margin-bottom: 10px; font-size: 14px;">Short-term Forecast Skill (1–2 mo)</h4>
+        ${shortTermMap}
+      </div>
+      <div style="text-align: center;">
+        <h4 style="margin-bottom: 10px; font-size: 14px;">Long-term Forecast Skill (11–12 mo)</h4>
+        ${longTermMap}
+      </div>
+      <div style="text-align: center;">
+        <h4 style="margin-bottom: 10px; font-size: 14px;">Difference (Long − Short)</h4>
+        ${deltaMap}
+      </div>
+    </div>`;
+  } else if (s13ViewType === "Chart") {
+
+    // Prepare data in the format expected by the chart
+    const data = s13Data.map(d => {
+      const short = d.shortTerm != null ? parseFloat(d.shortTerm) : null;
+      const long = d.longTerm != null ? parseFloat(d.longTerm) : null;
+      const delta = short != null && long != null ? long - short : null;
+      
+      // Calculate sort value based on selected sort mode
+      let sortValue = 0; //TODO: sorting again....
+      if (s13SortBy === "Short-term skill") {
+        sortValue = short || 0;
+      } else if (s13SortBy === "Long-term skill") {
+        sortValue = long || 0;
+      } else {
+        // Sort by delta (preserving sign)
+        sortValue = delta || 0;
+      }
+      
+      return {
+        country: d.admin,
+        short: short,
+        long: long,
+        delta: delta,
+        sortValue: sortValue
+      };
+    }).filter(d => d.short != null || d.long != null);
+    
+    // Sort data based on selected mode
+    const sorted = data.sort((a, b) => {
+      if (s13SortBy === "Short-term skill") {
+        return (b.short || 0) - (a.short || 0);
+      } else if (s13SortBy === "Long-term skill") {
+        return (b.long || 0) - (a.long || 0);
+      } else {
+        // Sort by delta - most positive to most negative
+        return (b.delta || 0) - (a.delta || 0);
+      }
+    });
+    
+    // Flatten data: each geography gets 3 entries (Short-term, Long-term, Delta)
+    const longData = sorted.flatMap((d) => [
+      {
+        country: d.country,
+        metric: "Short-term RPSS (1–2 mo)",
+        value: d.short
+      },
+      {
+        country: d.country,
+        metric: "Long-term RPSS (11–12 mo)",
+        value: d.long
+      },
+      {
+        country: d.country,
+        metric: "Δ (Long − Short)",
+        value: d.delta
+      }
+    ]).filter(d => d.value != null);
+    
+    // Calculate responsive height based on number of geographies
+    const geographyCount = sorted.length;
+    // Height is dynamic: 20px per region to prevent label overlap, min 400px
+    const height = Math.max(400, geographyCount * 20);
+    
+    // Get the ordered list of countries from sorted data
+    const countryOrder = sorted.map(d => d.country);
+    
+    // Calculate margin based on longest geography name
+    const maxNameLength = Math.max(...countryOrder.map(name => name.length), 0);
+    const marginLeft = Math.max(200, maxNameLength * 8); // At least 200px, or 8px per character
+    
+    // Wrap chart in scrollable container to handle many regions
+    const chart = Plot.plot({
+      marginLeft: marginLeft,
+      marginTop: 40,
+      marginBottom: 60,
+      width: width,
+      height: height,
+      y: { axis: null },
+      x: { 
+        grid: true,
+        axis: "top",
+        label: "RPSS or Δ"
+      },
+      fy: { 
+        padding: 0,  // Set padding to 0 to reduce spacing between bars
+        label: null,
+        domain: countryOrder // Use pre-sorted order to maintain sort
+      },
+      color: { 
+        domain: [
+          "Short-term RPSS (1–2 mo)",
+          "Long-term RPSS (11–12 mo)",
+          "Δ (Long − Short)"
+        ],
+        range: ["#4477AA", "#EE6677", "#228833"],
+        legend: true
+      },
+      marks: [
+        // X-axis at bottom
+        Plot.axisX({ 
+          anchor: "bottom", 
+          label: "RPSS or Δ"
+        }),
+        Plot.barX(longData, {
+          x: "value",
+          y: "metric",
+          fill: "metric",
+          fy: "country",
+          sort: {
+            y: null,
+            color: null
+          },
+          tip: true
+        }),
+        Plot.ruleX([0], { stroke: "black" })
+      ]
+    });
+    
+    // Return chart in scrollable container with fixed max-height
+    return htl.html`<div style="max-height: 600px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 10px;">
+      ${chart}
+    </div>`;
+  } else {
+    const tableData = s13Data.map(d => ({
+      "Admin Name": d.admin,
+      "Short-term": d.shortTerm?.toFixed(3) || "N/A",
+      "Long-term": d.longTerm?.toFixed(3) || "N/A",
+      "Delta": d.delta?.toFixed(3) || "N/A",
+      "Interpretation": d.interpretation,
+      "CIS Implication": d.implication
+    }));
+    
+    return filterableDataTable(tableData, {
+      rows: 20
+    });
+  }
+}
+```
+
+```{ojs}
+// Download button for Section 1.3
+downloadButton(
+  s13Data.map((d) => ({
+    "Admin Name": d.admin,
+    "Short-term Skill": d.shortTerm,
+    "Long-term Skill": d.longTerm,
+    Delta: d.delta,
+    Interpretation: d.interpretation,
+    "CIS Implication": d.implication,
+  })),
+  "cis_forecast_skill",
+  nbText.downloadLabel,
+);
+```
+
+```{ojs}
+// Section 1.3 Dynamic Insight
+s13Insight = {
+  // If admin2 regions are highlighted, only use those for insights
+  const insightData = highlightedAdmin2.length > 0 
+    ? filteredData.filter(d => highlightedAdmin2.includes(d.admin2_name))
+    : filteredData;
+  
+  const avgShortTerm = d3.mean(insightData, d => d["short-term_frcst_skill"]);
+  const avgLongTerm = d3.mean(insightData, d => d["seasonal_frcst_skill"]);
+  
+  const classification = classifyForecastSkill(avgShortTerm, avgLongTerm);
+  
+  return tmpl(nbText.insights.forecastSkill, {
+    area: breadcrumb,
+    shortTerm: avgShortTerm?.toFixed(3),
+    longTerm: avgLongTerm?.toFixed(3),
+    interpretation: classification.interpretation.toLowerCase(),
+  });
+}
+```
+
+`{ojs} s13Insight`
+
+{{< prose readiness-index level=2 >}}
+
+```{ojs}
+Inputs.form(
+  [
+    renderA0Multi({ enableSelectAll: true }),
+    renderA1Multi({ enableSelectAll: true }),
+    renderA2Multi({ enableSelectAll: true }),
+  ],
+  {
+    template: inputTemplate(),
+  },
+);
+```
+
+```{ojs}
+// Section 1.4 Controls
+viewof s14ViewType = Inputs.radio(["Map", "Table", "Heatmap"], {
+  label: nbText.viewTypeLabel,
+  value: "Map"
+})
+```
+
+```{ojs}
+// Prepare data for Section 1.4
+s14MapData = {
+  const boundaries = currentAdminLevel === 2 ? admin2Boundaries :
+                     currentAdminLevel === 1 ? admin1Boundaries :
+                     admin0Boundaries;
+  
+  const gaulCodeField = currentAdminLevel === 2 ? 'gaul2_code' :
+                        currentAdminLevel === 1 ? 'gaul1_code' :
+                        'gaul0_code';
+  
+  // Filter boundaries based on current selection
+  // Instead of filtering by property names, filter by matching with filteredData
+  let filteredBoundaries = boundaries;  //TODO: Same boundary filtering again...
+  if (currentAdminLevel === 2) {
+    // When showing admin2, only include boundaries that match our filtered data
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        const matchesAdmin1 = selectedAdmin1.length === 0 || (f.properties.admin1_name && selectedAdmin1.includes(f.properties.admin1_name));
+        return matchesData || (matchesAdmin0 && matchesAdmin1);
+      })
+    };
+  } else if (currentAdminLevel === 1) {
+    // When showing admin1, filter by admin0 and match with filtered data
+    const filteredGaulCodes = new Set(filteredData.map(d => d[gaulCodeField]).filter(c => c != null));
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => {
+        const gaulCode = f.properties[gaulCodeField];
+        const matchesData = filteredGaulCodes.has(gaulCode);
+        const matchesAdmin0 = selectedAdmin0.length === 0 || (f.properties.admin0_name && selectedAdmin0.includes(f.properties.admin0_name));
+        return matchesData || matchesAdmin0;
+      })
+    };
+  }
+  
+  const joinKey = currentAdminLevel === 2
+    ? (d) => `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
+    : currentAdminLevel === 1
+    ? (d) => `${d.admin0_name}|${d.admin1_name}`
+    : (d) => `${d.admin0_name}`;
+
+  const geoData = mergeDataToBoundaries({
+    boundaries: filteredBoundaries,
+    data: filteredData,
+    boundaryKey: (feature) => joinKey(feature.properties),
+    dataKey: (row) => joinKey(row)
+  });
+
+  const features = geoData.features.map(feature => {
+    const dataRow = feature.properties.data;
+    // Check if this admin2 region is highlighted
+    const isHighlighted = currentAdminLevel === 2 && 
+                          highlightedAdmin2.length > 0 && 
+                          highlightedAdmin2.includes(feature.properties.admin2_name);
+    
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        cisReadiness: dataRow?.["cis_readiness_index"],
+        cisReadinessClass: dataRow ? classifyThreshold("cis_readiness_index", dataRow["cis_readiness_index"], dataRow) : "No data",
+        weatherStation: dataRow?.["wstation_density"],
+        weatherStationClass: dataRow ? classifyThreshold("wstation_density", dataRow["wstation_density"], dataRow) : "No data",
+        cloudCover: dataRow?.["cloud-coverage_meanannual"],
+        cloudCoverClass: dataRow ? classifyThreshold("cloud-coverage_meanannual", dataRow["cloud-coverage_meanannual"], dataRow) : "No data",
+        precipAgreement: dataRow ? parseFloat(dataRow["cv-precipitation_agreement"]) : null,
+        precipAgreementClass: dataRow ? classifyThreshold("cv-precipitation_agreement", dataRow["cv-precipitation_agreement"], dataRow) : "No data",
+        shortTerm: dataRow?.["short-term_frcst_skill"],
+        longTerm: dataRow?.["seasonal_frcst_skill"],
+        isHighlighted: isHighlighted
+      }
+    };
+  }).filter(f => f.properties.cisReadiness != null);
+  
+  return { type: "FeatureCollection", features };
+}
+```
+
+```{ojs}
+// Section 1.4 Visualization
+{
+  if (s14ViewType === "Map") {
+    return makeChoropleth({
+      features: s14MapData,
+      width: width,
+      height: 600,
+      fill: d => d.properties.cisReadiness,
+      color: {
+        type: "linear",
+        domain: d3.extent(s14MapData.features, d => d.properties.cisReadiness),
+        scheme: "RdYlGn",
+        label: "CIS Readiness Index"
+      },
+      channels: {
+        region: {
+          label: "Region",
+          value: (d) => d.properties.admin0_name || d.properties.admin1_name || d.properties.admin2_name
+        },
+        cisReadiness: {
+          label: "CIS Readiness",
+          value: (d) => d.properties.cisReadiness != null
+            ? `${d.properties.cisReadiness.toFixed(3)} (Relative to SSA)`
+            : "N/A"
+        },
+        class: {
+          label: "Classification",
+          value: (d) => d.properties.cisReadinessClass
+        },
+        weatherStation: {
+          label: "Weather Stn",
+          value: (d) => d.properties.weatherStationClass
+        },
+        cloudCover: {
+          label: "Cloud Cover",
+          value: (d) => d.properties.cloudCoverClass
+        },
+        precipAgreement: {
+          label: "Precip Agree",
+          value: (d) => d.properties.precipAgreementClass
+        }
+      },
+      tooltip: {
+        region: true,
+        cisReadiness: true,
+        class: true,
+        weatherStation: true,
+        cloudCover: true,
+        precipAgreement: true
+      },
+      baseMarkOptions: {
+        fillOpacity: 1
+      },
+      adminHighlight: {
+        filter: (d) => d.properties.isHighlighted,
+        stroke: "#000",
+        strokeWidth: 2.5
+      }
+    });
+  } else if (s14ViewType === "Table") {
+    const tableData = filteredData
+      .filter(d => d["cis_readiness_index"] != null)
+      .map(d => {
+      const adminName = currentAdminLevel === 0 
+        ? d.admin0_name 
+        : currentAdminLevel === 1
+        ? `${d.admin1_name}, ${d.admin0_name}`
+        : `${d.admin2_name}, ${d.admin1_name}`;
+      return {
+        "Admin Name": adminName, //TODO: Admin name again
+        "CIS Readiness (Raw)": d["cis_readiness_index"]?.toFixed(3) || "N/A",
+        "CIS Readiness (Class)": classifyThreshold("cis_readiness_index", d["cis_readiness_index"], d),
+        "Weather Stn (Raw)": d["wstation_density"]?.toFixed(3) || "N/A",
+        "Weather Stn (Class)": classifyThreshold("wstation_density", d["wstation_density"], d),
+        "Cloud Cover (Raw)": d["cloud-coverage_meanannual"]?.toFixed(3) || "N/A",
+        "Cloud Cover (Class)": classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d),
+        "Precip Agree (Raw)": d["cv-precipitation_agreement"]?.toFixed(1) || "N/A",
+        "Precip Agree (Class)": classifyThreshold("cv-precipitation_agreement", d["cv-precipitation_agreement"], d),
+        "Short-term (Raw)": d["short-term_frcst_skill"]?.toFixed(3) || "N/A",
+        "Long-term (Raw)": d["seasonal_frcst_skill"]?.toFixed(3) || "N/A"
+      };
+    });
+    
+    return filterableDataTable(tableData, { // TODO: Why this tabe go ... when rest horizontal scroll
+      sort: "CIS Readiness (Raw)",
+      reverse: true,
+    })
+
+  } else {
+    const heatmapData = filteredData
+      .filter(d => d["cis_readiness_index"] != null)
+      .map(d => {
+      const adminName = currentAdminLevel === 0 
+        ? d.admin0_name 
+        : currentAdminLevel === 1
+        ? `${d.admin1_name}, ${d.admin0_name}`
+        : `${d.admin2_name}, ${d.admin1_name}`;
+      
+      return {
+        country: adminName,
+        "Weather Stations": d["wstation_density"],
+        "Cloud Cover": d["cloud-coverage_meanannual"],
+        "Precip Agreement": parseFloat(d["cv-precipitation_agreement"]) / 4, // Normalize to 0-1
+        "Short-term Forecast": d["short-term_frcst_skill"],
+        "Long-term Forecast": d["seasonal_frcst_skill"],
+        "CIS Readiness": d["cis_readiness_index"]
+      };
+    });
+    
+    // Sort by CIS Readiness (descending)
+    heatmapData.sort((a, b) => (b["CIS Readiness"] || 0) - (a["CIS Readiness"] || 0));
+    
+    const sortedCountries = heatmapData.map(d => d.country);
+    const indicators = ["Weather Stations", "Cloud Cover", "Precip Agreement", "Short-term Forecast", "Long-term Forecast", "CIS Readiness"];
+    
+    // Calculate responsive dimensions
+    const geographyCount = heatmapData.length;
+    const cellHeight = 25;
+    const height = Math.max(400, geographyCount * cellHeight + 120); // Extra space for legend at bottom
+    const maxNameLength = Math.max(...sortedCountries.map(name => name.length), 0);
+    const marginLeft = Math.max(180, maxNameLength * 7);
+    
+    // Flatten data for heatmap (long format)
+    const longData = heatmapData.flatMap(row => 
+      indicators.map(indicator => ({
+        country: row.country,
+        indicator: indicator,
+        value: row[indicator]
+      }))
+    ).filter(d => d.value != null);
+    
+    // Use Observable Plot.cell for the heatmap
+    return htl.html`<div style="max-height: 700px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 10px;">
+      ${Plot.plot({
+        width: width,
+        height: height,
+        marginLeft: marginLeft,
+        marginTop: 80,  // More space for rotated axis labels
+        marginBottom: 120, // Increased bottom margin as requested
+        marginRight: 20,
+        x: {
+          label: null,
+          tickRotate: -45,
+          domain: indicators
+        },
+        y: {
+          label: null,
+          domain: sortedCountries
+        },
+        color: {
+          type: "linear",
+          scheme: "RdYlBu",
+          reverse: true,  // Red = high, Blue = low
+          legend: true,
+          label: "Value"
+        },
+        marks: [
+          Plot.cell(longData, {
+            x: "indicator",
+            y: "country",
+            fill: "value",
+            tip: {
+              fontSize: 14,
+              format: {
+                fill: d => d != null ? d.toFixed(3) : "N/A"
+              }
+            }
+          }),
+          Plot.text(longData, {
+            x: "indicator",
+            y: "country",
+            text: d => d.value != null ? d.value.toFixed(2) : "",
+            fill: d => d.value > 0.5 ? "white" : "black",
+            fontSize: 9
+          })
+        ]
+      })}
+    </div>`;
+  }
+}
+```
+
+```{ojs}
+// Download button for Section 1.4
+downloadButton(
+  filteredData.map((d) => {
+    const adminName =
+      currentAdminLevel === 0
+        ? d.admin0_name
+        : currentAdminLevel === 1
+          ? `${d.admin1_name}, ${d.admin0_name}`
+          : `${d.admin2_name}, ${d.admin1_name}`;
+    return {
+      "Admin Name": adminName,
+      "CIS Readiness Index": d["cis_readiness_index"],
+      "Weather Station Density": d["wstation_density"],
+      "Cloud Coverage": d["cloud-coverage_meanannual"],
+      "Precipitation Agreement": parseFloat(d["cv-precipitation_agreement"]),
+      "Short-term Forecast Skill": d["short-term_frcst_skill"],
+      "Long-term Forecast Skill": d["seasonal_frcst_skill"],
+    };
+  }),
+  "cis_readiness_index",
+  nbText.downloadLabel,
+);
+```
+
+```{ojs}
+// Section 1.4 Dynamic Insight
+s14Insight = {
+  // If admin2 regions are highlighted, only use those for insights
+  const insightData = highlightedAdmin2.length > 0 
+    ? filteredData.filter(d => highlightedAdmin2.includes(d.admin2_name))
+    : filteredData;
+  
+  const avgReadiness = d3.mean(insightData, d => d["cis_readiness_index"]);
+  const readinessClass = classifyThreshold("cis_readiness_index", avgReadiness).toLowerCase();
+  
+  return tmpl(nbText.insights.readinessIndex, {
+    area: breadcrumb,
+    readiness: avgReadiness?.toFixed(3),
+    class: readinessClass,
+  });
+}
+```
+
+`{ojs} s14Insight`

@@ -1,0 +1,1052 @@
+<!--
+============================================================================
+SECTION 3: CIS READINESS × ACCESS/IMPLEMENTATION INTERSECTION
+============================================================================
+This file analyzes the intersection between CIS readiness and digital/media
+access (TV, internet, cellphone). It identifies regions where CIS capacity
+exists but communication channels may limit uptake, and vice versa.
+
+Data Sources:
+- CIS_access.parquet: Digital access percentages at admin levels
+- Section 1 cisData: CIS readiness indicators (reused)
+============================================================================
+-->
+
+# CIS Implementation {#cis-implementation}
+
+{{< prose reach-at-scale level=2 >}}
+
+```{ojs}
+Inputs.form(
+  [
+    renderA0Multi({ enableSelectAll: true }),
+    renderA1Multi({ enableSelectAll: true }),
+    renderA2Multi({ enableSelectAll: true }),
+  ],
+  {
+    template: inputTemplate(),
+  },
+);
+```
+
+```{ojs}
+s3AccessDB = await DuckDBClient.of({
+  access_data: FileAttachment("/data/cis/CIS_access.parquet")
+});
+
+// Query access data with SQL-side admin filtering (shared helper from Section 2)
+s3AccessDataRaw = {
+  const bind = createSqlBindings();
+  const adminWhere = sqlAdminWhere(
+    { admin0: selectedAdmin0, admin1: selectedAdmin1 },
+    bind,
+  );
+
+  return await s3AccessDB.query(
+    `
+    SELECT *
+    FROM access_data
+    WHERE ${adminWhere}
+  `,
+    bind.params,
+  );
+}
+
+// Load CIS readiness at the same admin level as the current selection.
+s3CisReadiness = {
+  const bind = createSqlBindings();
+  const adminWhere = sqlAdminWhere(
+    { admin0: selectedAdmin0, admin1: selectedAdmin1 },
+    bind,
+  );
+
+  const rows = await cisDB.query(
+    `
+    SELECT *
+    FROM cis_data
+    WHERE ${adminWhere}
+  `,
+    bind.params,
+  );
+
+  return rows.map((row) => {
+    return {
+      admin0_name: row.admin0_name,
+      admin1_name: row.admin1_name,
+      admin2_name: row.admin2_name,
+      iso3: row.iso3,
+      gaul0_code: row.gaul0_code,
+      gaul1_code: row.gaul1_code,
+      gaul2_code: row.gaul2_code,
+      cis_readiness_index: row.cis_readiness_index,
+    };
+  });
+}
+
+section3Data = {
+  return s3AccessDataRaw.map(access => {
+    // Match CIS readiness at the same admin level as the access row.
+     const cis = s3CisReadiness.find(a => 
+       a.admin0_name === access.admin0_name && a.admin1_name === access.admin1_name
+     );
+     if (!cis) return null;
+    
+    // Calculate combined access: average of available indicators
+    // This provides a single "overall access" metric
+    const combined_access = (() => {
+      const values = [access.tv, access.internet, access.cellphone]
+        .filter(v => v !== null && !isNaN(v));
+      return values.length > 0 
+        ? values.reduce((a, b) => a + b, 0) / values.length 
+        : null;
+    })();
+    
+    return {
+      admin0_name: access.admin0_name,
+      admin1_name: access.admin1_name,
+      admin2_name: access.admin2_name,
+      iso3: access.iso3,
+      gaul0_code: access.gaul0_code,
+      gaul1_code: access.gaul1_code,
+      gaul2_code: access.gaul2_code,
+      cis_readiness_index: cis.cis_readiness_index,
+      // Raw access percentages (0-100 scale)
+      tv_pct: access.tv,
+      internet_pct: access.internet,
+      cellphone_pct: access.cellphone,
+      combined_pct: combined_access,
+      // Normalized access values (0-1 scale, for comparison with CIS readiness)
+      tv_norm: access.tv !== null ? access.tv / 100 : null,
+      internet_norm: access.internet !== null ? access.internet / 100 : null,
+      cellphone_norm: access.cellphone !== null ? access.cellphone / 100 : null,
+      combined_norm: combined_access !== null ? combined_access / 100 : null
+    };
+  }).filter(d => d !== null);
+}
+```
+
+```{ojs}
+// Access Type Selector
+viewof s3AccessType = Inputs.radio(
+  ["combined", "internet", "tv", "cellphone"],
+  {
+    label: nbText.s3AccessSelector,
+    value: "combined",
+    format: x => x === "combined" ? nbText.s3AccessCombined :
+                 x === "internet" ? nbText.s3AccessInternet :
+                 x === "tv" ? nbText.s3AccessTV :
+                 nbText.s3AccessCellphone
+  }
+)
+```
+
+```{ojs}
+// View Toggle
+viewof s3ViewType = Inputs.radio(
+  ["map", "dumbbell", "scatter", "table"],
+  {
+    label: nbText.s3ViewToggle,
+    value: "map",
+    format: x => x === "map" ? nbText.s3ViewMap :
+                 x === "dumbbell" ? nbText.s3ViewDumbbell :
+                 x === "scatter" ? nbText.s3ViewScatter :
+                 nbText.s3ViewTable
+  }
+)
+
+// Map Type Toggle (Only shown when view type is map)
+viewof s3MapType = {
+  if (s3ViewType !== "map") {
+     const input = Inputs.radio(["bivariate"], {label: "Map Type", value: "bivariate"});
+     input.style.display = "none";
+     return input;
+  }
+  return Inputs.radio(["bivariate", "univariate"], {
+    label: "Map Type",
+    value: "bivariate", 
+    format: x => x === "bivariate" ? "Bivariate (Readiness × Access)" : "Access Distribution"
+  });
+}
+```
+
+```{ojs}
+// Sort By Selector - only shown when view type is not "map"
+viewof s3SortBy = {
+  if (s3ViewType === "map") {
+    // Return a hidden selector that maintains state but isn't displayed
+    const input = Inputs.select(
+      ["readiness", "combined", "internet", "tv", "cellphone"],
+      {
+        label: nbText.s3SortBy,
+        value: "readiness"
+      }
+    );
+    input.style.display = "none";
+    return input;
+  }
+  
+  return Inputs.select(
+    ["readiness", "combined", "internet", "tv", "cellphone"],
+    {
+      label: nbText.s3SortBy,
+      value: "readiness",
+      format: x => x === "readiness" ? nbText.s3SortReadiness :
+                   x === "combined" ? nbText.s3AccessCombined :
+                   x === "internet" ? nbText.s3AccessInternet :
+                   x === "tv" ? nbText.s3AccessTV :
+                   nbText.s3AccessCellphone
+    }
+  );
+}
+```
+
+```{ojs}
+// View Toggle
+
+// Helper to get current access field name
+s3CurrentAccessField =
+  s3AccessType === "combined"
+    ? "combined_norm"
+    : s3AccessType === "internet"
+      ? "internet_norm"
+      : s3AccessType === "tv"
+        ? "tv_norm"
+        : "cellphone_norm";
+
+// Helper to get current access label
+s3CurrentAccessLabel =
+  s3AccessType === "combined"
+    ? nbText.s3AccessCombined
+    : s3AccessType === "internet"
+      ? nbText.s3AccessInternet
+      : s3AccessType === "tv"
+        ? nbText.s3AccessTV
+        : nbText.s3AccessCellphone;
+
+// Helper to get current access raw field
+s3CurrentAccessRawField =
+  s3AccessType === "combined"
+    ? "combined_pct"
+    : s3AccessType === "internet"
+      ? "internet_pct"
+      : s3AccessType === "tv"
+        ? "tv_pct"
+        : "cellphone_pct";
+```
+
+```{ojs}
+s3AccessCutoffs = {
+  // Extract values for the currently selected access type
+  const values = section3Data
+    .map(d => d[s3CurrentAccessField])
+    .filter(v => v !== null && !isNaN(v))
+    .sort((a, b) => a - b);
+  
+  if (values.length === 0) {
+    return { low: 0.33, moderate: 0.67 };
+  }
+  
+  // Calculate tercile cutoffs (33.3% and 66.7% quantiles)
+  return {
+    low: d3.quantile(values, 0.333),
+    moderate: d3.quantile(values, 0.667)
+  };
+}
+```
+
+```{ojs}
+classifyS3Readiness = (value, rowOrLevel = currentAdminLevel) =>
+  classifyThreshold("cis_readiness_index", value, rowOrLevel);
+
+function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = currentAdminLevel) {
+  const readinessClass = classifyS3Readiness(readiness, rowOrLevel);
+
+  // Classify access level (using dynamic tercile cutoffs)
+  let accessClass;
+  if (access === null || isNaN(access)) accessClass = "N/A";
+  else if (access < accessCutoffs.low) accessClass = "Low";
+  else if (access < accessCutoffs.moderate) accessClass = "Moderate";
+  else accessClass = "High";
+  
+  return {
+    readinessClass,
+    accessClass,
+    bivariateClass: accessClass === "N/A" ? "N/A" : `${readinessClass} × ${accessClass}`
+  };
+}
+
+// Bivariate color palette (reused from Section 2 for consistency)
+s3BivariateColors = {
+  return {
+    "Low × Low": "#e8e8e8",        // Low priority
+    "Low × Moderate": "#b8d6be",
+    "Low × High": "#6c9a8b",        // High access but low readiness
+    "Moderate × Low": "#c8b2d6",
+    "Moderate × Moderate": "#9c9eba",
+    "Moderate × High": "#627a8e",
+    "High × Low": "#b8a0c2",        // High readiness but low access (capacity gap)
+    "High × Moderate": "#8b7fa8",
+    "High × High": "#5a5f8f",       // OPTIMAL - scale CIS here
+    "N/A": "#cccccc"                // No access data available
+  };
+}
+```
+
+```{ojs}
+// Process data with bivariate classification
+s3ProcessedData = {
+  return section3Data.map(d => {
+    const accessValue = d[s3CurrentAccessField];
+    const classification = bivariateClassifyAccess(
+      d.cis_readiness_index,
+      accessValue,
+      s3AccessCutoffs,
+      d
+    );
+    
+    return {
+      ...d,
+      accessValue,
+      ...classification,
+      gap: accessValue !== null && !isNaN(accessValue) ? accessValue - d.cis_readiness_index : null
+    };
+  });
+}
+```
+
+```{ojs}
+// Sort data based on selected metric
+s3SortedData = {
+  if (!s3ProcessedData || s3ProcessedData.length === 0) {
+    return [];
+  }
+  
+  const data = [...s3ProcessedData];
+  
+  if (s3SortBy === "readiness") {
+    return data.sort((a, b) => (b.cis_readiness_index || 0) - (a.cis_readiness_index || 0));
+  } else if (s3SortBy === "combined") {
+    return data.sort((a, b) => (b.combined_norm || 0) - (a.combined_norm || 0));
+  } else if (s3SortBy === "internet") {
+    return data.sort((a, b) => (b.internet_norm || 0) - (a.internet_norm || 0));
+  } else if (s3SortBy === "tv") {
+    return data.sort((a, b) => (b.tv_norm || 0) - (a.tv_norm || 0));
+  } else if (s3SortBy === "cellphone") {
+    return data.sort((a, b) => (b.cellphone_norm || 0) - (a.cellphone_norm || 0));
+  }
+  
+  return data;
+}
+```
+
+```{ojs}
+// Prepare geographic data for map - dynamically show admin levels based on selection
+// Use the master admin selectors (selectedAdmin0, etc.) for consistency with other sections
+s3GeoData = {
+  if (!s3ProcessedData || s3ProcessedData.length === 0) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  
+  // Use master admin selections (same as Section 1 and 2)
+  const selectedCountries = selectedAdmin0 || [];
+  const selectedAdmin1s = selectedAdmin1 || [];
+  const selectedAdmin2s = selectedAdmin2 || [];
+  
+  let boundaries = null;
+  let levelKey = "admin0_name";
+  let gaul_key = "gaul0_code";
+  
+  // Determine which admin level to show based on currentAdminLevel from Section 1
+  // Level 0: No admin0 selected - show all admin0
+  // Level 1: Admin0 selected but no admin1 - show admin1 within selected countries
+  // Level 2: Admin1 selected - show admin2 within selected admin1s
+  if (currentAdminLevel === 2 && admin2Boundaries) {
+    boundaries = admin2Boundaries;
+    levelKey = "admin2_name";
+    gaul_key = "gaul2_code";
+  } else if (currentAdminLevel === 1 && admin1Boundaries) {
+    boundaries = admin1Boundaries;
+    levelKey = "admin1_name";
+    gaul_key = "gaul1_code";
+  } else if (admin0Boundaries) {
+    boundaries = admin0Boundaries;
+    levelKey = "admin0_name";
+    gaul_key = "gaul0_code";
+  }
+  
+  if (!boundaries) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  
+  // Filter boundaries based on current selection
+  let filteredBoundaries = boundaries;
+  if (currentAdminLevel === 2) {
+    // Show only admin2 within selected admin1s
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => 
+        selectedCountries.includes(f.properties.admin0_name) &&
+        selectedAdmin1s.includes(f.properties.admin1_name)
+      )
+    };
+  } else if (currentAdminLevel === 1) {
+    // Show only admin1 within selected countries
+    filteredBoundaries = {
+      ...boundaries,
+      features: boundaries.features.filter(f => 
+        selectedCountries.includes(f.properties.admin0_name)
+      )
+    };
+  }
+  // Level 0: show all countries (no filtering needed)
+  
+  // Map data to boundaries
+  const features = filteredBoundaries.features.map(feature => {
+    // Find the parent admin0 for this feature (data is at country level)
+    const admin0key = feature.properties.admin0_name;
+    const admin1key = feature.properties.admin1_name;
+
+    const countryData = s3ProcessedData.find(d => d.admin0_name === admin0key && d.admin1_name === admin1key);
+    
+    if (!countryData) return null;
+    
+    // Check if this region is highlighted (for admin2 level)
+    const isHighlighted = currentAdminLevel === 2 && 
+                          selectedAdmin2s.length > 0 && 
+                          selectedAdmin2s.includes(feature.properties.admin2_name);
+    
+    return {
+      type: "Feature",
+      geometry: feature.geometry,
+      properties: {
+        ...feature.properties,
+        ...countryData,
+        displayName: feature.properties[levelKey] || feature.properties.admin0_name,
+        isHighlighted: isHighlighted
+      }
+    };
+  }).filter(f => f !== null);
+  
+  return {
+    type: "FeatureCollection",
+    features
+  };
+}
+```
+
+```{ojs}
+// Section 3 Map Display (Handles both Bivariate and Univariate)
+function renderS3MapDisplay() {
+  if (s3ViewType !== "map") return null;
+
+  if (s3MapType === "univariate") {
+    return createS3AccessMap();
+  } else {
+    return html`<div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
+      <div style="flex: 0 0 auto; display: flex; justify-content: center;">
+        ${makeBivariateLegend({
+          colors: s3BivariateColors,
+          xLabel: "CIS Readiness",
+          yLabel:
+            s3AccessType === "combined"
+              ? "Combined Access"
+              : s3CurrentAccessLabel,
+          width: 220,
+          height: 210,
+          fontSize: 14,
+        })}
+      </div>
+      <div style="flex: 1 1 640px; min-width: 0;">
+        ${createS3BivariateMap()}
+      </div>
+    </div>`;
+  }
+}
+
+// Access Map (Univariate)
+function createS3AccessMap() {
+  return makeChoropleth({
+    features: s3GeoData,
+    width: 775,
+    height: 610,
+    projection: "mercator",
+    fill: (d) => d.properties.accessValue,
+    color: {
+      type: "linear",
+      domain: [0, 1],
+      scheme: "Blues",
+      label: s3CurrentAccessLabel,
+    },
+    channels: {
+      region: {
+        label:
+          currentAdminLevel === 2
+            ? "District"
+            : currentAdminLevel === 1
+              ? "Region"
+              : "Country",
+        value: (d) =>
+          d.properties.displayName || d.properties.admin0_name || "N/A",
+      },
+      access: {
+        label: s3CurrentAccessLabel,
+        value: (d) =>
+          d.properties.accessValue != null
+            ? `${(d.properties.accessValue * 100).toFixed(1)}%`
+            : "N/A",
+      },
+    },
+    tooltip: {
+      region: true,
+      access: true,
+    },
+    adminHighlight: {
+      filter: (d) => d.properties.isHighlighted,
+      stroke: "#000",
+      strokeWidth: 2.5,
+    },
+  });
+}
+
+// Section 3 bivariate map with diamond legend (matching Section 2 style)
+function createS3BivariateMap() {
+  if (s3ViewType !== "map") return null;
+
+  return makeChoropleth({
+    features: s3GeoData,
+    width: 775,
+    height: 610,
+    fill: (d) => d.properties.bivariateClass,
+    color: {
+      type: "categorical",
+      legend: false,
+      domain: [
+        "Low × Low",
+        "Low × Moderate",
+        "Low × High",
+        "Moderate × Low",
+        "Moderate × Moderate",
+        "Moderate × High",
+        "High × Low",
+        "High × Moderate",
+        "High × High",
+      ],
+      range: [
+        s3BivariateColors["Low × Low"],
+        s3BivariateColors["Low × Moderate"],
+        s3BivariateColors["Low × High"],
+        s3BivariateColors["Moderate × Low"],
+        s3BivariateColors["Moderate × Moderate"],
+        s3BivariateColors["Moderate × High"],
+        s3BivariateColors["High × Low"],
+        s3BivariateColors["High × Moderate"],
+        s3BivariateColors["High × High"],
+      ],
+      label: "Bivariate Class",
+    },
+    channels: {
+      region: {
+        label:
+          currentAdminLevel === 2
+            ? "District"
+            : currentAdminLevel === 1
+              ? "Region"
+              : "Country",
+        value: (d) =>
+          d.properties.displayName || d.properties.admin0_name || "N/A",
+      },
+      readiness: {
+        label: nbText.s3ReadinessLabel,
+        value: (d) =>
+          d.properties.cis_readiness_index != null
+            ? d.properties.cis_readiness_index.toFixed(2)
+            : "N/A",
+      },
+      readinessClass: {
+        label: "Readiness Class",
+        value: (d) => d.properties.readinessClass || "N/A",
+      },
+      access: {
+        label: s3CurrentAccessLabel,
+        value: (d) =>
+          d.properties.accessValue != null
+            ? `${(d.properties.accessValue * 100).toFixed(1)}%`
+            : "N/A",
+      },
+      accessClass: {
+        label: "Access Class",
+        value: (d) => d.properties.accessClass || "N/A",
+      },
+      category: {
+        label: "Category",
+        value: (d) => d.properties.bivariateClass || "N/A",
+      },
+    },
+    tooltip: {
+      region: true,
+      readiness: true,
+      readinessClass: true,
+      access: true,
+      accessClass: true,
+      category: true,
+    },
+    adminHighlight: {
+      filter: (d) => d.properties.isHighlighted,
+      stroke: "#000",
+      strokeWidth: 2.5,
+    },
+  });
+}
+```
+
+```{ojs}
+function renderS3DumbbellLegend() {
+  const items = [
+    {symbol: "●", color: "#377eb8", label: nbText.s3ReadinessLabel},
+    {symbol: "●", color: "#ff7f00", label: s3CurrentAccessLabel},
+    {symbol: "━", color: "#4daf4a", label: nbText.s3PositiveGap},
+    {symbol: "━", color: "#e41a1c", label: nbText.s3NegativeGap},
+    {symbol: "━", color: "#999999", label: "Similar values"}
+  ];
+
+  return html`<div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+    <div style="display: flex; gap: 20px; align-items: center; font-size: 12px;">
+      ${items.map(({symbol, color, label}) => html`
+        <div><span style="color: ${color};">${symbol}</span> ${label}</div>
+      `)}
+    </div>
+  </div>`;
+}
+
+function makeS3DumbbellTip() {
+  return {
+    fontSize: 14,
+    channels: {
+      country: { label: "Country", value: d => d.admin0_name },
+      readiness: { label: nbText.s3ReadinessLabel, value: d => d.cis_readiness_index },
+      access: { label: s3CurrentAccessLabel, value: d => d.accessValue },
+      gap: { label: nbText.s3GapLabel, value: d => d.gap }
+    },
+    format: {
+      country: true,
+      x: false,
+      y: false,
+      readiness: d => d != null ? d.toFixed(3) : "N/A",
+      access: d => d != null ? `${(d * 100).toFixed(1)}%` : "N/A",
+      gap: (d) => {
+        if (d == null || isNaN(d)) return "N/A";
+        const label = d > 0 ? nbText.s3PositiveGap : nbText.s3NegativeGap
+        return `${d.toFixed(3)} (${label})`;
+      }
+    }
+  };
+}
+
+function renderS3DumbbellPlot(data) {
+  const chartHeight = Math.max(600, data.length * 25);
+  const dataWithAccess = data.filter(d => d.accessValue !== null && !isNaN(d.accessValue));
+  const xDomain = d3.extent([
+    ...data.map(d => d.cis_readiness_index || 0),
+    ...data.map(d => d.accessValue || 0)
+  ]);
+  const tip = makeS3DumbbellTip();
+
+  return Plot.plot({
+    width: 1200,
+    height: chartHeight,
+    marginLeft: 150,
+    marginRight: 50,
+    marginTop: 80,
+    marginBottom: 80,
+    x: {
+      domain: xDomain,
+      label: "Value",
+      grid: true,
+      axis: "top"
+    },
+    y: {
+      label: null,
+      domain: data.map(d => d.admin0_name)
+    },
+    marks: [
+      Plot.axisX({anchor: "bottom", label: "Value"}),
+      Plot.link(dataWithAccess, {
+        x1: "cis_readiness_index",
+        x2: "accessValue",
+        y1: "admin0_name",
+        y2: "admin0_name",
+        stroke: (d) => {
+          if (d.gap == null || isNaN(d.gap)) return "#999999";
+          return d.gap > 0.05 ? "#4daf4a" : d.gap < -0.05 ? "#e41a1c" : "#999999";
+        },
+        strokeWidth: 2
+      }),
+      Plot.dot(data, {
+        x: "cis_readiness_index",
+        y: "admin0_name",
+        fill: "#377eb8",
+        r: 5,
+        tip: {
+          ...tip,
+          format: {
+            ...tip.format,
+            x: d => `Readiness: ${d != null ? d.toFixed(3) : "N/A"}`
+          }
+        }
+      }),
+      Plot.dot(dataWithAccess, {
+        x: "accessValue",
+        y: "admin0_name",
+        fill: "#ff7f00",
+        r: 5,
+        stroke: "#ff7f00",
+        strokeWidth: 2,
+        tip
+      })
+    ]
+  });
+}
+
+function renderS3DumbbellView() {
+  return html`<div style="width: 100%; overflow-x: auto;">
+    ${renderS3DumbbellLegend()}
+    ${renderS3DumbbellPlot(s3SortedData)}
+    ${renderS3DumbbellLegend()}
+    <div style="margin-top: 10px;">
+      ${s3DownloadButton}
+    </div>
+  </div>`;
+}
+
+function getS3ScatterFacetData() {
+  const facetData = [];
+
+  s3ProcessedData.forEach(d => {
+    if (d.combined_norm != null && !isNaN(d.combined_norm)) {
+      facetData.push({
+        ...d,
+        accessType: nbText.s3AccessCombined,
+        accessValue: d.combined_norm,
+        accessKey: "combined"
+      });
+    }
+
+    if (d.internet_norm != null && !isNaN(d.internet_norm)) {
+      facetData.push({
+        ...d,
+        accessType: nbText.s3AccessInternet,
+        accessValue: d.internet_norm,
+        accessKey: "internet"
+      });
+    }
+
+    if (d.tv_norm != null && !isNaN(d.tv_norm)) {
+      facetData.push({
+        ...d,
+        accessType: nbText.s3AccessTV,
+        accessValue: d.tv_norm,
+        accessKey: "tv"
+      });
+    }
+
+    if (d.cellphone_norm != null && !isNaN(d.cellphone_norm)) {
+      facetData.push({
+        ...d,
+        accessType: nbText.s3AccessCellphone,
+        accessValue: d.cellphone_norm,
+        accessKey: "cellphone"
+      });
+    }
+  });
+
+  return facetData;
+}
+
+function getS3ScatterAccessTypes() {
+  return [
+    nbText.s3AccessCombined,
+    nbText.s3AccessInternet,
+    nbText.s3AccessTV,
+    nbText.s3AccessCellphone
+  ];
+}
+
+function getS3ScatterFacetLayout(accessTypes) {
+  const columnCount = 2;
+  const accessIndex = new Map(accessTypes.map((key, i) => [key, i]));
+
+  return {
+    getFx: key => accessIndex.get(key) % columnCount,
+    getFy: key => Math.floor(accessIndex.get(key) / columnCount)
+  };
+}
+
+function getS3ScatterPointColor(d) {
+  const readinessClass = classifyS3Readiness(d.cis_readiness_index, d);
+  const accessClass =
+    d.accessValue >= s3AccessCutoffs.moderate
+      ? "High"
+      : d.accessValue >= s3AccessCutoffs.low
+        ? "Moderate"
+        : "Low";
+
+  return s3BivariateColors[`${readinessClass} × ${accessClass}`] || "#cccccc";
+}
+
+function renderS3ScatterNote() {
+  return html`<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+    <div style="font-size: 12px;">
+      <strong>${nbText.s3ParityLine}:</strong> Points above the line indicate access exceeds readiness; points below indicate readiness exceeds access.
+    </div>
+  </div>`;
+}
+
+function renderS3ScatterPlot(facetData) {
+  const accessTypes = getS3ScatterAccessTypes();
+  const {getFx, getFy} = getS3ScatterFacetLayout(accessTypes);
+  const xExtent = d3.extent(facetData, d => d.cis_readiness_index);
+  const xDomain = (xExtent[0] == null || xExtent[1] == null) ? [0, 1] : xExtent;
+
+  return Plot.plot({
+    width: 900,
+    height: 700,
+    marginTop: 40,
+    marginRight: 40,
+    marginBottom: 60,
+    marginLeft: 60,
+    grid: true,
+    x: {
+      domain: xDomain,
+      label: `${nbText.s3ReadinessLabel} →`
+    },
+    y: {
+      label: "Access →"
+    },
+    fx: {
+      label: null,
+      padding: 0.08,
+      tickFormat: null
+    },
+    fy: {
+      label: null,
+      padding: 0.08,
+      tickFormat: null
+    },
+    marks: [
+      ...accessTypes.map(accessType =>
+        Plot.line([[0, 0], [1, 1]], {
+          stroke: "#999",
+          strokeWidth: 1.5,
+          strokeDasharray: "4,4",
+          fx: getFx(accessType),
+          fy: getFy(accessType)
+        })
+      ),
+      Plot.text(accessTypes, {
+        fx: d => getFx(d),
+        fy: d => getFy(d),
+        text: d => d,
+        frameAnchor: "top-left",
+        dx: 6,
+        dy: 6,
+        fontWeight: "bold",
+        fontSize: 11
+      }),
+      Plot.frame(),
+      Plot.dot(facetData, {
+        x: "cis_readiness_index",
+        y: "accessValue",
+        fx: d => getFx(d.accessType),
+        fy: d => getFy(d.accessType),
+        fill: getS3ScatterPointColor,
+        stroke: "#333",
+        strokeWidth: 0.5,
+        r: 4
+      }),
+      Plot.tip(
+        facetData,
+        Plot.pointer({
+          fontSize: 14,
+          x: "cis_readiness_index",
+          y: "accessValue",
+          fx: d => getFx(d.accessType),
+          fy: d => getFy(d.accessType),
+          channels: {
+            country: {
+              label: "Country",
+              value: d => d.admin0_name
+            },
+            readiness: {
+              label: nbText.s3ReadinessLabel,
+              value: d => d.cis_readiness_index
+            },
+            access: {
+              label: "Access",
+              value: d => d.accessValue
+            }
+          },
+          format: {
+            country: true,
+            readiness: d => d != null ? d.toFixed(3) : "N/A",
+            access: d => d != null ? `${(d * 100).toFixed(1)}%` : "N/A",
+            fx: false,
+            fy: false
+          }
+        })
+      )
+    ]
+  });
+}
+
+function renderS3ScatterView() {
+  const facetData = getS3ScatterFacetData();
+
+  return html`<div style="width: 100%;">
+    <div style="overflow-x: auto;">
+      ${renderS3ScatterNote()}
+      ${renderS3ScatterPlot(facetData)}
+    </div>
+    <div style="margin-top: 10px;">${s3DownloadButton}</div>
+  </div>`;
+}
+
+function renderS3TableView() {
+  return filterableDataTable(s3SortedData, {
+    columns: [
+      "admin0_name",
+      "iso3",
+      "cis_readiness_index",
+      "readinessClass",
+      "tv_pct",
+      "tv_norm",
+      "internet_pct",
+      "internet_norm",
+      "cellphone_pct",
+      "cellphone_norm",
+      "combined_pct",
+      "combined_norm",
+      "gap"
+    ],
+    header: {
+      admin0_name: "Country",
+      iso3: "ISO3",
+      cis_readiness_index: "CIS Readiness (Raw)",
+      readinessClass: "CIS Class",
+      tv_pct: "TV Access (%)",
+      tv_norm: "TV",
+      internet_pct: "Internet (%)",
+      internet_norm: "Internet",
+      cellphone_pct: "Cellphone (%)",
+      cellphone_norm: "Cellphone",
+      combined_pct: "Combined (%)",
+      combined_norm: "Combined",
+      gap: "Gap"
+    },
+    format: {
+      cis_readiness_index: d => d?.toFixed(3) || "N/A",
+      tv_pct: d => d !== null ? d.toFixed(1) : "N/A",
+      tv_norm: d => d !== null ? d.toFixed(3) : "N/A",
+      internet_pct: d => d !== null ? d.toFixed(1) : "N/A",
+      internet_norm: d => d !== null ? d.toFixed(3) : "N/A",
+      cellphone_pct: d => d !== null ? d.toFixed(1) : "N/A",
+      cellphone_norm: d => d !== null ? d.toFixed(3) : "N/A",
+      combined_pct: d => d !== null ? d.toFixed(1) : "N/A",
+      combined_norm: d => d !== null ? d.toFixed(3) : "N/A",
+      gap: d => d !== null ? d.toFixed(3) : "N/A"
+    },
+    width: {
+      admin0_name: 150,
+      iso3: 60
+    }
+  });
+}
+
+// Render based on view type
+{
+  if (s3ViewType === "map") {
+    return html`<div style="width: 100%; overflow-x: auto;">
+      ${renderS3MapDisplay()}
+    </div>`;
+  } else if (s3ViewType === "dumbbell") {
+    return renderS3DumbbellView();
+  } else if (s3ViewType === "scatter") {
+    return renderS3ScatterView();
+  }
+  return renderS3TableView();
+}
+```
+
+```{ojs}
+// Define Download button separately to be used in multiple places
+s3DownloadButton = {
+    // Helper function to safely format numbers
+    const safeFormat = (value, decimals) => {
+      if (value == null || isNaN(value)) return "N/A";
+      return value.toFixed(decimals);
+    };
+    
+    return downloadButton(
+      s3SortedData.map(d => ({
+        "Country": d.admin0_name || "N/A",
+        "ISO3": d.iso3 || "N/A",
+        "CIS Readiness Raw": safeFormat(d.cis_readiness_index, 3),
+        "CIS Readiness Class": d.readinessClass || "N/A",
+        "TV Access %": safeFormat(d.tv_pct, 1),
+        "TV Access": safeFormat(d.tv_norm, 3),
+        "Internet Access %": safeFormat(d.internet_pct, 1),
+        "Internet Access": safeFormat(d.internet_norm, 3),
+        "Cellphone Access %": safeFormat(d.cellphone_pct, 1),
+        "Cellphone Access": safeFormat(d.cellphone_norm, 3),
+        "Combined Access %": safeFormat(d.combined_pct, 1),
+        "Combined Access": safeFormat(d.combined_norm, 3),
+        "Gap (Access - Readiness)": safeFormat(d.gap, 3),
+        "Bivariate Category": d.bivariateClass || "N/A"
+      })),
+      `cis_implementation_${s3AccessType}_access`,
+      nbText.downloadLabel
+    );
+}
+```
+
+```{ojs}
+s3Insights = {
+  const avgReadiness = d3.mean(section3Data, d => d.cis_readiness_index);
+  const avgAccess = d3.mean(
+    section3Data.filter(d => d[s3CurrentAccessField] !== null && !isNaN(d[s3CurrentAccessField])),
+    d => d[s3CurrentAccessField]
+  );
+  
+  // Find countries with high readiness but low access (capacity-access gap)
+  const capacityGaps = s3ProcessedData.filter(d => 
+    d.cis_readiness_index > 0.6 && d.accessValue !== null && !isNaN(d.accessValue) && d.accessValue < 0.4
+  );
+  
+  // Find optimal zones (high readiness + high access)
+  const optimalZones = s3ProcessedData.filter(d => 
+    d.bivariateClass === "High × High"
+  );
+  
+  // Use breadcrumb from master admin selectors for consistent region naming
+  // breadcrumb is defined in _cis_readiness_index.qmd and reflects the current admin selection
+  const selectedRegion = breadcrumb || "Sub-Saharan Africa";
+  
+  const insight1 = `In ${selectedRegion}, average CIS Readiness is **${avgReadiness.toFixed(2)}** while ${s3CurrentAccessLabel} averages **${(avgAccess * 100).toFixed(1)}%**.`;
+  
+  const insight2 = capacityGaps.length > 0 
+    ? `Countries such as **${capacityGaps.slice(0, 2).map(d => d.admin0_name).join(' and ')}** show strong technical capacity but limited digital reach, highlighting the need for investment in ICT and communication channels to deliver CIS to users.`
+    : 'Most countries show balanced capacity and access.';
+  
+  const insight3 = optimalZones.length > 0
+    ? `**${optimalZones.length} countries** (${(optimalZones.length / s3ProcessedData.length * 100).toFixed(1)}%) fall in the optimal zone with both high CIS readiness and high ${s3CurrentAccessLabel.toLowerCase()}, representing prime opportunities for scaling climate services.`
+    : `No countries currently fall in the optimal zone for ${s3CurrentAccessLabel.toLowerCase()}.`;
+  
+  return html`
+    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;">
+      <h4 style="margin-top: 0;">Key Insights</h4>
+      <p style="margin: 10px 0;">${md([insight1])}</p>
+      <p style="margin: 10px 0;"><strong>${nbText.s3CapacityGap}:</strong> ${md([insight2])}</p>
+      <p style="margin: 10px 0;"><strong>Optimal Zones:</strong> ${md([insight3])}</p>
+    </div>
+  `;
+}
+```

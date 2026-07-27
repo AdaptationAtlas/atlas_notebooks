@@ -1,0 +1,251 @@
+---
+pagetitle: "Identifying Climate Information Readiness"
+image: ../../images/default_crop.webp
+description: >
+  See where climate information services are backed by reliable observation,
+  data agreement and forecast skill across Africa, where those capabilities meet
+  the highest climate hazard, and where they can actually reach users.
+keywords: [climate information services, CIS, readiness, forecast skill, weather stations, drought, waterlogging, Africa, adaptation]
+nb-text-dir: data/cis/text
+nb-authors:
+  - Johnson Mwakazi
+  - Brayden Youngberg
+  - Pete Steward
+  - Shalika Vyas
+  - Harold Achicanoy
+date-created: "2025-11-17"
+date-edited: today
+execute:
+  echo: false
+---
+
+```{=html}
+<back-to-top></back-to-top>
+```
+
+```{ojs}
+// ============================================================================
+// CIS READINESS NOTEBOOK - MAIN FILE
+// ============================================================================
+// Orchestration and shared definitions. The three analysis sections are pulled
+// in with the include shortcode below; every cell defined here is visible to
+// them (OJS resolves cells by name, not by document order).
+//
+// File Structure:
+// - notebook.qmd (this file) - orchestration & shared definitions
+// - _cis_readiness_index.qmd - Section 1: CIS Readiness components
+// - _cis_hazard_intersection.qmd - Section 2: Readiness × Hazard bivariate
+// - _cis_implementation.qmd - Section 3: Readiness × Access bivariate
+//
+// Narrative text is CMS-managed: prose blocks live in data/cis/text as
+// <id>.<locale>.md and are placed with the prose shortcode; widget labels and
+// templated insight sentences come from data/cis/text/<locale>.json as nbText.
+// ============================================================================
+
+import { atlasTOC } from "/helpers/toc.ojs";
+
+import { atlasCitation, atlasContributionSection, resolveContributors } from "/helpers/citation.js";
+
+import { atlasHero } from "/helpers/hero.js";
+
+// downloadButton is a deprecated pass-through to downloadCsvButton, so the CSV
+// itself is already the hardened one (BOM + proper escaping).
+//TODO: move the six call sites to downloadCsvButton(data, {filename, label}).
+import { downloadButton } from "/helpers/uiComponents.ojs";
+
+import { filterableDataTable } from "/helpers/atlasTable.ojs";
+
+import { inputTemplate } from "/helpers/std.ojs";
+
+import {
+  makeBivariateLegend,
+  makeChoropleth,
+  mergeDataToBoundaries,
+} from "/helpers/atlasMap.ojs";
+
+import { createSqlBindings, sqlAdminWhere } from "/helpers/sql.js";
+```
+
+```{ojs}
+atlasHero({
+  title: nbTitle,
+  image: "./../../images/default_crop.webp",
+  alt: "",
+});
+
+atlasTOC({
+  skip: ["notebook-title", "appendix", "source-code"], // These should be the section headings in the {# headings}
+  heading: `${Lang.toSentenceCase(_lang(general_translations.toc))}`,
+});
+```
+
+{{< prose overview >}}
+
+{{< include _cis_readiness_index.qmd >}}
+
+{{< include _cis_hazard_intersection.qmd >}}
+
+{{< include _cis_implementation.qmd >}}
+
+{{< prose methods >}}
+
+{{< prose data-sources level=2 >}}
+
+{{< prose methodology level=2 >}}
+
+{{< prose acknowledgements level=2 >}}
+
+# Contributors {#contributions}
+
+```{ojs}
+{
+  // Ids resolve against data/shared/contributors.json; inline {name, org}
+  // objects cover one-off contributors not in the shared registry.
+  const contributorList = resolveContributors(
+    {
+      authors: ["jmwakazi", "byoungberg", "psteward", "svyas", "hachicanoy"],
+      developers: ["jmwakazi", "byoungberg"],
+    },
+    contributors,
+  );
+
+  const contributionSection = atlasContributionSection(
+    contributorList,
+    atlasCitation(nbTitle),
+    language.key,
+  );
+  return html`${contributionSection}`;
+};
+```
+
+# Appendix {#appendix .hidden}
+
+## Source code {#source-code}
+
+<!--
+NOTE: Everything below this point will not appear in the notebook.
+This is useful to hide all of the code, master selectors (language, admin level, etc.),
+and other things that are needed for the notebook to run but would be messy if
+actually appearing in the notebook.
+-->
+
+## Language
+
+{{< include /components/_lang.qmd >}}
+
+```{ojs}
+// Per-locale notebook text: same key tree per language, missing keys fall back to English.
+// Both locales are fetched ONCE here (no `language` dependency) so toggling the
+// language never hits the network — nbText is a pure lookup.
+nbTextAll = {
+  const [en, fr] = await Promise.all([
+    FileAttachment("/data/cis/text/en.json").json(),
+    FileAttachment("/data/cis/text/fr.json").json(),
+  ]);
+  return { en, fr: Lang.withFallback(fr, en) };
+}
+
+nbText = nbTextAll[language.key] ?? nbTextAll.en
+
+nbTitle = nbText.meta.title
+
+// Narrative prose: one file per block (data/cis/text/<id>.<locale>.md), `title:`
+// front matter + markdown body. The block id is the filename — the CMS
+// (admin/config.yml) edits these; scripts/build/cmsContent.lua bakes English in
+// at render. FileAttachment paths must be literal, hence the explicit map.
+proseFiles = new Object({
+  "overview": { en: FileAttachment("/data/cis/text/overview.en.md"), fr: FileAttachment("/data/cis/text/overview.fr.md") },
+  "weather-measurement": { en: FileAttachment("/data/cis/text/weather-measurement.en.md"), fr: FileAttachment("/data/cis/text/weather-measurement.fr.md") },
+  "weather-consistency": { en: FileAttachment("/data/cis/text/weather-consistency.en.md"), fr: FileAttachment("/data/cis/text/weather-consistency.fr.md") },
+  "forecast-reliability": { en: FileAttachment("/data/cis/text/forecast-reliability.en.md"), fr: FileAttachment("/data/cis/text/forecast-reliability.fr.md") },
+  "readiness-index": { en: FileAttachment("/data/cis/text/readiness-index.en.md"), fr: FileAttachment("/data/cis/text/readiness-index.fr.md") },
+  "hazard-intersection": { en: FileAttachment("/data/cis/text/hazard-intersection.en.md"), fr: FileAttachment("/data/cis/text/hazard-intersection.fr.md") },
+  "reach-at-scale": { en: FileAttachment("/data/cis/text/reach-at-scale.en.md"), fr: FileAttachment("/data/cis/text/reach-at-scale.fr.md") },
+  "methods": { en: FileAttachment("/data/cis/text/methods.en.md"), fr: FileAttachment("/data/cis/text/methods.fr.md") },
+  "data-sources": { en: FileAttachment("/data/cis/text/data-sources.en.md"), fr: FileAttachment("/data/cis/text/data-sources.fr.md") },
+  "methodology": { en: FileAttachment("/data/cis/text/methodology.en.md"), fr: FileAttachment("/data/cis/text/methodology.fr.md") },
+  "acknowledgements": { en: FileAttachment("/data/cis/text/acknowledgements.en.md"), fr: FileAttachment("/data/cis/text/acknowledgements.fr.md") },
+})
+
+// All block files load in parallel at page start (they don't block first paint —
+// English is baked in by cmsContent.lua); the toggle is a plain lookup.
+sectionsAll = {
+  const load = (loc) =>
+    Promise.all(
+      Object.entries(proseFiles).map(async ([id, files]) => [
+        id,
+        Lang.parseBlock(await (files[loc] ?? files.en).text()),
+      ]),
+    ).then(Object.fromEntries);
+  const [en, fr] = await Promise.all([load("en"), load("fr")]);
+  return { en, fr };
+}
+
+sections = sectionsAll[language.key] ?? sectionsAll.en
+
+// languages / langKey / language / _lang come from /components/_lang.qmd,
+// included above with the notebook text cells.
+```
+
+```{ojs}
+// English prose is baked in at render (scripts/build/cmsContent.lua); this cell
+// swaps headings and prose to the toggled language and restores English back.
+// nbText.headings covers the section headings that have no prose block.
+{
+  Lang.applyTranslations({
+    sections,
+    md,
+    lang: language.key,
+    headings: {
+      ...nbText.headings,
+      contributions: _lang(general_translations.contributors),
+      appendix: _lang(general_translations.appendix),
+    },
+  });
+}
+```
+
+```{ojs}
+// Fill the `:::token:::` placeholders in a templated sentence from text/<locale>.json.
+tmpl = (template, values) =>
+  Lang.reduceReplaceTemplateItems(
+    template,
+    Object.entries(values).map(([name, value]) => ({ name, value })),
+  )
+
+// Shared contributor registry (id -> {name, org}); see the contributors cell.
+contributors = FileAttachment("/data/shared/contributors.json").json()
+```
+
+## Admin selectors
+
+```{ojs}
+// MASTER ADMIN SELECTORS and values across the notebook. Each section renders
+// its own bound copy with renderA*Multi(), so selections stay synchronized.
+//TODO: migrate to the canonical helpers/adminSelectors.ojs createAdminSelectors()
+// factory, which also owns its own label translations.
+import {
+  renderA0Multi,
+  renderA1Multi,
+  renderA2Multi,
+  admin0Select,
+  admin1Select,
+  admin2Select,
+} from "/components/_adminSelectorsMulti.ojs";
+
+selectedAdmin0 = admin0Select.map((d) => d?.admin0_name);
+selectedAdmin1 = admin1Select.map((d) => d?.admin1_name);
+selectedAdmin2 = admin2Select.map((d) => d?.admin2_name);
+```
+
+## Boundaries
+
+```{ojs}
+import { getAdminBoundaries } from "/components/_atlasBoundaries.ojs";
+
+atlasBoundaries = await getAdminBoundaries([0, 1, 2]);
+
+admin0Boundaries = atlasBoundaries.admin0;
+admin1Boundaries = atlasBoundaries.admin1;
+admin2Boundaries = atlasBoundaries.admin2;
+```
