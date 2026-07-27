@@ -1,0 +1,882 @@
+---
+pagetitle: "Climate Payouts to Smallholders"
+image: ../../images/default_crop.webp
+description: >
+  Estimate how many African farms will face losses or lost revenue from
+  droughts and floods, by farm size class, under historical and future
+  climate scenarios.
+keywords: [loss and damage, climate payouts, farm size, smallholders, drought, flood, SPEI, Africa, adaptation]
+nb-text-dir: data/lossDamage/text
+nb-authors:
+  - Zia Mehrabi
+  - Ginni Braich
+  - Brayden Youngberg
+date-created: "2025-02-19"
+date-edited: today
+execute:
+  echo: false
+---
+
+```{=html}
+<back-to-top></back-to-top>
+```
+
+```{ojs}
+import { atlasTOC } from "/helpers/toc.ojs";
+
+import { atlasCitation, atlasContributionSection, resolveContributors } from "/helpers/citation.js";
+
+import { atlasHero } from "/helpers/hero.js";
+
+import { makeChoropleth, mergeDataToBoundaries } from "/helpers/atlasMap.ojs";
+
+import { chartStyle, formatNumCompactShort, inputTemplate } from "/helpers/std.ojs";
+```
+
+```{ojs}
+atlasHero({
+  title: nbTitle,
+  image: "./../../images/default_crop.webp",
+  alt: "",
+});
+
+atlasTOC({
+  skip: ["notebook-title", "appendix", "source-code"], // These should be the section headings in the {# headings}
+  heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
+});
+```
+
+{{< prose overview >}}
+
+{{< prose farm-size >}}
+
+```{ojs}
+viewof fig1_inputs = renderS1_inputs();
+
+plotMap(fig1a_spatial, "value");
+
+renderS1_insight();
+```
+
+{{< prose extreme-event-loss >}}
+
+```{ojs}
+viewof fig2_inputs = renderS2_inputs();
+
+renderS2_plot();
+
+renderS2_insight();
+```
+
+{{< prose model-ensembles >}}
+
+```{ojs}
+renderS3_plot();
+```
+
+{{< prose ensemble-insights level=3 >}}
+
+{{< prose loss-by-farm-type >}}
+
+```{ojs}
+viewof fig4_inputs = renderS4_inputs();
+
+plotMap(fig4a_spatial, "high_fs");
+
+renderS4b_plot();
+
+renderS4b_insight();
+```
+
+{{< prose summary >}}
+
+{{< prose methods >}}
+
+# Contributors {#contributions}
+
+```{ojs}
+{
+  // Ids resolve against data/shared/contributors.json; inline {name, org}
+  // objects cover one-off contributors not in the shared registry.
+  const contributorList = resolveContributors(
+    {
+      authors: ["zmehrabi", "gbraich", "byoungberg"],
+      developers: ["byoungberg"],
+    },
+    contributors,
+  );
+
+  const contributionSection = atlasContributionSection(
+    contributorList,
+    atlasCitation(nbTitle),
+    language.key,
+  );
+  return html`${contributionSection}`;
+};
+```
+
+# Appendix {#appendix .hidden}
+
+## Source code {#source-code}
+
+<!--
+NOTE: Everything below this point will not appear in the notebook.
+This is useful to hide all of the code, master selectors (language, admin level, etc.),
+and other things that are needed for the notebook to run but would be messy if
+actually appearing in the notebook.
+-->
+
+## Language
+
+{{< include /components/_lang.qmd >}}
+
+```{ojs}
+// Per-locale notebook text: same key tree per language, missing keys fall back to English.
+// Both locales are fetched ONCE here (no `language` dependency) so toggling the
+// language never hits the network — nbText is a pure lookup.
+nbTextAll = {
+  const [en, fr] = await Promise.all([
+    FileAttachment("/data/lossDamage/text/en.json").json(),
+    FileAttachment("/data/lossDamage/text/fr.json").json(),
+  ]);
+  return { en, fr: Lang.withFallback(fr, en) };
+}
+
+nbText = nbTextAll[language.key] ?? nbTextAll.en
+
+nbTitle = nbText.meta.title
+
+// Narrative prose: one file per block (data/lossDamage/text/<id>.<locale>.md),
+// `title:` front matter + markdown body. The block id is the filename — the CMS
+// (admin/config.yml) edits these; scripts/build/cmsContent.lua bakes English in at render.
+// FileAttachment paths must be literal, hence the explicit map.
+proseFiles = new Object({
+  "overview": { en: FileAttachment("/data/lossDamage/text/overview.en.md"), fr: FileAttachment("/data/lossDamage/text/overview.fr.md") },
+  "farm-size": { en: FileAttachment("/data/lossDamage/text/farm-size.en.md"), fr: FileAttachment("/data/lossDamage/text/farm-size.fr.md") },
+  "extreme-event-loss": { en: FileAttachment("/data/lossDamage/text/extreme-event-loss.en.md"), fr: FileAttachment("/data/lossDamage/text/extreme-event-loss.fr.md") },
+  "model-ensembles": { en: FileAttachment("/data/lossDamage/text/model-ensembles.en.md"), fr: FileAttachment("/data/lossDamage/text/model-ensembles.fr.md") },
+  "ensemble-insights": { en: FileAttachment("/data/lossDamage/text/ensemble-insights.en.md"), fr: FileAttachment("/data/lossDamage/text/ensemble-insights.fr.md") },
+  "loss-by-farm-type": { en: FileAttachment("/data/lossDamage/text/loss-by-farm-type.en.md"), fr: FileAttachment("/data/lossDamage/text/loss-by-farm-type.fr.md") },
+  "summary": { en: FileAttachment("/data/lossDamage/text/summary.en.md"), fr: FileAttachment("/data/lossDamage/text/summary.fr.md") },
+  "methods": { en: FileAttachment("/data/lossDamage/text/methods.en.md"), fr: FileAttachment("/data/lossDamage/text/methods.fr.md") },
+})
+
+// All block files load in parallel at page start (they don't block first paint —
+// English is baked in by cmsContent.lua); the toggle is a plain lookup.
+sectionsAll = {
+  const load = (loc) =>
+    Promise.all(
+      Object.entries(proseFiles).map(async ([id, files]) => [
+        id,
+        Lang.parseBlock(await (files[loc] ?? files.en).text()),
+      ]),
+    ).then(Object.fromEntries);
+  const [en, fr] = await Promise.all([load("en"), load("fr")]);
+  return { en, fr };
+}
+
+sections = sectionsAll[language.key] ?? sectionsAll.en
+
+// languages / langKey / language / _lang come from /components/_lang.qmd,
+// included above with the notebook text cells.
+```
+
+```{ojs}
+// English prose is baked in at render (scripts/build/cmsContent.lua); this cell
+// swaps headings and prose to the toggled language and restores English back.
+{
+  Lang.applyTranslations({
+    sections,
+    md,
+    lang: language.key,
+    headings: {
+      contributions: _lang(general_translations.contributors),
+      appendix: _lang(general_translations.appendix),
+    },
+  });
+}
+```
+
+```{ojs}
+// Fill the `:::token:::` placeholders in a templated sentence from text/<locale>.json.
+tmpl = (template, values) =>
+  Lang.reduceReplaceTemplateItems(
+    template,
+    Object.entries(values).map(([name, value]) => ({ name, value })),
+  )
+
+// Data values (farm size class, hazard, scenario, ...) are English strings baked
+// into the parquet files, so they double as the lookup keys for their labels.
+farmSizeLabel = (k) => nbText.General.farmSizeClasses[k] ?? k
+eventLabel = (k) => nbText.General.events[k] ?? k
+lossLabel = (k) => nbText.LossFunctions.selectors.loss.options[k] ?? k
+eventTypeLabel = (k) => nbText.LossFunctions.selectors.eventType.options[k] ?? k
+scenarioLabel = (k) => nbText.Ensembles.scenarios[k] ?? k
+modelLabel = (k) => nbText.LossByFarmType.selectors.model.options[k] ?? k
+thresholdLabel = (k) => nbText.LossByFarmType.legend.options[k] ?? k
+
+// ponytail: country names stay as the raw `nm_slc0` data values — translating them
+// needs an nm_slc0 -> iso3 -> data/shared/atlas_countries.json lookup, and the
+// aggregate ("Sub-Saharan Africa") has no iso3. Add when a French review asks.
+
+numFormat = formatNumCompactShort({ locale: language.locale })
+
+// Zero means the extreme event never occurred, not "0 farms".
+farmCount = (d) => (d !== 0 ? numFormat(d) : nbText.General.noEvents)
+```
+
+## Data
+
+```{ojs}
+// hyparquet (pinned): 16KB pure-JS parquet reader, no DuckDB-wasm. It decodes
+// GeoParquet WKB geometry to GeoJSON for us, so the boundaries only need
+// rewinding for d3's winding order. hyparquet-compressors adds ZSTD (GDAL's
+// default); helpers/boundaries.js covers sources that hand back raw WKB.
+hypq = import("https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/+esm")
+
+hypq_compress = import("https://cdn.jsdelivr.net/npm/hyparquet-compressors/+esm")
+
+turfRewind = require("@turf/turf").then((t) => t.rewind)
+
+// Shared contributor registry (id -> {name, org}); see the contributors cell.
+contributors = FileAttachment("/data/shared/contributors.json").json()
+```
+
+```{ojs}
+bound_arrayBuf = await FileAttachment(
+  "/data/lossDamage/bounds.parquet",
+).arrayBuffer();
+
+getBounds = async (country) => {
+  const bounds = await hypq.parquetQuery({
+    file: bound_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: ["GID_0", "NAME_0", "NAME_1", "nm_slc0", "geometry"],
+    filter: !country
+      ? null
+      : {
+          nm_slc0: {
+            $eq: country,
+          },
+        },
+  });
+  return {
+    type: "FeatureCollection",
+    features: bounds.map(({ geometry, ...properties }) => ({
+      type: "Feature",
+      geometry: turfRewind(geometry, { reverse: true }),
+      properties,
+    })),
+  };
+};
+
+fig1_mapBounds = await getBounds(fig1_inputs.country);
+fig4_mapBounds = await getBounds(fig4_inputs.country);
+```
+
+## Section code
+
+### Section 1 code
+
+```{ojs}
+fig1_arrayBuf = await FileAttachment(
+  "/data/lossDamage/fig1_allshps.parquet",
+).arrayBuffer();
+
+fig1_selVars = (async () => {
+  const _data = await hypq.parquetQuery({
+    file: fig1_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: ["nm_slc0", "GID_0", "NAME_0", "farm_sz2", "variable"],
+  });
+
+  return {
+    iso3: Array.from(new Set(_data.map((d) => d.GID_0))),
+    country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
+    admin1_name: Array.from(new Set(_data.map((d) => d.NAME_0))),
+    farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
+    variable: Array.from(new Set(_data.map((d) => d.variable))),
+  };
+})();
+```
+
+```{ojs}
+renderS1_inputs = () => {
+  return Inputs.form(
+    {
+      country: Inputs.select(fig1_selVars.country, {
+        label: nbText.General.country,
+        value: "Sub-Saharan Africa",
+      }),
+      fSize: Inputs.select(fig1_selVars.farm_sz2, {
+        label: nbText.General.farmSize,
+        value: "All Farms",
+        format: farmSizeLabel,
+      }),
+      time: Inputs.select(fig1_selVars.variable, {
+        label: nbText.FarmSize.selectors.time.title,
+        value: "Current Farms",
+        format: (k) => nbText.FarmSize.selectors.time.options[k] ?? k,
+      }),
+    },
+    { template: inputTemplate({ gap: "3em" }) },
+  );
+};
+```
+
+```{ojs}
+fig1a_filtered = await hypq.parquetQuery({
+  file: fig1_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig1_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig1_inputs.fSize,
+    },
+    variable: {
+      $eq: fig1_inputs.time,
+    },
+  },
+});
+
+fig1a_spatial = mergeDataToBoundaries({
+  boundaries: fig1_mapBounds,
+  data: fig1a_filtered,
+  boundaryKey: (f) => adminKey(f.properties),
+  dataKey: adminKey,
+});
+```
+
+```{ojs}
+fig1b_filtered = await hypq.parquetQuery({
+  file: await FileAttachment(
+    "/data/lossDamage/fig1_farmsizelookup.parquet",
+  ).arrayBuffer(),
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig1_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig1_inputs.fSize,
+    },
+  },
+});
+```
+
+```{ojs}
+renderS1_insight = () => {
+  const _data = fig1b_filtered;
+  const _present = _data.filter((d) => d.variable === "Current Farms");
+  const _future = _data.filter((d) => d.variable === "Farms 2050");
+
+  const sum = (arr) => arr.reduce((a, b) => a + b, 0);
+
+  const sumpr = sum(_present.map((d) => d.value));
+  const sumfr = sum(_future.map((d) => d.value));
+
+  const pct = ((sumfr - sumpr) / sumpr) * 100;
+  const t = nbText.FarmSize.insight;
+
+  return md`#### ${tmpl(nbText.General.quickInsights, { subject: fig1_inputs.country })}
+
+${tmpl(t.baseline, {
+  country: fig1_inputs.country,
+  farms: numFormat(sumpr),
+  size: farmSizeLabel(fig1_inputs.fSize),
+})}
+
+${tmpl(t.projection, {
+  future: numFormat(sumfr),
+  trend: pct > 0 ? t.trend.increase : t.trend.decrease,
+  pct: pct.toFixed(1),
+})}
+`;
+};
+```
+
+### Section 2 code
+
+```{ojs}
+fig2_dat = await FileAttachment(
+  "/data/lossDamage/fig2_joined_eff.json",
+).json();
+```
+
+```{ojs}
+// Inputs
+fig2_groups = Array.from(new Set(fig2_dat.map((d) => d.group)));
+fig2_mod = Array.from(new Set(fig2_dat.map((d) => d.title)));
+
+renderS2_inputs = () => {
+  return Inputs.form(
+    [
+      Inputs.select(fig2_groups, {
+        label: nbText.LossFunctions.selectors.eventType.title,
+        value: "Drought",
+        format: eventTypeLabel,
+      }),
+      Inputs.select(fig2_mod, {
+        label: nbText.LossFunctions.selectors.loss.title,
+        value: "Predicted Probabilities of Loss",
+        format: lossLabel,
+      }),
+    ],
+    { template: inputTemplate({ gap: "3em" }) },
+  );
+};
+```
+
+```{ojs}
+figure2_filtered = (() => {
+  const [group_sel, mod_sel] = fig2_inputs;
+
+  return fig2_dat.filter((d) => d.group === group_sel && d.title === mod_sel);
+})();
+
+renderS2_plot = () => {
+  const [group_sel, mod_sel] = fig2_inputs;
+  const yax = figure2_filtered[0].yax;
+
+  return Plot.plot({
+    width,
+    height: 450,
+    marginLeft: 50,
+    style: chartStyle,
+
+    title: lossLabel(mod_sel),
+
+    x: {
+      label: nbText.LossFunctions.axis.x,
+      grid: true,
+    },
+
+    y: {
+      label: nbText.LossFunctions.axis.y[yax] ?? yax,
+      tickFormat: (d) => `${Math.round(d * 100)}%`,
+      grid: true,
+    },
+
+    marks: [
+      // Confidence ribbon (geom_ribbon)
+      Plot.areaY(figure2_filtered, {
+        x: "x",
+        y1: "conf.low",
+        y2: "conf.high",
+        fill: group_sel === "Drought" ? "red" : "blue",
+        fillOpacity: 0.3,
+      }),
+
+      // Predicted line (geom_line)
+      Plot.line(figure2_filtered, {
+        x: "x",
+        y: "predicted",
+        strokeWidth: 2,
+        tip: {
+          format: {
+            y: (d) => `${Math.round(d * 100)}%`,
+          },
+        },
+      }),
+    ],
+  });
+};
+
+renderS2_insight = () => {
+  const [_event, _loss] = fig2_inputs;
+  const t = nbText.LossFunctions.insight;
+  const _trend = figure2_filtered[0].trend;
+
+  return md`### ${tmpl(nbText.General.quickInsights, { subject: lossLabel(_loss) })}
+
+${tmpl(t.template, {
+  loss: lossLabel(_loss),
+  event: eventTypeLabel(_event),
+  trend: t.trend[_trend] ?? _trend,
+})}
+  `;
+};
+```
+
+### Section 3 code
+
+```{ojs}
+fig3_data = await FileAttachment("/data/lossDamage/figure3_spei.json").json();
+```
+
+```{ojs}
+ensemble2 = fig3_data.filter((d) => d.gcm === "Ensemble Average");
+joint3 = fig3_data.filter((d) => d.gcm !== "Ensemble Average");
+
+renderS3_plot = () => {
+  const tip = nbText.Ensembles.tooltip;
+  const channels = {
+    scenario: {
+      value: (d) => scenarioLabel(d.model),
+      label: tip.scenario,
+    },
+    hazard: {
+      value: (d) => eventLabel(d.variable),
+      label: tip.hazard,
+    },
+  };
+
+  return Plot.plot({
+    width,
+    height: 500,
+    marginLeft: 90,
+    style: chartStyle,
+
+    x: {
+      label: nbText.Ensembles.axis.x,
+    },
+
+    y: {
+      label: null,
+      tickFormat: eventLabel,
+    },
+
+    fy: {
+      label: null,
+      axis: "left",
+      tickRotate: -90,
+      tickPadding: 80,
+      tickFormat: scenarioLabel,
+    },
+
+    color: {
+      legend: true,
+    },
+
+    marks: [
+      // Ensemble Average bars (geom_col)
+      Plot.barX(ensemble2, {
+        x: "count",
+        fy: "model",
+        y: "variable",
+        fill: (d) => (d.variable === "Very Dry" ? "#F6A8A8" : "#A8D0F6"),
+        channels,
+        tip: {
+          format: {
+            fy: false,
+            x: true,
+            y: true,
+            scenario: true,
+            fill: false,
+            hazard: true,
+          },
+        },
+      }),
+
+      // Individual GCM points (geom_point)
+      Plot.dot(joint3, {
+        x: "count",
+        fy: "model",
+        y: "variable",
+        stroke: "gcm",
+        r: 4,
+        strokeOpacity: 0.7,
+        channels,
+        tip: {
+          format: {
+            fy: false,
+            x: true,
+            y: true,
+            scenario: true,
+            stroke: true,
+            hazard: true,
+          },
+        },
+      }),
+    ],
+  });
+};
+```
+
+### Section 4 code
+
+#### 4a code
+
+```{ojs}
+fig4a_arrayBuf = await FileAttachment(
+  "/data/lossDamage/fig4_map_fin_spei12_high.parquet",
+).arrayBuffer();
+
+fig4_selVars = (async () => {
+  const _data = await hypq.parquetQuery({
+    file: fig4a_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: ["nm_slc0", "GID_0", "NAME_0", "farm_sz2", "extEvent", "model"],
+  });
+
+  return {
+    iso3: Array.from(new Set(_data.map((d) => d.GID_0))),
+    country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
+    admin1_name: Array.from(new Set(_data.map((d) => d.NAME_0))),
+    farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
+    event: Array.from(new Set(_data.map((d) => d.extEvent))),
+    model: Array.from(new Set(_data.map((d) => d.model))),
+  };
+})();
+
+renderS4_inputs = () => {
+  return Inputs.form(
+    {
+      country: Inputs.select(fig4_selVars.country, {
+        label: nbText.General.country,
+        value: "Sub-Saharan Africa",
+      }),
+      fSize: Inputs.select(fig4_selVars.farm_sz2, {
+        label: nbText.General.farmSize,
+        value: "All Farms",
+        format: farmSizeLabel,
+      }),
+      event: Inputs.select(fig4_selVars.event, {
+        label: nbText.LossByFarmType.selectors.event.title,
+        value: "Very Dry",
+        format: eventLabel,
+      }),
+      time: Inputs.select(fig4_selVars.model, {
+        label: nbText.LossByFarmType.selectors.model.title,
+        value: "baseline",
+        format: modelLabel,
+      }),
+    },
+    { template: inputTemplate({ gap: "3em" }) },
+  );
+};
+```
+
+```{ojs}
+fig4a_filtered = await hypq.parquetQuery({
+  file: fig4a_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig4_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig4_inputs.fSize,
+    },
+    extEvent: {
+      $eq: fig4_inputs.event,
+    },
+    model: {
+      $eq: fig4_inputs.time,
+    },
+  },
+  //TODO: Select only the applicable columns to boost perf.
+});
+
+fig4a_spatial = mergeDataToBoundaries({
+  boundaries: fig4_mapBounds,
+  data: fig4a_filtered,
+  boundaryKey: (f) => adminKey(f.properties),
+  dataKey: adminKey,
+});
+```
+
+#### 4b code
+
+```{ojs}
+fig4b_arrayBuf = await FileAttachment(
+  "/data/lossDamage/fig4b.parquet",
+).arrayBuffer();
+
+fig4b_filtered = await hypq.parquetQuery({
+  file: fig4b_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig4_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig4_inputs.fSize,
+    },
+    Event: {
+      $eq: fig4_inputs.event,
+    },
+    model: {
+      $eq: fig4_inputs.time,
+    },
+  },
+  //TODO: Select only the applicable columns to boost perf.
+});
+```
+
+```{ojs}
+renderS4b_plot = () => {
+  const domainOrder =
+    fig4_inputs.event === "Very Dry"
+      ? ["Farms Likely Impacted", "40% lost revenue", "50% lost revenue"]
+      : ["Farms Likely Impacted", "30% lost revenue", "40% lost revenue"];
+  const tip = nbText.LossByFarmType.tooltip;
+
+  return Plot.plot({
+    width,
+    height: 420,
+    marginLeft: 50,
+    style: chartStyle,
+
+    x: {
+      label: nbText.LossByFarmType.axis.x,
+      tickFormat: "d",
+    },
+
+    y: {
+      label: nbText.LossByFarmType.axis.y,
+      grid: true,
+      tickFormat: numFormat,
+    },
+
+    fx: {
+      label: null,
+      tickFormat: (k) => tip.lossTypes[k] ?? k,
+    },
+
+    color: {
+      legend: true,
+      label: nbText.LossByFarmType.legend.title,
+      domain: domainOrder,
+      range: ["#4E79A7", "#F28E2C", "#E15759"],
+      tickFormat: thresholdLabel,
+    },
+
+    marks: [
+      Plot.line(fig4b_filtered, {
+        x: "year",
+        y: "cum_sum",
+        fx: "losstype",
+        stroke: "threshold",
+        strokeWidth: 2,
+        opacity: 0.85,
+        channels: {
+          type: {
+            value: (d) => tip.lossTypes[d.losstype] ?? d.losstype,
+            label: tip.lossType,
+          },
+        },
+        tip: {
+          format: {
+            x: "d",
+            y: farmCount,
+            type: true,
+            stroke: false, //HACK: Keep false for now while additional "threshold", field keeps appearing
+            fx: false,
+          },
+        },
+      }),
+    ],
+  });
+};
+
+renderS4b_insight = () => {
+  const _data = fig4b_filtered;
+  const years = _data.map((d) => d.year);
+  const minyear = Math.min(...years);
+  const maxyear = Math.max(...years);
+
+  const maxYearData = _data.filter((d) => d.year === maxyear);
+
+  const maxLoss = maxYearData.find((d) => d.losstype === "Loss");
+
+  const revenueAtMax = maxYearData.filter((d) => d.losstype === "Revenue");
+
+  const minThreshold = revenueAtMax.reduce((a, b) =>
+    a.threshold2 < b.threshold2 ? a : b,
+  );
+
+  const maxThreshold = revenueAtMax.reduce((a, b) =>
+    a.threshold2 > b.threshold2 ? a : b,
+  );
+
+  const payout = maxLoss.cum_sum / (maxyear - minyear);
+  const t = nbText.LossByFarmType.insight;
+
+  const shared = {
+    event: eventLabel(fig4_inputs.event),
+    country: fig4_inputs.country,
+    model: modelLabel(fig4_inputs.time),
+  };
+
+  return md`### ${tmpl(nbText.General.quickInsights, { subject: fig4_inputs.country })}
+
+${tmpl(t.losses, {
+  ...shared,
+  minYear: minyear,
+  maxYear: maxyear,
+  farms: numFormat(maxLoss.cum_sum),
+  size: farmSizeLabel(fig4_inputs.fSize),
+  payout: numFormat(payout),
+})}
+
+${tmpl(t.revenue, {
+  ...shared,
+  minFarms: numFormat(minThreshold.cum_sum),
+  minPct: minThreshold.threshold2,
+  maxFarms: numFormat(maxThreshold.cum_sum),
+  maxPct: maxThreshold.threshold2,
+})}
+`;
+};
+```
+
+### Geo helpers
+
+```{ojs}
+// The tabular data and the boundaries share these four admin columns; joining on
+// the composite key keeps like-named regions in different countries apart.
+adminKey = (o) =>
+  ["GID_0", "NAME_0", "NAME_1", "nm_slc0"].map((k) => o?.[k] ?? "").join("|")
+
+// mergeDataToBoundaries parks the matched row at properties.data.
+plotMap = (features, valueField, { height = 500, scheme = "YlGnBu" } = {}) => {
+  const value = (f) => f.properties.data?.[valueField];
+
+  return makeChoropleth({
+    features,
+    width,
+    height,
+    fill: value,
+    color: {
+      scheme,
+      tickFormat: numFormat,
+      label: nbText.General.numFarms,
+    },
+    channels: {
+      value: {
+        value,
+        label: nbText.General.numFarms,
+      },
+      gid_0: {
+        value: (f) => f.properties.GID_0,
+        label: nbText.General.iso3,
+      },
+      country: {
+        value: (f) =>
+          f.properties.nm_slc0 === "Sub-Saharan Africa"
+            ? f.properties.NAME_0
+            : f.properties.nm_slc0,
+        label: nbText.General.country,
+      },
+      region: {
+        value: (f) =>
+          f.properties.nm_slc0 === "Sub-Saharan Africa"
+            ? null
+            : f.properties.NAME_0,
+        label: nbText.General.region,
+      },
+    },
+    tooltip: {
+      format: {
+        value: farmCount,
+        country: true,
+        region: true,
+        gid_0: true,
+      },
+    },
+  });
+}
+```
