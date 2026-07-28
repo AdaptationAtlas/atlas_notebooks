@@ -57,7 +57,6 @@ data/cis/
 - **Bivariate Maps**: 3×3 classification showing two dimensions (e.g., CIS
   Readiness × Hazard)
 - **Dumbbell Charts**: Compare CIS readiness vs access infrastructure
-- **Faceted Scatter Plots**: Multi-panel comparison of access types
 - **Data Tables**: Sortable tabular views with full data access
 
 ### Dynamic Insights

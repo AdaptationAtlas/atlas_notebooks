@@ -117,13 +117,12 @@ viewof s3AccessType = Inputs.radio(
 ```{ojs}
 // View Toggle
 viewof s3ViewType = Inputs.radio(
-  ["map", "dumbbell", "scatter", "table"],
+  ["map", "dumbbell", "table"],
   {
     label: nbText.s3ViewToggle,
     value: "map",
     format: x => x === "map" ? nbText.s3ViewMap :
                  x === "dumbbell" ? nbText.s3ViewDumbbell :
-                 x === "scatter" ? nbText.s3ViewScatter :
                  nbText.s3ViewTable
   }
 )
@@ -173,8 +172,8 @@ viewof s3SortBy = {
 
 ```{ojs}
 // The access types, their columns and their labels in one place. Insertion order
-// is the display order for the radio and the scatter facets. Depends on nbText,
-// so the labels follow the language toggle.
+// is the display order for the radio. Depends on nbText, so the labels follow
+// the language toggle.
 S3_ACCESS_TYPES = new Object({
   combined: { pct: "combined_pct", label: nbText.s3AccessCombined },
   internet: { pct: "internet_pct", label: nbText.s3AccessInternet },
@@ -547,164 +546,6 @@ function renderS3DumbbellView() {
   </div>`;
 }
 
-function getS3ScatterFacetData() {
-  // One row per admin unit per access type that has a value.
-  return s3ProcessedData.flatMap((d) =>
-    Object.entries(S3_ACCESS_TYPES)
-      .filter(([key]) => s3AccessNorm(d, key) != null)
-      .map(([key, type]) => ({
-        ...d,
-        accessType: type.label,
-        accessValue: s3AccessNorm(d, key),
-        accessKey: key,
-      })),
-  );
-}
-
-function getS3ScatterAccessTypes() {
-  return Object.values(S3_ACCESS_TYPES).map((type) => type.label);
-}
-
-function getS3ScatterFacetLayout(accessTypes) {
-  const columnCount = 2;
-  const accessIndex = new Map(accessTypes.map((key, i) => [key, i]));
-
-  return {
-    getFx: key => accessIndex.get(key) % columnCount,
-    getFy: key => Math.floor(accessIndex.get(key) / columnCount)
-  };
-}
-
-function getS3ScatterPointColor(d) {
-  const readinessClass = classifyS3Readiness(d.cis_readiness_index, d);
-  const accessClass =
-    d.accessValue >= s3AccessCutoffs.moderate
-      ? "High"
-      : d.accessValue >= s3AccessCutoffs.low
-        ? "Moderate"
-        : "Low";
-
-  return s3BivariateColors[`${readinessClass} × ${accessClass}`] || "#cccccc";
-}
-
-function renderS3ScatterNote() {
-  return html`<div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
-    <div style="font-size: 12px;">
-      <strong>${nbText.s3ParityLine}:</strong> Points above the line indicate access exceeds readiness; points below indicate readiness exceeds access.
-    </div>
-  </div>`;
-}
-
-function renderS3ScatterPlot(facetData) {
-  const accessTypes = getS3ScatterAccessTypes();
-  const {getFx, getFy} = getS3ScatterFacetLayout(accessTypes);
-  const xExtent = d3.extent(facetData, d => d.cis_readiness_index);
-  const xDomain = (xExtent[0] == null || xExtent[1] == null) ? [0, 1] : xExtent;
-
-  return Plot.plot({
-    style: chartStyle,
-    width: 900,
-    height: 700,
-    marginTop: 40,
-    marginRight: 40,
-    marginBottom: 60,
-    marginLeft: 60,
-    grid: true,
-    x: {
-      domain: xDomain,
-      label: `${nbText.s3ReadinessLabel} →`
-    },
-    y: {
-      label: "Access →"
-    },
-    fx: {
-      label: null,
-      padding: 0.08,
-      tickFormat: null
-    },
-    fy: {
-      label: null,
-      padding: 0.08,
-      tickFormat: null
-    },
-    marks: [
-      ...accessTypes.map(accessType =>
-        Plot.line([[0, 0], [1, 1]], {
-          stroke: "#999",
-          strokeWidth: 1.5,
-          strokeDasharray: "4,4",
-          fx: getFx(accessType),
-          fy: getFy(accessType)
-        })
-      ),
-      Plot.text(accessTypes, {
-        fx: d => getFx(d),
-        fy: d => getFy(d),
-        text: d => d,
-        frameAnchor: "top-left",
-        dx: 6,
-        dy: 6,
-        fontWeight: "bold",
-        fontSize: 11
-      }),
-      Plot.frame(),
-      Plot.dot(facetData, {
-        x: "cis_readiness_index",
-        y: "accessValue",
-        fx: d => getFx(d.accessType),
-        fy: d => getFy(d.accessType),
-        fill: getS3ScatterPointColor,
-        stroke: "#333",
-        strokeWidth: 0.5,
-        r: 4
-      }),
-      Plot.tip(
-        facetData,
-        Plot.pointer({
-          fontSize: 14,
-          x: "cis_readiness_index",
-          y: "accessValue",
-          fx: d => getFx(d.accessType),
-          fy: d => getFy(d.accessType),
-          channels: {
-            country: {
-              label: "Country",
-              value: d => d.label
-            },
-            readiness: {
-              label: nbText.s3ReadinessLabel,
-              value: d => d.cis_readiness_index
-            },
-            access: {
-              label: "Access",
-              value: d => d.accessValue
-            }
-          },
-          format: {
-            country: true,
-            readiness: d => fmt(d, 3),
-            access: d => d != null ? `${(d * 100).toFixed(1)}%` : "N/A",
-            fx: false,
-            fy: false
-          }
-        })
-      )
-    ]
-  });
-}
-
-function renderS3ScatterView() {
-  const facetData = getS3ScatterFacetData();
-
-  return html`<div style="width: 100%;">
-    <div style="overflow-x: auto;">
-      ${renderS3ScatterNote()}
-      ${renderS3ScatterPlot(facetData)}
-    </div>
-    <div style="margin-top: 10px;">${s3DownloadButton}</div>
-  </div>`;
-}
-
 function renderS3TableView() {
   return filterableDataTable(s3SortedData, {
     // Columns, headers and formats all come off the one registry, so they cannot
@@ -757,8 +598,6 @@ function renderS3TableView() {
     </div>`;
   } else if (s3ViewType === "dumbbell") {
     return renderS3DumbbellView();
-  } else if (s3ViewType === "scatter") {
-    return renderS3ScatterView();
   }
   return renderS3TableView();
 }
