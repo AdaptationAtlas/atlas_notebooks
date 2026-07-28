@@ -526,88 +526,76 @@ profileLinkCheck = atlasContributionSection(
 
 # Canonical administrative selector checks
 
-The shared selector is `helpers/adminSelectors.ojs`. Test both versions below:
+The shared selector is `helpers/adminSelectors.ojs`. The selection lives in that
+module, one cell per level, and every control rendered anywhere on the page binds
+to those same cells. Check that:
 
-- changing a parent removes child selections that no longer belong to it;
-- Côte d'Ivoire and names containing apostrophes work without affecting data
-  queries;
+- changing a parent removes child selections that no longer belong to it — and
+  that it does so for a level with **no control on screen** (the partial form
+  below shows only country and region; pick a district in the full form first,
+  then change the country in the partial one);
+- the partial form and the full form stay in sync, and using the partial one
+  never clears the district selection by itself;
+- Côte d'Ivoire and names containing apostrophes work without affecting queries;
 - region and district search works with or without accents;
 - Select All is omitted when a level has a finite maximum;
-- the two synchronized multi-select displays stay in sync;
 - controls wrap cleanly in a narrow window;
 - **each trigger label reports only what is actually selected.** Select All on
   countries, then check that regions reads "All regions" rather than a count of
-  countries, and that picking one region shows that region — not a count that
-  stays the same whether zero or one region is chosen.
+  countries.
 
-The public value uses one whole-area convention: `admin1: null` in single mode
-or no matching admin-1 entry in multiple mode means the selected country is
-unfiltered. The displayed **All regions (ISO)** option is therefore a
-single-mode UI choice, not a value returned to notebook code.
+One whole-area convention throughout: a row whose own name is `null` means the
+level is not narrowed. Single-select shows those rows ("Sub-Saharan Africa",
+"Whole country", "All districts"); multi-select expresses the same thing by
+selecting nothing, so it has no such rows.
 
 ```{ojs}
-import { createAdminSelectors } from "/helpers/adminSelectors.ojs";
-
-adminSelectorLabel = (value) =>
-  value.kind === "ssa"
-    ? "SSA"
-    : [value.iso3, value.admin1_name, value.admin2_name]
-        .filter((part) => part != null)
-        .join(" / ");
+import {
+  adminSelect,
+  adminMultiSelect,
+  adminSelections,
+} from "/helpers/adminSelectors.ojs";
 
 adminSelectorSummary = (selection) =>
   Object.fromEntries(
-    Object.entries(selection).map(([level, value]) => [
+    Object.entries(selection).map(([level, rows]) => [
       level,
-      Array.isArray(value)
-        ? value.map(adminSelectorLabel)
-        : value == null
-          ? null
-          : adminSelectorLabel(value),
+      rows.map((row) =>
+        [row.iso3, row.admin1_name, row.admin2_name]
+          .filter((part) => part != null)
+          .join(" / ") || "whole area",
+      ),
     ]),
   );
 ```
 
-## Single selection
+## All three levels, multi-select
 
 ```{ojs}
-viewof adminSingleCheck = createAdminSelectors({
-  multiple: false,
-  language: "en",
-});
-```
-
-```{ojs}
-html`<pre>${JSON.stringify(adminSelectorSummary(adminSingleCheck), null, 2)}</pre>`
-```
-
-## Multiple selection and binding
-
-```{ojs}
-viewof adminMultiCheck = createAdminSelectors({
-  multiple: true,
-  language: "en",
+adminMultiSelect(0, 1, 2, {
   maxSelections: { admin0: 3, admin1: 8, admin2: 12 },
   selectAll: true,
-  searchable: { admin0: true, admin1: true, admin2: true },
-});
+  searchable: true,
+})
+```
+
+## A partial form: country and region only
+
+Bound to the same state. It has no district control, and must not be able to
+disturb the district selection made above.
+
+```{ojs}
+adminMultiSelect(0, 1, { selectAll: true, searchable: true, langKey: "fr" })
+```
+
+## Single-select
+
+```{ojs}
+adminSelect(0, 1, 2)
 ```
 
 ```{ojs}
-adminMultiBoundCheck = Inputs.bind(
-  createAdminSelectors({
-    multiple: true,
-    language: "fr",
-    maxSelections: { admin0: 3, admin1: 8, admin2: 12 },
-    selectAll: true,
-    searchable: true,
-  }),
-  viewof adminMultiCheck,
-);
-```
-
-```{ojs}
-html`<pre>${JSON.stringify(adminSelectorSummary(adminMultiCheck), null, 2)}</pre>`
+html`<pre>${JSON.stringify(adminSelectorSummary(adminSelections), null, 2)}</pre>`
 ```
 
 # Atlas map helper regression checks
