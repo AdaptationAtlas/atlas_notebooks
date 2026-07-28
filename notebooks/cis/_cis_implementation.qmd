@@ -80,11 +80,6 @@ section3Data = {
       internet_pct: access.internet,
       cellphone_pct: access.cellphone,
       combined_pct: combined_access,
-      // Normalized access values (0-1 scale, for comparison with CIS readiness)
-      tv_norm: access.tv !== null ? access.tv / 100 : null,
-      internet_norm: access.internet !== null ? access.internet / 100 : null,
-      cellphone_norm: access.cellphone !== null ? access.cellphone / 100 : null,
-      combined_norm: combined_access !== null ? combined_access / 100 : null
     };
   }).filter(d => d !== null);
 }
@@ -164,13 +159,19 @@ viewof s3SortBy = {
 // is the display order for the radio and the scatter facets. Depends on nbText,
 // so the labels follow the language toggle.
 S3_ACCESS_TYPES = new Object({
-  combined: { norm: "combined_norm", pct: "combined_pct", label: nbText.s3AccessCombined },
-  internet: { norm: "internet_norm", pct: "internet_pct", label: nbText.s3AccessInternet },
-  tv: { norm: "tv_norm", pct: "tv_pct", label: nbText.s3AccessTV },
-  cellphone: { norm: "cellphone_norm", pct: "cellphone_pct", label: nbText.s3AccessCellphone },
+  combined: { pct: "combined_pct", label: nbText.s3AccessCombined },
+  internet: { pct: "internet_pct", label: nbText.s3AccessInternet },
+  tv: { pct: "tv_pct", label: nbText.s3AccessTV },
+  cellphone: { pct: "cellphone_pct", label: nbText.s3AccessCellphone },
 })
 
-s3CurrentAccessField = S3_ACCESS_TYPES[s3AccessType].norm
+// Access is stored once, as a percentage. Comparing it to the readiness index or
+// to the tercile cutoffs needs the same 0-1 scale, so that is derived here rather
+// than held as a second copy of every column.
+s3AccessNorm = (d, key = s3AccessType) => {
+  const pct = d[S3_ACCESS_TYPES[key].pct];
+  return pct == null || isNaN(pct) ? null : pct / 100;
+}
 
 s3CurrentAccessLabel = S3_ACCESS_TYPES[s3AccessType].label
 ```
@@ -179,7 +180,7 @@ s3CurrentAccessLabel = S3_ACCESS_TYPES[s3AccessType].label
 s3AccessCutoffs = {
   // Extract values for the currently selected access type
   const values = section3Data
-    .map(d => d[s3CurrentAccessField])
+    .map((d) => s3AccessNorm(d))
     .filter(v => v !== null && !isNaN(v))
     .sort((a, b) => a - b);
   
@@ -227,7 +228,7 @@ s3BivariateColors = ({ ...bivariateColors, "N/A": "#cccccc" })
 // Process data with bivariate classification
 s3ProcessedData = {
   return section3Data.map(d => {
-    const accessValue = d[s3CurrentAccessField];
+    const accessValue = s3AccessNorm(d);
     const classification = bivariateClassifyAccess(
       d.cis_readiness_index,
       accessValue,
@@ -254,19 +255,12 @@ s3SortedData = {
   
   const data = [...s3ProcessedData];
   
-  if (s3SortBy === "readiness") {
-    return data.sort((a, b) => (b.cis_readiness_index || 0) - (a.cis_readiness_index || 0));
-  } else if (s3SortBy === "combined") {
-    return data.sort((a, b) => (b.combined_norm || 0) - (a.combined_norm || 0));
-  } else if (s3SortBy === "internet") {
-    return data.sort((a, b) => (b.internet_norm || 0) - (a.internet_norm || 0));
-  } else if (s3SortBy === "tv") {
-    return data.sort((a, b) => (b.tv_norm || 0) - (a.tv_norm || 0));
-  } else if (s3SortBy === "cellphone") {
-    return data.sort((a, b) => (b.cellphone_norm || 0) - (a.cellphone_norm || 0));
-  }
-  
-  return data;
+  const value =
+    s3SortBy === "readiness"
+      ? (d) => d.cis_readiness_index
+      : (d) => s3AccessNorm(d, s3SortBy);
+
+  return data.sort((a, b) => (value(b) || 0) - (value(a) || 0));
 }
 ```
 
@@ -292,21 +286,10 @@ function renderS3MapDisplay() {
   if (s3MapType === "univariate") {
     return createS3AccessMap();
   } else {
-    return html`<div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
-      <div style="flex: 0 0 auto; display: flex; justify-content: center;">
-        ${makeBivariateLegend({
-          colors: s3BivariateColors,
-          xLabel: "CIS Readiness",
-          yLabel: s3CurrentAccessLabel,
-          width: 220,
-          height: 210,
-          fontSize: 14,
-        })}
-      </div>
-      <div style="flex: 1 1 640px; min-width: 0;">
-        ${createS3BivariateMap()}
-      </div>
-    </div>`;
+    return bivariateMapWithLegend(createS3BivariateMap(), {
+      colors: s3BivariateColors,
+      yLabel: s3CurrentAccessLabel,
+    });
   }
 }
 
@@ -540,11 +523,11 @@ function getS3ScatterFacetData() {
   // One row per admin unit per access type that has a value.
   return s3ProcessedData.flatMap((d) =>
     Object.entries(S3_ACCESS_TYPES)
-      .filter(([, type]) => d[type.norm] != null && !isNaN(d[type.norm]))
+      .filter(([key]) => s3AccessNorm(d, key) != null)
       .map(([key, type]) => ({
         ...d,
         accessType: type.label,
-        accessValue: d[type.norm],
+        accessValue: s3AccessNorm(d, key),
         accessKey: key,
       })),
   );
@@ -696,47 +679,40 @@ function renderS3ScatterView() {
 
 function renderS3TableView() {
   return filterableDataTable(s3SortedData, {
+    // Columns, headers and formats all come off the one registry, so they cannot
+    // drift apart, and the access headers follow the language toggle.
+    //TODO: the remaining literals here are English-only, like most of this
+    // section's widget labels — they need keys in data/cis/text/<locale>.json.
     columns: [
       "admin0_name",
       "iso3",
       "cis_readiness_index",
       "readinessClass",
-      "tv_pct",
-      "tv_norm",
-      "internet_pct",
-      "internet_norm",
-      "cellphone_pct",
-      "cellphone_norm",
-      "combined_pct",
-      "combined_norm",
-      "gap"
+      ...Object.values(S3_ACCESS_TYPES).map((type) => type.pct),
+      "gap",
     ],
     header: {
       admin0_name: "Country",
       iso3: "ISO3",
       cis_readiness_index: "CIS Readiness (Raw)",
       readinessClass: "CIS Class",
-      tv_pct: "TV Access (%)",
-      tv_norm: "TV",
-      internet_pct: "Internet (%)",
-      internet_norm: "Internet",
-      cellphone_pct: "Cellphone (%)",
-      cellphone_norm: "Cellphone",
-      combined_pct: "Combined (%)",
-      combined_norm: "Combined",
-      gap: "Gap"
+      ...Object.fromEntries(
+        Object.values(S3_ACCESS_TYPES).map((type) => [
+          type.pct,
+          `${type.label} (%)`,
+        ]),
+      ),
+      gap: nbText.s3GapLabel,
     },
     format: {
-      cis_readiness_index: d => fmt(d, 3),
-      tv_pct: d => d !== null ? d.toFixed(1) : "N/A",
-      tv_norm: d => d !== null ? d.toFixed(3) : "N/A",
-      internet_pct: d => d !== null ? d.toFixed(1) : "N/A",
-      internet_norm: d => d !== null ? d.toFixed(3) : "N/A",
-      cellphone_pct: d => d !== null ? d.toFixed(1) : "N/A",
-      cellphone_norm: d => d !== null ? d.toFixed(3) : "N/A",
-      combined_pct: d => d !== null ? d.toFixed(1) : "N/A",
-      combined_norm: d => d !== null ? d.toFixed(3) : "N/A",
-      gap: d => d !== null ? d.toFixed(3) : "N/A"
+      cis_readiness_index: (d) => fmt(d, 3),
+      gap: (d) => fmt(d, 3),
+      ...Object.fromEntries(
+        Object.values(S3_ACCESS_TYPES).map((type) => [
+          type.pct,
+          (d) => fmt(d, 1),
+        ]),
+      ),
     },
     width: {
       admin0_name: 150,
@@ -776,13 +752,9 @@ s3DownloadButton = {
         "CIS Readiness Raw": safeFormat(d.cis_readiness_index, 3),
         "CIS Readiness Class": d.readinessClass || "N/A",
         "TV Access %": safeFormat(d.tv_pct, 1),
-        "TV Access": safeFormat(d.tv_norm, 3),
         "Internet Access %": safeFormat(d.internet_pct, 1),
-        "Internet Access": safeFormat(d.internet_norm, 3),
         "Cellphone Access %": safeFormat(d.cellphone_pct, 1),
-        "Cellphone Access": safeFormat(d.cellphone_norm, 3),
         "Combined Access %": safeFormat(d.combined_pct, 1),
-        "Combined Access": safeFormat(d.combined_norm, 3),
         "Gap (Access - Readiness)": safeFormat(d.gap, 3),
         "Bivariate Category": d.bivariateClass || "N/A"
       })),
@@ -794,10 +766,7 @@ s3DownloadButton = {
 ```{ojs}
 s3Insights = {
   const avgReadiness = d3.mean(section3Data, d => d.cis_readiness_index);
-  const avgAccess = d3.mean(
-    section3Data.filter(d => d[s3CurrentAccessField] !== null && !isNaN(d[s3CurrentAccessField])),
-    d => d[s3CurrentAccessField]
-  );
+  const avgAccess = d3.mean(section3Data, (d) => s3AccessNorm(d));
   
   // Find countries with high readiness but low access (capacity-access gap)
   const capacityGaps = s3ProcessedData.filter(d => 

@@ -15,14 +15,47 @@ forecast skill at multiple administrative levels (Admin 0/1/2).
 ```{ojs}
 thresholds = await FileAttachment("/data/cis/thresholds.json").json();
 
-thresholdIndicatorByField = new Object({
-  wstation_density: "WeatherStation_idx",
-  "cloud-coverage_meanannual": "OpticalAvailability_idx",
-  "cv-precipitation_agreement": "Precipitation variability agreement",
-  "short-term_frcst_skill": "ShortTerm_idx",
-  seasonal_frcst_skill: "LongTerm_idx",
-  cis_readiness_index: "cis_dfci",
+// One entry per indicator: its key in thresholds.json, the name to show it under,
+// and how many decimals it reads at. Tables and exports build their columns from
+// this, so an indicator is named the same everywhere and a label change is one edit.
+//TODO: labels are English-only, as are this section's other widget strings — they
+// want keys in data/cis/text/<locale>.json.
+CIS_INDICATORS = new Object({
+  cis_readiness_index: { threshold: "cis_dfci", label: "CIS Readiness", decimals: 3 },
+  wstation_density: { threshold: "WeatherStation_idx", label: "Weather Station", decimals: 3 },
+  "cloud-coverage_meanannual": { threshold: "OpticalAvailability_idx", label: "Cloud Cover", decimals: 3 },
+  "cv-precipitation_agreement": { threshold: "Precipitation variability agreement", label: "Satellite Agreement", decimals: 1 },
+  "short-term_frcst_skill": { threshold: "ShortTerm_idx", label: "Short-term Skill", decimals: 3 },
+  seasonal_frcst_skill: { threshold: "LongTerm_idx", label: "Long-term Skill", decimals: 3 },
 });
+
+thresholdIndicatorByField = new Object(
+  Object.fromEntries(
+    Object.entries(CIS_INDICATORS).map(([field, i]) => [field, i.threshold]),
+  ),
+);
+
+// A "<label> (Raw)" / "<label> (Class)" pair per indicator. Tables want the value
+// formatted; a CSV export wants the number itself, so `format` chooses. Set
+// `withClass: false` for indicators that have no threshold band to show.
+S11_INDICATORS = ["wstation_density", "cloud-coverage_meanannual"]
+
+indicatorColumns = (row, fields, { format = true, withClass = true } = {}) =>
+  Object.fromEntries(
+    fields.flatMap((field) => {
+      const { label, decimals } = CIS_INDICATORS[field];
+      const pairs = [
+        [`${label} (Raw)`, format ? fmt(row[field], decimals) : row[field]],
+      ];
+      if (withClass) {
+        pairs.push([
+          `${label} (Class)`,
+          classifyThreshold(field, row[field], row),
+        ]);
+      }
+      return pairs;
+    }),
+  );
 
 thresholdAdminLevel = (rowOrLevel = currentAdminLevel) => {
   if (typeof rowOrLevel === "number") return `admin${rowOrLevel}`;
@@ -120,12 +153,8 @@ classifyForecastSkill = (shortTerm, longTerm) => {
 ```
 
 ```{ojs}
-// Which boundaries to draw: no selection shows all countries, a country shows its
-// regions, a region shows its districts. Selecting districts does not drill
-// further — it highlights them within admin 2.
-currentAdminLevel =
-  selectedAdmin0.length === 0 ? 0 : selectedAdmin1.length === 0 ? 1 : 2
-
+// currentAdminLevel, currentBoundaries and adminKey all come from adminView in
+// notebook.qmd, which resolves them once from the selection.
 filteredData = {
   const bind = createSqlBindings();
   const adminWhere = sqlAdminWhere(
@@ -338,16 +367,10 @@ s11MapData = {
     </div>`;
   } else {
     // Table view
-    const tableData = filteredData.map(d => {
-      const adminName = adminDisplayName(d);
-      return {
-        "Admin Name": adminName,
-        "Weather Station (Raw)": fmt(d["wstation_density"], 3),
-        "Weather Station (Class)": classifyThreshold("wstation_density", d["wstation_density"], d),
-        "Cloud Cover (Raw)": fmt(d["cloud-coverage_meanannual"], 3),
-        "Cloud Cover (Class)": classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d)
-      };
-    });
+    const tableData = filteredData.map((d) => ({
+      "Admin Name": adminDisplayName(d),
+      ...indicatorColumns(d, S11_INDICATORS),
+    }));
     
     return filterableDataTable(tableData, {
       sort: "Admin Name",
@@ -359,25 +382,11 @@ s11MapData = {
 ```{ojs}
 // Download button for Section 1.1
 downloadCsvButton(
-  filteredData.map((d) => {
-    return {
-      // Was computed and never emitted, so this export shipped with no way to
-      // tell which region a row described. The other five exports all carry it.
-      "Admin Name": adminDisplayName(d),
-      "Weather Station Density": d["wstation_density"],
-      "Weather Station Class": classifyThreshold(
-        "wstation_density",
-        d["wstation_density"],
-        d,
-      ),
-      "Cloud Coverage": d["cloud-coverage_meanannual"],
-      "Cloud Coverage Class": classifyThreshold(
-        "cloud-coverage_meanannual",
-        d["cloud-coverage_meanannual"],
-        d,
-      ),
-    };
-  }),
+  filteredData.map((d) => ({
+    // This export used to ship with no column identifying the region at all.
+    "Admin Name": adminDisplayName(d),
+    ...indicatorColumns(d, S11_INDICATORS, { format: false }),
+  })),
   { filename: "cis_observation_capacity", label: nbText.downloadLabel },
 );
 ```
@@ -484,14 +493,10 @@ s12MapData = {
       adminHighlight
     });
   } else {
-    const tableData = filteredData.map(d => {
-      const adminName = adminDisplayName(d);
-      return {
-        "Admin Name": adminName,
-      "Satellite Agreement (Raw)": parseFloat(d["cv-precipitation_agreement"])?.toFixed(1) || "N/A",
-      "Satellite Agreement (Class)": classifyThreshold("cv-precipitation_agreement", d["cv-precipitation_agreement"], d)
-      };
-    });
+    const tableData = filteredData.map((d) => ({
+      "Admin Name": adminDisplayName(d),
+      ...indicatorColumns(d, ["cv-precipitation_agreement"]),
+    }));
     
     return filterableDataTable(tableData, {
       sort: "Admin Name",
@@ -937,22 +942,20 @@ s14MapData = {
   } else if (s14ViewType === "Table") {
     const tableData = filteredData
       .filter(d => d["cis_readiness_index"] != null)
-      .map(d => {
-      const adminName = adminDisplayName(d);
-      return {
-        "Admin Name": adminName, //TODO: Admin name again
-        "CIS Readiness (Raw)": fmt(d["cis_readiness_index"], 3),
-        "CIS Readiness (Class)": classifyThreshold("cis_readiness_index", d["cis_readiness_index"], d),
-        "Weather Stn (Raw)": fmt(d["wstation_density"], 3),
-        "Weather Stn (Class)": classifyThreshold("wstation_density", d["wstation_density"], d),
-        "Cloud Cover (Raw)": fmt(d["cloud-coverage_meanannual"], 3),
-        "Cloud Cover (Class)": classifyThreshold("cloud-coverage_meanannual", d["cloud-coverage_meanannual"], d),
-        "Precip Agree (Raw)": fmt(d["cv-precipitation_agreement"], 1),
-        "Precip Agree (Class)": classifyThreshold("cv-precipitation_agreement", d["cv-precipitation_agreement"], d),
-        "Short-term (Raw)": fmt(d["short-term_frcst_skill"], 3),
-        "Long-term (Raw)": fmt(d["seasonal_frcst_skill"], 3)
-      };
-    });
+      .map((d) => ({
+        "Admin Name": adminDisplayName(d),
+        ...indicatorColumns(d, [
+          "cis_readiness_index",
+          "wstation_density",
+          "cloud-coverage_meanannual",
+          "cv-precipitation_agreement",
+        ]),
+        ...indicatorColumns(
+          d,
+          ["short-term_frcst_skill", "seasonal_frcst_skill"],
+          { withClass: false },
+        ),
+      }));
     
     return filterableDataTable(tableData, { // TODO: Why this tabe go ... when rest horizontal scroll
       sort: "CIS Readiness (Raw)",
