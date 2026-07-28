@@ -62,17 +62,22 @@ export function createSqlBindings() {
  * stops at admin 1 must say so, otherwise a region selection asks it for
  * `admin2_name IS NOT NULL` and it returns nothing at all.
  *
+ * `iso3` restricts rows to the countries the notebook actually shows. Without it a
+ * query returns every country in the table, including ones the boundaries and the
+ * selector leave out, so tables and averages cover more ground than the map does.
+ *
  * @param {{admin0?: string[], admin1?: string[]}} selection
  *   Arrays of `admin0_name` / `admin1_name` values.
  * @param {ReturnType<typeof createSqlBindings>} bind
  * @param {object} [options]
  * @param {number} [options.maxLevel=2] Deepest level present in the table.
+ * @param {string[]|Set<string>} [options.iso3] Countries in scope.
  * @returns {string} WHERE fragment, safe to interpolate (contains only `?`)
  */
 export function sqlAdminWhere(
   { admin0 = [], admin1 = [] } = {},
   bind,
-  { maxLevel = 2 } = {},
+  { maxLevel = 2, iso3 } = {},
 ) {
   if (!bind || typeof bind.list !== "function") {
     throw new TypeError("sqlAdminWhere() requires bindings from createSqlBindings()");
@@ -88,6 +93,7 @@ export function sqlAdminWhere(
   // Levels above the target scope it; then the target's name column must be
   // present and everything deeper absent, which is what picks out one level.
   const conditions = [];
+  if (iso3) conditions.push(`iso3 IN (${bind.list([...iso3])})`);
   if (level >= 1) conditions.push(`admin0_name IN (${bind.list(a0)})`);
   if (level >= 2) conditions.push(`admin1_name IN (${bind.list(a1)})`);
   conditions.push(level >= 1 ? "admin1_name IS NOT NULL" : "admin1_name IS NULL");

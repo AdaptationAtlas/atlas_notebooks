@@ -27,7 +27,7 @@ s3AccessDataRaw = {
   const adminWhere = sqlAdminWhere(
     { admin0: selectedAdmin0, admin1: selectedAdmin1 },
     bind,
-    { maxLevel: 1 },
+    { maxLevel: 1, iso3: iso3Set },
   );
 
   return await db.query(
@@ -45,19 +45,32 @@ s3AccessDataRaw = {
 // rather than emptying the map.
 s3View = adminViewFor(1)
 
-// filteredData already ran this exact query for section 1, so section 3 indexes it
-// rather than issuing a byte-identical second one per selection change.
-cisByAdmin1 = new Map(
-  filteredData.map((d) => [`${d.admin0_name}|${d.admin1_name}`, d]),
+// Readiness has to be read at the same level as the access rows. filteredData is
+// the full-depth query, so at district level it holds many admin-2 rows per region
+// and indexing it by region would pick an arbitrary district's value.
+s3Readiness = {
+  const bind = createSqlBindings();
+  const adminWhere = sqlAdminWhere(
+    { admin0: selectedAdmin0, admin1: selectedAdmin1 },
+    bind,
+    { maxLevel: 1, iso3: iso3Set },
+  );
+
+  return await db.query(
+    `SELECT * FROM cis_data WHERE ${adminWhere}`,
+    bind.params,
+  );
+}
+
+s3ReadinessByAdmin = new Map(
+  s3Readiness.map((d) => [s3View.adminKey(d), d]),
 )
 
 
 section3Data = {
   return s3AccessDataRaw.map(access => {
     // Match CIS readiness at the same admin level as the access row.
-    const cis = cisByAdmin1.get(
-      `${access.admin0_name}|${access.admin1_name}`,
-    );
+    const cis = s3ReadinessByAdmin.get(s3View.adminKey(access));
     if (!cis) return null;
     
     // Calculate combined access: average of available indicators
@@ -197,10 +210,10 @@ s3AccessCutoffs = {
 ```
 
 ```{ojs}
-classifyS3Readiness = (value, rowOrLevel = currentAdminLevel) =>
+classifyS3Readiness = (value, rowOrLevel = s3View.level) =>
   classifyThreshold("cis_readiness_index", value, rowOrLevel);
 
-function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = currentAdminLevel) {
+function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = s3View.level) {
   const readinessClass = classifyS3Readiness(readiness, rowOrLevel);
 
   // Classify access level (using dynamic tercile cutoffs)
@@ -310,9 +323,9 @@ function createS3AccessMap() {
     channels: {
       region: {
         label:
-          currentAdminLevel === 2
+          s3View.level === 2
             ? "District"
-            : currentAdminLevel === 1
+            : s3View.level === 1
               ? "Region"
               : "Country",
         value: (d) =>
@@ -330,7 +343,7 @@ function createS3AccessMap() {
       region: true,
       access: true,
     },
-    adminHighlight,
+    adminHighlight: highlightFor(s3View),
   });
 }
 
@@ -353,9 +366,9 @@ function createS3BivariateMap() {
     channels: {
       region: {
         label:
-          currentAdminLevel === 2
+          s3View.level === 2
             ? "District"
-            : currentAdminLevel === 1
+            : s3View.level === 1
               ? "Region"
               : "Country",
         value: (d) =>
@@ -394,7 +407,7 @@ function createS3BivariateMap() {
       accessClass: true,
       category: true,
     },
-    adminHighlight,
+    adminHighlight: highlightFor(s3View),
   });
 }
 ```
