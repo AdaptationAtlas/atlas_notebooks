@@ -119,8 +119,7 @@ for (const dir of textDirs) {
 // entry point together with everything it includes, so prose markers placed in a
 // fragment count as references. One level deep — enough for the split notebooks
 // we have; make it recursive if a fragment ever includes another.
-async function readNotebook(path: string): Promise<string> {
-  const entry = await Deno.readTextFile(path);
+async function readIncludes(path: string, entry: string): Promise<string> {
   const parts = [entry];
 
   for (const m of entry.matchAll(/\{\{<\s*include\s+(\S+?)\s*>\}\}/g)) {
@@ -139,9 +138,12 @@ async function readNotebook(path: string): Promise<string> {
 
 // QMD references: every block a notebook uses must exist
 for await (const f of expandGlob("notebooks/**/*.qmd")) {
-  const qmd = await readNotebook(f.path);
-  const textDir = qmd.match(/^nb-text-dir:\s*(\S+)\s*$/m)?.[1];
+  // Check the contract opt-in on the entry file alone: a notebook with no
+  // CMS text must not fail the job because of how it writes an include.
+  const entry = await Deno.readTextFile(f.path);
+  const textDir = entry.match(/^nb-text-dir:\s*(\S+)\s*$/m)?.[1];
   if (!textDir) continue;
+  const qmd = await readIncludes(f.path, entry);
   const rel = relative(Deno.cwd(), f.path);
   const blocks = blocksByDir.get(textDir);
   if (!blocks) {

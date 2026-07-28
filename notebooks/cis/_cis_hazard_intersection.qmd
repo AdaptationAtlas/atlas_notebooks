@@ -18,10 +18,6 @@ adminSelectorDisplay()
 ```{ojs}
 //| echo: false
 
-hazardDB = await DuckDBClient.of({
-  hazard_data: FileAttachment("/data/cis/nexgddpHazards_monthMean_jagermeyr_rounded.parquet")
-});
-
 // The two hazards this section maps. `code` is the hazard id in the parquet,
 // `breaks` are the Atlas class thresholds for that indicator, collapsed from the
 // four published categories to the three the bivariate palette has: "no
@@ -58,7 +54,7 @@ hazardData = {
     bind,
   );
 
-  return await hazardDB.query(
+  return await db.query(
     `
     SELECT
       iso3,
@@ -182,7 +178,10 @@ bivariateColors = {
     "Moderate × High": "#627a8e",
     "High × Low": "#b8a0c2",      
     "High × Moderate": "#8b7fa8",
-    "High × High": "#5a5f8f"       // Dark purple - OPTIMAL (priority for CIS)
+    "High × High": "#5a5f8f",      // Dark purple - OPTIMAL (priority for CIS)
+    // Distinct from "Low × Low": a unit with no hazard value must not read as a
+    // low-hazard one. Matches the missing-data grey section 3 uses.
+    "No data": "#cccccc"
   };
 }
 ```
@@ -211,9 +210,6 @@ viewof s2ViewToggle = Inputs.radio(
 
 ```{ojs}
 //| echo: false
-
-// Reuse admin level from Section 1
-// s2CurrentAdminLevel = currentAdminLevel;
 
 // Process and classify data
 s2ProcessedData = {
@@ -324,8 +320,8 @@ s2GeoData = {
     
     // Check if this admin2 region is highlighted
     const isHighlighted = currentAdminLevel === 2 && 
-                          highlightedAdmin2.length > 0 && 
-                          highlightedAdmin2.includes(feature.properties.admin2_name);
+                          selectedAdmin2.length > 0 && 
+                          selectedAdmin2.includes(feature.properties.admin2_name);
     
     return {
       type: "Feature",
@@ -362,30 +358,9 @@ s2BivariateMap = {
     color: {
       type: "categorical",
       legend: false,
-      domain: [
-        "Low × Low",
-        "Low × Moderate",
-        "Low × High",
-        "Moderate × Low",
-        "Moderate × Moderate",
-        "Moderate × High",
-        "High × Low",
-        "High × Moderate",
-        "High × High",
-        "No data"
-      ],
-      range: [
-        bivariateColors["Low × Low"],
-        bivariateColors["Low × Moderate"],
-        bivariateColors["Low × High"],
-        bivariateColors["Moderate × Low"],
-        bivariateColors["Moderate × Moderate"],
-        bivariateColors["Moderate × High"],
-        bivariateColors["High × Low"],
-        bivariateColors["High × Moderate"],
-        bivariateColors["High × High"],
-        "#e8e8e8"
-      ],
+      // Insertion order of the palette is the class order the legend expects.
+      domain: Object.keys(bivariateColors),
+      range: Object.values(bivariateColors),
       label: "Bivariate Class"
     },
     channels: {
@@ -399,15 +374,11 @@ s2BivariateMap = {
       },
       readiness: {
         label: "Readiness (0-1)",
-        value: (d) => d.properties.cis_readiness_index != null
-          ? d.properties.cis_readiness_index.toFixed(2)
-          : "N/A"
+        value: (d) => fmt(d.properties.cis_readiness_index, 2)
       },
       hazard: {
         label: hazardName,
-        value: (d) => d.properties.hazardValue != null
-          ? d.properties.hazardValue.toFixed(1)
-          : "N/A"
+        value: (d) => fmt(d.properties.hazardValue, 1)
       },
       bivariateClass: {
         label: "Bivariate class",
@@ -423,11 +394,7 @@ s2BivariateMap = {
     baseMarkOptions: {
       fillOpacity: d => d.properties.hasData ? 1 : 0.3
     },
-    adminHighlight: {
-      filter: d => d.properties.isHighlighted,
-      stroke: "#000",
-      strokeWidth: 2.5
-    }
+    adminHighlight
   });
 }
 
@@ -519,9 +486,9 @@ downloadCsvButton(
       "Admin Level":
         currentAdminLevel === 0 ? "0" : currentAdminLevel === 1 ? "1" : "2",
       "Admin Name": adminName,
-      "CIS Readiness Raw": d.cis_readiness_index?.toFixed(3) || "N/A",
+      "CIS Readiness Raw": fmt(d.cis_readiness_index, 3),
       "CIS Readiness Class": d.readinessClass,
-      [hazardName + " Raw"]: d.hazardValue?.toFixed(1) || "N/A",
+      [hazardName + " Raw"]: fmt(d.hazardValue, 1),
       [hazardName + " Class"]: d.hazardClass,
       "Bivariate Category": d.bivariateClass,
     };
@@ -538,8 +505,8 @@ s2Insights = {
   const selectedRegion = breadcrumb; // Use the breadcrumb from Section 1
   
   // If admin2 regions are highlighted, only use those for insights
-  const insightData = highlightedAdmin2.length > 0 
-    ? s2MapData.filter(d => highlightedAdmin2.includes(d.admin2_name))
+  const insightData = selectedAdmin2.length > 0 
+    ? s2MapData.filter(d => selectedAdmin2.includes(d.admin2_name))
     : s2MapData;
   
   // Insight 1: Opportunity (High × High zones)

@@ -32,7 +32,6 @@ const atlasMultiSelectTranslations = {
  * "Select All" is omitted when `maxSelections` is finite.
  * @param {boolean} [config.searchable=false]
  * @param {"change"|"close"} [config.commit="close"]
- * @param {function} [config.formatSelection] Override the trigger summary
  * without changing the selected values.
  * @param {boolean} [config.emitOnChange] Deprecated alias for
  * `commit: "change"`.
@@ -52,7 +51,6 @@ export function enhancedMultiSelect(
     searchable = false,
     commit,
     emitOnChange,
-    formatSelection,
     compactLabelThreshold = null,
     language = "en",
     labels = {},
@@ -335,16 +333,7 @@ export function enhancedMultiSelect(
       : useCompactLabel
         ? String(compactText)
         : selected.map((option) => option.textContent).join(", ");
-    const customSelectionLabel = formatSelection?.({
-      count: selected.length,
-      defaultLabel: defaultSelectionLabel,
-      labels: selected.map((option) => option.textContent),
-    });
-
-    buttonLabel.textContent =
-      customSelectionLabel == null
-        ? defaultSelectionLabel
-        : String(customSelectionLabel);
+    buttonLabel.textContent = defaultSelectionLabel;
     buttonArrow.textContent = isOpen ? "▴" : "▾";
     btn.disabled = select.disabled;
 

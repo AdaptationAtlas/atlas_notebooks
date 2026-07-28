@@ -29,11 +29,14 @@ function contributionHeading(text) {
 }
 
 /**
- * Profile links come from content files (the contributor registry or a
- * notebook's inline entries), so only absolute http(s) URLs are allowed through:
- * a `javascript:` href would execute on click, and resolving relative values
- * would turn a typo into a dead same-origin link. Anything else renders as a
- * plain name rather than a link.
+ * Accept only absolute http(s) URLs. Contributor entries are repo- or CMS-authored
+ * and reviewed, so this is typo defence rather than a sanitizer: it stops a
+ * relative or malformed value becoming a dead same-origin link, and keeps a
+ * non-web scheme out of an href. Anything rejected renders as a plain name.
+ *
+ * Note this guards one sink only. Prose from the same content files is rendered
+ * as arbitrary markdown by Lang.applyTranslations, so if those files ever stop
+ * being trusted the guard belongs at that boundary, not here.
  */
 function safeProfileUrl(url) {
   if (!url) return null;

@@ -21,10 +21,6 @@ adminSelectorDisplay()
 ```
 
 ```{ojs}
-s3AccessDB = await DuckDBClient.of({
-  access_data: FileAttachment("/data/cis/CIS_access.parquet")
-});
-
 // Query access data with SQL-side admin filtering (shared helper from Section 2)
 s3AccessDataRaw = {
   const bind = createSqlBindings();
@@ -33,7 +29,7 @@ s3AccessDataRaw = {
     bind,
   );
 
-  return await s3AccessDB.query(
+  return await db.query(
     `
     SELECT *
     FROM access_data
@@ -51,7 +47,7 @@ s3CisReadiness = {
     bind,
   );
 
-  const rows = await cisDB.query(
+  const rows = await db.query(
     `
     SELECT *
     FROM cis_data
@@ -84,13 +80,9 @@ section3Data = {
     
     // Calculate combined access: average of available indicators
     // This provides a single "overall access" metric
-    const combined_access = (() => {
-      const values = [access.tv, access.internet, access.cellphone]
-        .filter(v => v !== null && !isNaN(v));
-      return values.length > 0 
-        ? values.reduce((a, b) => a + b, 0) / values.length 
-        : null;
-    })();
+    // d3.mean skips null and NaN, and returns undefined for an all-missing set.
+    const combined_access =
+      d3.mean([access.tv, access.internet, access.cellphone]) ?? null;
     
     return {
       admin0_name: access.admin0_name,
@@ -243,20 +235,10 @@ function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = 
 }
 
 // Bivariate color palette (reused from Section 2 for consistency)
-s3BivariateColors = {
-  return {
-    "Low × Low": "#e8e8e8",        // Low priority
-    "Low × Moderate": "#b8d6be",
-    "Low × High": "#6c9a8b",        // High access but low readiness
-    "Moderate × Low": "#c8b2d6",
-    "Moderate × Moderate": "#9c9eba",
-    "Moderate × High": "#627a8e",
-    "High × Low": "#b8a0c2",        // High readiness but low access (capacity gap)
-    "High × Moderate": "#8b7fa8",
-    "High × High": "#5a5f8f",       // OPTIMAL - scale CIS here
-    "N/A": "#cccccc"                // No access data available
-  };
-}
+// Section 2's palette plus the missing-access key. Sharing the object keeps the
+// two bivariate maps from drifting apart.
+s3BivariateColors = ({ ...bivariateColors, "N/A": "#cccccc" })
+
 ```
 
 ```{ojs}
@@ -464,11 +446,7 @@ function createS3AccessMap() {
       region: true,
       access: true,
     },
-    adminHighlight: {
-      filter: (d) => d.properties.isHighlighted,
-      stroke: "#000",
-      strokeWidth: 2.5,
-    },
+    adminHighlight,
   });
 }
 
@@ -484,28 +462,8 @@ function createS3BivariateMap() {
     color: {
       type: "categorical",
       legend: false,
-      domain: [
-        "Low × Low",
-        "Low × Moderate",
-        "Low × High",
-        "Moderate × Low",
-        "Moderate × Moderate",
-        "Moderate × High",
-        "High × Low",
-        "High × Moderate",
-        "High × High",
-      ],
-      range: [
-        s3BivariateColors["Low × Low"],
-        s3BivariateColors["Low × Moderate"],
-        s3BivariateColors["Low × High"],
-        s3BivariateColors["Moderate × Low"],
-        s3BivariateColors["Moderate × Moderate"],
-        s3BivariateColors["Moderate × High"],
-        s3BivariateColors["High × Low"],
-        s3BivariateColors["High × Moderate"],
-        s3BivariateColors["High × High"],
-      ],
+      domain: Object.keys(s3BivariateColors),
+      range: Object.values(s3BivariateColors),
       label: "Bivariate Class",
     },
     channels: {
@@ -522,9 +480,7 @@ function createS3BivariateMap() {
       readiness: {
         label: nbText.s3ReadinessLabel,
         value: (d) =>
-          d.properties.cis_readiness_index != null
-            ? d.properties.cis_readiness_index.toFixed(2)
-            : "N/A",
+          fmt(d.properties.cis_readiness_index, 2),
       },
       readinessClass: {
         label: "Readiness Class",
@@ -554,11 +510,7 @@ function createS3BivariateMap() {
       accessClass: true,
       category: true,
     },
-    adminHighlight: {
-      filter: (d) => d.properties.isHighlighted,
-      stroke: "#000",
-      strokeWidth: 2.5,
-    },
+    adminHighlight,
   });
 }
 ```
@@ -595,7 +547,7 @@ function makeS3DumbbellTip() {
       country: true,
       x: false,
       y: false,
-      readiness: d => d != null ? d.toFixed(3) : "N/A",
+      readiness: d => fmt(d, 3),
       access: d => d != null ? `${(d * 100).toFixed(1)}%` : "N/A",
       gap: (d) => {
         if (d == null || isNaN(d)) return "N/A";
@@ -616,6 +568,7 @@ function renderS3DumbbellPlot(data) {
   const tip = makeS3DumbbellTip();
 
   return Plot.plot({
+    style: chartStyle,
     width: 1200,
     height: chartHeight,
     marginLeft: 150,
@@ -654,7 +607,7 @@ function renderS3DumbbellPlot(data) {
           ...tip,
           format: {
             ...tip.format,
-            x: d => `Readiness: ${d != null ? d.toFixed(3) : "N/A"}`
+            x: d => `Readiness: ${fmt(d, 3)}`
           }
         }
       }),
@@ -737,6 +690,7 @@ function renderS3ScatterPlot(facetData) {
   const xDomain = (xExtent[0] == null || xExtent[1] == null) ? [0, 1] : xExtent;
 
   return Plot.plot({
+    style: chartStyle,
     width: 900,
     height: 700,
     marginTop: 40,
@@ -816,7 +770,7 @@ function renderS3ScatterPlot(facetData) {
           },
           format: {
             country: true,
-            readiness: d => d != null ? d.toFixed(3) : "N/A",
+            readiness: d => fmt(d, 3),
             access: d => d != null ? `${(d * 100).toFixed(1)}%` : "N/A",
             fx: false,
             fy: false
@@ -872,7 +826,7 @@ function renderS3TableView() {
       gap: "Gap"
     },
     format: {
-      cis_readiness_index: d => d?.toFixed(3) || "N/A",
+      cis_readiness_index: d => fmt(d, 3),
       tv_pct: d => d !== null ? d.toFixed(1) : "N/A",
       tv_norm: d => d !== null ? d.toFixed(3) : "N/A",
       internet_pct: d => d !== null ? d.toFixed(1) : "N/A",

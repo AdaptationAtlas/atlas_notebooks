@@ -56,6 +56,8 @@ import { filterableDataTable } from "/helpers/atlasTable.ojs";
 
 import { createAdminSelectors } from "/helpers/adminSelectors.ojs";
 
+import { chartStyle } from "/helpers/std.ojs";
+
 import {
   makeBivariateLegend,
   makeChoropleth,
@@ -250,6 +252,21 @@ selectedAdmin1 = adminSelection.admin1.map((d) => d.admin1_name);
 selectedAdmin2 = adminSelection.admin2.map((d) => d.admin2_name);
 ```
 
+## Data
+
+```{ojs}
+// One DuckDB instance for the whole notebook. Every DuckDBClient.of() call boots
+// its own wasm worker and instantiates the module again, and these cells are
+// top-level awaits on the critical path — three clients meant three boots.
+db = await DuckDBClient.of({
+  cis_data: FileAttachment("/data/cis/CIS_nb_data.parquet"),
+  access_data: FileAttachment("/data/cis/CIS_access.parquet"),
+  hazard_data: FileAttachment(
+    "/data/cis/nexgddpHazards_monthMean_jagermeyr_rounded.parquet",
+  ),
+})
+```
+
 ## Boundaries
 
 ```{ojs}
@@ -284,19 +301,39 @@ currentBoundaries =
 // Whether a boundary feature falls inside the current admin selection, by name.
 // At admin 0 the whole map is in scope; deeper levels narrow to the selected
 // names, and an empty selection at a level means "all of it".
+// Sets, not the arrays: this runs per boundary feature, and admin 1 can hold 550+
+// selections, so `includes` was a linear scan inside a 4000-feature filter.
+selectedAdmin0Set = new Set(selectedAdmin0)
+
+selectedAdmin1Set = new Set(selectedAdmin1)
+
 inCurrentSelection = (properties) => {
   if (currentAdminLevel === 0) return true;
 
   const inAdmin0 =
-    selectedAdmin0.length === 0 ||
-    (properties.admin0_name && selectedAdmin0.includes(properties.admin0_name));
-  if (currentAdminLevel === 1) return Boolean(inAdmin0);
+    selectedAdmin0Set.size === 0 ||
+    selectedAdmin0Set.has(properties.admin0_name);
+  if (currentAdminLevel === 1) return inAdmin0;
 
-  const inAdmin1 =
-    selectedAdmin1.length === 0 ||
-    (properties.admin1_name && selectedAdmin1.includes(properties.admin1_name));
-  return Boolean(inAdmin0 && inAdmin1);
+  return (
+    inAdmin0 &&
+    (selectedAdmin1Set.size === 0 ||
+      selectedAdmin1Set.has(properties.admin1_name))
+  );
 };
+
+// Every map outlines the districts the reader picked the same way.
+adminHighlight = ({
+  filter: (d) => d.properties.isHighlighted,
+  stroke: "#000",
+  strokeWidth: 2.5,
+})
+
+// Null-safe fixed-point formatting for tables, tooltips and CSV exports.
+fmt = (value, decimals = 3) =>
+  value == null || Number.isNaN(Number(value))
+    ? "N/A"
+    : Number(value).toFixed(decimals)
 
 // Display name for a row at the current admin level, for tables and CSV exports.
 // Deliberately shorter than the maps' regionName, which also appends the country
