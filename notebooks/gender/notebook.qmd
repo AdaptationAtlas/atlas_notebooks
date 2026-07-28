@@ -1,0 +1,848 @@
+---
+pagetitle: "Analyze Women's Exposure to Climate Hazards"
+image: ../../images/notebooks/womenClimate.webp
+description: >
+  See where climate risks disproportionately affect women in African
+  agriculture and how exposure and empowerment differ across crops,
+  countries, and regions.
+keywords: [gender, women, climate hazards, exposure, agriculture, Africa, adaptation]
+nb-text-dir: data/genderExposure/text
+nb-authors:
+  - Hanna Ewell
+  - Shalika Vyas
+  - Brayden Youngberg
+  - Pete Steward
+  - Todd Rosenstock
+date-created: "2026-07-24"
+date-edited: today
+execute:
+  echo: false
+---
+
+```{=html}
+<back-to-top></back-to-top>
+```
+
+```{ojs}
+import { atlasTOC } from "/helpers/toc.ojs";
+
+import { atlasCitation, atlasContributionSection, resolveContributors } from "/helpers/citation.js";
+
+import { atlasHero } from "/helpers/hero.js";
+
+import { makeBivariateLegend, makeChoropleth, mergeDataToBoundaries } from "/helpers/atlasMap.ojs";
+
+import { downloadCsvButton, dropdown_section } from "/helpers/uiComponents.ojs";
+
+import { chartStyle, inputTemplate, wrapTickLabel } from "/helpers/std.ojs";
+```
+
+```{ojs}
+atlasHero({
+  title: nbTitle,
+  image: "./../../images/notebooks/womenClimate.webp",
+  alt: "",
+});
+
+atlasTOC({
+  selector: "h1,h2",
+  skip: ["notebook-title", "appendix", "source-code"], // These should be the section headings in the {# headings}
+  heading: `<b>${Lang.toSentenceCase(_lang(general_translations.toc))}</b>`,
+});
+```
+
+{{< prose overview >}}
+
+```{ojs}
+dropdown_section(
+  sections["how-to-use"].title,
+  false,
+  md`${sections["how-to-use"].body}`,
+)
+```
+
+{{< prose gendered-agriculture >}}
+
+```{ojs}
+viewof afsSex = Inputs.radio(["F", "M", "diff"], {
+  value: "F",
+  label: nbText.GenderedAfriAG.afsEmployment.selectors.sex.title,
+  format: (k) => nbText.GenderedAfriAG.afsEmployment.selectors.sex.options[k],
+})
+```
+
+```{ojs}
+afsEmploymentChart = {
+  const t = nbText.GenderedAfriAG.afsEmployment;
+  const isDiff = afsSex === "diff";
+  let long;
+  if (isDiff) {
+    // Women minus men, per segment; the stacked (diverging) bars sum to the
+    // total AFS-share gap.
+    const bySex = d3.group(afsEmployment, (d) => d.iso3n, (d) => d.sex);
+    long = [...bySex.values()].flatMap((sexes) => {
+      const f = sexes.get("F")?.[0];
+      const m = sexes.get("M")?.[0];
+      if (!f || !m) return [];
+      return [
+        { country: countryNameN(f.iso3n, f.area), segment: t.segments.onFarm, pct: +(f.pctAgr - m.pctAgr).toFixed(1) },
+        { country: countryNameN(f.iso3n, f.area), segment: t.segments.offFarm, pct: +(f.pctOffFarm - m.pctOffFarm).toFixed(1) },
+      ];
+    });
+  } else {
+    const rows = afsEmployment.filter((d) => d.sex === afsSex);
+    long = rows.flatMap((d) => [
+      { country: countryNameN(d.iso3n, d.area), segment: t.segments.onFarm, pct: d.pctAgr, empl: d.emplAgrK },
+      { country: countryNameN(d.iso3n, d.area), segment: t.segments.offFarm, pct: d.pctOffFarm, empl: d.emplOffFarmK },
+    ]);
+  }
+  return Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 820),
+    height: 60 + (long.length / 2) * 26,
+    marginLeft: 130,
+    marginTop: isDiff ? 24 : 20,
+    x: { label: isDiff ? t.axisDiff : t.axis, grid: true },
+    y: { label: null, tickFormat: (d) => wrapTickLabel(d, 18) },
+    color: {
+      legend: true,
+      domain: [t.segments.onFarm, t.segments.offFarm],
+      range: ["#216729", "#64acbe"],
+    },
+    marks: [
+      Plot.barX(long, {
+        x: "pct",
+        y: "country",
+        fill: "segment",
+        stroke: "white",
+        strokeWidth: 0.75,
+        sort: { y: "-x", reduce: "sum" },
+        channels: isDiff ? {} : { [t.tooltip.employed]: "empl" },
+        tip: true,
+      }),
+      Plot.ruleX([0]),
+      ...(isDiff
+        ? [
+            Plot.text([t.diffHints.men], {
+              frameAnchor: "top-left",
+              dy: -18,
+              fontWeight: "bold",
+              fill: "currentColor",
+            }),
+            Plot.text([t.diffHints.women], {
+              frameAnchor: "top-right",
+              dy: -18,
+              fontWeight: "bold",
+              fill: "currentColor",
+            }),
+          ]
+        : []),
+    ],
+    caption: t.caption,
+  });
+}
+```
+
+```{ojs}
+downloadCsvButton(afsEmployment, {
+  filename: "afs_employment_by-sex_faostat.csv",
+  label: nbText.General.download,
+})
+```
+
+{{< prose women-dominate level=2 >}}
+
+```{ojs}
+// Heatmap marks with marginal averages: the cell grid, plus an "Average" row
+// (mean down each column), an "Average" column (mean across each row), and a
+// grand-mean corner — with the mean values labelled in bold. `x`/`y`/`v` map a
+// row to its column label, row label, and value; `avg` is the "Average" tick.
+heatmapMeanMarks = (rows, { x, y, v, avg, textThreshold = 50 }) => {
+  const cells = rows.map((d) => ({ x: x(d), y: y(d), v: v(d) }));
+  const mean = (subset) => (subset.length ? Math.round(d3.mean(subset, (c) => c.v) * 10) / 10 : null);
+  const columns = [...new Set(cells.map((c) => c.x))];
+  const countries = [...new Set(cells.map((c) => c.y))];
+  const means = [
+    ...columns.map((xv) => ({ x: xv, y: avg, v: mean(cells.filter((c) => c.x === xv)) })),
+    ...countries.map((yv) => ({ x: avg, y: yv, v: mean(cells.filter((c) => c.y === yv)) })),
+    { x: avg, y: avg, v: mean(cells) },
+  ].filter((c) => c.v != null);
+  return [
+    Plot.cell([...cells, ...means], { x: "x", y: "y", fill: "v", inset: 1, tip: true }),
+    Plot.text(means, {
+      x: "x", y: "y", text: (c) => c.v, fontWeight: "bold",
+      fill: (c) => (c.v >= textThreshold ? "white" : "#222"),
+    }),
+  ];
+}
+
+womenCropsChart = {
+  const t = nbText.GenderedAfriAG.FemaleParticipationCrops;
+  const avg = t.average;
+  const country = (d) => nbText.General.adminNames[d.country] ?? d.country;
+  const rows = cropGenderData.filter((d) => d.pctFemale != null);
+  const order = d3.groupSort(rows, (g) => -d3.mean(g, (d) => d.pctFemale), country);
+  return Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 760),
+    height: 70 + (order.length + 1) * 44,
+    marginLeft: 95,
+    marginBottom: 55,
+    x: { label: null, domain: [...Object.values(t.plot.crops), avg], tickFormat: (d) => wrapTickLabel(d, 14) },
+    y: { label: null, domain: [...order, avg] },
+    color: { type: "linear", range: ["#F7D732", "#216729"], legend: true, label: t.legend },
+    marks: heatmapMeanMarks(rows, {
+      x: (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup,
+      y: country, v: (d) => d.pctFemale, avg, textThreshold: 45,
+    }),
+    caption: t.caption,
+  });
+}
+```
+
+{{< prose women-livestock level=2 >}}
+
+```{ojs}
+womenLivestockChart = {
+  const t = nbText.GenderedAfriAG.livestockControl;
+  const avg = t.average;
+  const country = (d) => countryNameN(iso3ToN.get(d.iso3), d.iso3);
+  const order = d3.groupSort(livestockControl, (g) => -d3.mean(g, (d) => d.pctFemale), country);
+  return Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 640),
+    height: 70 + (order.length + 1) * 32,
+    marginLeft: 110,
+    x: { label: null, domain: [...Object.values(t.species), avg] },
+    y: { label: null, domain: [...order, avg], tickFormat: (d) => wrapTickLabel(d, 16) },
+    color: { type: "linear", domain: [0, 100], range: ["#F7D732", "#216729"], legend: true, label: t.legend },
+    marks: heatmapMeanMarks(livestockControl, {
+      x: (d) => t.species[d.species] ?? d.species,
+      y: country, v: (d) => d.pctFemale, avg,
+    }),
+    caption: t.caption,
+  });
+}
+```
+
+{{< prose gender-hotspots >}}
+
+{{< prose human-heat-stress level=2 >}}
+
+```{ojs}
+viewof heatControls = Inputs.form(
+  {
+    threshold: Inputs.radio([28, 30], {
+      value: 28,
+      label: nbText.GenderHotspots.wbgtMap.selectors.threshold.title,
+      format: (v) => `${v}°C WBGT`,
+    }),
+    timeframe: Inputs.select(["historic", "2030", "2050"], {
+      label: nbText.GenderHotspots.wbgtMap.selectors.timeframe.title,
+      format: (k) => nbText.GenderHotspots.wbgtMap.selectors.timeframe.options[k],
+    }),
+    // Ignored when the historic period is selected.
+    scenario: Inputs.select(["ssp245", "ssp585"], {
+      label: nbText.GenderHotspots.wbgtMap.selectors.scenario.title,
+      format: (k) => nbText.GenderHotspots.wbgtMap.selectors.scenario.options[k],
+    }),
+  },
+  { template: inputTemplate({ gap: "3em" }) },
+)
+
+heatThreshold = heatControls.threshold
+heatTimeframe = heatControls.timeframe
+heatScenario = heatControls.scenario
+```
+
+```{ojs}
+biVarMap = {
+  const heatTooltip = Lang.reduceReplaceTemplateItems(
+    nbText.GenderHotspots.wbgtMap.tooltip.heat,
+    [{ name: "threshold", value: heatThreshold }],
+  );
+  const map = makeChoropleth({
+    features: biVarFeatures.features,
+    width: Math.min(width, 760),
+    height: 520,
+    fill: (d) => biVarColor(d.properties.data),
+    channels: {
+      region: {
+        label: " ",
+        value: (d) => `${d.properties.admin1_name} — ${countryNameN(d.properties.iso3n)}`,
+      },
+      heat: { label: heatTooltip, value: (d) => d.properties.data?.value },
+      women: {
+        label: nbText.GenderHotspots.wbgtMap.tooltip.women,
+        value: (d) => d.properties.data?.pct_women_agri,
+      },
+    },
+    tooltip: { region: true, heat: true, women: true },
+    extraMarks: [Plot.geo(africaA0, { stroke: "#333", strokeWidth: 0.8, fill: null })],
+  });
+  const legend = makeBivariateLegend({
+    colors: biVarColors,
+    xLabel: nbText.GenderHotspots.wbgtMap.legend.women,
+    yLabel: nbText.GenderHotspots.wbgtMap.legend.heat,
+    width: 235,
+    height: 225,
+    fontSize: 13,
+  });
+  return htl.html`<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:0.25rem">${map}${legend}</div>`;
+}
+```
+
+```{ojs}
+downloadCsvButton(biVarRows, {
+  filename: `wbgt${heatThreshold}C_women-agri_${heatTimeframe}${heatTimeframe === "historic" ? "" : "_" + heatScenario}.csv`,
+  label: nbText.General.download,
+})
+```
+
+{{< prose hotspot-ranking >}}
+
+```{ojs}
+viewof hotspotIndicator = Inputs.select(Object.keys(hotspotIndicators), {
+  label: nbText.GlobalHotspots.selectorTitle,
+  format: (k) => hotspotIndicators[k].label,
+})
+```
+
+```{ojs}
+hotspotMap = makeChoropleth({
+  features: hotspotFeatures.features,
+  width: Math.min(width, 900),
+  height: 500,
+  fill: (d) => d.properties.data?.[hotspotIndicator],
+  color: {
+    type: "linear",
+    scheme: "YlOrRd",
+    unknown: "#e0e0e0",
+    label: hotspotIndicators[hotspotIndicator].legend,
+  },
+  channels: {
+    country: {
+      label: " ",
+      value: (d) => countryNameN(d.properties.iso3n),
+    },
+    rank: {
+      label: nbText.GlobalHotspots.rankLabel,
+      value: (d) => d.properties.data?.rank,
+    },
+  },
+  tooltip: { country: true, rank: true },
+})
+```
+
+```{ojs}
+downloadCsvButton(hotspotData, {
+  filename: "ifpri_gender_climate_hotspots_africa.csv",
+  label: nbText.General.download,
+})
+```
+
+{{< prose gender-investments >}}
+
+{{< prose country-deep-dive level=2 >}}
+
+```{ojs}
+// Custom country select: unlike the shared admin selector (SSA-only), this
+// offers every country the FAOSTAT data covers, incl. North Africa. Names
+// come from the shared translations file (data/shared/atlas_countries.json).
+viewof capCountry = Inputs.select(
+  [...capCountryNames.keys()].sort((a, b) =>
+    capCountryNames.get(a).localeCompare(capCountryNames.get(b))
+  ),
+  {
+    value: 404, // Kenya — good indicator coverage
+    label: nbText.GenderInvestments.adaptiveCapacity.selectors.country.title,
+    format: (n) => capCountryNames.get(n),
+  },
+)
+```
+
+```{ojs}
+adaptiveCapacityChart = {
+  const t = nbText.GenderInvestments.adaptiveCapacity;
+  const rows = adaptiveCapacity.filter((d) => d.iso3n === capCountry);
+  const label = (d) => t.indicators[d.indicator];
+  const order = Object.values(t.indicators);
+  const pairs = d3.groups(rows, label).map(([indicator, g]) => ({
+    indicator,
+    lo: d3.min(g, (d) => d.value),
+    hi: d3.max(g, (d) => d.value),
+  }));
+  const plot = Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 760),
+    height: 440,
+    marginBottom: 70,
+    x: { domain: order, label: null, tickFormat: (d) => wrapTickLabel(d, 16) },
+    y: { domain: [0, 100], grid: true, label: t.axisY },
+    color: { legend: true, domain: [t.sexes.F, t.sexes.M], range: ["#d6604d", "#4393c3"] },
+    marks: [
+      Plot.ruleX(pairs, { x: "indicator", y1: "lo", y2: "hi", stroke: "#bbb", strokeWidth: 2 }),
+      Plot.dot(rows, {
+        x: label,
+        y: "value",
+        fill: (d) => t.sexes[d.sex],
+        r: 7,
+        stroke: "white",
+        strokeWidth: 1,
+        tip: true,
+        channels: { year: "year" },
+      }),
+    ],
+    caption: t.caption,
+  });
+  return htl.html`<div>
+    <h4 style="margin:0 0 0.25rem;">${countryNameN(capCountry)}</h4>
+    ${plot}
+  </div>`;
+}
+```
+
+{{< prose indicator-deep-dive level=2 >}}
+
+```{ojs}
+viewof capMapControls = Inputs.form(
+  {
+    indicator: Inputs.select(Object.keys(nbText.GenderInvestments.adaptiveCapacity.indicators), {
+      label: nbText.GenderInvestments.adaptiveCapacity.selectors.indicator.title,
+      format: (k) => nbText.GenderInvestments.adaptiveCapacity.indicators[k],
+    }),
+    view: Inputs.radio(["gap", "F", "M"], {
+      value: "gap",
+      label: nbText.GenderInvestments.adaptiveCapacity.map.viewTitle,
+      format: (k) => nbText.GenderInvestments.adaptiveCapacity.map.views[k],
+    }),
+  },
+  { template: inputTemplate({ gap: "3em" }) },
+)
+```
+
+```{ojs}
+adaptiveCapacityMap = {
+  const t = nbText.GenderInvestments.adaptiveCapacity;
+  const { indicator, view } = capMapControls;
+  const rows = adaptiveCapacity.filter((d) => d.indicator === indicator);
+  const byIso = d3.rollup(
+    rows,
+    (g) => {
+      const f = g.find((d) => d.sex === "F");
+      const m = g.find((d) => d.sex === "M");
+      return {
+        F: f?.value ?? null,
+        M: m?.value ?? null,
+        gap: f && m ? +(f.value - m.value).toFixed(1) : null,
+        year: f?.year ?? m?.year,
+      };
+    },
+    (d) => d.iso3n,
+  );
+  const data = [...byIso].map(([iso3n, v]) => ({ iso3n, ...v }));
+  const features = mergeDataToBoundaries({
+    boundaries: africaA0,
+    data,
+    boundaryKey: "iso3n",
+    dataKey: "iso3n",
+  });
+  const isGap = view === "gap";
+  const maxGap = d3.max(data, (d) => Math.abs(d.gap ?? 0)) || 10;
+  const map = makeChoropleth({
+    features: features.features,
+    width: Math.min(width, 820),
+    height: 480,
+    fill: (d) => d.properties.data?.[view] ?? undefined,
+    color: isGap
+      ? { type: "linear", scheme: "RdBu", domain: [-maxGap, maxGap], unknown: "#e0e0e0", label: t.map.legendGap }
+      : { type: "linear", scheme: "YlGnBu", domain: [0, 100], unknown: "#e0e0e0", label: `${t.indicators[indicator]} (%)` },
+    channels: {
+      country: { label: " ", value: (d) => countryNameN(d.properties.iso3n) },
+      women: { label: t.sexes.F, value: (d) => d.properties.data?.F },
+      men: { label: t.sexes.M, value: (d) => d.properties.data?.M },
+    },
+    tooltip: { country: true, women: true, men: true },
+    adminHighlight: {
+      filter: (d) => d.properties.iso3n === capCountry,
+      stroke: "#111",
+      strokeWidth: 2,
+    },
+  });
+  return map;
+}
+```
+
+```{ojs}
+downloadCsvButton(adaptiveCapacity, {
+  filename: "adaptive_capacity_by-sex_faostat.csv",
+  label: nbText.General.download,
+})
+```
+
+{{< prose bridge-gap >}}
+
+```{ojs}
+bridgeGapMatrix = {
+  const t = nbText.BridgeGap;
+  const rows = genderSolutions.flatMap((d) =>
+    d.Risk.split(", ").map((risk) => ({ ...d, risk })),
+  );
+  const riskLabel = (d) => t.table.tooltip[d.risk.toLowerCase()] ?? d.risk;
+  const catLabel = (d) => t.selector.options[d["Adaptation Options"]] ?? d["Adaptation Options"];
+  const outcomeLabel = (o) => t.table.values[o.toLowerCase()] ?? o;
+  const cells = d3.flatGroup(rows, catLabel, riskLabel).map(([cat, risk, g]) => {
+    const counts = d3.rollup(g, (v) => v.length, (d) => d["Gender Outcome Score"]);
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    return {
+      cat,
+      risk,
+      n: g.length,
+      outcome: outcomeLabel(top),
+      outcomes: [...counts.entries()].map(([o, n]) => `${outcomeLabel(o)}: ${n}`).join(", "),
+      geographies: [...new Set(g.map((d) => d.Geography))].join(", "),
+    };
+  });
+  const outcomeKeys = ["enabling", "reinforcing", "constraining", "counteracting"];
+  const outcomeColors = {
+    enabling: "#216729",
+    reinforcing: "#74c476",
+    constraining: "#ef8a62",
+    counteracting: "#b2182b",
+  };
+  const lightFills = [t.table.values.reinforcing, t.table.values.constraining];
+  const riskOrder = d3.groupSort(cells, (g) => -d3.sum(g, (d) => d.n), (d) => d.risk);
+  return Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 820),
+    height: 80 + riskOrder.length * 42,
+    marginLeft: 150,
+    marginBottom: 55,
+    x: { label: null, domain: Object.values(t.selector.options), tickFormat: (d) => wrapTickLabel(d, 16) },
+    y: { label: null, domain: riskOrder },
+    color: {
+      legend: true,
+      label: t.matrix.legend,
+      domain: outcomeKeys.map((k) => t.table.values[k]),
+      range: outcomeKeys.map((k) => outcomeColors[k]),
+    },
+    marks: [
+      Plot.cell(cells, {
+        x: "cat",
+        y: "risk",
+        fill: "outcome",
+        inset: 1,
+        tip: true,
+        channels: {
+          [t.table.headings["Gender Outcome Score"]]: "outcomes",
+          [t.table.headings.Geography]: "geographies",
+        },
+      }),
+      Plot.text(cells, {
+        x: "cat",
+        y: "risk",
+        text: "n",
+        fill: (d) => (lightFills.includes(d.outcome) ? "#222" : "white"),
+      }),
+    ],
+    caption: t.matrix.caption,
+  });
+}
+```
+
+```{ojs}
+dropdown_section(
+  sections["solutions-context"].title,
+  false,
+  md`${sections["solutions-context"].body}`,
+)
+```
+
+```{ojs}
+downloadCsvButton(genderSolutions, {
+  filename: "gender_adaptation_solutions_roy2022.csv",
+  label: nbText.General.download,
+})
+```
+
+{{< prose summary >}}
+
+{{< prose methods >}}
+
+# Contributors {#contributions}
+
+```{ojs}
+{
+  // Ids resolve against data/shared/contributors.json; inline {name, org}
+  // objects cover one-off contributors not in the shared registry.
+  const contributorList = resolveContributors(
+    {
+      authors: ["hewell", "svyas", "byoungberg", "psteward", "trosenstock"],
+      developers: ["byoungberg"],
+    },
+    contributors,
+  );
+
+  const contributionSection = atlasContributionSection(
+    contributorList,
+    atlasCitation(nbTitle),
+    language.key,
+  );
+  return html`${contributionSection}`;
+};
+```
+
+# Appendix {#appendix .hidden}
+
+## Source code {#source-code}
+
+## Data import and cleaning
+
+```{ojs}
+// IFPRI global gender-climate risk ranking, filtered to the Atlas Africa
+// boundaries (41 of 87 countries). Standardized indicator columns from the
+// raw CSV are dropped; the composite indices are kept for the download.
+hotspotData = FileAttachment("/data/genderExposure/ifpriGenderHotspots_africa.json").json()
+
+africaA0 = {
+  const topo = await FileAttachment("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").json();
+  return topojson.feature(topo, topo.objects.atlas_gaul24_a0_africa);
+}
+
+hotspotFeatures = mergeDataToBoundaries({
+  boundaries: africaA0,
+  data: hotspotData,
+  boundaryKey: (f) => f.properties.iso3,
+  dataKey: "iso3",
+})
+
+// Localized country names, keyed by UN M49 numeric code (`iso3n`, present on
+// both the boundaries and the FAOSTAT rows). Prefers the shared translations
+// file, falls back to the boundary names.
+countryNamesByN = {
+  const atlas = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const byIso3 = new Map(atlas.map((r) => [r.iso3c, r.translation]));
+  return new Map(
+    africaA0.features.map((f) => {
+      const tr = byIso3.get(f.properties.iso3) ?? {};
+      return [f.properties.iso3n, {
+        en: tr.en ?? f.properties.un_a0_en,
+        fr: tr.fr ?? f.properties.un_a0_fr,
+      }];
+    }),
+  );
+}
+
+countryNameN = (iso3n, fallback = "") =>
+  countryNamesByN.get(iso3n)?.[language.key] ?? countryNamesByN.get(iso3n)?.en ?? fallback
+
+// Keys double as the field names in hotspotData.
+hotspotIndicators = nbText.GlobalHotspots.indicators
+```
+
+```{ojs}
+// hyparquet (pinned): 16KB pure-JS parquet reader, no DuckDB-wasm. Snappy is
+// built in — add hyparquet-compressors only if files ever use another codec.
+// Files are small (~40KB), so each is read fully once; filtering is plain JS.
+hypq = import("https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/+esm")
+
+// WBGT heat stress + women-in-agriculture tables extracted to GAUL24 admin0/1
+// by notebookv2/scripts/extract_gender_layers.R (join key: gaul1_code).
+wbgtData = {
+  const buf = await FileAttachment("/data/genderExposure/wbgt_gaul24_africa.parquet").arrayBuffer();
+  return hypq.parquetQuery({ file: buf });
+}
+
+womenAgriData = {
+  const buf = await FileAttachment("/data/genderExposure/women-agri_gaul24_africa.parquet").arrayBuffer();
+  return hypq.parquetQuery({ file: buf });
+}
+
+africaA1 = {
+  const topo = await FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json();
+  return topojson.feature(topo, topo.objects.atlas_gaul24_a1_africa);
+}
+
+// Agrifood-systems employment by sex per country, latest available year.
+// FAOSTAT Gender in Agrifood Systems domain (ILO modelled estimates),
+// extracted by notebookv2/scripts/extract_faostat_afsEmployment.sql.
+afsEmployment = {
+  const buf = await FileAttachment("/data/genderExposure/afsEmployment_faostat.parquet").arrayBuffer();
+  return hypq.parquetQuery({ file: buf });
+}
+
+// Sex-disaggregated adaptive-capacity indicators (all % of people, higher =
+// more able to adapt), latest year per country and indicator. FAOSTAT SXS
+// domain, extracted by notebookv2/scripts/extract_faostat_adaptiveCapacity.sql.
+adaptiveCapacity = {
+  const buf = await FileAttachment("/data/genderExposure/adaptiveCapacity_faostat.parquet").arrayBuffer();
+  return hypq.parquetQuery({ file: buf });
+}
+
+capCountryNames = new Map(
+  adaptiveCapacity.map((d) => [d.iso3n, countryNameN(d.iso3n, d.area)]),
+)
+
+// Gender outcomes of adaptation solutions: 24 coded studies on African
+// agriculture from Roy, Prakash, Some et al. (2022).
+genderSolutions = FileAttachment("/data/genderExposure/gender_solutions.json").json()
+
+iso3ToN = new Map(
+  africaA0.features.map((f) => [f.properties.iso3, f.properties.iso3n]),
+)
+
+// Shared contributor registry (id -> {name, org}); see the contributors cell.
+contributors = FileAttachment("/data/shared/contributors.json").json()
+
+// Women's control over livestock products (milk, eggs, meat) per country.
+// RHoMIS surveys, extracted by notebookv2/scripts/extract_rhomis_livestockControl.sql.
+livestockControl = FileAttachment("/data/genderExposure/livestockControl_rhomis.json").json()
+
+// Women's share of crop-production labor, 6 countries (Palacios-Lopez et al.
+// 2017; wide source rows reshaped to long).
+cropGenderData = {
+  const wide = await FileAttachment("/data/genderExposure/crop_gender_data.json").json();
+  return wide.flatMap(({ country, ...groups }) =>
+    Object.entries(groups).map(([cropGroup, pctFemale]) => ({ country, cropGroup, pctFemale })),
+  );
+}
+
+```
+
+```{ojs}
+// Bivariate map data: heat days for the current selection joined to the
+// women-in-agriculture percentages at admin1.
+womenByGaul1 = new Map(
+  womenAgriData.filter((d) => d.admin1_name != null).map((d) => [d.gaul1_code, d]),
+)
+
+biVarRows = {
+  const scen = heatTimeframe === "historic" ? "historic" : heatScenario;
+  return wbgtData
+    .filter((d) =>
+      d.admin1_name != null &&
+      d.timeframe === heatTimeframe &&
+      d.scenario === scen &&
+      d.threshold === heatThreshold
+    )
+    .map((d) => {
+      const w = womenByGaul1.get(d.gaul1_code);
+      return { ...d, pct_women_agri: w?.pct_women_agri ?? null, women_agri_count: w?.women_agri_count ?? null };
+    });
+}
+
+biVarFeatures = mergeDataToBoundaries({
+  boundaries: africaA1,
+  data: biVarRows,
+  boundaryKey: "gaul1_code",
+  dataKey: "gaul1_code",
+})
+
+// Fixed class breaks, identical for every WBGT threshold, timeframe, and
+// scenario so colors compare directly across selections: heat = 30/90 days
+// per year (about a month / a quarter of the year), women = 20/50%.
+heatClass = d3.scaleThreshold([30, 90], d3.range(3))
+
+womenClass = d3.scaleThreshold([20, 50], d3.range(3))
+
+// 3x3 bivariate ramp from the previous notebook version (women axis = rows,
+// heat axis = columns; index 0 = both low, 8 = both high).
+biVarPalette = ["#e8e8e8", "#e4acac", "#c85a5a", "#b0d5df", "#ad9ea5", "#985356", "#64acbe", "#627f8c", "#574249"]
+
+biVarColor = (row) => {
+  if (!row || !Number.isFinite(row.value) || !Number.isFinite(row.pct_women_agri)) {
+    return "#e0e0e0";
+  }
+  return biVarPalette[womenClass(row.pct_women_agri) * 3 + heatClass(row.value)];
+}
+
+// makeBivariateLegend expects colors keyed "<x> × <y>" (x = women, y = heat).
+biVarColors = {
+  const cls = ["Low", "Moderate", "High"];
+  const out = {};
+  for (let w = 0; w < 3; w++) {
+    for (let h = 0; h < 3; h++) {
+      out[`${cls[w]} × ${cls[h]}`] = biVarPalette[w * 3 + h];
+    }
+  }
+  return out;
+}
+```
+
+## Language
+
+{{< include /components/_lang.qmd >}}
+
+```{ojs}
+// Per-locale notebook text: same key tree per language, missing keys fall back to English.
+// Both locales are fetched ONCE here (no `language` dependency) so toggling the
+// language never hits the network — nbText is a pure lookup.
+nbTextAll = {
+  const [en, fr] = await Promise.all([
+    FileAttachment("/data/genderExposure/text/en.json").json(),
+    FileAttachment("/data/genderExposure/text/fr.json").json(),
+  ]);
+  return { en, fr: Lang.withFallback(fr, en) };
+}
+
+nbText = nbTextAll[language.key] ?? nbTextAll.en
+
+nbTitle = nbText.meta.title
+
+// Narrative prose: one file per block (data/genderExposure/text/<id>.<locale>.md),
+// `title:` front matter + markdown body. The block id is the filename — the CMS
+// (admin/config.yml) edits these; scripts/build/cmsContent.lua bakes English in at render.
+// FileAttachment paths must be literal, hence the explicit map.
+proseFiles = new Object({
+  "overview": { en: FileAttachment("/data/genderExposure/text/overview.en.md"), fr: FileAttachment("/data/genderExposure/text/overview.fr.md") },
+  "how-to-use": { en: FileAttachment("/data/genderExposure/text/how-to-use.en.md"), fr: FileAttachment("/data/genderExposure/text/how-to-use.fr.md") },
+  "gendered-agriculture": { en: FileAttachment("/data/genderExposure/text/gendered-agriculture.en.md"), fr: FileAttachment("/data/genderExposure/text/gendered-agriculture.fr.md") },
+  "women-dominate": { en: FileAttachment("/data/genderExposure/text/women-dominate.en.md"), fr: FileAttachment("/data/genderExposure/text/women-dominate.fr.md") },
+  "women-livestock": { en: FileAttachment("/data/genderExposure/text/women-livestock.en.md"), fr: FileAttachment("/data/genderExposure/text/women-livestock.fr.md") },
+  "gender-investments": { en: FileAttachment("/data/genderExposure/text/gender-investments.en.md"), fr: FileAttachment("/data/genderExposure/text/gender-investments.fr.md") },
+  "country-deep-dive": { en: FileAttachment("/data/genderExposure/text/country-deep-dive.en.md"), fr: FileAttachment("/data/genderExposure/text/country-deep-dive.fr.md") },
+  "indicator-deep-dive": { en: FileAttachment("/data/genderExposure/text/indicator-deep-dive.en.md"), fr: FileAttachment("/data/genderExposure/text/indicator-deep-dive.fr.md") },
+  "gender-hotspots": { en: FileAttachment("/data/genderExposure/text/gender-hotspots.en.md"), fr: FileAttachment("/data/genderExposure/text/gender-hotspots.fr.md") },
+  "human-heat-stress": { en: FileAttachment("/data/genderExposure/text/human-heat-stress.en.md"), fr: FileAttachment("/data/genderExposure/text/human-heat-stress.fr.md") },
+  "hotspot-ranking": { en: FileAttachment("/data/genderExposure/text/hotspot-ranking.en.md"), fr: FileAttachment("/data/genderExposure/text/hotspot-ranking.fr.md") },
+  "bridge-gap": { en: FileAttachment("/data/genderExposure/text/bridge-gap.en.md"), fr: FileAttachment("/data/genderExposure/text/bridge-gap.fr.md") },
+  "solutions-context": { en: FileAttachment("/data/genderExposure/text/solutions-context.en.md"), fr: FileAttachment("/data/genderExposure/text/solutions-context.fr.md") },
+  "summary": { en: FileAttachment("/data/genderExposure/text/summary.en.md"), fr: FileAttachment("/data/genderExposure/text/summary.fr.md") },
+  "methods": { en: FileAttachment("/data/genderExposure/text/methods.en.md"), fr: FileAttachment("/data/genderExposure/text/methods.fr.md") },
+})
+
+// All 16 block files load in parallel at page start (they don't block first
+// paint — English is baked in by cmsContent.lua); the toggle is a plain lookup.
+sectionsAll = {
+  const load = (loc) =>
+    Promise.all(
+      Object.entries(proseFiles).map(async ([id, files]) => [
+        id,
+        Lang.parseBlock(await (files[loc] ?? files.en).text()),
+      ]),
+    ).then(Object.fromEntries);
+  const [en, fr] = await Promise.all([load("en"), load("fr")]);
+  return { en, fr };
+}
+
+sections = sectionsAll[language.key] ?? sectionsAll.en
+
+// languages / langKey / language / _lang come from /components/_lang.qmd,
+// included above with the notebook text cells.
+```
+
+```{ojs}
+// English prose is baked in at render (scripts/build/cmsContent.lua); this cell
+// swaps headings and prose to the toggled language and restores English back.
+{
+  Lang.applyTranslations({
+    sections,
+    md,
+    lang: language.key,
+    headings: {
+      contributions: _lang(general_translations.contributors),
+      appendix: _lang(general_translations.appendix),
+    },
+  });
+}
+```

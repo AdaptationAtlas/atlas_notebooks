@@ -8,7 +8,7 @@ execute:
 # Lang Module Guide
 
 _Author: Zach Bogart, Brayden Youngberg_
-_Version: 2.0.1_
+_Version: 3.0.0_
 
 ## Overview
 
@@ -58,34 +58,17 @@ nbText = new Object({
 })
 ```
 
-## Language Toggle UI (Observable Example)
+## Language State
 
-Create a master toggle to pick the language key (Observable Inputs):
-
-```{ojs}
-viewof language = Inputs.radio(languages, {
-  label: "Main language toggle",
-  format: (d) => d.key,
-  value: languages.find((x) => x.key === defaultLangKey),
-})
-```
-
-A "pretty" toggle with label that changes based on the language:
-
- - NOTE: it is required to do this in a new Input, as there would be a circular definition otherwise
+Don't build a toggle per notebook. The navbar switcher
+(`components/langSwitcher.js`) owns language state site-wide, and notebooks
+get `language` / `_lang` from the `/components/_lang.qmd` include (see
+*Notebook Content Layout* below). For the standalone examples on this page we
+simply pin it:
 
 ```{ojs}
-viewof prettyLanguageView = {
-  return Inputs.bind(
-    Inputs.radio(languages, {
-      label: Lang.getText({en: "Language", fr: "Langue"}, { key: language.key }),
-      format: (d) => d.label
-    }),
-    viewof language
-  );
-}
+language = ({ key: "en" })
 ```
-
 
 ## Retrieving Translations
 
@@ -169,23 +152,6 @@ Lang.toSentenceCase("welcome to my home"); // "Welcome to my home"
 
 ---
 
-## Advanced: Default Language from URL
-
-Set the default language using a URL parameter (`?lang=fr`):
-
-```{ojs}
-
-queryLanguage = await Lang.getParamFromList({
-  name: "lang",
-  list: languages.map((d) => d.key)
-});
-
-defaultLangKey = queryLanguage ?? "en";
-```
-
-
----
-
 ## API Reference
 
 | Function | Description |
@@ -198,6 +164,69 @@ defaultLangKey = queryLanguage ?? "en";
 | `getParamFromList({ name, list, ... })` | Returns query parameter value if it exists in a provided list. |
 | `toTitleCase(str)` | Converts a string to title case. |
 | `toSentenceCase(str)` | Converts a string to sentence case. |
+
+---
+
+## Notebook Content Layout (CMS)
+
+Notebook text lives in `data/<notebook>/text/`:
+
+- `<id>.en.md`, `<id>.fr.md` — one file per narrative **block**. The filename is the
+  block id; the file is a deliberately narrow front matter (a single `title:` line)
+  plus the markdown body:
+
+  ```markdown
+  ---
+  title: "Overview"
+  ---
+
+  Understanding the economic impacts...
+  ```
+
+  Notebooks place a block with the `prose` shortcode, using the block id:
+
+  ```markdown
+  {{{< prose overview >}}}
+
+  {{{< prose costs level=2 >}}}
+
+  {{{< prose overview-closing heading=false >}}}
+  ```
+
+  **Developers control heading level and placement in the `.qmd`; authors control the
+  displayed text in the block file.** The shortcode
+  (`scripts/build/proseShortcode.lua`) emits a section heading titled from the
+  block's `title:` (`level=N` sets the heading level, default 1) followed by the
+  block body; `heading=false` injects just the body, for free-floating blocks — for
+  example an `overview-closing` block placed after a figure. Blocks can also be
+  consumed directly in OJS code via `sections["indicator-definitions"]` (e.g.
+  rendered inside a dropdown). A shortcode pointing at a missing or empty block
+  **fails the render**, and CI flags block files that nothing references (a typo'd
+  id would otherwise fail silently). Default-language prose is static HTML —
+  crawlable and visible before OJS boots. At runtime, `Lang.applyTranslations()`
+  swaps headings and `.nb-prose` blocks when the language toggle changes (blocks are
+  parsed with `Lang.parseBlock`), and restores the built English on toggle back.
+- `en.json`, `fr.json` — page title (`meta.title`), widget labels, tooltips, and
+  templated sentences. Identical key trees; missing keys fall back to English at
+  runtime via `Lang.withFallback`.
+
+`scripts/build/checkTranslations.ts` (run in CI) enforces the whole contract: JSON key
+parity, every block present in every locale, valid ids and front matter, non-empty
+titles, and every block referenced by a `.qmd` actually existing.
+
+The narrative blocks are editable in the browser at `/admin/` (Sveltia CMS, configured
+in `admin/config.yml` — one folder collection per notebook; authors can edit but not
+create or delete blocks). Edits are committed to the repo and published by the normal
+build. The JSON strings are deliberately *not* in the CMS — their keys are coupled to
+notebook code, so they are edited in the repo through review. See
+`notebooks/roi/notebook.qmd` for the reference implementation.
+
+Language state itself is owned by a vanilla navbar switcher
+(`components/langSwitcher.js`) that works before the OJS runtime boots.
+Notebooks pull the whole shared setup — the switcher script plus the
+`Lang`/`general_translations`/`languages`/`langKey`/`language`/`_lang` OJS
+cells — with a single include of `/components/_lang.qmd` (see the top of that
+file for the shortcode syntax), and must not redefine those cells.
 
 ---
 

@@ -265,11 +265,20 @@ class AtlasToc extends HTMLElement {
     if (!this._content) return;
 
     this._mutationObserver = new MutationObserver((mutations) => {
-      const headingsChanged = mutations.some((mutation) =>
-        [...mutation.addedNodes, ...mutation.removedNodes].some((node) =>
-          nodeContainsSelector(node, this._headingSelector),
-        ),
-      );
+      const headingsChanged = mutations.some((mutation) => {
+        // Text filled into an existing heading (e.g. OJS inline expressions
+        // resolving after initial render) — the mutation target sits inside
+        // the heading rather than adding a heading node.
+        const target =
+          mutation.target.nodeType === Node.ELEMENT_NODE
+            ? mutation.target
+            : mutation.target.parentElement;
+        if (target?.closest(this._headingSelector)) return true;
+
+        return [...mutation.addedNodes, ...mutation.removedNodes].some(
+          (node) => nodeContainsSelector(node, this._headingSelector),
+        );
+      });
       if (headingsChanged) {
         this._scheduleFrame("headings", () => this._refreshHeadings());
       }
@@ -277,6 +286,7 @@ class AtlasToc extends HTMLElement {
     this._mutationObserver.observe(this._content, {
       childList: true,
       subtree: true,
+      characterData: true,
     });
 
     if (!("ResizeObserver" in window)) return;
