@@ -3,7 +3,8 @@
 SECTION 2: CIS READINESS × CLIMATE HAZARD INTERSECTION
 ============================================================================
 Data Sources:
-- haz-means_adm_historic.parquet: Historical hazard means at admin levels
+- nexgddpHazards_monthMean_jagermeyr_rounded.parquet: NEX-GDDP-CMIP6 hazard
+  indices, monthly means over the Jagermeyr crop calendar, 1995-2014 historical
 - thresholds.json: Pre-computed classification thresholds for CIS readiness
 ============================================================================
 -->
@@ -21,16 +22,42 @@ hazardDB = await DuckDBClient.of({
   hazard_data: FileAttachment("/data/cis/nexgddpHazards_monthMean_jagermeyr_rounded.parquet")
 });
 
-// Query hazard data with SQL-side admin filtering
+// The two hazards this section maps. `code` is the hazard id in the parquet,
+// `breaks` are the Atlas class thresholds for that indicator, collapsed from the
+// four published categories to the three the bivariate palette has: "no
+// significant stress", "moderate", then severe and extreme together.
+//
+// Drought is number of dry days (NDD, P < 1 mm) rather than soil water stress
+// days (NDWS): as a monthly count NDWS sits at its ceiling almost everywhere in
+// Africa — 89% of admin units above 28 of ~30 days — so every unit classified as
+// extreme and the drought axis carried no information. NDD uses the same
+// published thresholds and spans all four classes.
+S2_HAZARDS = new Object({
+  drought: {
+    code: "NDD-mean",
+    column: "dryDays",
+    breaks: [15, 20],
+    label: nbText.s2HazardDrought,
+    mapTitle: nbText.s2MapTitleDrought,
+  },
+  waterlogging: {
+    code: "NDWL0-mean",
+    column: "waterloggingDays",
+    breaks: [2, 5],
+    label: nbText.s2HazardWaterlogging,
+    mapTitle: nbText.s2MapTitleWaterlogging,
+  },
+})
+
+// Query hazard data with SQL-side admin filtering.
 hazardData = {
-  const hazards = ["NDWS-mean", "NDWL0-mean"];
   // Bindings are positional, so the admin clause is built and placed first.
   const bind = createSqlBindings();
   const adminWhere = sqlAdminWhere(
     { admin0: selectedAdmin0, admin1: selectedAdmin1 },
     bind,
   );
-  //TODO: I think this should be filtering, so hazard can be based on selection
+
   return await hazardDB.query(
     `
     SELECT
@@ -42,86 +69,106 @@ hazardData = {
       value
     FROM hazard_data
     WHERE ${adminWhere}
-      AND hazard IN (${bind.list(hazards)})
+      AND hazard IN (${bind.list(Object.values(S2_HAZARDS).map((h) => h.code))})
+      AND stat = ${bind.value("mean")}
   `,
     bind.params,
   );
 }
 
-hazardPivoted = {
-   // TODO: why/is this needed?
-  // Create a composite key for each unique region (all admin levels)
-  const grouped = d3.group(hazardData, d => `${d.iso3}_${d.admin0_name}_${d.admin1_name}_${d.admin2_name}`);
-  
-  return Array.from(grouped.values()).map(group => {
-    const base = group[0];  // Get region identifiers from first row
-    const drought = group.find(d => d.hazard === "NDWS-mean");
-    const waterlogging = group.find(d => d.hazard === "NDWL0-mean");
-    
+// One row per admin unit with a column per hazard. The stat filter above matters:
+// each unit has both a mean and an sd row per hazard, so without it the value
+// picked here depended on row order and landed on the sd for ~24% of units.
+hazardByAdmin = {
+  const grouped = d3.group(
+    hazardData,
+    (d) => `${d.iso3}_${d.admin0_name}_${d.admin1_name}_${d.admin2_name}`,
+  );
+
+  return Array.from(grouped.values()).map((group) => {
+    const base = group[0];
+    const values = Object.fromEntries(
+      Object.values(S2_HAZARDS).map((hazard) => {
+        const row = group.find((d) => d.hazard === hazard.code);
+        return [hazard.column, row ? parseFloat(row.value) : null];
+      }),
+    );
+
     return {
       iso3: base.iso3,
       admin0_name: base.admin0_name,
       admin1_name: base.admin1_name,
       admin2_name: base.admin2_name,
-      drought_ndws: drought ? parseFloat(drought.value) : null,
-      waterlogging_ndwl0: waterlogging ? parseFloat(waterlogging.value) : null
+      ...values,
     };
   });
 }
 
-combinedData = filteredData.map(cis => {
-  // Find matching hazard row by exact admin name match
-  const hazard = hazardPivoted.find(h => 
-    h.iso3 === cis.iso3 &&
-    h.admin0_name === cis.admin0_name &&
-    h.admin1_name === cis.admin1_name &&
-    h.admin2_name === cis.admin2_name
-  );
-  
-  return {
-    ...cis,
-    drought_ndws: hazard?.drought_ndws || null,
-    waterlogging_ndwl0: hazard?.waterlogging_ndwl0 || null
-  };
-}).filter(d => d.drought_ndws !== null || d.waterlogging_ndwl0 !== null);
+combinedData = {
+  const hazardColumns = Object.values(S2_HAZARDS).map((h) => h.column);
+
+  return filteredData
+    .map((cis) => {
+      // Match by exact admin name at every level.
+      const hazard = hazardByAdmin.find(
+        (h) =>
+          h.iso3 === cis.iso3 &&
+          h.admin0_name === cis.admin0_name &&
+          h.admin1_name === cis.admin1_name &&
+          h.admin2_name === cis.admin2_name,
+      );
+
+      return {
+        ...cis,
+        ...Object.fromEntries(
+          hazardColumns.map((col) => [col, hazard?.[col] ?? null]),
+        ),
+      };
+    })
+    .filter((d) => hazardColumns.some((col) => d[col] !== null));
+}
 
 // ============================================================================
 // BIVARIATE CLASSIFICATION FUNCTION
 // ============================================================================
-// Classifies regions into a 3×3 bivariate grid based on:
-// - CIS Readiness: Low/Moderate/High (using thresholds.json)
-// - Hazard Severity: Low/Moderate/High (using hazard-specific thresholds)
-//
-// Hazard thresholds are based on climate science conventions:  //TODO: @BRAYDEN Check the thresholds ASAP. Smells like GPT bs.
-// - Drought (NDWS): <15 days = Low, 15-20 = Moderate, >20 = High //Important: this gets replaced with Haz X Exposure data anyway
-// - Waterlogging (NDWL0): <2 days = Low, 2-5 = Moderate, >5 = High
-//
-// The resulting bivariateClass (e.g., "High × High") drives map coloring.
+// Places a region on a 3×3 grid of CIS readiness (from thresholds.json) against
+// hazard severity (the class breaks on S2_HAZARDS). The resulting bivariateClass,
+// e.g. "High × High", drives the map colouring; a missing hazard value yields
+// "No data", which the colour scale already has an entry for.
 // ============================================================================
 
-function bivariateClassify(readiness, hazard, hazardType, readinessLevel = currentAdminLevel) {
+function bivariateClassify(
+  readiness,
+  hazardValue,
+  hazardKey,
+  readinessLevel = currentAdminLevel,
+) {
   const readinessClass = classifyThreshold(
     "cis_readiness_index",
     readiness,
     readinessLevel,
   );
 
-  // Classify hazard using hazard-type-specific thresholds
-  let hazardClass;
-  if (hazardType === "NDWS-mean") {
-    if (hazard < 15) hazardClass = "Low";
-    else if (hazard < 20) hazardClass = "Moderate";
-    else hazardClass = "High";
-  } else if (hazardType === "NDWL0-mean") {
-    if (hazard < 2) hazardClass = "Low";
-    else if (hazard < 5) hazardClass = "Moderate";
-    else hazardClass = "High";
-  }
-  
+  // Comparisons against NaN are all false, so missing values have to be caught
+  // before the ladder — otherwise they fall through to the most severe class.
+  const numeric = Number(hazardValue);
+  const [moderate, severe] = S2_HAZARDS[hazardKey].breaks;
+  const hazardClass =
+    hazardValue == null || Number.isNaN(numeric)
+      ? "No data"
+      : numeric < moderate
+        ? "Low"
+        : numeric < severe
+          ? "Moderate"
+          : "High";
+
   return {
     readinessClass,
     hazardClass,
-    bivariateClass: `${readinessClass} × ${hazardClass}`
+    bivariateClass:
+      hazardClass === "No data"
+        ? "No data"
+        : `${readinessClass} × ${hazardClass}`,
   };
 }
 
@@ -148,7 +195,7 @@ viewof s2HazardType = Inputs.radio(
   {
     label: nbText.s2HazardSelector,
     value: "drought",
-    format: d => d === "drought" ? nbText.s2HazardDrought : nbText.s2HazardWaterlogging
+    format: (d) => S2_HAZARDS[d].label
   }
 );
 
@@ -170,8 +217,7 @@ viewof s2ViewToggle = Inputs.radio(
 
 // Process and classify data
 s2ProcessedData = {
-  const hazardColumn = s2HazardType === "drought" ? "drought_ndws" : "waterlogging_ndwl0";
-  const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
+  const hazardColumn = S2_HAZARDS[s2HazardType].column;
 
   return combinedData
     .filter(d => d.cis_readiness_index != null && d[hazardColumn] !== null)
@@ -179,8 +225,8 @@ s2ProcessedData = {
     const classified = bivariateClassify(
       d.cis_readiness_index,
       d[hazardColumn],
-      hazardTypeCode,
-      d
+      s2HazardType,
+      d,
     );
     
     return {
@@ -202,8 +248,7 @@ s2MapData = {
       const first = group[0];
       const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
       const avgHazard = d3.mean(group, d => d.hazardValue);
-      const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
-      const classified = bivariateClassify(avgReadiness, avgHazard, hazardTypeCode, 0);
+      const classified = bivariateClassify(avgReadiness, avgHazard, s2HazardType, 0);
       
       return {
         admin0_name: first.admin0_name,
@@ -221,8 +266,7 @@ s2MapData = {
       const first = group[0];
       const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
       const avgHazard = d3.mean(group, d => d.hazardValue);
-      const hazardTypeCode = s2HazardType === "drought" ? "NDWS-mean" : "NDWL0-mean";
-      const classified = bivariateClassify(avgReadiness, avgHazard, hazardTypeCode, 1);
+      const classified = bivariateClassify(avgReadiness, avgHazard, s2HazardType, 1);
       
       return {
         admin0_name: first.admin0_name,
@@ -299,7 +343,7 @@ s2GeoData = {
 }
 ```
 
-## `{ojs} s2HazardType === "drought" ? nbText.s2MapTitleDrought : nbText.s2MapTitleWaterlogging`
+## `{ojs} S2_HAZARDS[s2HazardType].mapTitle`
 
 ```{ojs}
 //| echo: false
