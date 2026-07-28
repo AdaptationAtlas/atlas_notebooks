@@ -147,52 +147,17 @@ filteredData = {
 ```
 
 ```{ojs}
-// Every section 1 map needs the same thing: the boundaries for whichever admin
-// level the selection implies, narrowed to the selection, joined to filteredData,
-// with a display name and the admin-2 highlight flag precomputed. The only part
-// that differs per map is which columns to read off the joined row, so that is
-// the one argument: `fields(dataRow)` returns the properties for this map, and
-// receives undefined where a boundary has no matching row.
-buildLevelFeatures = (fields) => {
-  const gaulCodeField =
-    currentAdminLevel === 2
-      ? "gaul2_code"
-      : currentAdminLevel === 1
-        ? "gaul1_code"
-        : "gaul0_code";
-
-  // Drop boundaries the selection cannot reach. Matching on the gaul code catches
-  // rows whose names differ from the boundary file; the name checks catch the
-  // reverse. At admin 0 everything in view is already in scope.
-  const scopedBoundaries = (() => {
-    if (currentAdminLevel === 0) return currentBoundaries;
-
-    const codesInData = new Set(
-      filteredData.map((d) => d[gaulCodeField]).filter((c) => c != null),
-    );
-
-    return {
-      ...currentBoundaries,
-      features: currentBoundaries.features.filter(
-        (f) =>
-          codesInData.has(f.properties[gaulCodeField]) ||
-          inCurrentSelection(f.properties),
-      ),
-    };
-  })();
-
-  const joinKey = (d) =>
-    currentAdminLevel === 2
-      ? `${d.admin0_name}|${d.admin1_name}|${d.admin2_name}`
-      : currentAdminLevel === 1
-        ? `${d.admin0_name}|${d.admin1_name}`
-        : `${d.admin0_name}`;
-
+// Joins filteredData onto whatever boundaries the current selection resolves to
+// and adds the one label every map's tooltip wants. Scoping and the level rule
+// live in helpers/adminBoundaries.js; the join is the shared mergeDataToBoundaries.
+// The only per-map difference is which columns to read off the joined row, so that
+// is the argument: `fields(dataRow)` gets undefined where a boundary has no match.
+buildLevelFeatures = (fields, data = filteredData, view = adminView) => {
   const geoData = mergeDataToBoundaries({
-    boundaries: scopedBoundaries,
-    data: filteredData,
-    boundaryKey: (feature) => joinKey(feature.properties),
-    dataKey: joinKey,
+    boundaries: view.boundaries,
+    data,
+    boundaryKey: (feature) => view.adminKey(feature.properties),
+    dataKey: view.adminKey,
   });
 
   return geoData.features.map((feature) => {
@@ -202,22 +167,20 @@ buildLevelFeatures = (fields) => {
       ...feature,
       properties: {
         ...p,
-        // Precomputed so tooltips do not rebuild it on every hover.
+        // Precomputed so tooltips do not rebuild it on every hover. Deeper than
+        // adminDisplayName: this one keeps the country at admin 2.
         regionName:
-          currentAdminLevel === 0
+          view.level === 0
             ? p.admin0_name
-            : currentAdminLevel === 1
+            : view.level === 1
               ? `${p.admin1_name}, ${p.admin0_name}`
               : `${p.admin2_name}, ${p.admin1_name}, ${p.admin0_name}`,
-        isHighlighted:
-          currentAdminLevel === 2 &&
-          selectedAdmin2.length > 0 &&
-          selectedAdmin2.includes(p.admin2_name),
         ...fields(p.data),
       },
     };
   });
 }
+
 ```
 
 ```{ojs}
@@ -423,10 +386,7 @@ downloadCsvButton(
 // Section 1.1 Dynamic Insight
 
 s11Insight = {
-  // If admin2 regions are highlighted, only use those for insights
-  const insightData = selectedAdmin2.length > 0 
-    ? filteredData.filter(d => selectedAdmin2.includes(d.admin2_name))
-    : filteredData;
+  const insightData = onlySelectedAtLevel(filteredData);
   
   const avgWeatherStation = d3.mean(insightData, d => d["wstation_density"]);
   const avgCloudCover = d3.mean(insightData, d => d["cloud-coverage_meanannual"]);
@@ -505,11 +465,7 @@ s12MapData = {
       channels: {
         region: {
           label: "Region",
-          value: (d) => {
-            const regionName = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
-            const country = d.properties.admin0_name;
-            return regionName === country ? regionName : `${regionName}, ${country}`;
-          }
+          value: (d) => d.properties.regionName
         },
         satelliteAgreement: {
           label: "Satellite Agreement",
@@ -566,10 +522,7 @@ downloadCsvButton(
 ```{ojs}
 // Section 1.2 Dynamic Insight
 s12Insight = {
-  // If admin2 regions are highlighted, only use those for insights
-  const insightData = selectedAdmin2.length > 0 
-    ? filteredData.filter(d => selectedAdmin2.includes(d.admin2_name))
-    : filteredData;
+  const insightData = onlySelectedAtLevel(filteredData);
   
   const avgAgreement = d3.mean(insightData, d => parseFloat(d["cv-precipitation_agreement"]));
   
@@ -676,102 +629,53 @@ s13Data = {
 // Section 1.3 Map/Chart/Table
 {
   if (s13ViewType === "Map") {
-    const regionChannel = {
-      label: "Region",
-      value: (d) => {
-        const regionName = d.properties.admin2_name || d.properties.admin1_name || d.properties.admin0_name;
-        const country = d.properties.admin0_name;
-        return regionName === country ? regionName : `${regionName}, ${country}`;
-      }
-    };
-    const shortTermMap = makeChoropleth({
-      features: s13MapData,
-      width: 400,
-      height: 450,
-      fill: d => d.properties.shortTerm,
-      color: {
-        type: "linear",
-        domain: [0, 1],
-        scheme: "RdYlGn",
-        label: "RPSS"
+    // Three panels over the same features, differing only in the column they
+    // colour by, the scale, and the labels.
+    const panels = [
+      {
+        key: "shortTerm",
+        title: "Short-term Forecast Skill (1–2 mo)",
+        label: "Short-term",
+        color: { type: "linear", domain: [0, 1], scheme: "RdYlGn", label: "RPSS" },
       },
-      channels: {
-        region: regionChannel,
-        shortTerm: {
-          label: "Short-term",
-          value: (d) => fmt(d.properties.shortTerm, 3)
-        }
+      {
+        key: "longTerm",
+        title: "Long-term Forecast Skill (11–12 mo)",
+        label: "Long-term",
+        color: { type: "linear", domain: [0, 1], scheme: "RdYlGn", label: "RPSS" },
       },
-      tooltip: {
-        region: true,
-        shortTerm: true
+      {
+        key: "delta",
+        title: "Difference (Long − Short)",
+        label: "Difference",
+        color: {
+          type: "diverging",
+          domain: [-0.5, 0.5],
+          scheme: "RdBu",
+          label: "Δ (Long − Short)",
+        },
       },
-      adminHighlight
-    });
-    
-    const longTermMap = makeChoropleth({
-      features: s13MapData,
-      width: 400,
-      height: 450,
-      fill: d => d.properties.longTerm,
-      color: {
-        type: "linear",
-        domain: [0, 1],
-        scheme: "RdYlGn",
-        label: "RPSS"
-      },
-      channels: {
-        region: regionChannel,
-        longTerm: {
-          label: "Long-term",
-          value: (d) => fmt(d.properties.longTerm, 3)
-        }
-      },
-      tooltip: {
-        region: true,
-        longTerm: true
-      },
-      adminHighlight
-    });
-    
-    const deltaMap = makeChoropleth({
-      features: s13MapData,
-      width: 400,
-      height: 450,
-      fill: d => d.properties.delta,
-      color: {
-        type: "diverging",
-        domain: [-0.5, 0.5],
-        scheme: "RdBu",
-        label: "Δ (Long − Short)"
-      },
-      channels: {
-        region: regionChannel,
-        delta: {
-          label: "Difference",
-          value: (d) => fmt(d.properties.delta, 3)
-        }
-      },
-      tooltip: {
-        region: true,
-        delta: true
-      },
-      adminHighlight
-    });
-    
+    ];
+
     return htl.html`<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-top: 20px;">
-      <div style="text-align: center;">
-        <h4 style="margin-bottom: 10px; font-size: 14px;">Short-term Forecast Skill (1–2 mo)</h4>
-        ${shortTermMap}
-      </div>
-      <div style="text-align: center;">
-        <h4 style="margin-bottom: 10px; font-size: 14px;">Long-term Forecast Skill (11–12 mo)</h4>
-        ${longTermMap}
-      </div>
-      <div style="text-align: center;">
-        <h4 style="margin-bottom: 10px; font-size: 14px;">Difference (Long − Short)</h4>
-        ${deltaMap}
-      </div>
+      ${panels.map(
+        ({ key, title, label, color }) => htl.html`<div style="text-align: center;">
+        <h4 style="margin-bottom: 10px; font-size: 14px;">${title}</h4>
+        ${makeChoropleth({
+          features: s13MapData,
+          width: 400,
+          height: 450,
+          fill: (d) => d.properties[key],
+          color,
+          channels: {
+            region: { label: "Region", value: (d) => d.properties.regionName },
+            [key]: { label, value: (d) => fmt(d.properties[key], 3) },
+          },
+          tooltip: { region: true, [key]: true },
+          adminHighlight,
+        })}
+      </div>`,
+      )}
     </div>`;
   } else if (s13ViewType === "Chart") {
 
@@ -914,10 +818,7 @@ downloadCsvButton(
 ```{ojs}
 // Section 1.3 Dynamic Insight
 s13Insight = {
-  // If admin2 regions are highlighted, only use those for insights
-  const insightData = selectedAdmin2.length > 0 
-    ? filteredData.filter(d => selectedAdmin2.includes(d.admin2_name))
-    : filteredData;
+  const insightData = onlySelectedAtLevel(filteredData);
   
   const avgShortTerm = d3.mean(insightData, d => d["short-term_frcst_skill"]);
   const avgLongTerm = d3.mean(insightData, d => d["seasonal_frcst_skill"]);
@@ -1171,10 +1072,7 @@ downloadCsvButton(
 ```{ojs}
 // Section 1.4 Dynamic Insight
 s14Insight = {
-  // If admin2 regions are highlighted, only use those for insights
-  const insightData = selectedAdmin2.length > 0 
-    ? filteredData.filter(d => selectedAdmin2.includes(d.admin2_name))
-    : filteredData;
+  const insightData = onlySelectedAtLevel(filteredData);
   
   const avgReadiness = d3.mean(insightData, d => d["cis_readiness_index"]);
   const readinessClass = classifyThreshold("cis_readiness_index", avgReadiness).toLowerCase();

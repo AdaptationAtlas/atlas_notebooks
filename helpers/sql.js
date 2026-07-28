@@ -52,17 +52,28 @@ export function createSqlBindings() {
  * order they appear in the SQL — call this before appending further `bind`
  * fragments that follow it in the statement.
  *
- * Selecting districts is not a filtering level: the CIS notebook uses an admin-2
- * selection to highlight districts inside the selected regions, so the query
- * still returns the admin-2 rows for those regions. Add an `admin2` clause when a
- * notebook actually needs to filter by it.
+ * Selecting districts is not a filtering level: an admin-2 selection highlights
+ * districts inside the selected regions, so the query still returns every admin-2
+ * row for those regions.
+ *
+ * `maxLevel` is how deep the table itself goes, and it is the same idea as
+ * `maxLevel` in helpers/adminBoundaries.js — keep the two in step for one dataset,
+ * or the map and the rows disagree about which level is on screen. A table that
+ * stops at admin 1 must say so, otherwise a region selection asks it for
+ * `admin2_name IS NOT NULL` and it returns nothing at all.
  *
  * @param {{admin0?: string[], admin1?: string[]}} selection
  *   Arrays of `admin0_name` / `admin1_name` values.
  * @param {ReturnType<typeof createSqlBindings>} bind
+ * @param {object} [options]
+ * @param {number} [options.maxLevel=2] Deepest level present in the table.
  * @returns {string} WHERE fragment, safe to interpolate (contains only `?`)
  */
-export function sqlAdminWhere({ admin0 = [], admin1 = [] } = {}, bind) {
+export function sqlAdminWhere(
+  { admin0 = [], admin1 = [] } = {},
+  bind,
+  { maxLevel = 2 } = {},
+) {
   if (!bind || typeof bind.list !== "function") {
     throw new TypeError("sqlAdminWhere() requires bindings from createSqlBindings()");
   }
@@ -70,14 +81,17 @@ export function sqlAdminWhere({ admin0 = [], admin1 = [] } = {}, bind) {
   const names = (values) => (Array.isArray(values) ? values.filter(Boolean) : []);
   const [a0, a1] = [names(admin0), names(admin1)];
 
-  const conditions = [
-    a0.length
-      ? `admin0_name IN (${bind.list(a0)}) AND admin1_name IS NOT NULL`
-      : "admin1_name IS NULL",
-    a1.length
-      ? `admin1_name IN (${bind.list(a1)}) AND admin2_name IS NOT NULL`
-      : "admin2_name IS NULL",
-  ];
+  // Same rule as the boundary resolver: a selection deeper than the table stops
+  // narrowing and becomes a highlight, so the rows stay at the level it can reach.
+  const level = Math.min(a0.length === 0 ? 0 : a1.length === 0 ? 1 : 2, maxLevel);
+
+  // Levels above the target scope it; then the target's name column must be
+  // present and everything deeper absent, which is what picks out one level.
+  const conditions = [];
+  if (level >= 1) conditions.push(`admin0_name IN (${bind.list(a0)})`);
+  if (level >= 2) conditions.push(`admin1_name IN (${bind.list(a1)})`);
+  conditions.push(level >= 1 ? "admin1_name IS NOT NULL" : "admin1_name IS NULL");
+  conditions.push(level >= 2 ? "admin2_name IS NOT NULL" : "admin2_name IS NULL");
 
   return conditions.join(" AND ");
 }

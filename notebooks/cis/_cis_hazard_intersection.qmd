@@ -45,59 +45,39 @@ S2_HAZARDS = new Object({
   },
 })
 
-// Query hazard data with SQL-side admin filtering.
-hazardData = {
-  // Bindings are positional, so the admin clause is built and placed first.
+// The whole slice this section needs is 10,182 rows across all three admin levels,
+// so it is fetched once with no admin filter: `combinedData` joins it onto
+// filteredData, which is already scoped to the selection. Filtering here as well
+// meant re-scanning the 437k-row parquet on every selection change.
+hazardByAdmin = {
   const bind = createSqlBindings();
-  const adminWhere = sqlAdminWhere(
-    { admin0: selectedAdmin0, admin1: selectedAdmin1 },
-    bind,
-  );
-
-  return await db.query(
+  const rows = await db.query(
     `
     SELECT
-      iso3,
       admin0_name,
       admin1_name,
       admin2_name,
       hazard,
       value
     FROM hazard_data
-    WHERE ${adminWhere}
-      AND hazard IN (${bind.list(Object.values(S2_HAZARDS).map((h) => h.code))})
+    WHERE hazard IN (${bind.list(Object.values(S2_HAZARDS).map((h) => h.code))})
       AND stat = ${bind.value("mean")}
   `,
     bind.params,
   );
-}
 
-// One row per admin unit with a column per hazard. The stat filter above matters:
-// each unit has both a mean and an sd row per hazard, so without it the value
-// picked here depended on row order and landed on the sd for ~24% of units.
-hazardByAdmin = {
-  const grouped = d3.group(
-    hazardData,
-    (d) => `${d.iso3}_${d.admin0_name}_${d.admin1_name}_${d.admin2_name}`,
-  );
-
-  return Array.from(grouped.values()).map((group) => {
-    const base = group[0];
-    const values = Object.fromEntries(
-      Object.values(S2_HAZARDS).map((hazard) => {
-        const row = group.find((d) => d.hazard === hazard.code);
-        return [hazard.column, row ? parseFloat(row.value) : null];
-      }),
-    );
-
-    return {
-      iso3: base.iso3,
-      admin0_name: base.admin0_name,
-      admin1_name: base.admin1_name,
-      admin2_name: base.admin2_name,
-      ...values,
-    };
-  });
+  // One entry per admin unit with a column per hazard, keyed for direct lookup.
+  // The stat filter above matters: each unit has both a mean and an sd row per
+  // hazard, so without it the value picked depended on row order.
+  const byAdmin = new Map();
+  for (const row of rows) {
+    const key = `${row.admin0_name}|${row.admin1_name}|${row.admin2_name}`;
+    const unit = byAdmin.get(key) ?? {};
+    const hazard = Object.values(S2_HAZARDS).find((h) => h.code === row.hazard);
+    if (hazard) unit[hazard.column] = parseFloat(row.value);
+    byAdmin.set(key, unit);
+  }
+  return byAdmin;
 }
 
 combinedData = {
@@ -105,19 +85,15 @@ combinedData = {
 
   return filteredData
     .map((cis) => {
-      // Match by exact admin name at every level.
-      const hazard = hazardByAdmin.find(
-        (h) =>
-          h.iso3 === cis.iso3 &&
-          h.admin0_name === cis.admin0_name &&
-          h.admin1_name === cis.admin1_name &&
-          h.admin2_name === cis.admin2_name,
-      );
+      const hazard =
+        hazardByAdmin.get(
+          `${cis.admin0_name}|${cis.admin1_name}|${cis.admin2_name}`,
+        ) ?? {};
 
       return {
         ...cis,
         ...Object.fromEntries(
-          hazardColumns.map((col) => [col, hazard?.[col] ?? null]),
+          hazardColumns.map((col) => [col, hazard[col] ?? null]),
         ),
       };
     })
@@ -284,59 +260,17 @@ s2MapData = {
 // Load appropriate boundaries based on Section 1's admin level
 
 // Join boundaries with data
-s2GeoData = {
-  const gaulCodeField = currentAdminLevel === 0 ? 'gaul0_code' :
-                        currentAdminLevel === 1 ? 'gaul1_code' :
-                        'gaul2_code';
-  
-  // Narrow to the selection by name only — regions without data still draw, faded.
-  const filteredBoundaries =
-    currentAdminLevel === 0
-      ? currentBoundaries
-      : {
-          ...currentBoundaries,
-          features: currentBoundaries.features.filter((f) =>
-            inCurrentSelection(f.properties),
-          ),
-        };
-
-  const features = filteredBoundaries.features.map(feature => {
-    const gaulCode = feature.properties[gaulCodeField];
-    let match = s2MapData.find(d => d[gaulCodeField] === gaulCode);
-    
-    // Fallback: try matching by admin names if GAUL code fails
-    if (!match && currentAdminLevel === 2) {
-      match = s2MapData.find(d => 
-        d.admin0_name === feature.properties.admin0_name &&
-        d.admin1_name === feature.properties.admin1_name &&
-        d.admin2_name === feature.properties.admin2_name
-      );
-    } else if (!match && currentAdminLevel === 1) {
-      match = s2MapData.find(d => 
-        d.admin0_name === feature.properties.admin0_name &&
-        d.admin1_name === feature.properties.admin1_name
-      );
-    }
-    
-    // Check if this admin2 region is highlighted
-    const isHighlighted = currentAdminLevel === 2 && 
-                          selectedAdmin2.length > 0 && 
-                          selectedAdmin2.includes(feature.properties.admin2_name);
-    
-    return {
-      type: "Feature",
-      geometry: feature.geometry,
-      properties: {
-        ...feature.properties,
-        ...(match || {}),
-        isHighlighted: isHighlighted,
-        hasData: !!match
-      }
-    };
-  }); // Show all features, fade those without data
-  
-  return { type: "FeatureCollection", features };
-}
+// Boundaries for the current selection, with each unit's bivariate row spread onto
+// it. Every feature is kept so units without data still draw, faded via hasData.
+// The gaul-code-then-names fallback ladder this used to run is gone: the join key
+// from adminBoundariesForSelection already matches the drawn level on both sides.
+s2GeoData = ({
+  type: "FeatureCollection",
+  features: buildLevelFeatures(
+    (row) => ({ ...(row || {}), hasData: Boolean(row) }),
+    s2MapData,
+  ),
+})
 ```
 
 ## `{ojs} S2_HAZARDS[s2HazardType].mapTitle`
@@ -504,10 +438,7 @@ s2Insights = {
   const hazardName = s2HazardType === "drought" ? "Drought" : "Waterlogging";
   const selectedRegion = breadcrumb; // Use the breadcrumb from Section 1
   
-  // If admin2 regions are highlighted, only use those for insights
-  const insightData = selectedAdmin2.length > 0 
-    ? s2MapData.filter(d => selectedAdmin2.includes(d.admin2_name))
-    : s2MapData;
+  const insightData = onlySelectedAtLevel(s2MapData);
   
   // Insight 1: Opportunity (High × High zones)
   const highHazardHighReadiness = insightData.filter(d => d.bivariateClass === "High × High");

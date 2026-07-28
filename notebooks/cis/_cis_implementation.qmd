@@ -27,6 +27,7 @@ s3AccessDataRaw = {
   const adminWhere = sqlAdminWhere(
     { admin0: selectedAdmin0, admin1: selectedAdmin1 },
     bind,
+    { maxLevel: 1 },
   );
 
   return await db.query(
@@ -39,44 +40,25 @@ s3AccessDataRaw = {
   );
 }
 
-// Load CIS readiness at the same admin level as the current selection.
-s3CisReadiness = {
-  const bind = createSqlBindings();
-  const adminWhere = sqlAdminWhere(
-    { admin0: selectedAdmin0, admin1: selectedAdmin1 },
-    bind,
-  );
+// Access data reaches admin 1 only, so this section's view and its query both stop
+// there: drilling into districts draws the regions with the selection outlined
+// rather than emptying the map.
+s3View = adminViewFor(1)
 
-  const rows = await db.query(
-    `
-    SELECT *
-    FROM cis_data
-    WHERE ${adminWhere}
-  `,
-    bind.params,
-  );
+// filteredData already ran this exact query for section 1, so section 3 indexes it
+// rather than issuing a byte-identical second one per selection change.
+cisByAdmin1 = new Map(
+  filteredData.map((d) => [`${d.admin0_name}|${d.admin1_name}`, d]),
+)
 
-  return rows.map((row) => {
-    return {
-      admin0_name: row.admin0_name,
-      admin1_name: row.admin1_name,
-      admin2_name: row.admin2_name,
-      iso3: row.iso3,
-      gaul0_code: row.gaul0_code,
-      gaul1_code: row.gaul1_code,
-      gaul2_code: row.gaul2_code,
-      cis_readiness_index: row.cis_readiness_index,
-    };
-  });
-}
 
 section3Data = {
   return s3AccessDataRaw.map(access => {
     // Match CIS readiness at the same admin level as the access row.
-     const cis = s3CisReadiness.find(a => 
-       a.admin0_name === access.admin0_name && a.admin1_name === access.admin1_name
-     );
-     if (!cis) return null;
+    const cis = cisByAdmin1.get(
+      `${access.admin0_name}|${access.admin1_name}`,
+    );
+    if (!cis) return null;
     
     // Calculate combined access: average of available indicators
     // This provides a single "overall access" metric
@@ -291,96 +273,15 @@ s3SortedData = {
 ```{ojs}
 // Prepare geographic data for map - dynamically show admin levels based on selection
 // Use the master admin selectors (selectedAdmin0, etc.) for consistency with other sections
-s3GeoData = {
-  if (!s3ProcessedData || s3ProcessedData.length === 0) {
-    return { type: "FeatureCollection", features: [] };
-  }
-  
-  // Use master admin selections (same as Section 1 and 2)
-  const selectedCountries = selectedAdmin0 || [];
-  const selectedAdmin1s = selectedAdmin1 || [];
-  const selectedAdmin2s = selectedAdmin2 || [];
-  
-  let boundaries = null;
-  let levelKey = "admin0_name";
-  let gaul_key = "gaul0_code";
-  
-  // Determine which admin level to show based on currentAdminLevel from Section 1
-  // Level 0: No admin0 selected - show all admin0
-  // Level 1: Admin0 selected but no admin1 - show admin1 within selected countries
-  // Level 2: Admin1 selected - show admin2 within selected admin1s
-  if (currentAdminLevel === 2 && admin2Boundaries) {
-    boundaries = admin2Boundaries;
-    levelKey = "admin2_name";
-    gaul_key = "gaul2_code";
-  } else if (currentAdminLevel === 1 && admin1Boundaries) {
-    boundaries = admin1Boundaries;
-    levelKey = "admin1_name";
-    gaul_key = "gaul1_code";
-  } else if (admin0Boundaries) {
-    boundaries = admin0Boundaries;
-    levelKey = "admin0_name";
-    gaul_key = "gaul0_code";
-  }
-  
-  if (!boundaries) {
-    return { type: "FeatureCollection", features: [] };
-  }
-  
-  // Filter boundaries based on current selection
-  let filteredBoundaries = boundaries;
-  if (currentAdminLevel === 2) {
-    // Show only admin2 within selected admin1s
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => 
-        selectedCountries.includes(f.properties.admin0_name) &&
-        selectedAdmin1s.includes(f.properties.admin1_name)
-      )
-    };
-  } else if (currentAdminLevel === 1) {
-    // Show only admin1 within selected countries
-    filteredBoundaries = {
-      ...boundaries,
-      features: boundaries.features.filter(f => 
-        selectedCountries.includes(f.properties.admin0_name)
-      )
-    };
-  }
-  // Level 0: show all countries (no filtering needed)
-  
-  // Map data to boundaries
-  const features = filteredBoundaries.features.map(feature => {
-    // Find the parent admin0 for this feature (data is at country level)
-    const admin0key = feature.properties.admin0_name;
-    const admin1key = feature.properties.admin1_name;
-
-    const countryData = s3ProcessedData.find(d => d.admin0_name === admin0key && d.admin1_name === admin1key);
-    
-    if (!countryData) return null;
-    
-    // Check if this region is highlighted (for admin2 level)
-    const isHighlighted = currentAdminLevel === 2 && 
-                          selectedAdmin2s.length > 0 && 
-                          selectedAdmin2s.includes(feature.properties.admin2_name);
-    
-    return {
-      type: "Feature",
-      geometry: feature.geometry,
-      properties: {
-        ...feature.properties,
-        ...countryData,
-        displayName: feature.properties[levelKey] || feature.properties.admin0_name,
-        isHighlighted: isHighlighted
-      }
-    };
-  }).filter(f => f !== null);
-  
-  return {
-    type: "FeatureCollection",
-    features
-  };
-}
+s3GeoData = ({
+  type: "FeatureCollection",
+  // Units with no access data are dropped rather than drawn faded.
+  features: buildLevelFeatures(
+    (row) => ({ ...(row || {}), hasData: Boolean(row) }),
+    s3ProcessedData,
+    s3View,
+  ).filter((f) => f.properties.hasData),
+})
 ```
 
 ```{ojs}
@@ -432,7 +333,7 @@ function createS3AccessMap() {
               ? "Region"
               : "Country",
         value: (d) =>
-          d.properties.displayName || d.properties.admin0_name || "N/A",
+          d.properties.regionName || d.properties.admin0_name || "N/A",
       },
       access: {
         label: s3CurrentAccessLabel,
@@ -475,7 +376,7 @@ function createS3BivariateMap() {
               ? "Region"
               : "Country",
         value: (d) =>
-          d.properties.displayName || d.properties.admin0_name || "N/A",
+          d.properties.regionName || d.properties.admin0_name || "N/A",
       },
       readiness: {
         label: nbText.s3ReadinessLabel,

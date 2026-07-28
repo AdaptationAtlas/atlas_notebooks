@@ -272,62 +272,76 @@ db = await DuckDBClient.of({
 ```{ojs}
 import { getAdminBoundaries } from "/components/_atlasBoundaries.ojs";
 
+import { adminBoundariesForSelection } from "/helpers/adminBoundaries.js";
+
 // Levels 0 and 1 are small (14 KB and 48 KB over the wire) and always drawn.
 atlasBoundaries = await getAdminBoundaries([0, 1]);
 
-admin0Boundaries = atlasBoundaries.admin0;
-admin1Boundaries = atlasBoundaries.admin1;
-
-// Admin 2 is 336 KB over the wire and 6670 geometries to parse, and nothing
-// draws it until a region is selected (currentAdminLevel === 2). Load it on
-// first use and hold the promise, so the parse happens at most once per session
-// however often the reader moves in and out of district view.
+// Admin 2 is 336 KB over the wire and 6670 geometries to parse, and nothing draws
+// it until a region is selected. Load it on first use and hold the promise, so the
+// parse happens at most once per session however often the reader moves in and out
+// of district view.
 loadAdmin2Boundaries = {
   let pending = null;
   return () => (pending ??= getAdminBoundaries(2).then((b) => b.admin2));
 }
 
-admin2Boundaries = currentAdminLevel === 2 ? await loadAdmin2Boundaries() : null;
+// Only fetch the deep geometry once the selection actually asks to drill into it.
+admin2Boundaries =
+  selectedAdmin0.length && selectedAdmin1.length
+    ? await loadAdmin2Boundaries()
+    : null;
 
-// The boundary set for whichever level the current selection implies. Every map
-// in every section wants this, so it is derived once here.
-currentBoundaries =
-  currentAdminLevel === 2
-    ? admin2Boundaries
-    : currentAdminLevel === 1
-      ? admin1Boundaries
-      : admin0Boundaries;
+// The one place the drill-down rule lives: no country selected draws admin 0, a
+// country draws its regions, a region draws its districts and outlines any that
+// are selected. If a dataset stops short of admin 2, pass `maxLevel` and the
+// deeper selection outlines instead of filtering.
+// maxLevel is a property of the dataset, not the notebook, so a section whose data
+// stops short asks for its own view.
+adminViewFor = (maxLevel) =>
+  adminBoundariesForSelection({
+    boundaries: { ...atlasBoundaries, admin2: admin2Boundaries },
+    selection: {
+      admin0: selectedAdmin0,
+      admin1: selectedAdmin1,
+      admin2: selectedAdmin2,
+    },
+    maxLevel,
+  })
 
-// Whether a boundary feature falls inside the current admin selection, by name.
-// At admin 0 the whole map is in scope; deeper levels narrow to the selected
-// names, and an empty selection at a level means "all of it".
-// Sets, not the arrays: this runs per boundary feature, and admin 1 can hold 550+
-// selections, so `includes` was a linear scan inside a 4000-feature filter.
-selectedAdmin0Set = new Set(selectedAdmin0)
+adminView = adminViewFor(2)
 
-selectedAdmin1Set = new Set(selectedAdmin1)
+currentAdminLevel = adminView.level
 
-inCurrentSelection = (properties) => {
-  if (currentAdminLevel === 0) return true;
+currentBoundaries = adminView.boundaries
 
-  const inAdmin0 =
-    selectedAdmin0Set.size === 0 ||
-    selectedAdmin0Set.has(properties.admin0_name);
-  if (currentAdminLevel === 1) return inAdmin0;
+// Composite key for joining rows to features, always matching the drawn level.
+adminKey = adminView.adminKey
 
-  return (
-    inAdmin0 &&
-    (selectedAdmin1Set.size === 0 ||
-      selectedAdmin1Set.has(properties.admin1_name))
-  );
-};
+// The resolver says which field to read and which names are selected in it; the
+// test and the styling are ours. Set built once here, not per feature.
+adminHighlight = {
+  const selected = adminView.selectedAtLevel;
+  if (!selected) return null;
 
-// Every map outlines the districts the reader picked the same way.
-adminHighlight = ({
-  filter: (d) => d.properties.isHighlighted,
-  stroke: "#000",
-  strokeWidth: 2.5,
-})
+  const names = new Set(selected.names);
+  return {
+    filter: (feature) => names.has(feature.properties[selected.field]),
+    stroke: "#000",
+    strokeWidth: 2.5,
+  };
+}
+
+// Narrow rows to the units selected at the drawn level, for insight sentences that
+// should describe what the reader picked rather than the whole view. Reads the
+// level's own field, so a section capped at admin 1 narrows by region.
+onlySelectedAtLevel = (rows) => {
+  const selected = adminView.selectedAtLevel;
+  if (!selected) return rows;
+
+  const names = new Set(selected.names);
+  return rows.filter((row) => names.has(row[selected.field]));
+}
 
 // Null-safe fixed-point formatting for tables, tooltips and CSV exports.
 fmt = (value, decimals = 3) =>
