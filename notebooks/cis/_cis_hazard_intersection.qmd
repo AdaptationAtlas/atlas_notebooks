@@ -430,33 +430,45 @@ downloadCsvButton(
 //| echo: false
 
 s2Insights = {
-  const hazardName = S2_HAZARDS[s2HazardType].label;
-  const selectedRegion = breadcrumb; // Use the breadcrumb from Section 1
-  
+  const hazard = S2_HAZARDS[s2HazardType].label;
+  const area = breadcrumb;
   const insightData = onlySelectedAtLevel(s2MapData);
-  
-  // Insight 1: Opportunity (High × High zones)
-  const highHazardHighReadiness = insightData.filter(d => d.bivariateClass === "High × High");
-  const percentHighHigh = insightData.length > 0 
-    ? (highHazardHighReadiness.length / insightData.length * 100).toFixed(1)
-    : 0;
-  
-  const insight1 = `In ${selectedRegion}, **${percentHighHigh}%** of areas fall in High-Readiness & High-${hazardName} zones, indicating strong potential for CIS as an adaptation measure.`;
-  
-  // Insight 2: Gap (High hazard with Low readiness)
-  const highHazardAreas = insightData.filter(d => d.hazardClass === "High");
-  const highHazardLowReadiness = highHazardAreas.filter(d => d.readinessClass === "Low");
-  const percentGap = highHazardAreas.length > 0 
-    ? (highHazardLowReadiness.length / highHazardAreas.length * 100).toFixed(1)
-    : 0;
-  
-  const insight2 = `**${percentGap}%** of High-${hazardName} areas have Low CIS Readiness—priority gaps for station and forecast investment.`;
-  
+
+  // None of these three cases is a smaller version of another, so each gets its
+  // own sentence. Stating "0.0% of areas are High × High" and then asserting
+  // "strong potential for CIS" contradicted itself for every country without a
+  // high-readiness unit — Benin among them.
+  const highHigh = insightData.filter((d) => d.bivariateClass === "High × High");
+  const opportunity =
+    insightData.length === 0
+      ? tmpl(nbText.insights.s2NoData, { area })
+      : highHigh.length === 0
+        ? tmpl(nbText.insights.s2NoOpportunity, { area, hazard })
+        : tmpl(nbText.insights.s2Opportunity, {
+            area,
+            hazard,
+            percent: ((highHigh.length / insightData.length) * 100).toFixed(1),
+          });
+
+  // The empty case is not "0% of high-hazard areas have low readiness" — it is
+  // that there are no high-hazard areas to have a gap about. Reporting 0% read
+  // as "no gaps here", the opposite conclusion, wherever the hazard never
+  // crossed its high threshold.
+  const highHazard = insightData.filter((d) => d.hazardClass === "High");
+  const lowReadiness = highHazard.filter((d) => d.readinessClass === "Low");
+  const gap =
+    highHazard.length === 0
+      ? tmpl(nbText.insights.s2NoHighHazard, { area, hazard })
+      : tmpl(nbText.insights.s2Gap, {
+          hazard,
+          percent: ((lowReadiness.length / highHazard.length) * 100).toFixed(1),
+        });
+
   return html`
     <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;">
-      <h4 style="margin-top: 0;">Key Insights</h4>
-      <p style="margin: 10px 0;"><strong>Opportunity:</strong> ${md([insight1])}</p>
-      <p style="margin: 10px 0;"><strong>Investment Gap:</strong> ${md([insight2])}</p>
+      <h4 style="margin-top: 0;">${nbText.s2InsightsHeading}</h4>
+      <p style="margin: 10px 0;"><strong>${nbText.s2OpportunityLabel}:</strong> ${md([opportunity])}</p>
+      <p style="margin: 10px 0;"><strong>${nbText.s2GapLabel}:</strong> ${md([gap])}</p>
     </div>
   `;
 }
