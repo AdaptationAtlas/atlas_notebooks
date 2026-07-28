@@ -223,10 +223,15 @@ function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = 
   else if (access < accessCutoffs.moderate) accessClass = "Moderate";
   else accessClass = "High";
   
+  // Either axis missing means there is no cell on the 3x3 grid, so both fall to the
+  // one key the palette actually has. Composing "No data × High" produced a class
+  // with no colour.
+  const missing = accessClass === "N/A" || readinessClass === "No data";
+
   return {
     readinessClass,
     accessClass,
-    bivariateClass: accessClass === "N/A" ? "N/A" : `${readinessClass} × ${accessClass}`
+    bivariateClass: missing ? "N/A" : `${readinessClass} × ${accessClass}`,
   };
 }
 
@@ -253,7 +258,13 @@ s3ProcessedData = {
       ...d,
       accessValue,
       ...classification,
-      gap: accessValue !== null && !isNaN(accessValue) ? accessValue - d.cis_readiness_index : null
+      // Needs both terms: subtracting a null readiness coerces it to 0 and reports
+      // the access value itself as the gap.
+      gap:
+        Number.isFinite(accessValue) &&
+        Number.isFinite(d.cis_readiness_index)
+          ? accessValue - d.cis_readiness_index
+          : null,
     };
   });
 }

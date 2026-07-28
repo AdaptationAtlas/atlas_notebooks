@@ -88,6 +88,7 @@ classifyThreshold = (field, value, rowOrLevel = currentAdminLevel) => {
 
 classificationBand = (category) => {
   const label = String(category).toLowerCase();
+  if (label.includes("no data")) return "no data";
   if (label.includes("weak") || label.includes("low")) return "low";
   if (label.includes("strong") || label.includes("high")) return "high";
   return "moderate";
@@ -108,8 +109,8 @@ classificationScale = (field, colors) => ({
  *   > 0.6 = Good/reliable forecasts
  *   < 0.4 = Poor/unreliable forecasts
  *
- * The delta (difference) between short and long term indicates skill decay:
- *   Large positive delta = Rapid skill loss at longer lead times
+ * Delta is long minus short, the same direction the maps and charts use, so a
+ * negative delta is skill decaying with lead time.
  *
  * @param {number} shortTerm - Short-term (1-2 month) forecast RPSS
  * @param {number} longTerm - Long-term (11-12 month) forecast RPSS
@@ -119,7 +120,9 @@ classifyForecastSkill = (shortTerm, longTerm) => {
   if (shortTerm == null || longTerm == null)
     return { interpretation: "No data", implication: "Insufficient data" };
 
-  const delta = shortTerm - longTerm;
+  // Same sign convention as the maps and charts: long minus short, so a positive
+  // delta means skill improves with lead time.
+  const delta = longTerm - shortTerm;
 
   // Case 1: Both horizons perform well - ideal for CIS deployment
   if (shortTerm > 0.6 && longTerm > 0.6) {
@@ -129,7 +132,7 @@ classifyForecastSkill = (shortTerm, longTerm) => {
     };
   }
   // Case 2: Good short-term but poor long-term - limit to operational use
-  else if (shortTerm > 0.6 && longTerm < 0.4 && delta > 0.2) {
+  else if (shortTerm > 0.6 && longTerm < 0.4 && delta < -0.2) {
     return {
       interpretation: "Rapid loss of skill",
       implication: "Limit use to short-term planning",
@@ -404,8 +407,15 @@ s11Insight = {
   const wsClass = classificationBand(classifyThreshold("wstation_density", avgWeatherStation));
   const ccClass = classificationBand(classifyThreshold("cloud-coverage_meanannual", avgCloudCover));
   
-  const capacity = (wsClass === "high" && ccClass === "high") ? "high" :
-                   (wsClass === "low" || ccClass === "low") ? "low" : "moderate";
+  // Without the first arm an all-missing selection reported "moderate capacity".
+  const capacity =
+    wsClass === "no data" || ccClass === "no data"
+      ? "no data"
+      : wsClass === "high" && ccClass === "high"
+        ? "high"
+        : wsClass === "low" || ccClass === "low"
+          ? "low"
+          : "moderate";
   
   return tmpl(nbText.insights.stationDensity, {
     area: breadcrumb,
