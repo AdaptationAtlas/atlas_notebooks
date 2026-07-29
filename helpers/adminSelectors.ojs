@@ -25,13 +25,14 @@ import {
  * sections that render three.
  *
  * `admin0Select` / `admin1Select` / `admin2Select` are the reactive selections,
- * always arrays. In single-select mode the array holds one entry.
+ * always arrays — at most one entry in single-select mode, empty when the level
+ * is not narrowed.
  *
- * "No filter at this level" is a row whose own name is null — Sub-Saharan Africa
- * at level 0, whole-country at level 1, all-districts at level 2. Nothing
- * downstream special-cases them: helpers/adminBoundaries.js drops null names, so
- * a whole-country pick resolves to level 0 on its own. Multi-select has no such
- * rows, because selecting nothing already means the same thing there.
+ * Both modes expose the same thing: an array of real admin units, where empty
+ * means the level is not narrowed. Single-select additionally *offers* a
+ * "Sub-Saharan Africa" / "Whole country" / "All districts" row, because a single
+ * select cannot choose nothing — but picking one stores an empty array, so
+ * nothing downstream has to tell the modes apart.
  */
 
 adminTranslations = ({
@@ -143,6 +144,16 @@ dataAdmin2 = admin1Select.flatMap(
   (r) => adminLookup.admin2ByRegion.get(`${r.iso3}||${r.admin1_name}`) ?? [],
 )
 
+// True for a row that stands for "do not narrow at this level". Single-select
+// offers such rows because it cannot select nothing; they are never stored.
+adminIsWholeArea = (level, d) =>
+  d == null ||
+  (level === 0
+    ? d.iso3 == null
+    : level === 1
+      ? d.admin1_name == null
+      : d.admin2_name == null)
+
 adminKeyOf = (level, d) =>
   level === 1
     ? `${d.iso3}||${d.admin1_name ?? ""}`
@@ -155,9 +166,7 @@ adminSetView = (view, value) => {
 
 /**
  * Drop selections below `level` that its new value no longer offers — deselect a
- * country and its regions have to go with it. A row whose own name is null
- * ("whole country", "all districts") survives as long as its parent does, since
- * such a row is never in the lookup.
+ * country and its regions have to go with it.
  *
  * Called from the control's input handler rather than from a cell of its own: an
  * imported module only computes what something depends on, so a standalone prune
@@ -171,21 +180,17 @@ adminPruneBelow = (level) => {
   if (level === 0) {
     const a0 = adminViews.get(0).value;
     const a1 = adminViews.get(1).value;
-    const isoSet = new Set(a0.map((d) => d.iso3));
     const valid = new Set(
       a0.flatMap((c) =>
         (adminLookup.admin1ByIso.get(c.iso3) ?? []).map((d) => adminKeyOf(1, d)),
       ),
     );
-    const kept = a1.filter((d) =>
-      d.admin1_name == null ? isoSet.has(d.iso3) : valid.has(adminKeyOf(1, d)),
-    );
+    const kept = a1.filter((d) => valid.has(adminKeyOf(1, d)));
     if (kept.length !== a1.length) adminSetView(adminViews.get(1), kept);
   }
 
   const a1 = adminViews.get(1).value;
   const a2 = adminViews.get(2).value;
-  const parents = new Set(a1.map((d) => adminKeyOf(1, d)));
   const valid = new Set(
     a1.flatMap((r) =>
       (adminLookup.admin2ByRegion.get(`${r.iso3}||${r.admin1_name}`) ?? []).map(
@@ -193,11 +198,7 @@ adminPruneBelow = (level) => {
       ),
     ),
   );
-  const kept = a2.filter((d) =>
-    d.admin2_name == null
-      ? parents.has(adminKeyOf(1, d))
-      : valid.has(adminKeyOf(2, d)),
-  );
+  const kept = a2.filter((d) => valid.has(adminKeyOf(2, d)));
   if (kept.length !== a2.length) adminSetView(adminViews.get(2), kept);
 }
 
@@ -311,7 +312,12 @@ adminControl = (level, config) => {
   } else {
     input.addEventListener("input", (event) => {
       event.stopPropagation();
-      adminSetView(view, input.value == null ? [] : [input.value]);
+      // A null-name row ("Sub-Saharan Africa", "Whole country", "All districts")
+      // means this level is not narrowed, which is exactly what an empty
+      // selection means in multi-select — so it is stored as one. The row exists
+      // only because a single select has no way to choose nothing, and keeping it
+      // in the state would give the two modes different shapes for one meaning.
+      adminSetView(view, adminIsWholeArea(level, input.value) ? [] : [input.value]);
     });
   }
 
