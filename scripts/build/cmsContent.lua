@@ -89,33 +89,6 @@ local function metaStrings(values)
 	return pandoc.MetaList(out)
 end
 
-local function contributorNames(entries, registry)
-	local names = {}
-	for _, entry in ipairs(entries or {}) do
-		local person = nil
-		if type(entry) == "table" and entry.type == "common" then
-			person = registry[entry.id]
-		elseif type(entry) == "table" and entry.type == "custom" then
-			person = entry
-		end
-		if not person or not person.name then
-			error("cmsContent: notebook config contains an unknown contributor")
-		end
-		table.insert(names, person.name)
-	end
-	return names
-end
-
-local function contributorMap(registry)
-	local contributors = {}
-	for _, person in ipairs(registry.contributors or {}) do
-		if person.id then
-			contributors[person.id] = person
-		end
-	end
-	return contributors
-end
-
 local function applyNotebookConfig(meta)
 	local configPath = meta["nb-config"] and pandoc.utils.stringify(meta["nb-config"])
 	if not configPath or configPath == "" then
@@ -140,16 +113,11 @@ local function applyNotebookConfig(meta)
 		error("cmsContent: notebook config is missing title, textDir, or blocks: " .. path)
 	end
 
-	local registryRaw = readFile(projectRoot() .. "/data/shared/contributors.json")
-	local registry = contributorMap(registryRaw and pandoc.json.decode(registryRaw) or {})
-	local authors = contributorNames(config.contributors and config.contributors.authors, registry)
-
 	textDir = config.textDir
 	runtimeConfigRaw = raw
 	meta.pagetitle = pandoc.MetaString(config.title.en)
 	meta.description = pandoc.MetaString(config.description or "")
 	meta.keywords = metaStrings(config.keywords)
-	meta.author = metaStrings(authors)
 	return meta
 end
 
