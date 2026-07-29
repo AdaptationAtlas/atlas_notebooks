@@ -1,5 +1,5 @@
 ---
-title: "Indice de préparation climatique"
+title: Indice de préparation climatique
 ---
 
 Afin de fournir une mesure composite de la capacité en données et en prévisions des services d’information climatique (CIS), nous avons défini l’Indice de capacité des données et des prévisions des CIS comme la moyenne géométrique des indices suivants : indice de densité des stations météorologiques, concordance de la variabilité des précipitations satellitaires, et performance des prévisions à court et à long terme. Des valeurs élevées indiquent des zones où les produits CIS sont plus susceptibles d’être soutenus par de meilleures conditions de données et de performance des prévisions, c’est-à-dire des conditions techniques favorables au déploiement des CIS. À l’inverse, des valeurs faibles suggèrent des contraintes techniques potentielles, telles que des réseaux de stations clairsemés, une faible concordance entre les produits satellitaires sur la variabilité des précipitations, ou une faible performance des prévisions à court ou à long horizon.
