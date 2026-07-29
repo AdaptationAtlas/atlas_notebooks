@@ -31,10 +31,11 @@ const atlasMultiSelectTranslations = {
  * @param {boolean} [config.enableSelectAll=false] Show valid bulk actions.
  * "Select All" is omitted when `maxSelections` is finite.
  * @param {boolean} [config.searchable=false]
- * @param {"change"|"close"} [config.commit="close"]
- * without changing the selected values.
- * @param {boolean} [config.emitOnChange] Deprecated alias for
- * `commit: "change"`.
+ *
+ * The selection commits once, when the dropdown closes, and only if it actually
+ * changed while open. This is not configurable: an Atlas selector drives queries
+ * and map redraws, so committing per checkbox click ran the whole chain on every
+ * click of a multi-unit selection.
  * @param {?number} [config.compactLabelThreshold=null]
  * @param {string} [config.language="en"]
  * @param {object} [config.labels]
@@ -49,8 +50,6 @@ export function enhancedMultiSelect(
     requireAtLeastOne = true,
     enableSelectAll = false,
     searchable = false,
-    commit,
-    emitOnChange,
     compactLabelThreshold = null,
     language = "en",
     labels = {},
@@ -65,11 +64,6 @@ export function enhancedMultiSelect(
     throw new TypeError(
       "enhancedMultiSelect requires a multiple Inputs.select()",
     );
-  }
-
-  const commitMode = commit ?? (emitOnChange ? "change" : "close");
-  if (!["change", "close"].includes(commitMode)) {
-    throw new TypeError('commit must be either "change" or "close"');
   }
 
   const selectionLimit = Number.isFinite(maxSelections)
@@ -355,22 +349,16 @@ export function enhancedMultiSelect(
   const dispatchInput = () => {
     select.dispatchEvent(new Event("input", { bubbles: true }));
   };
-  const selectionChanged = (previousSignature) => {
+  // Refresh only. The commit happens in closeList, which compares against the
+  // signature taken when the list opened.
+  const selectionChanged = () => {
     updateUI();
-    if (
-      selectionSignature() !== previousSignature &&
-      commitMode === "change"
-    ) {
-      selectionAtOpen = selectionSignature();
-      dispatchInput();
-    }
   };
 
   const toggleOption = (entry) => {
     const { option, row } = entry;
     if (option.disabled) return;
 
-    const previousSignature = selectionSignature();
     const selectedCount = selectedOptions().length;
     if (
       !option.selected &&
@@ -393,7 +381,7 @@ export function enhancedMultiSelect(
     }
 
     option.selected = !option.selected;
-    selectionChanged(previousSignature);
+    selectionChanged();
   };
 
   const moveOptionFocus = (current, direction) => {
@@ -504,7 +492,7 @@ export function enhancedMultiSelect(
 
     const changed = selectionSignature() !== selectionAtOpen;
     selectionAtOpen = selectionSignature();
-    if (changed && commitMode === "close") dispatchInput();
+    if (changed) dispatchInput();
     if (focusButton && btn.isConnected) {
       btn.focus({ preventScroll: true });
     }
@@ -566,11 +554,10 @@ export function enhancedMultiSelect(
     if (showSelectAll) {
       const selectAllButton = actionButton(text.selectAll);
       listen(selectAllButton, "click", () => {
-        const previousSignature = selectionSignature();
         Array.from(select.options).forEach((option) => {
           if (!option.disabled) option.selected = true;
         });
-        selectionChanged(previousSignature);
+        selectionChanged();
       });
       actionContainer.appendChild(selectAllButton);
     }
@@ -578,11 +565,10 @@ export function enhancedMultiSelect(
     if (showDeselectAll) {
       const deselectAllButton = actionButton(text.deselectAll);
       listen(deselectAllButton, "click", () => {
-        const previousSignature = selectionSignature();
         Array.from(select.options).forEach((option) => {
           if (!option.disabled) option.selected = false;
         });
-        selectionChanged(previousSignature);
+        selectionChanged();
       });
       actionContainer.appendChild(deselectAllButton);
     }
@@ -700,7 +686,6 @@ export function enhancedMultiSelect(
     configurable: true,
     value: Object.freeze({
       close: (options) => closeList(options),
-      commit: commitMode,
       destroy,
       open: (options) => openList(options),
       refresh: renderOptions,
