@@ -1,3 +1,5 @@
+import { readNotebookConfig } from "./notebook.js";
+
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
 function stackedBarsIcon() {
@@ -96,3 +98,27 @@ export function atlasHero({ title, image, group = "", alt = "" } = {}) {
 export function heroImage(title, bgImage, group = "") {
   return atlasHero({ title, image: bgImage, group });
 }
+
+class AtlasNotebookHero extends HTMLElement {
+  connectedCallback() {
+    const config = readNotebookConfig();
+    const render = (lang) =>
+      this.replaceChildren(
+        atlasHero({
+          title: config.title?.[lang] ?? config.title?.en ?? config.id,
+          image: config.image,
+          alt: config.imageAlt?.[lang] ?? config.imageAlt?.en ?? "",
+        }),
+      );
+
+    this._onLanguageChange = (event) => render(event.detail);
+    window.addEventListener("atlas:lang", this._onLanguageChange);
+    render(window.atlasLang ?? document.documentElement.lang);
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("atlas:lang", this._onLanguageChange);
+  }
+}
+
+customElements.define("atlas-notebook-hero", AtlasNotebookHero);

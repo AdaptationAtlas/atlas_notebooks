@@ -24,6 +24,15 @@ function parseList(value) {
     .filter(Boolean);
 }
 
+function headingFor(element, lang = document.documentElement.lang) {
+  return (
+    element.getAttribute(lang === "fr" ? "heading-fr" : "heading-en") ||
+    element.getAttribute("heading") ||
+    element.getAttribute("title") ||
+    "Contents"
+  );
+}
+
 function readConfig(element) {
   const headingLevels = parseList(
     element.getAttribute("heading-levels") || "1",
@@ -35,10 +44,7 @@ function readConfig(element) {
     .join(", ");
 
   return {
-    heading:
-      element.getAttribute("heading") ||
-      element.getAttribute("title") ||
-      "Contents",
+    heading: headingFor(element),
     selector: element.getAttribute("selector")?.trim() || fallbackSelector,
     fallbackSelector,
     ignoredIds: new Set(parseList(element.getAttribute("ids-to-ignore"))),
@@ -213,14 +219,14 @@ class AtlasToc extends HTMLElement {
     this._panel.tabIndex = -1;
     this._panel.setAttribute("aria-labelledby", headingId);
 
-    const heading = document.createElement("span");
-    heading.className = "atlas-toc-heading";
-    heading.id = headingId;
-    heading.textContent = this._config.heading;
+    this._heading = document.createElement("span");
+    this._heading.className = "atlas-toc-heading";
+    this._heading.id = headingId;
+    this._heading.textContent = this._config.heading;
 
     this._linksContainer = document.createElement("ol");
     this._linksContainer.className = "atlas-toc-links";
-    this._panel.append(heading, this._linksContainer);
+    this._panel.append(this._heading, this._linksContainer);
 
     this._toggleButton = document.createElement("button");
     this._toggleButton.type = "button";
@@ -251,6 +257,11 @@ class AtlasToc extends HTMLElement {
       passive: true,
       signal,
     });
+    window.addEventListener(
+      "atlas:lang",
+      (event) => this._setHeading(event.detail),
+      { signal },
+    );
     document.addEventListener("keydown", this._onOverlayKeydown, {
       signal,
     });
@@ -259,6 +270,12 @@ class AtlasToc extends HTMLElement {
       this._onDocumentPointerDown,
       { signal },
     );
+  }
+
+  _setHeading(lang) {
+    const heading = headingFor(this, lang);
+    this._heading.textContent = heading;
+    this._toggleButton.textContent = heading;
   }
 
   _observeContent() {

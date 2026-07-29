@@ -94,7 +94,6 @@ Text is CMS-managed (Sveltia at `/admin/`, configured in `admin/config.yml`):
 
 ```javascript
 import { atlasHero } from "/helpers/hero.js";
-import { atlasTOC } from "/helpers/toc.ojs";
 import { makeBivariateLegend, makeChoropleth, mergeDataToBoundaries } from "/helpers/atlasMap.ojs";
 import { createSqlBindings, sqlAdminWhere } from "/helpers/sql.js";
 import { lang as Lang } from "/helpers/lang.js"; // via /components/_lang.qmd
