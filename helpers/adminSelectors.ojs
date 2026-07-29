@@ -88,21 +88,23 @@ ssaObj = ({
   translation: adminTranslations.ssa,
 })
 
-// One query for the whole lookup, indexed once. The pre-consolidation notebooks
-// re-queried per interaction and interpolated names into SQL, which broke on
-// Côte d'Ivoire's apostrophe.
+// One row per admin-2 unit, flat, as
+// data/shared/gaul24_africa_lookup.parquet exports it — the parquet stays the
+// source of truth and this is the four columns of it a selector needs.
+//
+// JSON rather than the parquet itself: every row is read and indexed here, with
+// no filtering at read time, so a parquet reader would buy nothing. DuckDB-wasm
+// booted a multi-megabyte worker for it, and hyparquet cannot read the file at
+// all — it is ZSTD, and the compressors bundle that adds ZSTD costs more than
+// this whole file does.
+//
+// Read once and indexed once, rather than re-queried per interaction as the
+// pre-consolidation notebooks did — which also meant interpolating admin names
+// into SQL, and broke on Côte d'Ivoire's apostrophe.
 adminLookup = {
-  const db = await DuckDBClient.of({
-    admin_lookup: await FileAttachment(
-      "/data/shared/gaul24_africa_lookup.parquet",
-    ),
-  });
-
-  const rows = await db.query(`
-    SELECT DISTINCT admin0_name, admin1_name, admin2_name, iso3
-    FROM admin_lookup
-    ORDER BY iso3, admin1_name, admin2_name
-  `);
+  const rows = await FileAttachment(
+    "/data/shared/gaul24_africa_lookup.json",
+  ).json();
 
   const admin1ByIso = new Map();
   const admin2ByRegion = new Map();
@@ -129,11 +131,26 @@ adminLookup = {
     });
   }
 
+  // The file is already in this order, but sorting here keeps option order a
+  // property of the code rather than of the export, and localeCompare on "base"
+  // sensitivity puts accented names where a reader looks for them instead of
+  // after Z, which a byte-order sort does not.
+  const byName = (field) => (a, b) =>
+    a[field].localeCompare(b[field], undefined, { sensitivity: "base" });
+
   return {
     admin1ByIso: new Map(
-      Array.from(admin1ByIso, ([iso3, m]) => [iso3, [...m.values()]]),
+      Array.from(admin1ByIso, ([iso3, regions]) => [
+        iso3,
+        [...regions.values()].sort(byName("admin1_name")),
+      ]),
     ),
-    admin2ByRegion,
+    admin2ByRegion: new Map(
+      Array.from(admin2ByRegion, ([key, districts]) => [
+        key,
+        districts.sort(byName("admin2_name")),
+      ]),
+    ),
   };
 }
 
