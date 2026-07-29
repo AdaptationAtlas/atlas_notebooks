@@ -14,8 +14,8 @@ Repository automation scripts are organized by purpose.
   - Purpose: `{{< prose <id> >}}` sugar for the cmsContent.lua prose markers.
   - Run: configured in `_quarto.yml` shortcodes.
 - `scripts/build/checkTranslations.ts`
-  - Purpose: verify per-locale notebook text under `data/*/text/` against the content contract.
-  - Run: `deno run --allow-read scripts/build/checkTranslations.ts`
+  - Purpose: verify every notebook's locale files and prose blocks match.
+  - Run: `quarto run scripts/build/checkTranslations.ts`
 
 ## Assets
 

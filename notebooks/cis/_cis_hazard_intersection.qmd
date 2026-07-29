@@ -1,0 +1,423 @@
+<!-- Section 2: CIS readiness × NEX-GDDP-CMIP6 climate hazards. -->
+
+{{< prose hazard-intersection >}}
+
+```{ojs}
+adminControls(0, 1, 2)
+```
+
+```{ojs}
+//| echo: false
+
+// Collapse published hazard classes to three bivariate bands.
+// Use NDD for drought because monthly NDWS saturates across most African units.
+S2_HAZARDS = new Object({
+  drought: {
+    code: "NDD-mean",
+    column: "dryDays",
+    breaks: [15, 20],
+    label: nbText.s2HazardDrought,
+    mapTitle: nbText.s2MapTitleDrought,
+    severity: nbText.s2HazardDroughtSeverity,
+  },
+  waterlogging: {
+    code: "NDWL0-mean",
+    column: "waterloggingDays",
+    breaks: [2, 5],
+    label: nbText.s2HazardWaterlogging,
+    mapTitle: nbText.s2MapTitleWaterlogging,
+    severity: nbText.s2HazardWaterloggingSeverity,
+  },
+})
+
+// Fetch the small hazard slice once; filteredData already scopes the later join.
+hazardByAdmin = {
+  const bind = createSqlBindings();
+  const rows = await db.query(
+    `
+    SELECT
+      admin0_name,
+      admin1_name,
+      admin2_name,
+      hazard,
+      value
+    FROM hazard_data
+    WHERE iso3 IN (${bind.list([...iso3Set])})
+      AND hazard IN (${bind.list(Object.values(S2_HAZARDS).map((h) => h.code))})
+      AND stat = ${bind.value("mean")}
+  `,
+    bind.params,
+  );
+
+  // Pivot mean-only hazard rows into a direct admin-unit lookup.
+  const byAdmin = new Map();
+  for (const row of rows) {
+    const key = `${row.admin0_name}|${row.admin1_name}|${row.admin2_name}`;
+    const unit = byAdmin.get(key) ?? {};
+    const hazard = Object.values(S2_HAZARDS).find((h) => h.code === row.hazard);
+    if (hazard) unit[hazard.column] = parseFloat(row.value);
+    byAdmin.set(key, unit);
+  }
+  return byAdmin;
+}
+
+combinedData = {
+  const hazardColumns = Object.values(S2_HAZARDS).map((h) => h.column);
+
+  return filteredData
+    .map((cis) => {
+      const hazard =
+        hazardByAdmin.get(
+          `${cis.admin0_name}|${cis.admin1_name}|${cis.admin2_name}`,
+        ) ?? {};
+
+      return {
+        ...cis,
+        ...Object.fromEntries(
+          hazardColumns.map((col) => [col, hazard[col] ?? null]),
+        ),
+      };
+    })
+    .filter((d) => hazardColumns.some((col) => d[col] !== null));
+}
+
+// Classify readiness × hazard on the 3×3 palette; missing hazards remain no-data.
+
+function bivariateClassify(
+  readiness,
+  hazardValue,
+  hazardKey,
+  readinessLevel = currentAdminLevel,
+) {
+  const readinessClass = classifyThreshold(
+    "cis_readiness_index",
+    readiness,
+    readinessLevel,
+  );
+
+  // Comparisons against NaN are all false, so missing values have to be caught
+  // before the ladder — otherwise they fall through to the most severe class.
+  const numeric = Number(hazardValue);
+  const [moderate, severe] = S2_HAZARDS[hazardKey].breaks;
+  const hazardClass =
+    hazardValue == null || Number.isNaN(numeric)
+      ? "No data"
+      : numeric < moderate
+        ? "Low"
+        : numeric < severe
+          ? "Moderate"
+          : "High";
+
+  return {
+    readinessClass,
+    hazardClass,
+    bivariateClass:
+      hazardClass === "No data"
+        ? "No data"
+        : `${readinessClass} × ${hazardClass}`,
+  };
+}
+
+// Colour only. What each cell means, and how the cells rank, is policy: see
+// bivariatePriority in data/cis/thresholds.json and the s2Priority* strings.
+bivariateColors = {
+  return {
+    "Low × Low": "#e8e8e8",
+    "Low × Moderate": "#b8d6be",
+    "Low × High": "#6c9a8b",
+    "Moderate × Low": "#c8b2d6",
+    "Moderate × Moderate": "#9c9eba",
+    "Moderate × High": "#627a8e",
+    "High × Low": "#b8a0c2",
+    "High × Moderate": "#8b7fa8",
+    "High × High": "#5a5f8f",
+    // Distinct from "Low × Low": a unit with no hazard value must not read as a
+    // low-hazard one. Matches the missing-data grey section 3 uses.
+    "No data": "#cccccc"
+  };
+}
+```
+
+```{ojs}
+//| echo: false
+
+viewof s2HazardType = Inputs.radio(
+  ["drought", "waterlogging"],
+  {
+    label: nbText.s2HazardSelector,
+    value: "drought",
+    format: (d) => S2_HAZARDS[d].label
+  }
+);
+
+viewof s2ViewToggle = Inputs.radio(
+  ["map", "table"],
+  {
+    label: nbText.s2ViewToggle,
+    value: "map",
+    format: d => d === "map" ? nbText.s2ViewMap : nbText.s2ViewTable
+  }
+);
+```
+
+```{ojs}
+//| echo: false
+
+s2ProcessedData = {
+  const hazardColumn = S2_HAZARDS[s2HazardType].column;
+
+  return combinedData
+    .filter(d => d.cis_readiness_index != null && d[hazardColumn] !== null)
+    .map(d => {
+    const classified = bivariateClassify(
+      d.cis_readiness_index,
+      d[hazardColumn],
+      s2HazardType,
+      d,
+    );
+    
+    return {
+      ...d,
+      hazardValue: d[hazardColumn],
+      ...classified
+    };
+  });
+}
+
+s2MapData = {
+  const level = currentAdminLevel; //TODO: This filtering has to go / be re-used across notebook
+  
+  if (level === 0) {
+    const grouped = d3.group(s2ProcessedData, d => d.gaul0_code);
+    return Array.from(grouped.values()).map(group => {
+      const first = group[0];
+      const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
+      const avgHazard = d3.mean(group, d => d.hazardValue);
+      const classified = bivariateClassify(avgReadiness, avgHazard, s2HazardType, 0);
+      
+      return {
+        admin0_name: first.admin0_name,
+        iso3: first.iso3,
+        gaul0_code: first.gaul0_code,
+        cis_readiness_index: avgReadiness,
+        hazardValue: avgHazard,
+        ...classified
+      };
+    });
+  } else if (level === 1) {
+    const grouped = d3.group(s2ProcessedData, d => d.gaul1_code);
+    return Array.from(grouped.values()).map(group => {
+      const first = group[0];
+      const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
+      const avgHazard = d3.mean(group, d => d.hazardValue);
+      const classified = bivariateClassify(avgReadiness, avgHazard, s2HazardType, 1);
+      
+      return {
+        admin0_name: first.admin0_name,
+        admin1_name: first.admin1_name,
+        iso3: first.iso3,
+        gaul0_code: first.gaul0_code,
+        gaul1_code: first.gaul1_code,
+        cis_readiness_index: avgReadiness,
+        hazardValue: avgHazard,
+        ...classified
+      };
+    });
+  } else {
+    return s2ProcessedData;
+  }
+}
+
+// Join at the resolved admin level and retain unmatched no-data features.
+s2GeoData = ({
+  type: "FeatureCollection",
+  features: buildLevelFeatures(
+    (row) => ({ ...(row || {}), hasData: Boolean(row) }),
+    s2MapData,
+  ),
+})
+```
+
+## `{ojs} S2_HAZARDS[s2HazardType].mapTitle`
+
+```{ojs}
+//| echo: false
+
+s2BivariateMap = {
+  if (s2ViewToggle !== "map") return null;
+  const hazardName = S2_HAZARDS[s2HazardType].label;
+  
+  return makeChoropleth({
+    features: s2GeoData,
+    width: 775,
+    height: 610,
+    projection: "mercator",
+    fill: d => d.properties.hasData ? d.properties.bivariateClass : "No data",
+    color: {
+      type: "categorical",
+      legend: false,
+      // Insertion order of the palette is the class order the legend expects.
+      domain: Object.keys(bivariateColors),
+      range: Object.values(bivariateColors),
+      label: "Bivariate Class"
+    },
+    channels: {
+      region: {
+        label: "Region",
+        value: (d) => currentAdminLevel === 0
+          ? d.properties.admin0_name
+          : currentAdminLevel === 1
+          ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
+          : `${d.properties.admin2_name}, ${d.properties.admin1_name}`
+      },
+      readiness: {
+        label: "Readiness (0-1)",
+        value: (d) => fmt(d.properties.cis_readiness_index, 2)
+      },
+      hazard: {
+        label: hazardName,
+        value: (d) => fmt(d.properties.hazardValue, 1)
+      },
+      bivariateClass: {
+        label: "Bivariate class",
+        value: (d) => d.properties.bivariateClass || "N/A"
+      }
+    },
+    tooltip: {
+      region: true,
+      readiness: true,
+      hazard: true,
+      bivariateClass: true
+    },
+    baseMarkOptions: {
+      fillOpacity: d => d.properties.hasData ? 1 : 0.3
+    },
+    adminHighlight
+  });
+}
+
+{
+  if (s2ViewToggle === "map") {
+    return bivariateMapWithLegend(s2BivariateMap, {
+      colors: bivariateColors,
+      yLabel: S2_HAZARDS[s2HazardType].severity,
+    });
+  } else {
+    const hazardName = S2_HAZARDS[s2HazardType].label;
+    
+    const tableData = s2MapData.map(d => {
+      const adminName = adminDisplayName(d);
+      
+      // Policy rankings come from thresholds.json; wording stays localized.
+      // High readiness × high hazard ranks action potential, not warning severity.
+      const priority = bivariatePriority[d.bivariateClass] ?? {
+        rank: 0,
+        textKey: "s2PriorityLow",
+      };
+      
+      return {
+        adminName: adminName,
+        readinessRaw: d.cis_readiness_index,
+        readinessClass: d.readinessClass,
+        hazardRaw: d.hazardValue,
+        hazardClass: d.hazardClass,
+        bivariateClass: d.bivariateClass,
+        priorityRank: priority.rank,
+        priorityLevel: nbText[priority.textKey],
+      };
+    });
+    
+    return filterableDataTable(tableData, {
+      columns: [
+        "adminName",
+        "readinessRaw",
+        "readinessClass",
+        "hazardRaw",
+        "hazardClass",
+        "priorityLevel"
+      ],
+      header: {
+        adminName: "Admin Name",
+        readinessRaw: "CIS Readiness",
+        readinessClass: "Readiness Class",
+        hazardRaw: hazardName,
+        hazardClass: "Hazard Class",
+        priorityLevel: nbText.s2PriorityColumn
+      },
+      format: {
+        readinessRaw: d => d.toFixed(2),
+        hazardRaw: d => d.toFixed(1)
+      },
+      sort: "priorityRank",
+      reverse: true,
+    });
+  }
+}
+```
+
+```{ojs}
+//| echo: false
+
+// Download button for Section 2
+downloadCsvButton(
+  s2MapData.map((d) => {
+    const adminName = adminDisplayName(d);
+
+    const hazardName = S2_HAZARDS[s2HazardType].label;
+
+    return {
+      "Admin Level":
+        currentAdminLevel === 0 ? "0" : currentAdminLevel === 1 ? "1" : "2",
+      "Admin Name": adminName,
+      "CIS Readiness Raw": fmt(d.cis_readiness_index, 3),
+      "CIS Readiness Class": d.readinessClass,
+      [hazardName + " Raw"]: fmt(d.hazardValue, 1),
+      [hazardName + " Class"]: d.hazardClass,
+      "Bivariate Category": d.bivariateClass,
+    };
+  }),
+  { filename: `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`, label: nbText.downloadLabel },
+);
+```
+
+```{ojs}
+//| echo: false
+
+s2Insights = {
+  const hazard = S2_HAZARDS[s2HazardType].label;
+  const area = breadcrumb;
+  const insightData = onlySelectedAtLevel(s2MapData);
+
+  // Keep empty, zero-potential, and positive-potential messages distinct.
+  const highHigh = insightData.filter((d) => d.bivariateClass === "High × High");
+  const opportunity =
+    insightData.length === 0
+      ? tmpl(nbText.insights.s2NoData, { area })
+      : highHigh.length === 0
+        ? tmpl(nbText.insights.s2NoOpportunity, { area, hazard })
+        : tmpl(nbText.insights.s2Opportunity, {
+            area,
+            hazard,
+            percent: ((highHigh.length / insightData.length) * 100).toFixed(1),
+          });
+
+  // No high-hazard areas is different from a 0% readiness gap.
+  const highHazard = insightData.filter((d) => d.hazardClass === "High");
+  const lowReadiness = highHazard.filter((d) => d.readinessClass === "Low");
+  const gap =
+    highHazard.length === 0
+      ? tmpl(nbText.insights.s2NoHighHazard, { area, hazard })
+      : tmpl(nbText.insights.s2Gap, {
+          hazard,
+          percent: ((lowReadiness.length / highHazard.length) * 100).toFixed(1),
+        });
+
+  return html`
+    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;">
+      <h4 style="margin-top: 0;">${nbText.s2InsightsHeading}</h4>
+      <p style="margin: 10px 0;"><strong>${nbText.s2OpportunityLabel}:</strong> ${md([opportunity])}</p>
+      <p style="margin: 10px 0;"><strong>${nbText.s2GapLabel}:</strong> ${md([gap])}</p>
+    </div>
+  `;
+}
+```

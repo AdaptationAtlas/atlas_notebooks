@@ -153,10 +153,7 @@ downloadCsvButton(afsEmployment, {
 {{< prose women-dominate level=2 >}}
 
 ```{ojs}
-// Heatmap marks with marginal averages: the cell grid, plus an "Average" row
-// (mean down each column), an "Average" column (mean across each row), and a
-// grand-mean corner — with the mean values labelled in bold. `x`/`y`/`v` map a
-// row to its column label, row label, and value; `avg` is the "Average" tick.
+// Add row, column, and grand means around a heatmap and label them in bold.
 heatmapMeanMarks = (rows, { x, y, v, avg, textThreshold = 50 }) => {
   const cells = rows.map((d) => ({ x: x(d), y: y(d), v: v(d) }));
   const mean = (subset) => (subset.length ? Math.round(d3.mean(subset, (c) => c.v) * 10) / 10 : null);
@@ -346,9 +343,7 @@ downloadCsvButton(hotspotData, {
 {{< prose country-deep-dive level=2 >}}
 
 ```{ojs}
-// Custom country select: unlike the shared admin selector (SSA-only), this
-// offers every country the FAOSTAT data covers, incl. North Africa. Names
-// come from the shared translations file (data/shared/atlas_countries.json).
+// Offer all FAOSTAT countries, including North Africa, with shared translations.
 viewof capCountry = Inputs.select(
   [...capCountryNames.keys()].sort((a, b) =>
     capCountryNames.get(a).localeCompare(capCountryNames.get(b))
@@ -599,9 +594,7 @@ downloadCsvButton(genderSolutions, {
 ## Data import and cleaning
 
 ```{ojs}
-// IFPRI global gender-climate risk ranking, filtered to the Atlas Africa
-// boundaries (41 of 87 countries). Standardized indicator columns from the
-// raw CSV are dropped; the composite indices are kept for the download.
+// IFPRI global ranking filtered to 41 Atlas countries; retain composite indices.
 hotspotData = FileAttachment("/data/genderExposure/ifpriGenderHotspots_africa.json").json()
 
 africaA0 = {
@@ -616,9 +609,7 @@ hotspotFeatures = mergeDataToBoundaries({
   dataKey: "iso3",
 })
 
-// Localized country names, keyed by UN M49 numeric code (`iso3n`, present on
-// both the boundaries and the FAOSTAT rows). Prefers the shared translations
-// file, falls back to the boundary names.
+// Key localized country names by UN M49, falling back to boundary names.
 countryNamesByN = {
   const atlas = await FileAttachment("/data/shared/atlas_countries.json").json();
   const byIso3 = new Map(atlas.map((r) => [r.iso3c, r.translation]));
@@ -641,9 +632,7 @@ hotspotIndicators = nbText.GlobalHotspots.indicators
 ```
 
 ```{ojs}
-// hyparquet (pinned): 16KB pure-JS parquet reader, no DuckDB-wasm. Snappy is
-// built in — add hyparquet-compressors only if files ever use another codec.
-// Files are small (~40KB), so each is read fully once; filtering is plain JS.
+// Use pinned hyparquet for these small Snappy files; no DuckDB worker is needed.
 hypq = import("https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/+esm")
 
 // WBGT heat stress + women-in-agriculture tables extracted to GAUL24 admin0/1
@@ -663,17 +652,13 @@ africaA1 = {
   return topojson.feature(topo, topo.objects.atlas_gaul24_a1_africa);
 }
 
-// Agrifood-systems employment by sex per country, latest available year.
-// FAOSTAT Gender in Agrifood Systems domain (ILO modelled estimates),
-// extracted by notebookv2/scripts/extract_faostat_afsEmployment.sql.
+// Latest FAOSTAT/ILO agrifood employment by sex and country.
 afsEmployment = {
   const buf = await FileAttachment("/data/genderExposure/afsEmployment_faostat.parquet").arrayBuffer();
   return hypq.parquetQuery({ file: buf });
 }
 
-// Sex-disaggregated adaptive-capacity indicators (all % of people, higher =
-// more able to adapt), latest year per country and indicator. FAOSTAT SXS
-// domain, extracted by notebookv2/scripts/extract_faostat_adaptiveCapacity.sql.
+// Latest sex-disaggregated FAOSTAT capacity indicators; higher percentages are better.
 adaptiveCapacity = {
   const buf = await FileAttachment("/data/genderExposure/adaptiveCapacity_faostat.parquet").arrayBuffer();
   return hypq.parquetQuery({ file: buf });
@@ -738,9 +723,7 @@ biVarFeatures = mergeDataToBoundaries({
   dataKey: "gaul1_code",
 })
 
-// Fixed class breaks, identical for every WBGT threshold, timeframe, and
-// scenario so colors compare directly across selections: heat = 30/90 days
-// per year (about a month / a quarter of the year), women = 20/50%.
+// Fixed breaks keep colors comparable: heat 30/90 days, women 20/50%.
 heatClass = d3.scaleThreshold([30, 90], d3.range(3))
 
 womenClass = d3.scaleThreshold([20, 50], d3.range(3))
@@ -774,9 +757,7 @@ biVarColors = {
 {{< include /components/_lang.qmd >}}
 
 ```{ojs}
-// Per-locale notebook text: same key tree per language, missing keys fall back to English.
-// Both locales are fetched ONCE here (no `language` dependency) so toggling the
-// language never hits the network — nbText is a pure lookup.
+// Load both locale trees once; missing French values fall back to English.
 nbTextAll = {
   const [en, fr] = await Promise.all([
     FileAttachment("/data/genderExposure/text/en.json").json(),
@@ -789,10 +770,8 @@ nbText = nbTextAll[language.key] ?? nbTextAll.en
 
 nbTitle = nbText.meta.title
 
-// Narrative prose: one file per block (data/genderExposure/text/<id>.<locale>.md),
-// `title:` front matter + markdown body. The block id is the filename — the CMS
-// (admin/config.yml) edits these; scripts/build/cmsContent.lua bakes English in at render.
-// FileAttachment paths must be literal, hence the explicit map.
+// Map CMS prose blocks explicitly because FileAttachment paths must be literals.
+// English is embedded at build time; localized blocks support runtime switching.
 proseFiles = new Object({
   "overview": { en: FileAttachment("/data/genderExposure/text/overview.en.md"), fr: FileAttachment("/data/genderExposure/text/overview.fr.md") },
   "how-to-use": { en: FileAttachment("/data/genderExposure/text/how-to-use.en.md"), fr: FileAttachment("/data/genderExposure/text/how-to-use.fr.md") },

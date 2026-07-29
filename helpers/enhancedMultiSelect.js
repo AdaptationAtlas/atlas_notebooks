@@ -17,32 +17,7 @@ const atlasMultiSelectTranslations = {
   },
 };
 
-/**
- * Enhance an existing `Inputs.select(..., {multiple: true})`.
- *
- * Use `atlasMultiSelect()` for normal construction. This lower-level helper is
- * retained for advanced cases that need to create or bind the native input
- * before enhancement.
- *
- * @param {HTMLElement|HTMLFormElement} viewofSelect
- * @param {object} [config]
- * @param {?number} [config.maxSelections=null]
- * @param {boolean} [config.requireAtLeastOne=true]
- * @param {boolean} [config.enableSelectAll=false] Show valid bulk actions.
- * "Select All" is omitted when `maxSelections` is finite.
- * @param {boolean} [config.searchable=false]
- * @param {"change"|"close"} [config.commit="close"]
- * @param {function} [config.formatSelection] Override the trigger summary
- * without changing the selected values.
- * @param {boolean} [config.emitOnChange] Deprecated alias for
- * `commit: "change"`.
- * @param {?number} [config.compactLabelThreshold=null]
- * @param {string} [config.language="en"]
- * @param {object} [config.labels]
- * @param {string} [config.minWidth="240px"]
- * @param {string} [config.maxWidth="400px"]
- * @returns {HTMLElement|HTMLFormElement}
- */
+/** Enhance a multiple Inputs.select; changes commit once when the menu closes. */
 export function enhancedMultiSelect(
   viewofSelect,
   {
@@ -50,9 +25,6 @@ export function enhancedMultiSelect(
     requireAtLeastOne = true,
     enableSelectAll = false,
     searchable = false,
-    commit,
-    emitOnChange,
-    formatSelection,
     compactLabelThreshold = null,
     language = "en",
     labels = {},
@@ -67,11 +39,6 @@ export function enhancedMultiSelect(
     throw new TypeError(
       "enhancedMultiSelect requires a multiple Inputs.select()",
     );
-  }
-
-  const commitMode = commit ?? (emitOnChange ? "change" : "close");
-  if (!["change", "close"].includes(commitMode)) {
-    throw new TypeError('commit must be either "change" or "close"');
   }
 
   const selectionLimit = Number.isFinite(maxSelections)
@@ -335,16 +302,7 @@ export function enhancedMultiSelect(
       : useCompactLabel
         ? String(compactText)
         : selected.map((option) => option.textContent).join(", ");
-    const customSelectionLabel = formatSelection?.({
-      count: selected.length,
-      defaultLabel: defaultSelectionLabel,
-      labels: selected.map((option) => option.textContent),
-    });
-
-    buttonLabel.textContent =
-      customSelectionLabel == null
-        ? defaultSelectionLabel
-        : String(customSelectionLabel);
+    buttonLabel.textContent = defaultSelectionLabel;
     buttonArrow.textContent = isOpen ? "▴" : "▾";
     btn.disabled = select.disabled;
 
@@ -366,22 +324,15 @@ export function enhancedMultiSelect(
   const dispatchInput = () => {
     select.dispatchEvent(new Event("input", { bubbles: true }));
   };
-  const selectionChanged = (previousSignature) => {
+  // Refresh now; closeList commits only if the opening signature changed.
+  const selectionChanged = () => {
     updateUI();
-    if (
-      selectionSignature() !== previousSignature &&
-      commitMode === "change"
-    ) {
-      selectionAtOpen = selectionSignature();
-      dispatchInput();
-    }
   };
 
   const toggleOption = (entry) => {
     const { option, row } = entry;
     if (option.disabled) return;
 
-    const previousSignature = selectionSignature();
     const selectedCount = selectedOptions().length;
     if (
       !option.selected &&
@@ -404,7 +355,7 @@ export function enhancedMultiSelect(
     }
 
     option.selected = !option.selected;
-    selectionChanged(previousSignature);
+    selectionChanged();
   };
 
   const moveOptionFocus = (current, direction) => {
@@ -515,7 +466,7 @@ export function enhancedMultiSelect(
 
     const changed = selectionSignature() !== selectionAtOpen;
     selectionAtOpen = selectionSignature();
-    if (changed && commitMode === "close") dispatchInput();
+    if (changed) dispatchInput();
     if (focusButton && btn.isConnected) {
       btn.focus({ preventScroll: true });
     }
@@ -577,11 +528,10 @@ export function enhancedMultiSelect(
     if (showSelectAll) {
       const selectAllButton = actionButton(text.selectAll);
       listen(selectAllButton, "click", () => {
-        const previousSignature = selectionSignature();
         Array.from(select.options).forEach((option) => {
           if (!option.disabled) option.selected = true;
         });
-        selectionChanged(previousSignature);
+        selectionChanged();
       });
       actionContainer.appendChild(selectAllButton);
     }
@@ -589,11 +539,10 @@ export function enhancedMultiSelect(
     if (showDeselectAll) {
       const deselectAllButton = actionButton(text.deselectAll);
       listen(deselectAllButton, "click", () => {
-        const previousSignature = selectionSignature();
         Array.from(select.options).forEach((option) => {
           if (!option.disabled) option.selected = false;
         });
-        selectionChanged(previousSignature);
+        selectionChanged();
       });
       actionContainer.appendChild(deselectAllButton);
     }
@@ -711,7 +660,6 @@ export function enhancedMultiSelect(
     configurable: true,
     value: Object.freeze({
       close: (options) => closeList(options),
-      commit: commitMode,
       destroy,
       open: (options) => openList(options),
       refresh: renderOptions,

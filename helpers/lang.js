@@ -1,19 +1,12 @@
 // Authors: Zach Bogart, Brayden Youngberg
 const VERSION = "3.0.0";
 
-// FUNCTIONS
-
-/**
- * Shorthand for getText, that defines default key
- */
+/** Bind a default language key for getText. */
 export function lg(defaultKey) {
   return (textObj) => getText(textObj, { key: defaultKey });
 }
 
-/**
- * get the text in specified language key, or undefined
- * - default to 'en'
- */
+/** Return text for the required language key. */
 export function getText(textObj, { key = null } = {}) {
   if (key === null) {
     throw new Error("No 'key' field; please provide a language key.");
@@ -22,19 +15,12 @@ export function getText(textObj, { key = null } = {}) {
   return textObj?.[key];
 }
 
-/**
- * get a regex for a defined string
- * - default to wrapping in triple angle brackets (<<< item >>>)
- * - ignores whitespace before and after inner string
- */
+/** Match a named insertion with optional surrounding whitespace. */
 export function getRegexForNamedInsertion(itemName, { start = ":::", end = ":::" } = {}) {
   return new RegExp(`${start}\\s*${itemName}\\s*${end}`, "g");
 }
 
-/**
- * replace items in template, return replaced string
- * - default fields for 'items' array of objects [{name: "...", value: "..."}]
- */
+/** Replace named insertion tokens with values from an item list. */
 export function reduceReplaceTemplateItems(template, items, { templateNameField = "name", templateValueField = "value", ...options } = {}) {
   return items.reduce((text, item) => {
     return text.replace(
@@ -44,21 +30,7 @@ export function reduceReplaceTemplateItems(template, items, { templateNameField 
   }, template);
 }
 
-/**
- * Parse one prose block file (data/<notebook>/text/<id>.<locale>.md) into
- * { title, body }. The front matter is a deliberately narrow contract —
- * exactly one single-line `title:` field:
- *
- *   ---
- *   title: "Overview"
- *   ---
- *
- *   the prose...
- *
- * scripts/build/checkTranslations.ts rejects anything else in CI, so this
- * only has to handle the three single-line YAML scalar forms (plain,
- * 'single', "double").
- */
+/** Parse a prose block with the CI-enforced, single-title front-matter format. */
 export function parseBlock(markdown) {
   const m = markdown.match(/^---\r?\ntitle:[ \t]*(.*?)[ \t]*\r?\n---\r?\n?/);
   if (!m) throw new Error("prose block must start with `---\\ntitle: ...\\n---` front matter");
@@ -68,13 +40,7 @@ export function parseBlock(markdown) {
   return { title, body: markdown.slice(m[0].length).trim() };
 }
 
-/**
- * Bind translated text onto the statically rendered page: set <html lang>,
- * retitle section headings from their prose blocks, and swap `.nb-prose`
- * nodes to the given language — restoring the build-time markup when back on
- * the default language. Pass the OJS `md` tag for client-side rendering, and
- * `headings` for extra ids whose titles come from elsewhere.
- */
+/** Apply translated headings and prose, restoring build-time markup for the default. */
 export function applyTranslations({ sections, md, lang, defaultLang = "en", headings = {} }) {
   document.documentElement.lang = lang;
 
@@ -98,12 +64,7 @@ export function applyTranslations({ sections, md, lang, defaultLang = "en", head
   }
 }
 
-/**
- * Deep-merge fallback values into a translation tree: any key missing in
- * `obj` is filled from `fallback`. For per-locale text files (en.json,
- * fr.json), pass the English tree as the fallback so untranslated strings
- * render in English instead of `undefined`.
- */
+/** Fill missing translation-tree values recursively from a fallback. */
 export function withFallback(obj, fallback) {
   if (obj === undefined || obj === null) return fallback;
   if (typeof obj !== "object" || typeof fallback !== "object" || fallback === null) {
@@ -116,9 +77,7 @@ export function withFallback(obj, fallback) {
   return out;
 }
 
-/**
- * Lists the leaves (i.e., terminal nodes) of an object tree that are missing specified keys.
- */
+/** List object-tree leaves missing any required key. */
 export function listLeavesMissingObjectKeys(obj, keys) {
   const missingLeaves = [];
 
@@ -158,9 +117,7 @@ export function listLeavesMissingObjectKeys(obj, keys) {
   return missingLeaves;
 }
 
-/**
- * Get a query string parameter and return if it is in the provided list.
- */
+/** Return a query parameter only when it is in the allowed list. */
 export async function getParamFromList({ name, list, search = location.search } = {}) {
   if (!name || !list) {
     throw new Error("'name' and 'list' parameters are required.");
@@ -172,9 +129,7 @@ export async function getParamFromList({ name, list, search = location.search } 
   return param && list.includes(param) ? param : null;
 }
 
-/**
- * Return string in title case
- */
+/** Convert a string to title case. */
 export function toTitleCase(str) {
   if (typeof str !== "string") {
     throw new Error("Input must be a string");
@@ -182,9 +137,7 @@ export function toTitleCase(str) {
   return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.slice(1));
 }
 
-/**
- * Return string in sentence case
- */
+/** Convert a string to sentence case. */
 export function toSentenceCase(str) {
   if (typeof str !== "string") {
     throw new Error("Input must be a string");
@@ -207,4 +160,4 @@ export const lang = {
   toSentenceCase
 };
 
-export default lang; // This is included for some back comapatibility due to some initial issues I was hitting with the import system
+export default lang; // Backward-compatible default export.
