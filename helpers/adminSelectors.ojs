@@ -53,18 +53,38 @@ adminTranslations = ({
 // offer the same countries or they cannot stay bound to each other.
 adminExcludedIso3 = new Set(["SDN"])
 
+// Every option, at every level, is this shape:
+//
+//   { iso3, admin0_name, admin1_name, admin2_name, translation? }
+//
+// with the names below the option's own level set to null. That is the Atlas
+// convention already used by the parquet tables, by boundary feature properties,
+// by sqlAdminWhere and by adminBoundariesForSelection, so a selected option reads
+// against any of them without being translated first. It also makes a row
+// self-describing: its deepest non-null name is its level.
+//
+// The source file's `iso3c` is not carried through. It duplicated `iso3`, was
+// present on level-0 rows only, and gave two names for one value.
 countries = {
   const rows = await FileAttachment("/data/shared/atlas_countries.json").json();
   return rows
     .filter((c) => c.include && !adminExcludedIso3.has(c.iso3c))
-    .map(({ include, ...rest }) => ({ ...rest, iso3: rest.iso3c }));
+    .map((c) => ({
+      iso3: c.iso3c,
+      admin0_name: c.admin0_name,
+      admin1_name: null,
+      admin2_name: null,
+      translation: c.translation,
+    }));
 }
 
+// Country names are translated, region and district names are not, so
+// `translation` is the one field that appears at level 0 only.
 ssaObj = ({
+  iso3: null,
   admin0_name: null,
   admin1_name: null,
   admin2_name: null,
-  iso3: null,
   translation: adminTranslations.ssa,
 })
 
@@ -92,20 +112,20 @@ adminLookup = {
 
     if (!admin1ByIso.has(row.iso3)) admin1ByIso.set(row.iso3, new Map());
     admin1ByIso.get(row.iso3).set(row.admin1_name, {
+      iso3: row.iso3,
       admin0_name: row.admin0_name,
       admin1_name: row.admin1_name,
       admin2_name: null,
-      iso3: row.iso3,
     });
 
     if (row.admin2_name == null) continue;
     const key = `${row.iso3}||${row.admin1_name}`;
     if (!admin2ByRegion.has(key)) admin2ByRegion.set(key, []);
     admin2ByRegion.get(key).push({
+      iso3: row.iso3,
       admin0_name: row.admin0_name,
       admin1_name: row.admin1_name,
       admin2_name: row.admin2_name,
-      iso3: row.iso3,
     });
   }
 
@@ -222,7 +242,7 @@ adminOptionsFor = (level, multiple, _lang) => {
   if (level === 1) {
     if (multiple) return dataAdmin1;
     return admin0Select.flatMap((c) => [
-      { admin0_name: c.admin0_name, admin1_name: null, admin2_name: null, iso3: c.iso3 },
+      { iso3: c.iso3, admin0_name: c.admin0_name, admin1_name: null, admin2_name: null },
       ...(adminLookup.admin1ByIso.get(c.iso3) ?? []),
     ]);
   }
