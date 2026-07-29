@@ -36,9 +36,10 @@
 const LEVEL_NAME = ["admin0_name", "admin1_name", "admin2_name"];
 
 /**
- * Accepts what `createAdminSelectors` produces at any level — an array in
- * multiple-select mode, a single object or null in single-select mode — as well
- * as a plain array of names, and returns the names.
+ * Accepts what the admin selectors produce at any level — `admin0Select` and its
+ * siblings from helpers/adminSelectors.ojs are arrays of option objects in both
+ * modes — as well as a single object, or a plain array of names, and returns the
+ * names. A row standing for "whole area" carries a null name and drops out here.
  */
 function selectedNames(value, field) {
   const list = value == null ? [] : Array.isArray(value) ? value : [value];
@@ -53,7 +54,7 @@ function selectedNames(value, field) {
  *   GeoJSON FeatureCollection per level, as `getAdminBoundaries()` returns. The
  *   deepest one present sets how far the map can drill unless `maxLevel` says less.
  * @param {{admin0?: *, admin1?: *, admin2?: *}} config.selection
- *   A `createAdminSelectors` value, or arrays of names.
+ *   An `adminSelections` value from helpers/adminSelectors.ojs, or arrays of names.
  * @param {number} [config.maxLevel] Deepest level to draw. Defaults to the deepest
  *   boundary set supplied — pass it explicitly when the *data* is shallower than
  *   the geometry.
