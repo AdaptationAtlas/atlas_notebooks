@@ -11,7 +11,7 @@
 --    body, parsed with Pandoc's own reader. The block id is the filename;
 --    authors never see or edit it.
 --
---      front matter:  nb-text-dir: data/economicReturns/text
+--      front matter:  nb-config: data/economicReturns/notebook.json
 --
 --    Notebooks place blocks with the {{< prose <id> >}} shortcode
 --    (scripts/build/proseShortcode.lua) — `level=N` sets the heading level,
@@ -48,6 +48,7 @@
 local textDir = nil
 local lang = "en"
 local blocks = {} -- id -> { title = Inlines, body = Blocks } | false (missing)
+local runtimeConfigRaw = nil
 
 -- ---------- shared helpers ----------
 
@@ -78,6 +79,79 @@ end
 
 local function mdToHtml(md)
 	return pandoc.write(pandoc.read(md or "", "markdown"), "html")
+end
+
+local function metaStrings(values)
+	local out = {}
+	for _, value in ipairs(values or {}) do
+		table.insert(out, pandoc.MetaString(value))
+	end
+	return pandoc.MetaList(out)
+end
+
+local function contributorNames(entries, registry)
+	local names = {}
+	for _, entry in ipairs(entries or {}) do
+		local person = nil
+		if type(entry) == "string" then
+			person = registry[entry]
+		elseif type(entry) == "table" and entry.id then
+			person = registry[entry.id]
+		elseif type(entry) == "table" then
+			person = entry
+		end
+		if not person or not person.name then
+			error("cmsContent: notebook config contains an unknown contributor")
+		end
+		table.insert(names, person.name)
+	end
+	return names
+end
+
+local function applyNotebookConfig(meta)
+	local configPath = meta["nb-config"] and pandoc.utils.stringify(meta["nb-config"])
+	if not configPath or configPath == "" then
+		return meta
+	end
+
+	local path = projectRoot() .. "/" .. configPath
+	local raw = readFile(path)
+	if not raw then
+		error("cmsContent: cannot read notebook config " .. path)
+	end
+	local ok, config = pcall(pandoc.json.decode, raw)
+	if not ok or type(config) ~= "table" then
+		error("cmsContent: notebook config is not valid JSON: " .. path)
+	end
+	if
+		type(config.title) ~= "table"
+		or type(config.title.en) ~= "string"
+		or type(config.textDir) ~= "string"
+		or type(config.content) ~= "table"
+	then
+		error("cmsContent: notebook config is missing title, textDir, or content: " .. path)
+	end
+
+	local registryRaw = readFile(projectRoot() .. "/data/shared/contributors.json")
+	local registry = registryRaw and pandoc.json.decode(registryRaw) or {}
+	local authors = contributorNames(config.contributors and config.contributors.authors, registry)
+	local developers = contributorNames(config.contributors and config.contributors.developers, registry)
+
+	textDir = config.textDir
+	runtimeConfigRaw = raw
+	meta.pagetitle = pandoc.MetaString(config.title.en)
+	meta.image = pandoc.MetaString(config.image or "")
+	meta.description = pandoc.MetaString(config.description or "")
+	meta.keywords = metaStrings(config.keywords)
+	meta.author = metaStrings(authors)
+	meta["nb-authors"] = metaStrings(authors)
+	meta["nb-developers"] = metaStrings(developers)
+	meta["nb-text-dir"] = pandoc.MetaString(textDir)
+	if config.dates then
+		meta["date-created"] = pandoc.MetaString(config.dates.created or "")
+		meta["date-edited"] = pandoc.MetaString(config.dates.edited or "")
+	end
+	return meta
 end
 
 -- ---------- notebook prose ----------
@@ -216,12 +290,18 @@ end
 -- ---------- dispatch ----------
 
 local function getMeta(meta)
-	if meta["nb-text-dir"] then
+	textDir = nil
+	lang = "en"
+	runtimeConfigRaw = nil
+	blocks = {}
+	meta = applyNotebookConfig(meta)
+	if not textDir and meta["nb-text-dir"] then
 		textDir = pandoc.utils.stringify(meta["nb-text-dir"])
 	end
 	if meta["lang"] then
 		lang = pandoc.utils.stringify(meta["lang"])
 	end
+	return meta
 end
 
 local function fillDiv(div)
@@ -235,7 +315,18 @@ local function fillDiv(div)
 	return nil
 end
 
+local function injectNotebookConfig(doc)
+	if not runtimeConfigRaw then
+		return doc
+	end
+	local safe = runtimeConfigRaw:gsub("</", "<\\/")
+	local script = ('<script id="atlas-notebook-config" type="application/json">%s</script>'):format(safe)
+	table.insert(doc.blocks, 1, pandoc.RawBlock("html", script))
+	return doc
+end
+
 return {
 	{ Meta = getMeta },
 	{ Div = fillDiv, Header = expandHeader },
+	{ Pandoc = injectNotebookConfig },
 }

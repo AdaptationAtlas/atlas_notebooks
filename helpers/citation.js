@@ -95,7 +95,12 @@ export function resolveContributors(groups = {}, registry = {}) {
   };
   const resolve = (list = []) =>
     list.map((entry) => {
-      const person = typeof entry === "string" ? registry[entry] : entry;
+      const person =
+        typeof entry === "string"
+          ? registry[entry]
+          : entry?.id
+            ? { ...registry[entry.id], ...entry }
+            : entry;
       if (!person?.name) {
         throw new Error(`Unknown contributor: ${JSON.stringify(entry)}`);
       }
