@@ -58,9 +58,9 @@ nbText = new Object({
 
 Don't build a toggle per notebook. The navbar switcher
 (`components/langSwitcher.js`) owns language state site-wide, and notebooks
-get `language` / `_lang` from the `/components/_lang.qmd` include (see
-*Notebook Content Layout* below). For the standalone examples on this page we
-simply pin it:
+get `language` / `_lang` through the shared notebook runtime (see *Notebook
+Content Layout* below). For the standalone examples on this page we simply pin
+it:
 
 ```{ojs}
 language = ({ key: "en" })
@@ -166,7 +166,13 @@ Lang.toSentenceCase("welcome to my home"); // "Welcome to my home"
 
 ## Notebook Content Layout (CMS)
 
-Notebook text lives in `data/<notebook>/text/`:
+Each notebook is defined by `data/<notebook>/notebook.json`. The manifest is
+the single source for its localized page title, hero image, contributors,
+dates, text directory, TOC selector, and ordered content blocks. It also
+declares the standard content slots: `overview` and `methods` are required;
+`summary` is optional.
+
+Localized notebook text lives in `data/<notebook>/text/`:
 
 - `<id>.en.md`, `<id>.fr.md` — one file per narrative **block**. The filename is the
   block id; the file contains a `title`, an optional nested `details` note, and the
@@ -209,29 +215,31 @@ Notebook text lives in `data/<notebook>/text/`:
   crawlable and visible before OJS boots. At runtime, `Lang.applyTranslations()`
   swaps headings and `.nb-prose` blocks when the language toggle changes (blocks are
   parsed with `Lang.parseBlock`), and restores the built English on toggle back.
-- `en.json`, `fr.json` — page title (`meta.title`), widget labels, tooltips, and
-  templated sentences. Identical key trees; missing keys fall back to English at
-  runtime via `Lang.withFallback`.
+- `en.json`, `fr.json` — widget labels, tooltips, headings used inside charts,
+  and templated sentences. Identical key trees; missing keys fall back to
+  English at runtime via `Lang.withFallback`. The page title belongs in the
+  manifest, not these files.
 
-`scripts/build/checkTranslations.ts` (run in CI) enforces the whole contract: JSON key
-  parity, every block present in every locale, valid ids and front matter, non-empty
-  titles and details, and every block referenced by a `.qmd` actually existing.
+The shared `/components/_notebookRuntime.qmd` include reads the manifest and
+loads every declared prose block. Entry notebooks should not maintain
+`proseFiles` maps or individual `FileAttachment` entries.
+
+`scripts/build/checkTranslations.ts` enforces locale parity and prose
+references.
 
 The narrative blocks are editable in the browser at `/admin/` (Sveltia CMS,
 configured in `admin/config.yml` — one folder collection per notebook; authors can
 edit but not create or delete blocks). The optional “Collapsible note” editor stores
 its heading and content in the same localized file as the parent section. Edits are
-committed to the repo and published by the normal build. The JSON strings are
-deliberately *not* in the CMS — their keys are coupled to notebook code, so they are
-edited in the repo through review. See `notebooks/cis/notebook.qmd` for a details
-example and `notebooks/roi/notebook.qmd` for the base implementation.
+committed to the repo and published by the normal build. The notebook manifest and
+JSON strings are deliberately *not* in the CMS — their structure is coupled to
+notebook code, so they are edited in the repo through review.
 
 Language state itself is owned by a vanilla navbar switcher
 (`components/langSwitcher.js`) that works before the OJS runtime boots.
-Notebooks pull the whole shared setup — the switcher script plus the
-`Lang`/`general_translations`/`languages`/`langKey`/`language`/`_lang` OJS
-cells — with a single include of `/components/_lang.qmd` (see the top of that
-file for the shortcode syntax), and must not redefine those cells.
+The shared notebook runtime includes `/components/_lang.qmd`, then exposes
+`nbText`, `sections`, `nbTitle`, `contributors`, and `tmpl` for notebook code.
+Entry notebooks include the runtime once and must not redefine those cells.
 
 ---
 
