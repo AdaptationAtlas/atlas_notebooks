@@ -198,7 +198,7 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
   }
   let config: {
     textDir?: string;
-    content?: { blocks?: string[] };
+    blocks?: string[];
   };
   try {
     config = JSON.parse(configRaw);
@@ -218,11 +218,20 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
     problems.push(`${rel}: textDir '${textDir}' has no en.json / prose blocks`);
     continue;
   }
-  const declared = new Set(config.content?.blocks ?? []);
+  const declared = new Set(config.blocks ?? []);
+  for (const id of ["overview", "methods"]) {
+    if (!declared.has(id)) {
+      problems.push(`${configPath}: blocks must include '${id}'`);
+    }
+  }
   const refs = new Set<string>([
     ...[...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
-    ...[...qmd.matchAll(/\bsections\.([A-Za-z0-9_]+)/g)].map((m) => m[1]),
-    ...[...qmd.matchAll(/\bsections\[["']([^"']+)["']\]/g)].map((m) => m[1]),
+    ...[...qmd.matchAll(/(?<!\.)\bsections\.([A-Za-z0-9_]+)/g)].map((m) =>
+      m[1]
+    ),
+    ...[...qmd.matchAll(/(?<!\.)\bsections\[["']([^"']+)["']\]/g)].map((m) =>
+      m[1]
+    ),
   ]);
   for (const id of refs) referencedByDir.get(textDir)?.add(id);
 

@@ -93,11 +93,9 @@ local function contributorNames(entries, registry)
 	local names = {}
 	for _, entry in ipairs(entries or {}) do
 		local person = nil
-		if type(entry) == "string" then
-			person = registry[entry]
-		elseif type(entry) == "table" and entry.id then
+		if type(entry) == "table" and entry.type == "common" then
 			person = registry[entry.id]
-		elseif type(entry) == "table" then
+		elseif type(entry) == "table" and entry.type == "custom" then
 			person = entry
 		end
 		if not person or not person.name then
@@ -109,11 +107,8 @@ local function contributorNames(entries, registry)
 end
 
 local function contributorMap(registry)
-	if type(registry.contributors) ~= "table" then
-		return registry
-	end
 	local contributors = {}
-	for _, person in ipairs(registry.contributors) do
+	for _, person in ipairs(registry.contributors or {}) do
 		if person.id then
 			contributors[person.id] = person
 		end
@@ -140,30 +135,21 @@ local function applyNotebookConfig(meta)
 		type(config.title) ~= "table"
 		or type(config.title.en) ~= "string"
 		or type(config.textDir) ~= "string"
-		or type(config.content) ~= "table"
+		or type(config.blocks) ~= "table"
 	then
-		error("cmsContent: notebook config is missing title, textDir, or content: " .. path)
+		error("cmsContent: notebook config is missing title, textDir, or blocks: " .. path)
 	end
 
 	local registryRaw = readFile(projectRoot() .. "/data/shared/contributors.json")
 	local registry = contributorMap(registryRaw and pandoc.json.decode(registryRaw) or {})
 	local authors = contributorNames(config.contributors and config.contributors.authors, registry)
-	local developers = contributorNames(config.contributors and config.contributors.developers, registry)
 
 	textDir = config.textDir
 	runtimeConfigRaw = raw
 	meta.pagetitle = pandoc.MetaString(config.title.en)
-	meta.image = pandoc.MetaString(config.image or "")
 	meta.description = pandoc.MetaString(config.description or "")
 	meta.keywords = metaStrings(config.keywords)
 	meta.author = metaStrings(authors)
-	meta["nb-authors"] = metaStrings(authors)
-	meta["nb-developers"] = metaStrings(developers)
-	meta["nb-text-dir"] = pandoc.MetaString(textDir)
-	if config.dates then
-		meta["date-created"] = pandoc.MetaString(config.dates.created or "")
-		meta["date-edited"] = pandoc.MetaString(config.dates.edited or "")
-	end
 	return meta
 end
 
@@ -308,9 +294,6 @@ local function getMeta(meta)
 	runtimeConfigRaw = nil
 	blocks = {}
 	meta = applyNotebookConfig(meta)
-	if not textDir and meta["nb-text-dir"] then
-		textDir = pandoc.utils.stringify(meta["nb-text-dir"])
-	end
 	if meta["lang"] then
 		lang = pandoc.utils.stringify(meta["lang"])
 	end
