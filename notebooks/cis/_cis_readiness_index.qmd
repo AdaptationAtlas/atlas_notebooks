@@ -224,6 +224,15 @@ viewof s11MapMode = Inputs.radio(["Raw values", "Classified"], {
   label: nbText.mapModeLabel,
   value: "Raw values"
 })
+
+viewof s11ShowStations = {
+  const input = Inputs.toggle({
+    label: nbText.stationOverlayToggle,
+    value: true,
+  });
+  if (s11ViewType !== "Map") input.style.display = "none";
+  return input;
+}
 ```
 
 ```{ojs}
@@ -252,16 +261,62 @@ s11MapData = {
 ```
 
 ```{ojs}
+s11StationFeatures = {
+  const countries = new Set(admin0Select.map((d) => d.iso3));
+  const regions = new Set(
+    admin1Select.map((d) => `${d.iso3}||${d.admin1_name}`),
+  );
+  const districts = new Set(
+    admin2Select.map(
+      (d) => `${d.iso3}||${d.admin1_name}||${d.admin2_name}`,
+    ),
+  );
+
+  return weatherStations.features.filter(({ properties: p }) =>
+    (!countries.size || countries.has(p.iso3)) &&
+    (!regions.size || regions.has(`${p.iso3}||${p.admin1_name}`)) &&
+    (!districts.size ||
+      districts.has(`${p.iso3}||${p.admin1_name}||${p.admin2_name}`)),
+  );
+}
+```
+
+```{ojs}
 // Section 1.1 Maps
 {
   if (s11ViewType === "Map") {
-    //TODO: see if this can be removed
     const height = 600;
     const useRaw = s11MapMode === "Raw values";
+    const stationCount = new Intl.NumberFormat(language.key).format(
+      s11StationFeatures.length,
+    );
+    const stationSummary = tmpl(nbText.stationRecordsShown, {
+      count: stationCount,
+    });
+    const stationMark = Plot.dot(s11StationFeatures, {
+      x: (d) => d.geometry.coordinates[0],
+      y: (d) => d.geometry.coordinates[1],
+      r: 1.3,
+      fill: "#6b1e57",
+      fillOpacity: 0.45,
+      pointerEvents: "none",
+    });
+
     return htl.html`
     <div style="display: flex; gap: 20px;">
       <div style="flex: 1;">
-        <h4>${nbText.weatherStationLabel}</h4>
+        <h4 style="margin-bottom: 0;">${nbText.weatherStationLabel}</h4>
+        ${s11ShowStations
+          ? htl.html`
+              <div style="align-items: center; color: #4a5568; display: flex; flex-wrap: wrap; font-size: 0.85rem; gap: 0.35rem 0.65rem; margin-bottom: 0.35rem;">
+                <span style="align-items: center; display: inline-flex; gap: 0.35rem;">
+                  <span aria-hidden="true" style="background: #6b1e57; border-radius: 50%; display: inline-block; height: 0.55rem; opacity: 0.45; width: 0.55rem;"></span>
+                  ${nbText.stationLegendLabel}
+                </span>
+                <span>· ${stationSummary}</span>
+              </div>
+            `
+          : null}
         ${makeChoropleth({
           features: s11MapData,
           width: width / 2,
@@ -294,7 +349,8 @@ s11MapData = {
             weatherStation: true,
             class: true
           },
-          adminHighlight
+          adminHighlight,
+          extraMarks: s11ShowStations ? [stationMark] : [],
         })}
       </div>
       <div style="flex: 1;">

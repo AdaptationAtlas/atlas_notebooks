@@ -40,6 +40,7 @@ data/cis/
 | Dataset             | Description                          | Variables                                                                                                                                        |
 | ------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | CIS_nb_data.parquet | CIS readiness metrics by admin level | wstation_density, cloud-coverage_meanannual, cv-precipitation_agreement, short-term_frcst_skill, seasonal_frcst_skill, cis_readiness_index        |
+| weather_stations_2025.geojson | Atlas-country weather-station catalogue records | station, name, source, iso3, admin0_name, admin1_name, admin2_name |
 | CIS_access.parquet  | Communication infrastructure access  | tv, internet, cellphone (% penetration)                                                                                                          |
 | nexgddpHazards\_…   | Historical climate hazards           | NDWS-mean (drought), NDWL0-mean (waterlogging)                                                                                                   |
 
