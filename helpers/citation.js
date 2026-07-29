@@ -86,8 +86,15 @@ function peopleSection(heading, people) {
   return section;
 }
 
-/** Resolve contributor IDs or inline entries and number affiliations by appearance. */
+function contributorMap(registry = {}) {
+  const entries = Array.isArray(registry) ? registry : registry.contributors;
+  if (!Array.isArray(entries)) return registry;
+  return Object.fromEntries(entries.map((person) => [person.id, person]));
+}
+
+/** Resolve common or custom contributors and number affiliations by appearance. */
 export function resolveContributors(groups = {}, registry = {}) {
+  const contributors = contributorMap(registry);
   const orgNumbers = new Map();
   const numberFor = (org) => {
     if (!orgNumbers.has(org)) orgNumbers.set(org, orgNumbers.size + 1);
@@ -95,12 +102,11 @@ export function resolveContributors(groups = {}, registry = {}) {
   };
   const resolve = (list = []) =>
     list.map((entry) => {
-      const person =
-        typeof entry === "string"
-          ? registry[entry]
-          : entry?.id
-            ? { ...registry[entry.id], ...entry }
-            : entry;
+      const person = typeof entry === "string"
+        ? contributors[entry]
+        : entry?.id
+        ? { ...contributors[entry.id], ...entry }
+        : entry;
       if (!person?.name) {
         throw new Error(`Unknown contributor: ${JSON.stringify(entry)}`);
       }

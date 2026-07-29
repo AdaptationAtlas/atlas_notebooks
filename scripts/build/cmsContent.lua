@@ -108,6 +108,19 @@ local function contributorNames(entries, registry)
 	return names
 end
 
+local function contributorMap(registry)
+	if type(registry.contributors) ~= "table" then
+		return registry
+	end
+	local contributors = {}
+	for _, person in ipairs(registry.contributors) do
+		if person.id then
+			contributors[person.id] = person
+		end
+	end
+	return contributors
+end
+
 local function applyNotebookConfig(meta)
 	local configPath = meta["nb-config"] and pandoc.utils.stringify(meta["nb-config"])
 	if not configPath or configPath == "" then
@@ -133,7 +146,7 @@ local function applyNotebookConfig(meta)
 	end
 
 	local registryRaw = readFile(projectRoot() .. "/data/shared/contributors.json")
-	local registry = registryRaw and pandoc.json.decode(registryRaw) or {}
+	local registry = contributorMap(registryRaw and pandoc.json.decode(registryRaw) or {})
 	local authors = contributorNames(config.contributors and config.contributors.authors, registry)
 	local developers = contributorNames(config.contributors and config.contributors.developers, registry)
 
