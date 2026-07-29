@@ -154,6 +154,7 @@ Lang.toSentenceCase("welcome to my home"); // "Welcome to my home"
 | :-- | :-- |
 | `lg(defaultKey)` | Returns a function to fetch text for a default language key. |
 | `getText(textObj, { key })` | Gets text for the specified language key. |
+| `parseBlock(markdown)` | Parses CMS prose and its optional collapsible note. |
 | `getRegexForNamedInsertion(item, opts)` | Returns regex to match placeholders (default: `:::item:::`). |
 | `reduceReplaceTemplateItems(...)` | Replaces all placeholders in a template with provided values. |
 | `listLeavesMissingObjectKeys(obj, keys)` | Lists object leaves missing specified keys. |
@@ -168,12 +169,16 @@ Lang.toSentenceCase("welcome to my home"); // "Welcome to my home"
 Notebook text lives in `data/<notebook>/text/`:
 
 - `<id>.en.md`, `<id>.fr.md` — one file per narrative **block**. The filename is the
-  block id; the file is a deliberately narrow front matter (a single `title:` line)
-  plus the markdown body:
+  block id; the file contains a `title`, an optional nested `details` note, and the
+  main markdown body:
 
   ```markdown
   ---
   title: "Overview"
+  details:
+    title: "How to interpret these indicators"
+    body: |-
+      **Indicator** — A concise definition and interpretation.
   ---
 
   Understanding the economic impacts...
@@ -194,11 +199,13 @@ Notebook text lives in `data/<notebook>/text/`:
   (`scripts/build/proseShortcode.lua`) emits a section heading titled from the
   block's `title:` (`level=N` sets the heading level, default 1) followed by the
   block body; `heading=false` injects just the body, for free-floating blocks — for
-  example an `overview-closing` block placed after a figure. Blocks can also be
-  consumed directly in OJS code via `sections["indicator-definitions"]` (e.g.
-  rendered inside a dropdown). A shortcode pointing at a missing or empty block
-  **fails the render**, and CI flags block files that nothing references (a typo'd
-  id would otherwise fail silently). Default-language prose is static HTML —
+  example an `overview-closing` block placed after a figure. Optional details can
+  be rendered directly in OJS with `sections[id].details.title` and
+  `sections[id].details.body`, keeping the dropdown copy in its parent CMS entry.
+  Blocks can also be consumed directly in OJS code via
+  `sections["indicator-definitions"]`. A shortcode pointing at a missing or empty
+  block **fails the render**, and CI flags block files that nothing references (a
+  typo'd id would otherwise fail silently). Default-language prose is static HTML —
   crawlable and visible before OJS boots. At runtime, `Lang.applyTranslations()`
   swaps headings and `.nb-prose` blocks when the language toggle changes (blocks are
   parsed with `Lang.parseBlock`), and restores the built English on toggle back.
@@ -207,15 +214,17 @@ Notebook text lives in `data/<notebook>/text/`:
   runtime via `Lang.withFallback`.
 
 `scripts/build/checkTranslations.ts` (run in CI) enforces the whole contract: JSON key
-parity, every block present in every locale, valid ids and front matter, non-empty
-titles, and every block referenced by a `.qmd` actually existing.
+  parity, every block present in every locale, valid ids and front matter, non-empty
+  titles and details, and every block referenced by a `.qmd` actually existing.
 
-The narrative blocks are editable in the browser at `/admin/` (Sveltia CMS, configured
-in `admin/config.yml` — one folder collection per notebook; authors can edit but not
-create or delete blocks). Edits are committed to the repo and published by the normal
-build. The JSON strings are deliberately *not* in the CMS — their keys are coupled to
-notebook code, so they are edited in the repo through review. See
-`notebooks/roi/notebook.qmd` for the reference implementation.
+The narrative blocks are editable in the browser at `/admin/` (Sveltia CMS,
+configured in `admin/config.yml` — one folder collection per notebook; authors can
+edit but not create or delete blocks). The optional “Collapsible note” editor stores
+its heading and content in the same localized file as the parent section. Edits are
+committed to the repo and published by the normal build. The JSON strings are
+deliberately *not* in the CMS — their keys are coupled to notebook code, so they are
+edited in the repo through review. See `notebooks/cis/notebook.qmd` for a details
+example and `notebooks/roi/notebook.qmd` for the base implementation.
 
 Language state itself is owned by a vanilla navbar switcher
 (`components/langSwitcher.js`) that works before the OJS runtime boots.

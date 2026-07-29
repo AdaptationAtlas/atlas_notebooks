@@ -7,8 +7,9 @@
 -- same contracts in CI.
 --
 -- 1. Notebook prose — one file per block: data/<notebook>/text/<id>.<lang>.md,
---    front matter (`title:` only) + markdown body, parsed with Pandoc's own
---    reader. The block id is the filename; authors never see or edit it.
+--    front matter (`title:` plus an optional `details:` object) + markdown
+--    body, parsed with Pandoc's own reader. The block id is the filename;
+--    authors never see or edit it.
 --
 --      front matter:  nb-text-dir: data/economicReturns/text
 --
@@ -23,7 +24,9 @@
 --    (Shortcodes expand in Quarto's built-in pass, so _quarto.yml lists
 --    `- quarto` before this filter.)
 --
---    Default-language prose is baked in as static HTML — crawlable and
+--    Optional details contain a localized title and markdown body for a
+--    collapsible note rendered by notebook code. Default-language prose is
+--    baked in as static HTML — crawlable and
 --    visible before the OJS runtime boots; the client-side language toggle
 --    swaps the same nodes at runtime (Lang.applyTranslations /
 --    Lang.parseBlock in helpers/lang.js). Developers control heading level

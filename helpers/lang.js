@@ -30,14 +30,126 @@ export function reduceReplaceTemplateItems(template, items, { templateNameField 
   }, template);
 }
 
-/** Parse a prose block with the CI-enforced, single-title front-matter format. */
+function parseYamlScalar(value) {
+  const text = value.trim();
+  if (text === "null" || text === "~") return null;
+  if (text.startsWith('"') && text.endsWith('"')) return JSON.parse(text);
+  if (text.startsWith("'") && text.endsWith("'")) {
+    return text.slice(1, -1).replaceAll("''", "'");
+  }
+  return text;
+}
+
+function indentation(line) {
+  return line.match(/^ */)[0].length;
+}
+
+function readYamlValue(lines, index, parentIndent, rawValue) {
+  if (!/^[>|][+-]?$/.test(rawValue.trim())) {
+    return { value: parseYamlScalar(rawValue), next: index + 1 };
+  }
+
+  let next = index + 1;
+  let contentIndent = null;
+  const valueLines = [];
+  while (next < lines.length) {
+    const line = lines[next];
+    if (line.trim() === "") {
+      valueLines.push("");
+      next += 1;
+      continue;
+    }
+    const lineIndent = indentation(line);
+    if (lineIndent <= parentIndent) break;
+    contentIndent ??= lineIndent;
+    valueLines.push(line.slice(contentIndent));
+    next += 1;
+  }
+  return { value: valueLines.join("\n").trim(), next };
+}
+
+function parseProseFrontMatter(source) {
+  const lines = source.replaceAll("\r\n", "\n").split("\n");
+  const meta = {};
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    if (line.trim() === "" || line.trimStart().startsWith("#")) {
+      index += 1;
+      continue;
+    }
+    const field = line.match(/^([A-Za-z0-9_-]+):(?:[ \t]*(.*))?$/);
+    if (!field) throw new Error(`unsupported prose front matter: ${line}`);
+    const [, key, rawValue = ""] = field;
+
+    if (key !== "details") {
+      const parsed = readYamlValue(lines, index, 0, rawValue);
+      meta[key] = parsed.value;
+      index = parsed.next;
+      continue;
+    }
+
+    if (rawValue.trim() !== "") {
+      meta.details = parseYamlScalar(rawValue);
+      index += 1;
+      continue;
+    }
+
+    const details = {};
+    index += 1;
+    while (index < lines.length) {
+      const nestedLine = lines[index];
+      if (nestedLine.trim() === "") {
+        index += 1;
+        continue;
+      }
+      const nestedIndent = indentation(nestedLine);
+      if (nestedIndent === 0) break;
+      const nested = nestedLine
+        .slice(nestedIndent)
+        .match(/^([A-Za-z0-9_-]+):(?:[ \t]*(.*))?$/);
+      if (!nested) {
+        throw new Error(`unsupported details front matter: ${nestedLine}`);
+      }
+      const [, nestedKey, nestedRawValue = ""] = nested;
+      const parsed = readYamlValue(
+        lines,
+        index,
+        nestedIndent,
+        nestedRawValue,
+      );
+      details[nestedKey] = parsed.value;
+      index = parsed.next;
+    }
+    meta.details = details;
+  }
+  return meta;
+}
+
+/** Parse CMS prose and its optional nested collapsible note. */
 export function parseBlock(markdown) {
-  const m = markdown.match(/^---\r?\ntitle:[ \t]*(.*?)[ \t]*\r?\n---\r?\n?/);
-  if (!m) throw new Error("prose block must start with `---\\ntitle: ...\\n---` front matter");
-  let title = m[1];
-  if (title.startsWith('"') && title.endsWith('"')) title = JSON.parse(title);
-  else if (title.startsWith("'") && title.endsWith("'")) title = title.slice(1, -1).replaceAll("''", "'");
-  return { title, body: markdown.slice(m[0].length).trim() };
+  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!match) {
+    throw new Error("prose block must start with YAML front matter");
+  }
+  const meta = parseProseFrontMatter(match[1]);
+  if (typeof meta.title !== "string" || !meta.title.trim()) {
+    throw new Error("prose front matter requires a title");
+  }
+  const details =
+    meta.details &&
+    typeof meta.details.title === "string" &&
+    typeof meta.details.body === "string"
+      ? {
+          title: meta.details.title.trim(),
+          body: meta.details.body.trim(),
+        }
+      : undefined;
+  return {
+    title: meta.title.trim(),
+    body: markdown.slice(match[0].length).trim(),
+    details,
+  };
 }
 
 /** Apply translated headings and prose, restoring build-time markup for the default. */

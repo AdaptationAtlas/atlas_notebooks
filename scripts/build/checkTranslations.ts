@@ -4,6 +4,7 @@
 import { expandGlob } from "https://deno.land/std@0.224.0/fs/expand_glob.ts";
 import { dirname, relative } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { parse as parseYaml } from "https://deno.land/std@0.224.0/yaml/mod.ts";
+import { parseBlock as parseRuntimeBlock } from "../../helpers/lang.js";
 
 const LOCALES = ["en", "fr"]; // keep in sync with admin/config.yml i18n.locales
 
@@ -24,24 +25,48 @@ async function readOr(path: string): Promise<string | null> {
   }
 }
 
-// Keep front matter to one title so CI and Lang.parseBlock cannot disagree.
-function checkFrontMatter(path: string, raw: string) {
-  const m = raw.match(/^---\r?\n(title:[^\r\n]*)\r?\n---\r?\n?/);
+// Keep prose metadata narrow so build-time and browser parsing stay aligned.
+function checkFrontMatter(path: string, raw: string): boolean {
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!m) {
-    problems.push(`${path}: front matter must be exactly \`---\\ntitle: ...\\n---\``);
-    return;
+    problems.push(`${path}: missing YAML front matter`);
+    return false;
   }
   let fm: unknown;
   try {
     fm = parseYaml(m[1]);
   } catch (e) {
     problems.push(`${path}: front matter is not valid YAML (${(e as Error).message})`);
-    return;
+    return false;
   }
-  const title = (fm as Record<string, unknown>)?.title;
+  const fields = fm as Record<string, unknown>;
+  for (const key of Object.keys(fields ?? {})) {
+    if (!["title", "details"].includes(key)) {
+      problems.push(`${path}: unsupported front matter field '${key}'`);
+    }
+  }
+  const title = fields?.title;
   if (typeof title !== "string" || title.trim() === "") {
     problems.push(`${path}: \`title:\` must be a non-empty string`);
   }
+  if (fields?.details === undefined || fields.details === null) return false;
+
+  if (typeof fields.details !== "object" || Array.isArray(fields.details)) {
+    problems.push(`${path}: \`details:\` must contain title and body fields`);
+    return false;
+  }
+  const details = fields.details as Record<string, unknown>;
+  for (const key of Object.keys(details)) {
+    if (!["title", "body"].includes(key)) {
+      problems.push(`${path}: unsupported details field '${key}'`);
+    }
+  }
+  for (const key of ["title", "body"]) {
+    if (typeof details[key] !== "string" || details[key].trim() === "") {
+      problems.push(`${path}: \`details.${key}:\` must be a non-empty string`);
+    }
+  }
+  return true;
 }
 
 const textDirs = new Set<string>();
@@ -76,6 +101,7 @@ for (const dir of textDirs) {
 
   // Validate every localized prose block.
   const ids = new Map<string, Set<string>>();
+  const detailsById = new Map<string, Set<string>>();
   for await (const e of Deno.readDir(dir)) {
     const m = e.name.match(/^(.+)\.([a-z]{2})\.md$/);
     if (!m) continue;
@@ -90,17 +116,38 @@ for (const dir of textDirs) {
     }
     if (!ids.has(id)) ids.set(id, new Set());
     ids.get(id)!.add(loc);
-    checkFrontMatter(`${rel}/${e.name}`, await Deno.readTextFile(`${dir}/${e.name}`));
+    const path = `${rel}/${e.name}`;
+    const raw = await Deno.readTextFile(`${dir}/${e.name}`);
+    const hasDetails = checkFrontMatter(path, raw);
+    try {
+      parseRuntimeBlock(raw);
+    } catch (error) {
+      problems.push(`${path}: runtime parser failed (${(error as Error).message})`);
+    }
+    if (hasDetails) {
+      if (!detailsById.has(id)) detailsById.set(id, new Set());
+      detailsById.get(id)!.add(loc);
+    }
   }
   for (const [id, present] of ids) {
     for (const loc of LOCALES) {
       if (!present.has(loc)) problems.push(`${rel}/${id}.${loc}.md is missing`);
     }
+    const detailsLocales = detailsById.get(id);
+    if (detailsLocales) {
+      for (const loc of LOCALES) {
+        if (!detailsLocales.has(loc)) {
+          problems.push(`${rel}/${id}.${loc}.md is missing its \`details:\` content`);
+        }
+      }
+    }
   }
   blocksByDir.set(rel, new Set(ids.keys()));
   referencedByDir.set(rel, new Set());
 
-  console.log(`${rel}: ${en.size} keys, ${ids.size} prose blocks`);
+  console.log(
+    `${rel}: ${en.size} keys, ${ids.size} prose blocks, ${detailsById.size} with details`,
+  );
 }
 
 // Include one fragment level so split-notebook prose markers count as references.
