@@ -28,15 +28,40 @@ function contributionHeading(text) {
   return heading;
 }
 
+/** Accept absolute HTTP(S) profile URLs; invalid values render as plain names. */
+function safeProfileUrl(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(String(url)); // absolute only — no base
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function peopleList(people) {
   const list = document.createElement("div");
   list.className = "atlas-contributions__people";
 
-  people.forEach(({ name = "", orgs = [] }, index) => {
+  people.forEach(({ name = "", url, orgs = [] }, index) => {
     if (index) list.append(document.createTextNode(", "));
 
     const person = document.createElement("span");
-    person.textContent = String(name);
+
+    // Keep affiliation markers outside links; new tabs preserve notebook state.
+    let nameTarget = person;
+    const href = safeProfileUrl(url);
+    if (href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      person.appendChild(link);
+      nameTarget = link;
+    }
+    nameTarget.textContent = String(name);
 
     if (orgs.length) {
       const affiliations = document.createElement("sup");
@@ -61,19 +86,7 @@ function peopleSection(heading, people) {
   return section;
 }
 
-/**
- * Resolve author/developer lists into the shape atlasContributionSection wants,
- * assigning affiliation numbers from the orgs that actually appear.
- *
- * Each entry is either an id into `registry` (data/shared/contributors.json) or
- * an inline `{name, org}` object for one-off contributors not worth registering.
- * `org` may be a string or an array of strings; affiliations are numbered in
- * first-appearance order.
- *
- * @param {{authors?: Array, developers?: Array}} groups
- * @param {Record<string, {name: string, org?: string|string[]}>} [registry={}]
- * @returns {{authors: Array, developers: Array, organizations: Record<number,string>}}
- */
+/** Resolve contributor IDs or inline entries and number affiliations by appearance. */
 export function resolveContributors(groups = {}, registry = {}) {
   const orgNumbers = new Map();
   const numberFor = (org) => {
@@ -86,7 +99,11 @@ export function resolveContributors(groups = {}, registry = {}) {
       if (!person?.name) {
         throw new Error(`Unknown contributor: ${JSON.stringify(entry)}`);
       }
-      return { name: person.name, orgs: [].concat(person.org ?? []).map(numberFor) };
+      return {
+        name: person.name,
+        url: person.url,
+        orgs: [].concat(person.org ?? []).map(numberFor),
+      };
     });
 
   const authors = resolve(groups.authors);
@@ -97,14 +114,7 @@ export function resolveContributors(groups = {}, registry = {}) {
   return { authors, developers, organizations };
 }
 
-/**
- * Create the Atlas notebook contribution and affiliation block.
- *
- * @param {Object} data - Contributor and affiliation data.
- * @param {Node|string|null} [citation=null] - Optional citation node or text.
- * @param {string} [lang="en"] - Translation language.
- * @returns {HTMLElement}
- */
+/** Create the localized Atlas contribution and affiliation block. */
 export function atlasContributionSection(
   data = {},
   citation = null,
@@ -172,12 +182,7 @@ export function atlasContributionSection(
   return contribution;
 }
 
-/**
- * Create the standard Atlas citation.
- *
- * @param {string} [nbTitle=""] - Notebook title.
- * @returns {HTMLElement}
- */
+/** Create the standard Atlas citation. */
 export function atlasCitation(nbTitle = "") {
   const citation = document.createElement("span");
   citation.append(document.createTextNode("CGIAR. (2025). "));

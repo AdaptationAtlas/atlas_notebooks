@@ -11,15 +11,12 @@ window.anotherTest = "Hello World" // Can be accessed through console
   window.livetest = test // Can also be accessed through console
 }
 
-{ // Dispatch an event to be able to get the value from js console and trigger a js event.
+{ // Expose the value and notify regular JavaScript.
   window.livetest = test
   window.dispatchEvent(new CustomEvent("livetest-change", { detail: test }))
   return test
 }
-// Then in JS console:
-// window.addEventListener("livetest-change", (e) => {
-//   console.log("livetest changed:", e.detail)
-// })
+// Listen for "livetest-change" in the browser console to inspect updates.
 
 
 livetest = Generators.observe((notify) => {
@@ -27,8 +24,7 @@ livetest = Generators.observe((notify) => {
   window.addEventListener("livetest-change", handler)
   return () => window.removeEventListener("livetest-change", handler)
 })
-// Then in JS console:
-// window.dispatchEvent(new CustomEvent("livetest-change", { detail: 5 }))
+// Dispatch "livetest-change" from the browser console to update it.
 
 livetest
 
@@ -40,16 +36,15 @@ ojsBridge = (id, value) => {
   const key = `ojs_${id}`;
   const eventName = `ojs:${id}:change`;
 
-  // Push current OJS value out to regular JS
+  // Publish the current OJS value.
   window[key] = value;
   window.dispatchEvent(new CustomEvent(eventName, { detail: value }));
 
-  // Return an observable that can receive updates from JS/console
+  // Receive JavaScript updates as an observable.
   return Generators.observe((notify) => {
     const handler = (e) => notify(e.detail);
     window.addEventListener(eventName, handler);
 
-    // Initialize from current global if present
     if (key in window) notify(window[key]);
 
     return () => window.removeEventListener(eventName, handler);
@@ -64,16 +59,7 @@ testBridge = ojsBridge("bridgetest", inputVar);
 
 md`Say hello from JS and OJS: ${testBridge}`;
 
-// IN JS console:
-
-// To get/watch value:
-// window.addEventListener("ojs:bridgetest:change", (e) => {
-//   console.log("livetest changed:", e.detail)
-// })
-
-// To set value:
-// window.ojs_bridgetest = "Hello World"
-// window.dispatchEvent(new CustomEvent("ojs:bridgetest:change", { detail: "Hello World" }))
+// In the console, listen for or dispatch "ojs:bridgetest:change".
 ```
 
 # Observable input CSS regression checks
@@ -250,7 +236,6 @@ enhancedInputChecks = {
       options: ["Kenya", "Tanzanie", "Ouganda"],
       language: "fr",
       value: [],
-      commit: "change",
     }),
   ];
 
@@ -271,14 +256,14 @@ advancedEnhancedCheck = {
   enhancedMultiSelect(input, {
     searchable: true,
     requireAtLeastOne: false,
-    commit: "change",
   });
   return input;
 }
 ```
 
 The following checks exercise the DOM contract and commit timing without
-requiring visual inspection:
+requiring visual inspection. Commit timing is fixed: selecting an option must not
+emit, and closing the menu emits once if anything changed while it was open.
 
 ```{ojs}
 multiSelectBehaviorChecks = {
@@ -292,7 +277,6 @@ multiSelectBehaviorChecks = {
     value: [],
     requireAtLeastOne: false,
     enableSelectAll: true,
-    commit: "change",
   });
   sandbox.appendChild(immediate);
   let immediateEvents = 0;
@@ -302,7 +286,7 @@ multiSelectBehaviorChecks = {
   const immediateOption = immediate.querySelector('[role="option"]');
   immediateOption.click();
 
-  check("change mode emits immediately", immediateEvents === 1);
+  check("selecting an option does not emit", immediateEvents === 0);
   check("trigger exposes expanded state", immediateButton.getAttribute("aria-expanded") === "true");
   check("options use listbox semantics", immediate.querySelector('[role="listbox"]')?.contains(immediateOption));
   check("all buttons have type=button", Array.from(immediate.querySelectorAll("button")).every((button) => button.type === "button"));
@@ -319,20 +303,24 @@ multiSelectBehaviorChecks = {
   }));
   check("Escape closes the menu", immediateButton.getAttribute("aria-expanded") === "false");
   check("Escape returns trigger focus", document.activeElement === immediateButton);
+  // Closing is the commit, however it is closed.
+  check("Escape commits the pending change", immediateEvents === 1);
 
   const deferred = atlasMultiSelect(["Alpha", "Beta"], {
     value: [],
     requireAtLeastOne: false,
-    commit: "close",
   });
   sandbox.appendChild(deferred);
   let deferredEvents = 0;
   deferred.addEventListener("input", () => deferredEvents += 1);
   deferred.atlasMultiSelect.open();
   deferred.querySelector('[role="option"]').click();
-  check("close mode defers its event", deferredEvents === 0);
+  check("selection while open is deferred", deferredEvents === 0);
   deferred.atlasMultiSelect.close();
-  check("close mode emits once on close", deferredEvents === 1);
+  check("close emits exactly once", deferredEvents === 1);
+  deferred.atlasMultiSelect.open();
+  deferred.atlasMultiSelect.close();
+  check("close with no change emits nothing", deferredEvents === 1);
 
   const localized = atlasMultiSelect(["Un", "Deux"], {
     value: [],
@@ -504,86 +492,99 @@ safeContributionCheck = atlasContributionSection(
 );
 ```
 
-# Canonical administrative selector checks
-
-The shared selector is `helpers/adminSelectors.ojs`. Test both versions below:
-
-- changing a parent removes child selections that no longer belong to it;
-- Côte d'Ivoire and names containing apostrophes work without affecting data
-  queries;
-- region and district search works with or without accents;
-- Select All is omitted when a level has a finite maximum;
-- the two synchronized multi-select displays stay in sync;
-- controls wrap cleanly in a narrow window.
-
-The public value uses one whole-area convention: `admin1: null` in single mode
-or no matching admin-1 entry in multiple mode means the selected country is
-unfiltered. The displayed **All regions (ISO)** option is therefore a
-single-mode UI choice, not a value returned to notebook code.
+Optional contributor profile links. Only `http(s)` is allowed through, so the
+first name below links and the rest render as plain text — no link, and nothing
+executable. The affiliation marker must stay outside the link.
 
 ```{ojs}
-import { createAdminSelectors } from "/helpers/adminSelectors.ojs";
+profileLinkCheck = atlasContributionSection(
+  {
+    authors: [
+      { name: "Linked Person", url: "https://example.org/profile", orgs: [1] },
+      { name: "Script Person", url: "javascript:alert(1)", orgs: [1] },
+      { name: "Data URI Person", url: "data:text/html,<script>alert(1)</script>", orgs: [1] },
+      { name: "Nonsense URL Person", url: "not a url", orgs: [1] },
+      { name: "No URL Person", orgs: [1] },
+    ],
+    developers: [],
+    organizations: { 1: "R&D <Lab>" },
+  },
+);
+```
 
-adminSelectorLabel = (value) =>
-  value.kind === "ssa"
-    ? "SSA"
-    : [value.iso3, value.admin1_name, value.admin2_name]
-        .filter((part) => part != null)
-        .join(" / ");
+# Canonical administrative selector checks
+
+The shared selector is `helpers/adminSelectors.ojs`. The selection lives in that
+module, one cell per level, and every control rendered anywhere on the page binds
+to those same cells. Check that:
+
+- changing a parent removes child selections that no longer belong to it — and
+  that it does so for a level with **no control on screen** (the partial form
+  below shows only country and region; pick a district in the full form first,
+  then change the country in the partial one);
+- the partial form and the full form stay in sync, and using the partial one
+  never clears the district selection by itself;
+- Côte d'Ivoire and names containing apostrophes work without affecting queries;
+- region and district search works with or without accents;
+- Select All is omitted when a level has a finite maximum;
+- controls wrap cleanly in a narrow window;
+- **each trigger label reports only what is actually selected.** Select All on
+  countries, then check that regions reads "All regions" rather than a count of
+  countries.
+
+One whole-area convention throughout: a row whose own name is `null` means the
+level is not narrowed. Single-select shows those rows ("Sub-Saharan Africa",
+"Whole country", "All districts"); multi-select expresses the same thing by
+selecting nothing, so it has no such rows.
+
+```{ojs}
+import {
+  adminSelect,
+  adminMultiSelect,
+  adminSelections,
+} from "/helpers/adminSelectors.ojs";
 
 adminSelectorSummary = (selection) =>
   Object.fromEntries(
-    Object.entries(selection).map(([level, value]) => [
+    Object.entries(selection).map(([level, rows]) => [
       level,
-      Array.isArray(value)
-        ? value.map(adminSelectorLabel)
-        : value == null
-          ? null
-          : adminSelectorLabel(value),
+      // Empty means the level is not narrowed, in either mode.
+      rows.map((row) =>
+        [row.iso3, row.admin1_name, row.admin2_name]
+          .filter((part) => part != null)
+          .join(" / "),
+      ),
     ]),
   );
 ```
 
-## Single selection
+## All three levels, multi-select
 
 ```{ojs}
-viewof adminSingleCheck = createAdminSelectors({
-  multiple: false,
-  language: "en",
-});
-```
-
-```{ojs}
-html`<pre>${JSON.stringify(adminSelectorSummary(adminSingleCheck), null, 2)}</pre>`
-```
-
-## Multiple selection and binding
-
-```{ojs}
-viewof adminMultiCheck = createAdminSelectors({
-  multiple: true,
-  language: "en",
+adminMultiSelect(0, 1, 2, {
   maxSelections: { admin0: 3, admin1: 8, admin2: 12 },
   selectAll: true,
-  searchable: { admin0: true, admin1: true, admin2: true },
-});
+  searchable: true,
+})
+```
+
+## A partial form: country and region only
+
+Bound to the same state. It has no district control, and must not be able to
+disturb the district selection made above.
+
+```{ojs}
+adminMultiSelect(0, 1, { selectAll: true, searchable: true, langKey: "fr" })
+```
+
+## Single-select
+
+```{ojs}
+adminSelect(0, 1, 2)
 ```
 
 ```{ojs}
-adminMultiBoundCheck = Inputs.bind(
-  createAdminSelectors({
-    multiple: true,
-    language: "fr",
-    maxSelections: { admin0: 3, admin1: 8, admin2: 12 },
-    selectAll: true,
-    searchable: true,
-  }),
-  viewof adminMultiCheck,
-);
-```
-
-```{ojs}
-html`<pre>${JSON.stringify(adminSelectorSummary(adminMultiCheck), null, 2)}</pre>`
+html`<pre>${JSON.stringify(adminSelectorSummary(adminSelections), null, 2)}</pre>`
 ```
 
 # Atlas map helper regression checks

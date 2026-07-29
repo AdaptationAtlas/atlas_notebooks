@@ -1,560 +1,310 @@
+import { lang as Lang } from "/helpers/lang.js";
 import {
   enhancedMultiSelect as enhanceSelect,
 } from "/helpers/enhancedMultiSelect.js";
 
-_adminSelectorTranslations = ({
-  en: {
-    country: "Country",
-    region: "Region",
-    district: "District",
-    ssa: "Sub-Saharan Africa",
-    allRegions: "All regions",
-    allDistricts: "All districts",
-    selectAll: "Select All",
-    deselectAll: "Deselect All",
-    noneSelected: "None selected",
-    search: "Search…",
-    selected: (count) => `${count} selected`,
-  },
-  fr: {
-    country: "Pays",
-    region: "Région",
-    district: "District",
-    ssa: "Afrique subsaharienne",
-    allRegions: "Toutes les régions",
-    allDistricts: "Tous les districts",
-    selectAll: "Tout sélectionner",
-    deselectAll: "Tout désélectionner",
-    noneSelected: "Aucune sélection",
-    search: "Rechercher…",
-    selected: (count) => `${count} sélectionnés`,
-  },
-});
+// Shared state is per admin level and always an array; empty means unrestricted.
+// Single- and multi-select controls therefore expose the same downstream shape.
 
-_adminSelectorCountries = {
+adminTranslations = ({
+  country: { en: "Country", fr: "Pays" },
+  region: { en: "Region", fr: "Région" },
+  district: { en: "District", fr: "District" },
+  ssa: { en: "Sub-Saharan Africa", fr: "Afrique subsaharienne" },
+  wholeCountry: { en: "Whole country", fr: "Pays entier" },
+  allRegions: { en: "All regions", fr: "Toutes les régions" },
+  allDistricts: { en: "All districts", fr: "Tous les districts" },
+  selectAll: { en: "Select All", fr: "Tout sélectionner" },
+  deselectAll: { en: "Deselect All", fr: "Tout désélectionner" },
+  noneSelected: { en: "None selected", fr: "Aucune sélection" },
+  search: { en: "Search…", fr: "Rechercher…" },
+})
+
+// Keep all controls on a level aligned on the same Atlas-wide exclusions.
+adminExcludedIso3 = new Set(["SDN"])
+
+// Options mirror Atlas data fields; names below their own level are null.
+// Normalize source `iso3c` to `iso3` for a single identifier.
+countries = {
   const rows = await FileAttachment("/data/shared/atlas_countries.json").json();
-
   return rows
-    .filter((country) => country.include)
-    .map(({ include, iso3c, ...country }) => ({
-      ...country,
-      level: 0,
-      kind: "admin0",
-      iso3: iso3c,
-      // Retain the source field during migration while exposing one consistent
-      // `iso3` field at every administrative level.
-      iso3c,
+    .filter((c) => c.include && !adminExcludedIso3.has(c.iso3c))
+    .map((c) => ({
+      iso3: c.iso3c,
+      admin0_name: c.admin0_name,
+      admin1_name: null,
+      admin2_name: null,
+      translation: c.translation,
     }));
-};
+}
 
-_adminSelectorRows = {
-  const db = await DuckDBClient.of({
-    admin_lookup: await FileAttachment(
-      "/data/shared/gaul24_africa_lookup.parquet",
-    ),
-  });
+// Only country names have translations.
+ssaObj = ({
+  iso3: null,
+  admin0_name: null,
+  admin1_name: null,
+  admin2_name: null,
+  translation: adminTranslations.ssa,
+})
 
-  const rows = await db.query(`
-    SELECT DISTINCT admin0_name, admin1_name, admin2_name, iso3
-    FROM admin_lookup
-    ORDER BY iso3, admin1_name, admin2_name
-  `);
+// Load the small JSON projection once; reading its ZSTD parquet source would cost more.
+// In-memory indexes also avoid repeated SQL and name escaping.
+adminLookup = {
+  const rows = await FileAttachment(
+    "/data/shared/gaul24_africa_lookup.json",
+  ).json();
 
-  return Array.from(rows, (row) => ({ ...row }));
-};
-
-_adminSelectorIndex = {
   const admin1ByIso = new Map();
-  const admin2ByParent = new Map();
+  const admin2ByRegion = new Map();
 
-  for (const row of _adminSelectorRows) {
-    if (row.iso3 && row.admin1_name != null) {
-      if (!admin1ByIso.has(row.iso3)) admin1ByIso.set(row.iso3, new Map());
+  for (const row of rows) {
+    if (!row.iso3 || row.admin1_name == null) continue;
 
-      const admin1Rows = admin1ByIso.get(row.iso3);
-      if (!admin1Rows.has(row.admin1_name)) {
-        admin1Rows.set(row.admin1_name, {
-          level: 1,
-          kind: "admin1",
-          iso3: row.iso3,
-          admin0_name: row.admin0_name,
-          admin1_name: row.admin1_name,
-          admin2_name: null,
-        });
-      }
-    }
+    if (!admin1ByIso.has(row.iso3)) admin1ByIso.set(row.iso3, new Map());
+    admin1ByIso.get(row.iso3).set(row.admin1_name, {
+      iso3: row.iso3,
+      admin0_name: row.admin0_name,
+      admin1_name: row.admin1_name,
+      admin2_name: null,
+    });
 
-    if (row.iso3 && row.admin1_name != null && row.admin2_name != null) {
-      const parentKey = JSON.stringify([row.iso3, row.admin1_name]);
-      if (!admin2ByParent.has(parentKey)) {
-        admin2ByParent.set(parentKey, new Map());
-      }
-
-      const admin2Rows = admin2ByParent.get(parentKey);
-      if (!admin2Rows.has(row.admin2_name)) {
-        admin2Rows.set(row.admin2_name, {
-          level: 2,
-          kind: "admin2",
-          iso3: row.iso3,
-          admin0_name: row.admin0_name,
-          admin1_name: row.admin1_name,
-          admin2_name: row.admin2_name,
-        });
-      }
-    }
+    if (row.admin2_name == null) continue;
+    const key = `${row.iso3}||${row.admin1_name}`;
+    if (!admin2ByRegion.has(key)) admin2ByRegion.set(key, []);
+    admin2ByRegion.get(key).push({
+      iso3: row.iso3,
+      admin0_name: row.admin0_name,
+      admin1_name: row.admin1_name,
+      admin2_name: row.admin2_name,
+    });
   }
+
+  // Sort explicitly and group accented names naturally.
+  const byName = (field) => (a, b) =>
+    a[field].localeCompare(b[field], undefined, { sensitivity: "base" });
 
   return {
     admin1ByIso: new Map(
-      Array.from(admin1ByIso, ([iso3, rows]) => [
+      Array.from(admin1ByIso, ([iso3, regions]) => [
         iso3,
-        Array.from(rows.values()).sort((a, b) =>
-          a.admin1_name.localeCompare(b.admin1_name, undefined, {
-            sensitivity: "base",
-          }),
-        ),
+        [...regions.values()].sort(byName("admin1_name")),
       ]),
     ),
-    admin2ByParent: new Map(
-      Array.from(admin2ByParent, ([parent, rows]) => [
-        parent,
-        Array.from(rows.values()).sort((a, b) =>
-          a.admin2_name.localeCompare(b.admin2_name, undefined, {
-            sensitivity: "base",
-          }),
-        ),
+    admin2ByRegion: new Map(
+      Array.from(admin2ByRegion, ([key, districts]) => [
+        key,
+        districts.sort(byName("admin2_name")),
       ]),
     ),
   };
-};
-
-function _adminSelectorLevelConfig(config, name, fallback) {
-  if (config === undefined) return fallback;
-  if (
-    config !== null &&
-    typeof config === "object" &&
-    !Array.isArray(config)
-  ) {
-    return config[name] ?? fallback;
-  }
-  return config;
 }
 
-function _adminSelectorKey(level, option) {
-  if (!option) return null;
-  if (option.kind === "ssa") return "ssa";
+// Selection state: one array-backed holder per level.
+
+viewof admin0Select = Inputs.input([])
+viewof admin1Select = Inputs.input([])
+viewof admin2Select = Inputs.input([])
+
+// Observable requires literal `viewof` references.
+adminViews = new Map([
+  [0, viewof admin0Select],
+  [1, viewof admin1Select],
+  [2, viewof admin2Select],
+])
+
+// Cascade each level's options from the level above.
+
+dataAdmin1 = admin0Select.flatMap(
+  (c) => adminLookup.admin1ByIso.get(c.iso3) ?? [],
+)
+
+dataAdmin2 = admin1Select.flatMap(
+  (r) => adminLookup.admin2ByRegion.get(`${r.iso3}||${r.admin1_name}`) ?? [],
+)
+
+// Single-select placeholder rows mean “do not narrow” and are never stored.
+adminIsWholeArea = (level, d) =>
+  d == null ||
+  (level === 0
+    ? d.iso3 == null
+    : level === 1
+      ? d.admin1_name == null
+      : d.admin2_name == null)
+
+adminKeyOf = (level, d) =>
+  level === 1
+    ? `${d.iso3}||${d.admin1_name ?? ""}`
+    : `${d.iso3}||${d.admin1_name ?? ""}||${d.admin2_name ?? ""}`
+
+adminSetView = (view, value) => {
+  view.value = value;
+  view.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+/** Remove deeper selections invalidated by a parent change. */
+adminPruneBelow = (level) => {
+  if (level > 1) return;
 
   if (level === 0) {
-    return JSON.stringify([0, option.iso3 ?? option.iso3c ?? null]);
+    const a0 = adminViews.get(0).value;
+    const a1 = adminViews.get(1).value;
+    const valid = new Set(
+      a0.flatMap((c) =>
+        (adminLookup.admin1ByIso.get(c.iso3) ?? []).map((d) => adminKeyOf(1, d)),
+      ),
+    );
+    const kept = a1.filter((d) => valid.has(adminKeyOf(1, d)));
+    if (kept.length !== a1.length) adminSetView(adminViews.get(1), kept);
   }
+
+  const a1 = adminViews.get(1).value;
+  const a2 = adminViews.get(2).value;
+  const valid = new Set(
+    a1.flatMap((r) =>
+      (adminLookup.admin2ByRegion.get(`${r.iso3}||${r.admin1_name}`) ?? []).map(
+        (d) => adminKeyOf(2, d),
+      ),
+    ),
+  );
+  const kept = a2.filter((d) => valid.has(adminKeyOf(2, d)));
+  if (kept.length !== a2.length) adminSetView(adminViews.get(2), kept);
+}
+
+// The whole selection in one piece, for helpers/adminBoundaries.js.
+adminSelections = ({
+  admin0: admin0Select,
+  admin1: admin1Select,
+  admin2: admin2Select,
+})
+
+// Controls
+
+// Single-select needs an unrestricted row; multi-select represents it with [].
+adminOptionsFor = (level, multiple, _lang) => {
+  if (level === 0) {
+    return multiple ? countries : [ssaObj, ...countries];
+  }
+
   if (level === 1) {
-    return JSON.stringify([
-      1,
-      option.iso3 ?? null,
-      option.admin1_name ?? null,
+    if (multiple) return dataAdmin1;
+    return admin0Select.flatMap((c) => [
+      { iso3: c.iso3, admin0_name: c.admin0_name, admin1_name: null, admin2_name: null },
+      ...(adminLookup.admin1ByIso.get(c.iso3) ?? []),
     ]);
   }
-  return JSON.stringify([
-    2,
-    option.iso3 ?? null,
-    option.admin1_name ?? null,
-    option.admin2_name ?? null,
+
+  if (multiple) return dataAdmin2;
+  return admin1Select.flatMap((r) => [
+    { ...r, admin2_name: null },
+    ...(adminLookup.admin2ByRegion.get(`${r.iso3}||${r.admin1_name}`) ?? []),
   ]);
 }
 
-function _adminSelectorAsArray(value) {
-  if (value === null || value === undefined) return [];
-  return Array.isArray(value) ? value : [value];
+adminOptionLabel = (level, d, _lang) => {
+  if (level === 0) {
+    return d.translation ? _lang(d.translation) : d.admin0_name ?? d.iso3;
+  }
+  if (level === 1) {
+    return d.admin1_name == null
+      ? `${_lang(adminTranslations.wholeCountry)} (${d.iso3})`
+      : `${d.admin1_name} (${d.iso3})`;
+  }
+  return d.admin2_name == null
+    ? `${_lang(adminTranslations.allDistricts)} (${d.iso3})`
+    : `${d.admin2_name} (${d.iso3})`;
 }
 
-/**
- * Create linked Atlas administrative selectors as one Observable-compatible
- * input. The returned element has a `.value` shaped as:
- *
- *   { admin0, admin1, admin2 }
- *
- * In multiple mode each field is an array. In single mode each field is an
- * object or null. The component may be passed to `Inputs.bind()` to keep
- * repeated displays synchronized.
- *
- * @param {object} [config]
- * @param {number[]} [config.levels=[0,1,2]]
- * @param {boolean} [config.multiple=false]
- * @param {string} [config.language="en"]
- * @param {object} [config.value] Initial `{admin0,admin1,admin2}` selection.
- * @param {boolean} [config.includeSSA] Include an SSA option in single mode.
- * @param {boolean} [config.includeFullCountry] Show the internal whole-country
- * option in single-select mode. Defaults to `true` in single mode and is
- * ignored in multiple mode, where an absent admin-1 selection means whole
- * country.
- * @param {boolean} [config.includeAllDistricts=true]
- * @param {number|object} [config.maxSelections=Infinity]
- * @param {boolean|object} [config.requireAtLeastOne=false]
- * @param {boolean|object} [config.selectAll=false] Enable valid bulk actions.
- * Select All is omitted for levels with a finite selection limit.
- * @param {boolean|object} [config.searchable]
- * @param {string[]} [config.includeIso3]
- * @param {string[]} [config.excludeIso3=["SDN"]]
- * @param {object} [config.labels] Translation overrides.
- * @returns {HTMLDivElement}
- */
-function createAdminSelectors({
-  levels = [0, 1, 2],
-  multiple = false,
-  language = "en",
-  value,
-  includeSSA = !multiple,
-  includeFullCountry = !multiple,
-  includeAllDistricts = true,
-  maxSelections = Infinity,
-  requireAtLeastOne = false,
-  selectAll = false,
-  searchable = { admin0: false, admin1: true, admin2: true },
-  includeIso3 = null,
-  excludeIso3 = ["SDN"],
-  labels = {},
-} = {}) {
-  const normalizedLevels = Array.from(new Set(levels)).sort((a, b) => a - b);
+adminLevelLabel = (level, _lang) =>
+  _lang([adminTranslations.country, adminTranslations.region, adminTranslations.district][level])
 
-  if (
-    !normalizedLevels.length ||
-    normalizedLevels.some((level) => ![0, 1, 2].includes(level))
-  ) {
-    throw new TypeError("levels must contain one or more of 0, 1, and 2");
-  }
-  if (normalizedLevels.includes(1) && !normalizedLevels.includes(0)) {
-    throw new Error("Admin level 1 requires admin level 0");
-  }
-  if (normalizedLevels.includes(2) && !normalizedLevels.includes(1)) {
-    throw new Error("Admin level 2 requires admin levels 0 and 1");
-  }
-  if (multiple && includeSSA) {
-    throw new Error("includeSSA is only supported in single-select mode");
-  }
+// Bind one control to its level; single-select converts its scalar value to an array.
+adminControl = (level, config) => {
+  const {
+    multiple = false,
+    langKey = "en",
+    maxSelections,
+    requireAtLeastOne = false,
+    selectAll = false,
+    searchable = false,
+  } = config;
 
-  const translation = _adminSelectorTranslations[language] || {};
-  const text = {
-    ..._adminSelectorTranslations.en,
-    ...translation,
-    ...labels,
-  };
-  const includeSet = includeIso3 ? new Set(includeIso3) : null;
-  const excludeSet = new Set(excludeIso3 || []);
-  const countries = _adminSelectorCountries.filter(
-    (country) =>
-      (!includeSet || includeSet.has(country.iso3)) &&
-      !excludeSet.has(country.iso3),
-  );
-  const countryByIso = new Map(
-    countries.map((country) => [country.iso3, country]),
-  );
-  const fullCountryByIso = new Map();
-  const allDistrictsByParent = new Map();
-  const ssaOption = {
-    level: 0,
-    kind: "ssa",
-    iso3: null,
-    iso3c: null,
-    admin0_name: null,
-    translation: {
-      en: _adminSelectorTranslations.en.ssa,
-      fr: _adminSelectorTranslations.fr.ssa,
-    },
-  };
+  const _lang = Lang.lg(langKey);
+  const name = `admin${level}`;
+  const perLevel = (opt, fallback) =>
+    opt && typeof opt === "object" && !Array.isArray(opt)
+      ? (opt[name] ?? fallback)
+      : (opt ?? fallback);
 
-  const root = document.createElement("div");
-  root.className = "atlas-admin-selectors";
-  root.dataset.mode = multiple ? "multiple" : "single";
-
-  const hosts = {};
-  const state = { admin0: [], admin1: [], admin2: [] };
-
-  for (const level of normalizedLevels) {
-    const name = `admin${level}`;
-    const host = document.createElement("div");
-    host.className = `atlas-admin-selector atlas-admin-selector--${name}`;
-    hosts[name] = host;
-    root.appendChild(host);
-  }
-
-  function countryLabel(country) {
-    return (
-      country?.translation?.[language] ||
-      country?.translation?.en ||
-      country?.admin0_name ||
-      country?.iso3 ||
-      ""
-    );
-  }
-
-  function fullCountryOption(country) {
-    if (!fullCountryByIso.has(country.iso3)) {
-      fullCountryByIso.set(country.iso3, {
-        level: 1,
-        kind: "full-country",
-        iso3: country.iso3,
-        admin0_name: country.admin0_name,
-        admin1_name: null,
-        admin2_name: null,
-      });
-    }
-    return fullCountryByIso.get(country.iso3);
-  }
-
-  function allDistrictsOption(admin1) {
-    const parentKey = JSON.stringify([admin1.iso3, admin1.admin1_name]);
-    if (!allDistrictsByParent.has(parentKey)) {
-      allDistrictsByParent.set(parentKey, {
-        level: 2,
-        kind: "all-districts",
-        iso3: admin1.iso3,
-        admin0_name: admin1.admin0_name,
-        admin1_name: admin1.admin1_name,
-        admin2_name: null,
-      });
-    }
-    return allDistrictsByParent.get(parentKey);
-  }
-
-  function optionsFor(level) {
-    if (level === 0) {
-      return includeSSA ? [ssaOption, ...countries] : countries;
-    }
-
-    if (level === 1) {
-      const options = [];
-      for (const selectedCountry of state.admin0) {
-        if (!selectedCountry?.iso3) continue;
-        const country = countryByIso.get(selectedCountry.iso3);
-        if (!country) continue;
-        if (!multiple && includeFullCountry) {
-          options.push(fullCountryOption(country));
-        }
-        options.push(
-          ...(_adminSelectorIndex.admin1ByIso.get(country.iso3) || []),
-        );
-      }
-      return options;
-    }
-
-    const options = [];
-    for (const selectedAdmin1 of state.admin1) {
-      if (!selectedAdmin1?.iso3 || selectedAdmin1.admin1_name == null) continue;
-      if (!multiple && includeAllDistricts) {
-        options.push(allDistrictsOption(selectedAdmin1));
-      }
-      const parentKey = JSON.stringify([
-        selectedAdmin1.iso3,
-        selectedAdmin1.admin1_name,
-      ]);
-      options.push(
-        ...(_adminSelectorIndex.admin2ByParent.get(parentKey) || []),
-      );
-    }
-    return options;
-  }
-
-  function matchSelection(level, candidates, options) {
-    const optionByKey = new Map(
-      options.map((option) => [_adminSelectorKey(level, option), option]),
-    );
-    const matched = [];
-
-    for (const candidate of _adminSelectorAsArray(candidates)) {
-      let match;
-      if (level === 0 && typeof candidate === "string") {
-        match = options.find(
-          (option) => option.iso3 === candidate || option.iso3c === candidate,
-        );
-      } else {
-        match = optionByKey.get(_adminSelectorKey(level, candidate));
-      }
-      if (match && !matched.includes(match)) matched.push(match);
-    }
-
-    const limit = _adminSelectorLevelConfig(
-      maxSelections,
-      `admin${level}`,
-      Infinity,
-    );
-    return multiple && Number.isFinite(limit)
-      ? matched.slice(0, Math.max(0, Math.floor(limit)))
-      : matched;
-  }
-
-  function normalizeState() {
-    for (const level of [0, 1, 2]) {
-      const name = `admin${level}`;
-      if (!normalizedLevels.includes(level)) {
-        state[name] = [];
-        continue;
-      }
-
-      const options = optionsFor(level);
-      state[name] = matchSelection(level, state[name], options);
-      const required = _adminSelectorLevelConfig(
-        requireAtLeastOne,
-        name,
-        false,
-      );
-
-      if (!state[name].length && options.length && (!multiple || required)) {
-        state[name] = [options[0]];
-      }
-    }
-  }
-
-  function optionLabel(level, option) {
-    if (option.kind === "ssa") return text.ssa;
-    if (level === 0) return countryLabel(option);
-    if (option.kind === "full-country") {
-      return `${text.allRegions} (${option.iso3})`;
-    }
-    if (option.kind === "all-districts") {
-      return `${text.allDistricts} (${option.iso3})`;
-    }
-    if (level === 1) return `${option.admin1_name} (${option.iso3})`;
-    return `${option.admin2_name} (${option.iso3})`;
-  }
-
-  function labelFor(level) {
-    return level === 0 ? text.country : level === 1 ? text.region : text.district;
-  }
-
-  function emptyLabelFor(level) {
-    if (!multiple || level === 0) return text.noneSelected;
-    return level === 1 ? text.allRegions : text.allDistricts;
-  }
-
-  function admin1SelectionLabel(selectedRegions) {
-    if (!state.admin0.length) return text.noneSelected;
-
-    const summary = [];
-    for (const country of state.admin0) {
-      const regions = selectedRegions.filter(
-        (label) => label.endsWith(` (${country.iso3})`),
-      );
-      if (regions.length) {
-        summary.push(...regions);
-      } else {
-        summary.push(`${text.allRegions} (${country.iso3})`);
-      }
-    }
-
-    return summary.length > 5
-      ? typeof text.selected === "function"
-        ? text.selected(summary.length)
-        : String(text.selected).replace("{count}", summary.length)
-      : summary.join(", ");
-  }
-
-  function renderControl(level) {
-    if (!normalizedLevels.includes(level)) return;
-
-    const name = `admin${level}`;
-    const options = optionsFor(level);
-    const input = Inputs.select(options, {
-      label: labelFor(level),
-      format: (option) => optionLabel(level, option),
-      multiple,
-      value: multiple ? state[name] : state[name][0],
-    });
-    const nativeSelect = input.querySelector("select") || input;
-    nativeSelect.disabled = options.length === 0;
-
-    if (multiple) {
-      enhanceSelect(input, {
-        maxSelections: _adminSelectorLevelConfig(
-          maxSelections,
-          name,
-          Infinity,
-        ),
-        requireAtLeastOne: _adminSelectorLevelConfig(
-          requireAtLeastOne,
-          name,
-          false,
-        ),
-        enableSelectAll:
-          options.length > 0 &&
-          _adminSelectorLevelConfig(selectAll, name, false),
-        searchable:
-          options.length > 0 &&
-          _adminSelectorLevelConfig(searchable, name, false),
-        commit: "change",
-        compactLabelThreshold: 5,
-        formatSelection:
-          level === 1
-            ? ({ labels }) => admin1SelectionLabel(labels)
-            : undefined,
-        labels: {
-          selectAll: text.selectAll,
-          deselectAll: text.deselectAll,
-          noneSelected: emptyLabelFor(level),
-          search: text.search,
-          selected: text.selected,
-        },
-      });
-    }
-
-    input.addEventListener("input", (event) => {
-      event.stopPropagation();
-      state[name] = _adminSelectorAsArray(input.value);
-      normalizeState();
-
-      if (level === 0) {
-        renderControl(1);
-        renderControl(2);
-      } else if (level === 1) {
-        renderControl(2);
-      }
-
-      root.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    hosts[name].replaceChildren(input);
-  }
-
-  function setValue(nextValue = {}) {
-    nextValue ||= {};
-    state.admin0 = _adminSelectorAsArray(nextValue.admin0);
-    state.admin1 = _adminSelectorAsArray(nextValue.admin1);
-    state.admin2 = _adminSelectorAsArray(nextValue.admin2);
-    normalizeState();
-    for (const level of normalizedLevels) renderControl(level);
-  }
-
-  function getValue() {
-    if (multiple) {
-      return {
-        admin0: [...state.admin0],
-        admin1: state.admin1.filter(
-          (option) => option.kind !== "full-country",
-        ),
-        admin2: state.admin2.filter(
-          (option) => option.kind !== "all-districts",
-        ),
-      };
-    }
-
-    return {
-      admin0: state.admin0[0] || null,
-      admin1:
-        state.admin1[0]?.kind === "full-country"
-          ? null
-          : state.admin1[0] || null,
-      admin2:
-        state.admin2[0]?.kind === "all-districts"
-          ? null
-          : state.admin2[0] || null,
-    };
-  }
-
-  Object.defineProperty(root, "value", {
-    configurable: true,
-    get: getValue,
-    set: setValue,
+  const options = adminOptionsFor(level, multiple, _lang);
+  const view = adminViews.get(level);
+  const input = Inputs.select(options, {
+    label: adminLevelLabel(level, _lang),
+    format: (d) => adminOptionLabel(level, d, _lang),
+    multiple,
+    value: multiple ? view.value : view.value[0],
   });
 
-  setValue(value || {});
-  return root;
+  (input.querySelector("select") ?? input).disabled = options.length === 0;
+
+  if (multiple) {
+    enhanceSelect(input, {
+      maxSelections: perLevel(maxSelections, Infinity),
+      requireAtLeastOne: perLevel(requireAtLeastOne, false),
+      enableSelectAll: options.length > 0 && perLevel(selectAll, false),
+      searchable: options.length > 0 && perLevel(searchable, false),
+      // Commit on close to avoid a query per checkbox click.
+      compactLabelThreshold: 5,
+      labels: {
+        selectAll: _lang(adminTranslations.selectAll),
+        deselectAll: _lang(adminTranslations.deselectAll),
+        noneSelected: _lang(
+          level === 0
+            ? adminTranslations.noneSelected
+            : level === 1
+              ? adminTranslations.allRegions
+              : adminTranslations.allDistricts,
+        ),
+        search: _lang(adminTranslations.search),
+      },
+    });
+    // Multi-select already speaks in arrays, so it binds to the state directly.
+    Inputs.bind(input, view);
+  } else {
+    input.addEventListener("input", (event) => {
+      event.stopPropagation();
+      // Store unrestricted placeholder rows as [] to match multi-select.
+      adminSetView(view, adminIsWholeArea(level, input.value) ? [] : [input.value]);
+    });
+  }
+
+  // Registered after the binding above, so this sees the level's new value.
+  input.addEventListener("input", () => adminPruneBelow(level));
+
+  return input;
 }
+
+// Accept level varargs followed by an optional config object.
+adminForm = (args, multiple) => {
+  const rest = [...args];
+  const config =
+    rest.length && typeof rest[rest.length - 1] === "object" ? rest.pop() : {};
+  const levels = (rest.length ? rest : [0, 1, 2])
+    .filter((level) => [0, 1, 2].includes(level))
+    .sort((a, b) => a - b);
+
+  if (!levels.length) {
+    throw new TypeError("adminSelect() needs at least one of levels 0, 1, 2");
+  }
+
+  return Inputs.form(
+    levels.map((level) => adminControl(level, { ...config, multiple })),
+    {
+      template: (inputs) =>
+        html`<div class="atlas-admin-selectors" style="display: flex; flex-wrap: wrap; gap: 2em;">${inputs}</div>`,
+    },
+  );
+}
+
+adminSelect = (...args) => adminForm(args, false)
+
+adminMultiSelect = (...args) => adminForm(args, true)
