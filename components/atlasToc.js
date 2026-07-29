@@ -266,9 +266,7 @@ class AtlasToc extends HTMLElement {
 
     this._mutationObserver = new MutationObserver((mutations) => {
       const headingsChanged = mutations.some((mutation) => {
-        // Text filled into an existing heading (e.g. OJS inline expressions
-        // resolving after initial render) — the mutation target sits inside
-        // the heading rather than adding a heading node.
+        // OJS may fill text inside an existing heading after initial render.
         const target =
           mutation.target.nodeType === Node.ELEMENT_NODE
             ? mutation.target

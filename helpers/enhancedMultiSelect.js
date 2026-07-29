@@ -17,32 +17,7 @@ const atlasMultiSelectTranslations = {
   },
 };
 
-/**
- * Enhance an existing `Inputs.select(..., {multiple: true})`.
- *
- * Use `atlasMultiSelect()` for normal construction. This lower-level helper is
- * retained for advanced cases that need to create or bind the native input
- * before enhancement.
- *
- * @param {HTMLElement|HTMLFormElement} viewofSelect
- * @param {object} [config]
- * @param {?number} [config.maxSelections=null]
- * @param {boolean} [config.requireAtLeastOne=true]
- * @param {boolean} [config.enableSelectAll=false] Show valid bulk actions.
- * "Select All" is omitted when `maxSelections` is finite.
- * @param {boolean} [config.searchable=false]
- *
- * The selection commits once, when the dropdown closes, and only if it actually
- * changed while open. This is not configurable: an Atlas selector drives queries
- * and map redraws, so committing per checkbox click ran the whole chain on every
- * click of a multi-unit selection.
- * @param {?number} [config.compactLabelThreshold=null]
- * @param {string} [config.language="en"]
- * @param {object} [config.labels]
- * @param {string} [config.minWidth="240px"]
- * @param {string} [config.maxWidth="400px"]
- * @returns {HTMLElement|HTMLFormElement}
- */
+/** Enhance a multiple Inputs.select; changes commit once when the menu closes. */
 export function enhancedMultiSelect(
   viewofSelect,
   {
@@ -349,8 +324,7 @@ export function enhancedMultiSelect(
   const dispatchInput = () => {
     select.dispatchEvent(new Event("input", { bubbles: true }));
   };
-  // Refresh only. The commit happens in closeList, which compares against the
-  // signature taken when the list opened.
+  // Refresh now; closeList commits only if the opening signature changed.
   const selectionChanged = () => {
     updateUI();
   };

@@ -1,16 +1,4 @@
-<!--
-============================================================================
-SECTION 3: CIS READINESS × ACCESS/IMPLEMENTATION INTERSECTION
-============================================================================
-This file analyzes the intersection between CIS readiness and digital/media
-access (TV, internet, cellphone). It identifies regions where CIS capacity
-exists but communication channels may limit uptake, and vice versa.
-
-Data Sources:
-- CIS_access.parquet: Digital access percentages at admin levels
-- Section 1 cisData: CIS readiness indicators (reused)
-============================================================================
--->
+<!-- Section 3: CIS readiness × digital and media access. -->
 
 # CIS Implementation {#cis-implementation}
 
@@ -23,7 +11,6 @@ adminControls(0, 1)
 ```
 
 ```{ojs}
-// Query access data with SQL-side admin filtering (shared helper from Section 2)
 s3AccessDataRaw = {
   const bind = createSqlBindings();
   const adminWhere = sqlAdminWhere(
@@ -42,14 +29,10 @@ s3AccessDataRaw = {
   );
 }
 
-// Access data reaches admin 1 only, so this section's view and its query both stop
-// there: drilling into districts draws the regions with the selection outlined
-// rather than emptying the map.
+// Access stops at admin 1; deeper selections highlight regions instead of filtering.
 s3View = adminViewFor(1)
 
-// Readiness has to be read at the same level as the access rows. filteredData is
-// the full-depth query, so at district level it holds many admin-2 rows per region
-// and indexing it by region would pick an arbitrary district's value.
+// Query readiness at the access level to avoid choosing an arbitrary district row.
 s3Readiness = {
   const bind = createSqlBindings();
   const adminWhere = sqlAdminWhere(
@@ -71,20 +54,15 @@ s3ReadinessByAdmin = new Map(
 
 section3Data = {
   return s3AccessDataRaw.map(access => {
-    // Match CIS readiness at the same admin level as the access row.
     const cis = s3ReadinessByAdmin.get(s3View.adminKey(access));
     if (!cis) return null;
     
-    // Calculate combined access: average of available indicators
-    // This provides a single "overall access" metric
-    // d3.mean skips null and NaN, and returns undefined for an all-missing set.
+    // Average available access indicators; preserve an all-missing row as null.
     const combined_access =
       d3.mean([access.tv, access.internet, access.cellphone]) ?? null;
     
     return {
-      // Rows are regions once a country is picked, so they need their own label:
-      // keying charts and tables on admin0_name collapsed every region of a
-      // country onto one row.
+      // Label at the resolved level so regions remain distinct.
       label: adminDisplayName(access, s3View.level),
       admin0_name: access.admin0_name,
       admin1_name: access.admin1_name,
@@ -94,7 +72,6 @@ section3Data = {
       gaul1_code: access.gaul1_code,
       gaul2_code: access.gaul2_code,
       cis_readiness_index: cis.cis_readiness_index,
-      // Raw access percentages (0-100 scale)
       tv_pct: access.tv,
       internet_pct: access.internet,
       cellphone_pct: access.cellphone,
@@ -173,9 +150,7 @@ viewof s3SortBy = {
 ```
 
 ```{ojs}
-// The access types, their columns and their labels in one place. Insertion order
-// is the display order for the radio. Depends on nbText, so the labels follow
-// the language toggle.
+// Registry order controls the localized access-type radio.
 S3_ACCESS_TYPES = new Object({
   combined: { pct: "combined_pct", label: nbText.s3AccessCombined },
   internet: { pct: "internet_pct", label: nbText.s3AccessInternet },
@@ -183,9 +158,7 @@ S3_ACCESS_TYPES = new Object({
   cellphone: { pct: "cellphone_pct", label: nbText.s3AccessCellphone },
 })
 
-// Access is stored once, as a percentage. Comparing it to the readiness index or
-// to the tercile cutoffs needs the same 0-1 scale, so that is derived here rather
-// than held as a second copy of every column.
+// Convert stored percentages to 0–1 only for readiness comparisons.
 s3AccessNorm = (d, key = s3AccessType) => {
   const pct = d[S3_ACCESS_TYPES[key].pct];
   return pct == null || isNaN(pct) ? null : pct / 100;
@@ -196,7 +169,6 @@ s3CurrentAccessLabel = S3_ACCESS_TYPES[s3AccessType].label
 
 ```{ojs}
 s3AccessCutoffs = {
-  // Extract values for the currently selected access type
   const values = section3Data
     .map((d) => s3AccessNorm(d))
     .filter(v => v !== null && !isNaN(v))
@@ -206,7 +178,6 @@ s3AccessCutoffs = {
     return { low: 0.33, moderate: 0.67 };
   }
   
-  // Calculate tercile cutoffs (33.3% and 66.7% quantiles)
   return {
     low: d3.quantile(values, 0.333),
     moderate: d3.quantile(values, 0.667)
@@ -221,16 +192,13 @@ classifyS3Readiness = (value, rowOrLevel = s3View.level) =>
 function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = s3View.level) {
   const readinessClass = classifyS3Readiness(readiness, rowOrLevel);
 
-  // Classify access level (using dynamic tercile cutoffs)
   let accessClass;
   if (access === null || isNaN(access)) accessClass = "N/A";
   else if (access < accessCutoffs.low) accessClass = "Low";
   else if (access < accessCutoffs.moderate) accessClass = "Moderate";
   else accessClass = "High";
   
-  // Either axis missing means there is no cell on the 3x3 grid, so both fall to the
-  // one key the palette actually has. Composing "No data × High" produced a class
-  // with no colour.
+  // Collapse any missing axis to the palette's single no-data key.
   const missing = accessClass === "N/A" || readinessClass === "No data";
 
   return {
@@ -240,15 +208,12 @@ function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = 
   };
 }
 
-// Bivariate color palette (reused from Section 2 for consistency)
-// Section 2's palette plus the missing-access key. Sharing the object keeps the
-// two bivariate maps from drifting apart.
+// Reuse Section 2's palette and add the missing-access key.
 s3BivariateColors = ({ ...bivariateColors, "N/A": "#cccccc" })
 
 ```
 
 ```{ojs}
-// Process data with bivariate classification
 s3ProcessedData = {
   return section3Data.map(d => {
     const accessValue = s3AccessNorm(d);
@@ -276,7 +241,6 @@ s3ProcessedData = {
 ```
 
 ```{ojs}
-// Sort data based on selected metric
 s3SortedData = {
   if (!s3ProcessedData || s3ProcessedData.length === 0) {
     return [];
@@ -294,8 +258,6 @@ s3SortedData = {
 ```
 
 ```{ojs}
-// Prepare geographic data for map - dynamically show admin levels based on selection
-// Use the master admin selectors (selectedAdmin0, etc.) for consistency with other sections
 s3GeoData = ({
   type: "FeatureCollection",
   // Units with no access data are dropped rather than drawn faded.
@@ -308,7 +270,6 @@ s3GeoData = ({
 ```
 
 ```{ojs}
-// Section 3 Map Display (Handles both Bivariate and Univariate)
 function renderS3MapDisplay() {
   if (s3ViewType !== "map") return null;
 
@@ -322,7 +283,6 @@ function renderS3MapDisplay() {
   }
 }
 
-// Access Map (Univariate)
 function createS3AccessMap() {
   return makeChoropleth({
     features: s3GeoData,
@@ -553,10 +513,8 @@ function renderS3DumbbellView() {
 
 function renderS3TableView() {
   return filterableDataTable(s3SortedData, {
-    // Columns, headers and formats all come off the one registry, so they cannot
-    // drift apart, and the access headers follow the language toggle.
-    //TODO: the remaining literals here are English-only, like most of this
-    // section's widget labels — they need keys in data/cis/text/<locale>.json.
+    // Derive access columns from one localized registry.
+    // TODO: Move remaining English literals into data/cis/text/<locale>.json.
     columns: [
       "label",
       "iso3",
@@ -595,7 +553,6 @@ function renderS3TableView() {
   });
 }
 
-// Render based on view type
 {
   if (s3ViewType === "map") {
     return html`<div style="width: 100%; overflow-x: auto;">
@@ -609,9 +566,7 @@ function renderS3TableView() {
 ```
 
 ```{ojs}
-// Define Download button separately to be used in multiple places
 s3DownloadButton = {
-    // Helper function to safely format numbers
     const safeFormat = (value, decimals) => {
       if (value == null || isNaN(value)) return "N/A";
       return value.toFixed(decimals);
@@ -640,18 +595,17 @@ s3Insights = {
   const avgReadiness = d3.mean(section3Data, d => d.cis_readiness_index);
   const avgAccess = d3.mean(section3Data, (d) => s3AccessNorm(d));
   
-  // Find countries with high readiness but low access (capacity-access gap)
+  // Capacity-access gaps.
   const capacityGaps = s3ProcessedData.filter(d => 
     d.cis_readiness_index > 0.6 && d.accessValue !== null && !isNaN(d.accessValue) && d.accessValue < 0.4
   );
   
-  // Find optimal zones (high readiness + high access)
+  // High-readiness, high-access opportunities.
   const optimalZones = s3ProcessedData.filter(d => 
     d.bivariateClass === "High × High"
   );
   
-  // Use breadcrumb from master admin selectors for consistent region naming
-  // breadcrumb is defined in _cis_readiness_index.qmd and reflects the current admin selection
+  // Reuse the master selection breadcrumb.
   const selectedRegion = breadcrumb || "Sub-Saharan Africa";
   
   const insight1 = `In ${selectedRegion}, average CIS Readiness is **${avgReadiness.toFixed(2)}** while ${s3CurrentAccessLabel} averages **${(avgAccess * 100).toFixed(1)}%**.`;

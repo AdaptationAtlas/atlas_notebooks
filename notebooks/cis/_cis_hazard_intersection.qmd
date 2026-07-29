@@ -1,13 +1,4 @@
-<!--
-============================================================================
-SECTION 2: CIS READINESS × CLIMATE HAZARD INTERSECTION
-============================================================================
-Data Sources:
-- nexgddpHazards_monthMean_jagermeyr_rounded.parquet: NEX-GDDP-CMIP6 hazard
-  indices, monthly means over the Jagermeyr crop calendar, 1995-2014 historical
-- thresholds.json: Pre-computed classification thresholds for CIS readiness
-============================================================================
--->
+<!-- Section 2: CIS readiness × NEX-GDDP-CMIP6 climate hazards. -->
 
 {{< prose hazard-intersection >}}
 
@@ -18,16 +9,8 @@ adminControls(0, 1, 2)
 ```{ojs}
 //| echo: false
 
-// The two hazards this section maps. `code` is the hazard id in the parquet,
-// `breaks` are the Atlas class thresholds for that indicator, collapsed from the
-// four published categories to the three the bivariate palette has: "no
-// significant stress", "moderate", then severe and extreme together.
-//
-// Drought is number of dry days (NDD, P < 1 mm) rather than soil water stress
-// days (NDWS): as a monthly count NDWS sits at its ceiling almost everywhere in
-// Africa — 89% of admin units above 28 of ~30 days — so every unit classified as
-// extreme and the drought axis carried no information. NDD uses the same
-// published thresholds and spans all four classes.
+// Collapse published hazard classes to three bivariate bands.
+// Use NDD for drought because monthly NDWS saturates across most African units.
 S2_HAZARDS = new Object({
   drought: {
     code: "NDD-mean",
@@ -47,10 +30,7 @@ S2_HAZARDS = new Object({
   },
 })
 
-// The whole slice this section needs is 10,182 rows across all three admin levels,
-// so it is fetched once with no admin filter: `combinedData` joins it onto
-// filteredData, which is already scoped to the selection. Filtering here as well
-// meant re-scanning the 437k-row parquet on every selection change.
+// Fetch the small hazard slice once; filteredData already scopes the later join.
 hazardByAdmin = {
   const bind = createSqlBindings();
   const rows = await db.query(
@@ -69,9 +49,7 @@ hazardByAdmin = {
     bind.params,
   );
 
-  // One entry per admin unit with a column per hazard, keyed for direct lookup.
-  // The stat filter above matters: each unit has both a mean and an sd row per
-  // hazard, so without it the value picked depended on row order.
+  // Pivot mean-only hazard rows into a direct admin-unit lookup.
   const byAdmin = new Map();
   for (const row of rows) {
     const key = `${row.admin0_name}|${row.admin1_name}|${row.admin2_name}`;
@@ -103,14 +81,7 @@ combinedData = {
     .filter((d) => hazardColumns.some((col) => d[col] !== null));
 }
 
-// ============================================================================
-// BIVARIATE CLASSIFICATION FUNCTION
-// ============================================================================
-// Places a region on a 3×3 grid of CIS readiness (from thresholds.json) against
-// hazard severity (the class breaks on S2_HAZARDS). The resulting bivariateClass,
-// e.g. "High × High", drives the map colouring; a missing hazard value yields
-// "No data", which the colour scale already has an entry for.
-// ============================================================================
+// Classify readiness × hazard on the 3×3 palette; missing hazards remain no-data.
 
 function bivariateClassify(
   readiness,
@@ -192,7 +163,6 @@ viewof s2ViewToggle = Inputs.radio(
 ```{ojs}
 //| echo: false
 
-// Process and classify data
 s2ProcessedData = {
   const hazardColumn = S2_HAZARDS[s2HazardType].column;
 
@@ -214,12 +184,10 @@ s2ProcessedData = {
   });
 }
 
-// Prepare map data at the appropriate admin level
 s2MapData = {
   const level = currentAdminLevel; //TODO: This filtering has to go / be re-used across notebook
   
   if (level === 0) {
-    // Group by admin0
     const grouped = d3.group(s2ProcessedData, d => d.gaul0_code);
     return Array.from(grouped.values()).map(group => {
       const first = group[0];
@@ -237,7 +205,6 @@ s2MapData = {
       };
     });
   } else if (level === 1) {
-    // Group by admin1
     const grouped = d3.group(s2ProcessedData, d => d.gaul1_code);
     return Array.from(grouped.values()).map(group => {
       const first = group[0];
@@ -257,18 +224,11 @@ s2MapData = {
       };
     });
   } else {
-    // admin2 - use as is
     return s2ProcessedData;
   }
 }
 
-// Load appropriate boundaries based on Section 1's admin level
-
-// Join boundaries with data
-// Boundaries for the current selection, with each unit's bivariate row spread onto
-// it. Every feature is kept so units without data still draw, faded via hasData.
-// The gaul-code-then-names fallback ladder this used to run is gone: the join key
-// from adminBoundariesForSelection already matches the drawn level on both sides.
+// Join at the resolved admin level and retain unmatched no-data features.
 s2GeoData = ({
   type: "FeatureCollection",
   features: buildLevelFeatures(
@@ -283,7 +243,6 @@ s2GeoData = ({
 ```{ojs}
 //| echo: false
 
-// Render map or table based on toggle
 s2BivariateMap = {
   if (s2ViewToggle !== "map") return null;
   const hazardName = S2_HAZARDS[s2HazardType].label;
@@ -337,7 +296,6 @@ s2BivariateMap = {
   });
 }
 
-// Render map or table based on toggle
 {
   if (s2ViewToggle === "map") {
     return bivariateMapWithLegend(s2BivariateMap, {
@@ -345,17 +303,13 @@ s2BivariateMap = {
       yLabel: S2_HAZARDS[s2HazardType].severity,
     });
   } else {
-    // Table view
     const hazardName = S2_HAZARDS[s2HazardType].label;
     
     const tableData = s2MapData.map(d => {
       const adminName = adminDisplayName(d);
       
-      // Ranking comes from thresholds.json, wording from the locale files. The
-      // section's prose defines priority zones as high capacity meeting high
-      // hazard, so that cell ranks top: it reads "where can we act", not a
-      // warning. Low readiness under high hazard is the investment gap the
-      // insight text reports separately.
+      // Policy rankings come from thresholds.json; wording stays localized.
+      // High readiness × high hazard ranks action potential, not warning severity.
       const priority = bivariatePriority[d.bivariateClass] ?? {
         rank: 0,
         textKey: "s2PriorityLow",
@@ -434,10 +388,7 @@ s2Insights = {
   const area = breadcrumb;
   const insightData = onlySelectedAtLevel(s2MapData);
 
-  // None of these three cases is a smaller version of another, so each gets its
-  // own sentence. Stating "0.0% of areas are High × High" and then asserting
-  // "strong potential for CIS" contradicted itself for every country without a
-  // high-readiness unit — Benin among them.
+  // Keep empty, zero-potential, and positive-potential messages distinct.
   const highHigh = insightData.filter((d) => d.bivariateClass === "High × High");
   const opportunity =
     insightData.length === 0
@@ -450,10 +401,7 @@ s2Insights = {
             percent: ((highHigh.length / insightData.length) * 100).toFixed(1),
           });
 
-  // The empty case is not "0% of high-hazard areas have low readiness" — it is
-  // that there are no high-hazard areas to have a gap about. Reporting 0% read
-  // as "no gaps here", the opposite conclusion, wherever the hazard never
-  // crossed its high threshold.
+  // No high-hazard areas is different from a 0% readiness gap.
   const highHazard = insightData.filter((d) => d.hazardClass === "High");
   const lowReadiness = highHazard.filter((d) => d.readinessClass === "Low");
   const gap =

@@ -26,23 +26,8 @@ execute:
 ```
 
 ```{ojs}
-// ============================================================================
-// CIS READINESS NOTEBOOK - MAIN FILE
-// ============================================================================
-// Orchestration and shared definitions. The three analysis sections are pulled
-// in with the include shortcode below; every cell defined here is visible to
-// them (OJS resolves cells by name, not by document order).
-//
-// File Structure:
-// - notebook.qmd (this file) - orchestration & shared definitions
-// - _cis_readiness_index.qmd - Section 1: CIS Readiness components
-// - _cis_hazard_intersection.qmd - Section 2: Readiness × Hazard bivariate
-// - _cis_implementation.qmd - Section 3: Readiness × Access bivariate
-//
-// Narrative text is CMS-managed: prose blocks live in data/cis/text as
-// <id>.<locale>.md and are placed with the prose shortcode; widget labels and
-// templated insight sentences come from data/cis/text/<locale>.json as nbText.
-// ============================================================================
+// Shared orchestration for the three included CIS analysis sections.
+// CMS prose lives in *.md blocks; widget text comes from <locale>.json.
 
 import { atlasTOC } from "/helpers/toc.ojs";
 
@@ -105,8 +90,7 @@ atlasTOC({
 
 ```{ojs}
 {
-  // Ids resolve against data/shared/contributors.json, which is for recurring and
-  // internal contributors; inline {name, org, url} objects cover everyone else.
+  // Use registry IDs for recurring contributors and inline objects for others.
   const jmwakazi = {
     name: "Johnson Mwakazi",
     org: "Snapp Africa",
@@ -134,21 +118,14 @@ atlasTOC({
 
 ## Source code {#source-code}
 
-<!--
-NOTE: Everything below this point will not appear in the notebook.
-This is useful to hide all of the code, master selectors (language, admin level, etc.),
-and other things that are needed for the notebook to run but would be messy if
-actually appearing in the notebook.
--->
+<!-- Hidden runtime code and shared controls follow. -->
 
 ## Language
 
 {{< include /components/_lang.qmd >}}
 
 ```{ojs}
-// Per-locale notebook text: same key tree per language, missing keys fall back to English.
-// Both locales are fetched ONCE here (no `language` dependency) so toggling the
-// language never hits the network — nbText is a pure lookup.
+// Load both locale trees once; missing French values fall back to English.
 nbTextAll = {
   const [en, fr] = await Promise.all([
     FileAttachment("/data/cis/text/en.json").json(),
@@ -161,10 +138,8 @@ nbText = nbTextAll[language.key] ?? nbTextAll.en
 
 nbTitle = nbText.meta.title
 
-// Narrative prose: one file per block (data/cis/text/<id>.<locale>.md), `title:`
-// front matter + markdown body. The block id is the filename — the CMS
-// (admin/config.yml) edits these; scripts/build/cmsContent.lua bakes English in
-// at render. FileAttachment paths must be literal, hence the explicit map.
+// Map CMS prose blocks explicitly because FileAttachment paths must be literals.
+// English is embedded at build time; localized blocks support runtime switching.
 proseFiles = new Object({
   "overview": { en: FileAttachment("/data/cis/text/overview.en.md"), fr: FileAttachment("/data/cis/text/overview.fr.md") },
   "weather-measurement": { en: FileAttachment("/data/cis/text/weather-measurement.en.md"), fr: FileAttachment("/data/cis/text/weather-measurement.fr.md") },
@@ -179,8 +154,7 @@ proseFiles = new Object({
   "acknowledgements": { en: FileAttachment("/data/cis/text/acknowledgements.en.md"), fr: FileAttachment("/data/cis/text/acknowledgements.fr.md") },
 })
 
-// All block files load in parallel at page start (they don't block first paint —
-// English is baked in by cmsContent.lua); the toggle is a plain lookup.
+// Load localized blocks in parallel for network-free toggles.
 sectionsAll = {
   const load = (loc) =>
     Promise.all(
@@ -195,14 +169,11 @@ sectionsAll = {
 
 sections = sectionsAll[language.key] ?? sectionsAll.en
 
-// languages / langKey / language / _lang come from /components/_lang.qmd,
-// included above with the notebook text cells.
+// Language cells come from /components/_lang.qmd.
 ```
 
 ```{ojs}
-// English prose is baked in at render (scripts/build/cmsContent.lua); this cell
-// swaps headings and prose to the toggled language and restores English back.
-// nbText.headings covers the section headings that have no prose block.
+// Swap localized prose and headings; restore embedded English when selected.
 {
   Lang.applyTranslations({
     sections,
@@ -218,24 +189,21 @@ sections = sectionsAll[language.key] ?? sectionsAll.en
 ```
 
 ```{ojs}
-// Fill the `:::token:::` placeholders in a templated sentence from text/<locale>.json.
+// Fill `:::token:::` placeholders in localized templates.
 tmpl = (template, values) =>
   Lang.reduceReplaceTemplateItems(
     template,
     Object.entries(values).map(([name, value]) => ({ name, value })),
   )
 
-// Shared contributor registry (id -> {name, org}); see the contributors cell.
+// Shared contributor registry keyed by ID.
 contributors = FileAttachment("/data/shared/contributors.json").json()
 ```
 
 ## Admin selectors
 
 ```{ojs}
-// The selection itself lives in helpers/adminSelectors.ojs, one cell per level.
-// Sections call this for their own controls — every one of them binds to those
-// same cells, so all of them stay in sync, and a section that asks for fewer
-// levels cannot disturb the ones that ask for more.
+// All section controls bind to shared, per-level selection state.
 adminControls = (...levels) =>
   adminMultiSelect(...levels, {
     langKey: language.key,
@@ -243,9 +211,7 @@ adminControls = (...levels) =>
     searchable: { admin1: true, admin2: true },
   })
 
-// Downstream code works in plain admin names at whichever level is selected. An
-// empty array means that level is not narrowed, which is what sqlAdminWhere and
-// adminBoundariesForSelection already expect.
+// Downstream helpers consume plain names; [] means unrestricted.
 selectedAdmin0 = admin0Select.map((d) => d.admin0_name);
 selectedAdmin1 = admin1Select.map((d) => d.admin1_name);
 selectedAdmin2 = admin2Select.map((d) => d.admin2_name);
@@ -254,9 +220,7 @@ selectedAdmin2 = admin2Select.map((d) => d.admin2_name);
 ## Data
 
 ```{ojs}
-// One DuckDB instance for the whole notebook. Every DuckDBClient.of() call boots
-// its own wasm worker and instantiates the module again, and these cells are
-// top-level awaits on the critical path — three clients meant three boots.
+// Share one DuckDB instance to avoid booting multiple WASM workers.
 db = await DuckDBClient.of({
   cis_data: FileAttachment("/data/cis/CIS_nb_data.parquet"),
   access_data: FileAttachment("/data/cis/CIS_access.parquet"),
@@ -269,9 +233,7 @@ db = await DuckDBClient.of({
 ## Boundaries
 
 ```{ojs}
-// iso3Set is the countries atlas_countries.json marks as included, minus the ones
-// the loader excludes. Boundaries, selectors and queries all scope to it, so a row
-// can never appear in a table or an average without appearing on the map.
+// Scope boundaries and queries to the same included countries.
 import { getAdminBoundaries, iso3Set } from "/components/_atlasBoundaries.ojs";
 
 import { adminBoundariesForSelection } from "/helpers/adminBoundaries.js";
@@ -279,27 +241,20 @@ import { adminBoundariesForSelection } from "/helpers/adminBoundaries.js";
 // Levels 0 and 1 are small (14 KB and 48 KB over the wire) and always drawn.
 atlasBoundaries = await getAdminBoundaries([0, 1]);
 
-// Admin 2 is 336 KB over the wire and 6670 geometries to parse, and nothing draws
-// it until a region is selected. Load it on first use and hold the promise, so the
-// parse happens at most once per session however often the reader moves in and out
-// of district view.
+// Lazy-load and memoize admin 2 because it is only needed after region selection.
 loadAdmin2Boundaries = {
   let pending = null;
   return () => (pending ??= getAdminBoundaries(2).then((b) => b.admin2));
 }
 
-// Only fetch the deep geometry once the selection actually asks to drill into it.
+// Fetch deep geometry only when drill-down needs it.
 admin2Boundaries =
   selectedAdmin0.length && selectedAdmin1.length
     ? await loadAdmin2Boundaries()
     : null;
 
-// The one place the drill-down rule lives: no country selected draws admin 0, a
-// country draws its regions, a region draws its districts and outlines any that
-// are selected. If a dataset stops short of admin 2, pass `maxLevel` and the
-// deeper selection outlines instead of filtering.
-// maxLevel is a property of the dataset, not the notebook, so a section whose data
-// stops short asks for its own view.
+// Resolve drill-down once; maxLevel caps shallower datasets and turns deeper
+// selections into highlights.
 adminViewFor = (maxLevel) =>
   adminBoundariesForSelection({
     boundaries: { ...atlasBoundaries, admin2: admin2Boundaries },
@@ -317,12 +272,10 @@ currentAdminLevel = adminView.level
 
 currentBoundaries = adminView.boundaries
 
-// Composite key for joining rows to features, always matching the drawn level.
+// Build join keys at the drawn admin level.
 adminKey = adminView.adminKey
 
-// The resolver says which field to read and which names are selected in it; the
-// test and the styling are ours. Per view, because a section capped shallower
-// outlines a different level than the one the full-depth view would.
+// Build highlight styling from the selection at this view's drawn level.
 highlightFor = (view) => {
   const selected = view.selectedAtLevel;
   if (!selected) return null;
@@ -337,8 +290,7 @@ highlightFor = (view) => {
 
 adminHighlight = highlightFor(adminView)
 
-// Both bivariate sections put a 3x3 legend beside the map, at the same size, with
-// readiness on the x axis. Built once so the two cannot drift apart.
+// Share 3×3 legend geometry between both bivariate sections.
 bivariateMapWithLegend = (map, { colors, yLabel }) =>
   html`<div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
     <div style="flex: 0 0 auto; display: flex; justify-content: center;">
@@ -354,9 +306,7 @@ bivariateMapWithLegend = (map, { colors, yLabel }) =>
     <div style="flex: 1 1 640px; min-width: 0;">${map}</div>
   </div>`
 
-// Narrow rows to the units selected at the drawn level, for insight sentences that
-// should describe what the reader picked rather than the whole view. Reads the
-// level's own field, so a section capped at admin 1 narrows by region.
+// Narrow insight rows to selections at the view's drawn level.
 onlySelectedAtLevel = (rows) => {
   const selected = adminView.selectedAtLevel;
   if (!selected) return rows;
@@ -365,15 +315,13 @@ onlySelectedAtLevel = (rows) => {
   return rows.filter((row) => names.has(row[selected.field]));
 }
 
-// Null-safe fixed-point formatting for tables, tooltips and CSV exports.
+// Null-safe fixed-point formatting.
 fmt = (value, decimals = 3) =>
   value == null || Number.isNaN(Number(value))
     ? "N/A"
     : Number(value).toFixed(decimals)
 
-// Display name for a row at the current admin level, for tables and CSV exports.
-// Deliberately shorter than the maps' regionName, which also appends the country
-// at admin 2.
+// Use shorter table/export labels than map tooltips.
 adminDisplayName = (d, level = currentAdminLevel) =>
   level === 0
     ? d.admin0_name
@@ -381,24 +329,12 @@ adminDisplayName = (d, level = currentAdminLevel) =>
       ? `${d.admin1_name}, ${d.admin0_name}`
       : `${d.admin2_name}, ${d.admin1_name}`;
 
-// Left margin and tick format for a chart labelled by admin name. Plot right-
-// aligns y and fy tick labels into the left margin, so a margin narrower than
-// the longest label pushes the text off the figure — chartStyle sets
-// `overflow: visible`, so it spills out and gets clipped by the container
-// rather than wrapping.
-//
-// Width is estimated at 7px per character for chartStyle's 13px font; measuring
-// properly would need a canvas, and the labels here are one font and one size.
-// The margin is capped at a share of the chart because adminDisplayName appends
-// the parent unit ("Area Without Administration At The 2Nd Level, Communauté
-// Urbaine De Niamey" is 74 characters), which would otherwise leave the plot
-// area narrower than the names beside it. Anything past the cap is truncated,
-// so it is visibly shortened rather than silently cut off; the tooltip still
-// carries the full name.
+// Estimate label width for Plot's left margin, then truncate at a proportional cap.
+// Tooltips retain full labels.
 labelAxis = (labels, chartWidth, { share = 0.35, minimum = 120 } = {}) => {
   const perChar = 7;
   const gutter = 12;
-  // reduce, not Math.max(...spread): admin 2 reaches 6,670 labels.
+  // Avoid spreading thousands of admin-2 label lengths.
   const longest = labels.reduce((n, l) => Math.max(n, String(l).length), 0);
   const cap = Math.max(minimum, Math.round(chartWidth * share));
   const marginLeft = Math.min(cap, Math.max(minimum, longest * perChar + gutter));

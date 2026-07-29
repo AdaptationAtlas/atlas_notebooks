@@ -1,24 +1,5 @@
-// Vanilla navbar language switcher — owns the page's language state so the
-// toggle works before (and without) the OJS runtime. Load it from a notebook
-// with: <script src="/components/langSwitcher.js"></script>
-//
-// State surface (what notebooks consume):
-//   window.atlasLang                     current language key ("en" | "fr")
-//   "atlas:lang" CustomEvent on window   detail = new key, fired on change
-//   document.documentElement.lang        kept in sync
-//   ?lang= query param                   read on load, updated on toggle
-//
-// OJS side subscribes with one cell:
-//   langKey = Generators.observe((notify) => {
-//     notify(window.atlasLang ?? "en");
-//     const onChange = (e) => notify(e.detail);
-//     window.addEventListener("atlas:lang", onChange);
-//     return () => window.removeEventListener("atlas:lang", onChange);
-//   })
-//
-// If the site moves to per-language builds (/fr/ profile), this component
-// becomes navigation between the two page trees and the event goes away.
-// (That variant is implemented on the feat/cms reference branch.)
+// Owns language state before OJS loads, syncing <html>, ?lang, and window.atlasLang.
+// Notebook cells subscribe to the "atlas:lang" event.
 
 const LANGS = [
   { key: "en", label: "English" },

@@ -3,37 +3,8 @@ import {
   enhancedMultiSelect as enhanceSelect,
 } from "/helpers/enhancedMultiSelect.js";
 
-/**
- * Atlas administrative selectors.
- *
- * The selection lives here, one cell per level. A notebook renders as many
- * controls as it likes and every one is bound to those same cells, so all of
- * them stay aligned:
- *
- *   import { adminSelect, adminMultiSelect, adminSelections,
- *            admin0Select, admin1Select, admin2Select }
- *     from "/helpers/adminSelectors.ojs";
- *
- *   adminMultiSelect(0, 1, 2)                 // one control per level
- *   adminMultiSelect(0, 1)                    // country + region only
- *   adminSelect(0)                            // single-select country
- *   adminMultiSelect(0, 1, { selectAll: true, searchable: true })
- *
- * The unit of state is the LEVEL, not the trio, which is what makes a partial
- * form safe: `adminMultiSelect(0, 1)` has no way to touch admin 2, so a section
- * whose data stops at admin 1 can render two controls without disturbing the
- * sections that render three.
- *
- * `admin0Select` / `admin1Select` / `admin2Select` are the reactive selections,
- * always arrays — at most one entry in single-select mode, empty when the level
- * is not narrowed.
- *
- * Both modes expose the same thing: an array of real admin units, where empty
- * means the level is not narrowed. Single-select additionally *offers* a
- * "Sub-Saharan Africa" / "Whole country" / "All districts" row, because a single
- * select cannot choose nothing — but picking one stores an empty array, so
- * nothing downstream has to tell the modes apart.
- */
+// Shared state is per admin level and always an array; empty means unrestricted.
+// Single- and multi-select controls therefore expose the same downstream shape.
 
 adminTranslations = ({
   country: { en: "Country", fr: "Pays" },
@@ -49,22 +20,11 @@ adminTranslations = ({
   search: { en: "Search…", fr: "Rechercher…" },
 })
 
-// Excluded Atlas-wide. Module level, not per call: two controls on one level must
-// offer the same countries or they cannot stay bound to each other.
+// Keep all controls on a level aligned on the same Atlas-wide exclusions.
 adminExcludedIso3 = new Set(["SDN"])
 
-// Every option, at every level, is this shape:
-//
-//   { iso3, admin0_name, admin1_name, admin2_name, translation? }
-//
-// with the names below the option's own level set to null. That is the Atlas
-// convention already used by the parquet tables, by boundary feature properties,
-// by sqlAdminWhere and by adminBoundariesForSelection, so a selected option reads
-// against any of them without being translated first. It also makes a row
-// self-describing: its deepest non-null name is its level.
-//
-// The source file's `iso3c` is not carried through. It duplicated `iso3`, was
-// present on level-0 rows only, and gave two names for one value.
+// Options mirror Atlas data fields; names below their own level are null.
+// Normalize source `iso3c` to `iso3` for a single identifier.
 countries = {
   const rows = await FileAttachment("/data/shared/atlas_countries.json").json();
   return rows
@@ -78,8 +38,7 @@ countries = {
     }));
 }
 
-// Country names are translated, region and district names are not, so
-// `translation` is the one field that appears at level 0 only.
+// Only country names have translations.
 ssaObj = ({
   iso3: null,
   admin0_name: null,
@@ -88,19 +47,8 @@ ssaObj = ({
   translation: adminTranslations.ssa,
 })
 
-// One row per admin-2 unit, flat, as
-// data/shared/gaul24_africa_lookup.parquet exports it — the parquet stays the
-// source of truth and this is the four columns of it a selector needs.
-//
-// JSON rather than the parquet itself: every row is read and indexed here, with
-// no filtering at read time, so a parquet reader would buy nothing. DuckDB-wasm
-// booted a multi-megabyte worker for it, and hyparquet cannot read the file at
-// all — it is ZSTD, and the compressors bundle that adds ZSTD costs more than
-// this whole file does.
-//
-// Read once and indexed once, rather than re-queried per interaction as the
-// pre-consolidation notebooks did — which also meant interpolating admin names
-// into SQL, and broke on Côte d'Ivoire's apostrophe.
+// Load the small JSON projection once; reading its ZSTD parquet source would cost more.
+// In-memory indexes also avoid repeated SQL and name escaping.
 adminLookup = {
   const rows = await FileAttachment(
     "/data/shared/gaul24_africa_lookup.json",
@@ -131,10 +79,7 @@ adminLookup = {
     });
   }
 
-  // The file is already in this order, but sorting here keeps option order a
-  // property of the code rather than of the export, and localeCompare on "base"
-  // sensitivity puts accented names where a reader looks for them instead of
-  // after Z, which a byte-order sort does not.
+  // Sort explicitly and group accented names naturally.
   const byName = (field) => (a, b) =>
     a[field].localeCompare(b[field], undefined, { sensitivity: "base" });
 
@@ -154,24 +99,20 @@ adminLookup = {
   };
 }
 
-// ── selection state: one holder per level ───────────────────────────────────
-// Always arrays, so a single-select control on one level and a multi-select on
-// another can share the same state.
+// Selection state: one array-backed holder per level.
 
 viewof admin0Select = Inputs.input([])
 viewof admin1Select = Inputs.input([])
 viewof admin2Select = Inputs.input([])
 
-// `viewof x` is only referenceable as a literal, so the three are listed rather
-// than built in a loop.
+// Observable requires literal `viewof` references.
 adminViews = new Map([
   [0, viewof admin0Select],
   [1, viewof admin1Select],
   [2, viewof admin2Select],
 ])
 
-// ── cascade: each level's options come from the level above ─────────────────
-// Ordinary reactivity, so there is no invalidation code beyond the prune below.
+// Cascade each level's options from the level above.
 
 dataAdmin1 = admin0Select.flatMap(
   (c) => adminLookup.admin1ByIso.get(c.iso3) ?? [],
@@ -181,8 +122,7 @@ dataAdmin2 = admin1Select.flatMap(
   (r) => adminLookup.admin2ByRegion.get(`${r.iso3}||${r.admin1_name}`) ?? [],
 )
 
-// True for a row that stands for "do not narrow at this level". Single-select
-// offers such rows because it cannot select nothing; they are never stored.
+// Single-select placeholder rows mean “do not narrow” and are never stored.
 adminIsWholeArea = (level, d) =>
   d == null ||
   (level === 0
@@ -201,16 +141,7 @@ adminSetView = (view, value) => {
   view.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-/**
- * Drop selections below `level` that its new value no longer offers — deselect a
- * country and its regions have to go with it.
- *
- * Called from the control's input handler rather than from a cell of its own: an
- * imported module only computes what something depends on, so a standalone prune
- * cell would never run. Reads the views directly because the reactive cells have
- * not recomputed yet at this point. Prunes every deeper level whether a control
- * for it is on screen or not.
- */
+/** Remove deeper selections invalidated by a parent change. */
 adminPruneBelow = (level) => {
   if (level > 1) return;
 
@@ -246,11 +177,9 @@ adminSelections = ({
   admin2: admin2Select,
 })
 
-// ── controls ────────────────────────────────────────────────────────────────
+// Controls
 
-// Single-select needs an explicit "do not narrow here" row; multi-select says the
-// same thing by selecting nothing, and adding the row there made a country with
-// no region chosen count as a selection ("43 selected" for 43 countries).
+// Single-select needs an unrestricted row; multi-select represents it with [].
 adminOptionsFor = (level, multiple, _lang) => {
   if (level === 0) {
     return multiple ? countries : [ssaObj, ...countries];
@@ -288,11 +217,7 @@ adminOptionLabel = (level, d, _lang) => {
 adminLevelLabel = (level, _lang) =>
   _lang([adminTranslations.country, adminTranslations.region, adminTranslations.district][level])
 
-// One control for one level, two-way bound to that level's state cell.
-//
-// Not `Inputs.bind` for single-select: the state is an array and a single select
-// speaks in one row, so the two convert at the boundary. Multi-select matches the
-// state shape and binds directly.
+// Bind one control to its level; single-select converts its scalar value to an array.
 adminControl = (level, config) => {
   const {
     multiple = false,
@@ -327,9 +252,7 @@ adminControl = (level, config) => {
       requireAtLeastOne: perLevel(requireAtLeastOne, false),
       enableSelectAll: options.length > 0 && perLevel(selectAll, false),
       searchable: options.length > 0 && perLevel(searchable, false),
-      // No `commit` override: enhancedMultiSelect defaults to "close", so the
-      // selection commits once when the dropdown closes. The bundled selector
-      // forced "change", which fired a query per checkbox click.
+      // Commit on close to avoid a query per checkbox click.
       compactLabelThreshold: 5,
       labels: {
         selectAll: _lang(adminTranslations.selectAll),
@@ -349,11 +272,7 @@ adminControl = (level, config) => {
   } else {
     input.addEventListener("input", (event) => {
       event.stopPropagation();
-      // A null-name row ("Sub-Saharan Africa", "Whole country", "All districts")
-      // means this level is not narrowed, which is exactly what an empty
-      // selection means in multi-select — so it is stored as one. The row exists
-      // only because a single select has no way to choose nothing, and keeping it
-      // in the state would give the two modes different shapes for one meaning.
+      // Store unrestricted placeholder rows as [] to match multi-select.
       adminSetView(view, adminIsWholeArea(level, input.value) ? [] : [input.value]);
     });
   }
@@ -364,8 +283,7 @@ adminControl = (level, config) => {
   return input;
 }
 
-// Levels as varargs with an optional trailing config, so a call reads as the
-// levels it shows: adminMultiSelect(0, 1), adminSelect(0, { langKey: "fr" }).
+// Accept level varargs followed by an optional config object.
 adminForm = (args, multiple) => {
   const rest = [...args];
   const config =

@@ -1,25 +1,12 @@
-<!--
-============================================================================
-SECTION 1: CIS READINESS INDEX ANALYSIS
-============================================================================
-This file contains the core analysis of Climate Information Services (CIS)
-readiness across Sub-Saharan Africa. It loads CIS indicator data, calculates
-Africa-wide tercile classifications, and provides interactive visualizations
-for weather station density, clear-sky availability, satellite agreement,
-forecast skill at multiple administrative levels (Admin 0/1/2).
-============================================================================
--->
+<!-- Section 1: CIS readiness indicators and forecast skill across admin levels. -->
 
 # Building the CIS Readiness Index {#building-readiness-index}
 
 ```{ojs}
 thresholds = await FileAttachment("/data/cis/thresholds.json").json();
 
-// One entry per indicator: its key in thresholds.json, the name to show it under,
-// and how many decimals it reads at. Tables and exports build their columns from
-// this, so an indicator is named the same everywhere and a label change is one edit.
-//TODO: labels are English-only, as are this section's other widget strings — they
-// want keys in data/cis/text/<locale>.json.
+// Centralize threshold keys, labels, and precision for tables and exports.
+// TODO: Move English-only labels into data/cis/text/<locale>.json.
 CIS_INDICATORS = new Object({
   cis_readiness_index: { threshold: "cis_dfci", label: "CIS Readiness", decimals: 3 },
   wstation_density: { threshold: "WeatherStation_idx", label: "Weather Station", decimals: 3 },
@@ -35,9 +22,7 @@ thresholdIndicatorByField = new Object(
   ),
 );
 
-// A "<label> (Raw)" / "<label> (Class)" pair per indicator. Tables want the value
-// formatted; a CSV export wants the number itself, so `format` chooses. Set
-// `withClass: false` for indicators that have no threshold band to show.
+// Build raw/class column pairs; exports can disable formatting or classes.
 S11_INDICATORS = ["wstation_density", "cloud-coverage_meanannual"]
 
 indicatorColumns = (row, fields, { format = true, withClass = true } = {}) =>
@@ -106,49 +91,32 @@ classificationScale = (field, colors) => ({
 ```
 
 ```{ojs}
-/**
- * Interpret forecast skill based on both short-term and long-term RPSS scores
- * RPSS (Ranked Probability Skill Score) measures forecast quality:
- *   > 0.6 = Good/reliable forecasts
- *   < 0.4 = Poor/unreliable forecasts
- *
- * Delta is long minus short, the same direction the maps and charts use, so a
- * negative delta is skill decaying with lead time.
- *
- * @param {number} shortTerm - Short-term (1-2 month) forecast RPSS
- * @param {number} longTerm - Long-term (11-12 month) forecast RPSS
- * @returns {object} Interpretation text and CIS implication
- */
+/** Interpret short- and long-term RPSS; delta is long minus short. */
 classifyForecastSkill = (shortTerm, longTerm) => {
   if (shortTerm == null || longTerm == null)
     return { interpretation: "No data", implication: "Insufficient data" };
 
-  // Same sign convention as the maps and charts: long minus short, so a positive
-  // delta means skill improves with lead time.
+  // Positive delta means skill improves with lead time.
   const delta = longTerm - shortTerm;
 
-  // Case 1: Both horizons perform well - ideal for CIS deployment
   if (shortTerm > 0.6 && longTerm > 0.6) {
     return {
       interpretation: "Reliable forecasts at both horizons",
       implication: "Scale CIS for advisories + finance",
     };
   }
-  // Case 2: Good short-term but poor long-term - limit to operational use
   else if (shortTerm > 0.6 && longTerm < 0.4 && delta < -0.2) {
     return {
       interpretation: "Rapid loss of skill",
       implication: "Limit use to short-term planning",
     };
   }
-  // Case 3: Both horizons perform poorly - use historical averages instead
   else if (shortTerm < 0.4 && longTerm < 0.4) {
     return {
       interpretation: "Weak predictability",
       implication: "Use climatology / caution",
     };
   }
-  // Case 4: Mixed results - blend forecasts with historical data
   else {
     return {
       interpretation: "Uncertain but usable",
@@ -159,8 +127,7 @@ classifyForecastSkill = (shortTerm, longTerm) => {
 ```
 
 ```{ojs}
-// currentAdminLevel, currentBoundaries and adminKey all come from adminView in
-// notebook.qmd, which resolves them once from the selection.
+// Reuse the selection-resolved admin view from notebook.qmd.
 filteredData = {
   const bind = createSqlBindings();
   const adminWhere = sqlAdminWhere(
@@ -183,11 +150,8 @@ filteredData = {
 ```
 
 ```{ojs}
-// Joins filteredData onto whatever boundaries the current selection resolves to
-// and adds the one label every map's tooltip wants. Scoping and the level rule
-// live in helpers/adminBoundaries.js; the join is the shared mergeDataToBoundaries.
-// The only per-map difference is which columns to read off the joined row, so that
-// is the argument: `fields(dataRow)` gets undefined where a boundary has no match.
+// Join selected boundaries with filtered rows and derive map-specific fields.
+// Unmatched boundaries remain available as no-data features.
 buildLevelFeatures = (fields, data = filteredData, view = adminView) => {
   const geoData = mergeDataToBoundaries({
     boundaries: view.boundaries,
@@ -203,8 +167,7 @@ buildLevelFeatures = (fields, data = filteredData, view = adminView) => {
       ...feature,
       properties: {
         ...p,
-        // Precomputed so tooltips do not rebuild it on every hover. Deeper than
-        // adminDisplayName: this one keeps the country at admin 2.
+        // Precompute the full map label, including country at admin 2.
         regionName:
           view.level === 0
             ? p.admin0_name
@@ -575,7 +538,6 @@ viewof s13ViewType = Inputs.radio(["Map", "Chart", "Table"], {
 })
 
 viewof s13SortBy = {
-  // Only show sort-by when Chart or Table view is selected
   if (s13ViewType === "Map") {
     const input = Inputs.radio(["Short-term skill", "Long-term skill", "Difference (Δ)"], {
       label: nbText.sortByLabel,
@@ -630,13 +592,11 @@ s13Data = {
     };
   }).filter(d => d.shortTerm != null || d.longTerm != null);
   
-  // Sort data
   if (s13SortBy === "Short-term skill") { //TODO: We can use bulit in OJS plot fn instead
     data.sort((a, b) => (b.shortTerm || 0) - (a.shortTerm || 0));
   } else if (s13SortBy === "Long-term skill") {
     data.sort((a, b) => (b.longTerm || 0) - (a.longTerm || 0));
   } else {
-    // Sort by delta - most positive to most negative
     data.sort((a, b) => (b.delta || 0) - (a.delta || 0));
   }
   
@@ -648,8 +608,7 @@ s13Data = {
 // Section 1.3 Map/Chart/Table
 {
   if (s13ViewType === "Map") {
-    // Three panels over the same features, differing only in the column they
-    // colour by, the scale, and the labels.
+    // Three metrics over the same features.
     const panels = [
       {
         key: "shortTerm",
@@ -698,7 +657,6 @@ s13Data = {
     </div>`;
   } else if (s13ViewType === "Chart") {
 
-    // Prepare data in the format expected by the chart
     const data = s13Data.map(d => {
       const short = d.shortTerm != null ? parseFloat(d.shortTerm) : null;
       const long = d.longTerm != null ? parseFloat(d.longTerm) : null;
@@ -718,7 +676,7 @@ s13Data = {
       "delta";
     const sorted = data.sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0));
     
-    // Flatten data: each geography gets 3 entries (Short-term, Long-term, Delta)
+    // Flatten each geography into three forecast metrics.
     const longData = sorted.flatMap((d) => [
       {
         country: d.country,
@@ -737,19 +695,15 @@ s13Data = {
       }
     ]).filter(d => d.value != null);
     
-    // One 20px band per geography, plus the two axes. Counting the margins in
-    // keeps the bands at 20px instead of shrinking them to absorb the axes.
+    // Reserve a 20px band per geography plus axes.
     const marginTop = 40;
     const marginBottom = 60;
     const height = Math.max(400, sorted.length * 20 + marginTop + marginBottom);
     
-    // Get the ordered list of countries from sorted data
     const countryOrder = sorted.map(d => d.country);
     const axis = labelAxis(countryOrder, width);
     
-    // Rendered at full height: one band per unit, so a 600px window hid most of
-    // the rows behind a second scrollbar. This is behind a view toggle, not the
-    // default.
+    // Render every band; the chart is already behind a view toggle.
     return Plot.plot({
       style: chartStyle,
       marginLeft: axis.marginLeft,
@@ -779,7 +733,6 @@ s13Data = {
         legend: true
       },
       marks: [
-        // X-axis at bottom
         Plot.axisX({ 
           anchor: "bottom", 
           label: "RPSS or Δ"

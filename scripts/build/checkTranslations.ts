@@ -1,13 +1,4 @@
-// Check per-locale notebook text under data/*/text/ against the content contract:
-//  - every locale in LOCALES has a <locale>.json with the same leaf keys as en.json
-//  - every prose block <id>.<locale>.md exists for every locale
-//  - block ids (filenames) match [A-Za-z0-9_-]+
-//  - every block's front matter is exactly `---\ntitle: <non-empty scalar>\n---`
-//    (the narrow contract Lang.parseBlock relies on in the browser)
-//  - every block referenced by a .qmd ({{< prose id >}} marker, sections.id,
-//    sections["id"]) has a matching file, and every block file is referenced
-//    by something — an unreferenced block usually means a typo'd id (which
-//    would otherwise fail silently at render)
+// Validate locale parity, prose front matter, and QMD↔block references.
 // Usage: deno run --allow-read scripts/build/checkTranslations.ts
 
 import { expandGlob } from "https://deno.land/std@0.224.0/fs/expand_glob.ts";
@@ -33,9 +24,7 @@ async function readOr(path: string): Promise<string | null> {
   }
 }
 
-// Front matter contract: exactly one single-line `title:` field, parsed with a
-// real YAML parser. Anything richer is rejected so the small runtime parser
-// (Lang.parseBlock) can never disagree with what ships.
+// Keep front matter to one title so CI and Lang.parseBlock cannot disagree.
 function checkFrontMatter(path: string, raw: string) {
   const m = raw.match(/^---\r?\n(title:[^\r\n]*)\r?\n---\r?\n?/);
   if (!m) {
@@ -66,7 +55,7 @@ const referencedByDir = new Map<string, Set<string>>();
 for (const dir of textDirs) {
   const rel = relative(Deno.cwd(), dir);
 
-  // JSON widget strings: key parity against en.json for every expected locale
+  // Require widget-string key parity with English.
   const en = new Set(
     leafPaths(JSON.parse(await Deno.readTextFile(`${dir}/en.json`))),
   );
@@ -85,7 +74,7 @@ for (const dir of textDirs) {
     }
   }
 
-  // Prose blocks: <id>.<locale>.md, valid id, all locales, valid front matter
+  // Validate every localized prose block.
   const ids = new Map<string, Set<string>>();
   for await (const e of Deno.readDir(dir)) {
     const m = e.name.match(/^(.+)\.([a-z]{2})\.md$/);
@@ -114,11 +103,7 @@ for (const dir of textDirs) {
   console.log(`${rel}: ${en.size} keys, ${ids.size} prose blocks`);
 }
 
-// A notebook may be split across {{< include >}} fragments (which carry no front
-// matter of their own, so they are not notebooks in their own right). Read the
-// entry point together with everything it includes, so prose markers placed in a
-// fragment count as references. One level deep — enough for the split notebooks
-// we have; make it recursive if a fragment ever includes another.
+// Include one fragment level so split-notebook prose markers count as references.
 async function readIncludes(path: string, entry: string): Promise<string> {
   const parts = [entry];
 
@@ -136,10 +121,9 @@ async function readIncludes(path: string, entry: string): Promise<string> {
   return parts.join("\n");
 }
 
-// QMD references: every block a notebook uses must exist
+// Require every referenced prose block to exist.
 for await (const f of expandGlob("notebooks/**/*.qmd")) {
-  // Check the contract opt-in on the entry file alone: a notebook with no
-  // CMS text must not fail the job because of how it writes an include.
+  // Read nb-text-dir from the entry file, not its includes.
   const entry = await Deno.readTextFile(f.path);
   const textDir = entry.match(/^nb-text-dir:\s*(\S+)\s*$/m)?.[1];
   if (!textDir) continue;
@@ -151,18 +135,14 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
     continue;
   }
   const refs = new Set<string>([
-    // {{< prose <id> >}} markers (scripts/build/proseShortcode.lua) place
-    // blocks on the page; sections.<id> / sections["<id>"] consume them in code
+    // Collect rendered markers and code references.
     ...[...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
     ...[...qmd.matchAll(/\bsections\.([A-Za-z0-9_]+)/g)].map((m) => m[1]),
     ...[...qmd.matchAll(/\bsections\[["']([^"']+)["']\]/g)].map((m) => m[1]),
   ]);
   for (const id of refs) referencedByDir.get(textDir)?.add(id);
 
-  // The notebook's runtime FileAttachment map (proseFiles) must cover every
-  // referenced block in every locale — a missing entry passes the file checks
-  // but silently breaks the client-side language toggle for that block.
-  // (Delete this check if prose ever moves to build-time-only rendering.)
+  // Require runtime attachments for every referenced block and locale.
   const mapped = new Map<string, Set<string>>();
   const attachmentRe = new RegExp(
     `FileAttachment\\("/?${textDir}/([A-Za-z0-9_-]+)\\.([a-z]{2})\\.md"\\)`,
@@ -186,9 +166,7 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
   }
 }
 
-// Unreferenced block files: usually a typo'd id in a {{< prose >}} marker
-// (a marker matching no block errors at render, but a block matching no
-// marker would otherwise go unnoticed) or dead content
+// Flag dead blocks and misspelled marker IDs.
 for (const [dir, ids] of blocksByDir) {
   const referenced = referencedByDir.get(dir)!;
   for (const id of ids) {

@@ -51,17 +51,7 @@ function stackedBarsIcon() {
   return icon;
 }
 
-/**
- * Create the canonical circular Atlas notebook hero.
- *
- * @param {object} options
- * @param {string} options.title - Notebook title.
- * @param {string} options.image - Background image URL.
- * @param {string} [options.group=""] - Optional notebook group or category.
- * @param {string} [options.alt=""] - Background image alternative text. Leave
- * empty when the image is decorative.
- * @returns {HTMLElement}
- */
+/** Create the circular Atlas notebook hero; leave alt empty for decorative images. */
 export function atlasHero({ title, image, group = "", alt = "" } = {}) {
   if (!title) throw new TypeError("atlasHero requires a title");
   if (!image) throw new TypeError("atlasHero requires an image");
@@ -102,9 +92,7 @@ export function atlasHero({ title, image, group = "", alt = "" } = {}) {
   return hero;
 }
 
-/**
- * @deprecated Use `atlasHero({title, image, group, alt})`.
- */
+/** @deprecated Use `atlasHero({title, image, group, alt})`. */
 export function heroImage(title, bgImage, group = "") {
   return atlasHero({ title, image: bgImage, group });
 }
