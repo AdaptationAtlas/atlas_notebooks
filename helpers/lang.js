@@ -174,6 +174,13 @@ export function applyTranslations({ sections, md, lang, defaultLang = "en", head
       if (text) node.replaceChildren(md`${text}`);
     }
   }
+
+  for (const node of document.querySelectorAll(".nb-details")) {
+    const details = sections[node.dataset.section]?.details;
+    if (!details) continue;
+    node.querySelector("summary").textContent = details.title;
+    node.querySelector(".nb-details__body").replaceChildren(md`${details.body}`);
+  }
 }
 
 /** Fill missing translation-tree values recursively from a fallback. */

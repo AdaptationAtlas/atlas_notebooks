@@ -24,9 +24,9 @@
 --    (Shortcodes expand in Quarto's built-in pass, so _quarto.yml lists
 --    `- quarto` before this filter.)
 --
---    Optional details contain a localized title and markdown body for a
---    collapsible note rendered by notebook code. Default-language prose is
---    baked in as static HTML — crawlable and
+--    Optional details contain a localized title and markdown body rendered
+--    as a native <details> note. Default-language prose is baked in as
+--    static HTML — crawlable and
 --    visible before the OJS runtime boots; the client-side language toggle
 --    swaps the same nodes at runtime (Lang.applyTranslations /
 --    Lang.parseBlock in helpers/lang.js). Developers control heading level
@@ -135,10 +135,24 @@ local function loadBlock(id)
 			blocks[id] = {
 				title = doc.meta.title and pandoc.Inlines(doc.meta.title) or nil,
 				body = doc.blocks,
+				details = doc.meta.details,
 			}
 		end
 	end
 	return blocks[id]
+end
+
+local function appendDetails(out, block, id)
+	local details = block.details
+	if not details or not details.title or not details.body then
+		return
+	end
+	table.insert(out, pandoc.RawBlock("html", ('<details class="nb-details" data-section="%s"><summary>%s</summary><div class="nb-details__body">'):format(
+		esc(id),
+		esc(pandoc.utils.stringify(details.title))
+	)))
+	table.insert(out, pandoc.Para(pandoc.Inlines(details.body)))
+	table.insert(out, pandoc.RawBlock("html", "</div></details>"))
 end
 
 local function injectProse(div)
@@ -148,7 +162,9 @@ local function injectProse(div)
 		error(("cmsContent: no prose block '%s' (%s/%s.%s.md)"):format(tostring(id), tostring(textDir), tostring(id), lang))
 	end
 	div.content = block.body
-	return div
+	local out = { div }
+	appendDetails(out, block, id)
+	return out
 end
 
 local function expandHeader(el)
@@ -162,11 +178,12 @@ local function expandHeader(el)
 	if block.title then
 		el.content = block.title
 	end
-	if #block.body == 0 then
-		return el
+	local out = { el }
+	if #block.body > 0 then
+		table.insert(out, pandoc.Div(block.body, pandoc.Attr("", { "nb-prose" }, { ["data-section"] = el.identifier })))
 	end
-	local div = pandoc.Div(block.body, pandoc.Attr("", { "nb-prose" }, { ["data-section"] = el.identifier }))
-	return { el, div }
+	appendDetails(out, block, el.identifier)
+	return #out == 1 and el or out
 end
 
 -- ---------- docs data pages ----------
