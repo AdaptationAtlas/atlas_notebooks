@@ -1,4 +1,4 @@
-// Validate locale parity, prose front matter, and QMD↔block references.
+// Validate locale parity, prose front matter, manifests, and QMD↔block references.
 // Usage: deno run --allow-read scripts/build/checkTranslations.ts
 
 import { expandGlob } from "https://deno.land/std@0.224.0/fs/expand_glob.ts";
@@ -36,7 +36,9 @@ function checkFrontMatter(path: string, raw: string): boolean {
   try {
     fm = parseYaml(m[1]);
   } catch (e) {
-    problems.push(`${path}: front matter is not valid YAML (${(e as Error).message})`);
+    problems.push(
+      `${path}: front matter is not valid YAML (${(e as Error).message})`,
+    );
     return false;
   }
   const fields = fm as Record<string, unknown>;
@@ -95,7 +97,11 @@ for (const dir of textDirs) {
       if (!other.has(k)) problems.push(`${rel}/${loc}.json missing: ${k}`);
     }
     for (const k of other) {
-      if (!en.has(k)) problems.push(`${rel}/${loc}.json has extra key (not in en.json): ${k}`);
+      if (!en.has(k)) {
+        problems.push(
+          `${rel}/${loc}.json has extra key (not in en.json): ${k}`,
+        );
+      }
     }
   }
 
@@ -111,7 +117,11 @@ for (const dir of textDirs) {
       continue;
     }
     if (!LOCALES.includes(loc)) {
-      problems.push(`${rel}/${e.name}: unexpected locale '${loc}' (expected ${LOCALES.join(", ")})`);
+      problems.push(
+        `${rel}/${e.name}: unexpected locale '${loc}' (expected ${
+          LOCALES.join(", ")
+        })`,
+      );
       continue;
     }
     if (!ids.has(id)) ids.set(id, new Set());
@@ -122,7 +132,9 @@ for (const dir of textDirs) {
     try {
       parseRuntimeBlock(raw);
     } catch (error) {
-      problems.push(`${path}: runtime parser failed (${(error as Error).message})`);
+      problems.push(
+        `${path}: runtime parser failed (${(error as Error).message})`,
+      );
     }
     if (hasDetails) {
       if (!detailsById.has(id)) detailsById.set(id, new Set());
@@ -137,7 +149,9 @@ for (const dir of textDirs) {
     if (detailsLocales) {
       for (const loc of LOCALES) {
         if (!detailsLocales.has(loc)) {
-          problems.push(`${rel}/${id}.${loc}.md is missing its \`details:\` content`);
+          problems.push(
+            `${rel}/${id}.${loc}.md is missing its \`details:\` content`,
+          );
         }
       }
     }
@@ -161,7 +175,9 @@ async function readIncludes(path: string, entry: string): Promise<string> {
     try {
       parts.push(await Deno.readTextFile(target));
     } catch {
-      problems.push(`${relative(Deno.cwd(), path)}: cannot read include '${m[1]}'`);
+      problems.push(
+        `${relative(Deno.cwd(), path)}: cannot read include '${m[1]}'`,
+      );
     }
   }
 
@@ -170,45 +186,65 @@ async function readIncludes(path: string, entry: string): Promise<string> {
 
 // Require every referenced prose block to exist.
 for await (const f of expandGlob("notebooks/**/*.qmd")) {
-  // Read nb-text-dir from the entry file, not its includes.
   const entry = await Deno.readTextFile(f.path);
-  const textDir = entry.match(/^nb-text-dir:\s*(\S+)\s*$/m)?.[1];
-  if (!textDir) continue;
+  const configPath = entry.match(/^nb-config:\s*(\S+)\s*$/m)?.[1];
+  if (!configPath) continue;
+  const configRaw = await readOr(configPath);
+  if (configRaw === null) {
+    problems.push(
+      `${relative(Deno.cwd(), f.path)}: cannot read nb-config '${configPath}'`,
+    );
+    continue;
+  }
+  let config: {
+    textDir?: string;
+    content?: { blocks?: string[] };
+  };
+  try {
+    config = JSON.parse(configRaw);
+  } catch {
+    problems.push(`${configPath}: notebook config is not valid JSON`);
+    continue;
+  }
+  const textDir = config.textDir;
+  if (!textDir) {
+    problems.push(`${configPath}: notebook config is missing textDir`);
+    continue;
+  }
   const qmd = await readIncludes(f.path, entry);
   const rel = relative(Deno.cwd(), f.path);
   const blocks = blocksByDir.get(textDir);
   if (!blocks) {
-    problems.push(`${rel}: nb-text-dir '${textDir}' has no en.json / prose blocks`);
+    problems.push(`${rel}: textDir '${textDir}' has no en.json / prose blocks`);
     continue;
   }
+  const declared = new Set(config.content?.blocks ?? []);
   const refs = new Set<string>([
-    // Collect rendered markers and code references.
     ...[...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
     ...[...qmd.matchAll(/\bsections\.([A-Za-z0-9_]+)/g)].map((m) => m[1]),
     ...[...qmd.matchAll(/\bsections\[["']([^"']+)["']\]/g)].map((m) => m[1]),
   ]);
   for (const id of refs) referencedByDir.get(textDir)?.add(id);
 
-  // Require runtime attachments for every referenced block and locale.
-  const mapped = new Map<string, Set<string>>();
-  const attachmentRe = new RegExp(
-    `FileAttachment\\("/?${textDir}/([A-Za-z0-9_-]+)\\.([a-z]{2})\\.md"\\)`,
-    "g",
-  );
-  for (const m of qmd.matchAll(attachmentRe)) {
-    if (!mapped.has(m[1])) mapped.set(m[1], new Set());
-    mapped.get(m[1])!.add(m[2]);
-  }
-
   for (const id of refs) {
     if (!blocks.has(id)) {
-      problems.push(`${rel} references block '${id}' but ${textDir}/${id}.en.md does not exist`);
+      problems.push(
+        `${rel} references block '${id}' but ${textDir}/${id}.en.md does not exist`,
+      );
       continue;
     }
-    for (const loc of LOCALES) {
-      if (!mapped.get(id)?.has(loc)) {
-        problems.push(`${rel}: proseFiles map is missing FileAttachment for '${id}' (${loc})`);
-      }
+    if (!declared.has(id)) {
+      problems.push(
+        `${rel} references block '${id}' but ${configPath} does not declare it`,
+      );
+    }
+  }
+
+  for (const id of declared) {
+    if (!blocks.has(id)) {
+      problems.push(
+        `${configPath} declares '${id}' but ${textDir}/${id}.en.md does not exist`,
+      );
     }
   }
 }
@@ -218,7 +254,9 @@ for (const [dir, ids] of blocksByDir) {
   const referenced = referencedByDir.get(dir)!;
   for (const id of ids) {
     if (!referenced.has(id)) {
-      problems.push(`${dir}/${id}.*.md is referenced by no .qmd (typo'd {{< prose >}} id? dead content?)`);
+      problems.push(
+        `${dir}/${id}.*.md is referenced by no .qmd (typo'd {{< prose >}} id? dead content?)`,
+      );
     }
   }
 }
