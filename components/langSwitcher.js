@@ -6,12 +6,6 @@ const LANGS = [
   { key: "fr", label: "Français" },
 ];
 
-// Quarto bakes `toc-title` from _quarto.yml at build, so it needs swapping here.
-const TOC_TITLES = {
-  en: "In this notebook",
-  fr: "Dans ce notebook",
-};
-
 function initialLang() {
   const param = new URLSearchParams(location.search).get("lang");
   if (LANGS.some((l) => l.key === param)) return param;
@@ -27,8 +21,6 @@ function setLang(key, select) {
   else url.searchParams.set("lang", key);
   history.replaceState(null, "", url);
   if (select) select.value = key;
-  const tocTitle = document.getElementById("toc-title");
-  if (tocTitle) tocTitle.textContent = TOC_TITLES[key];
   window.dispatchEvent(new CustomEvent("atlas:lang", { detail: key }));
 }
 
