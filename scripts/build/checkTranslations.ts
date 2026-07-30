@@ -24,12 +24,13 @@ async function readOr(path: string): Promise<string | null> {
   }
 }
 
-// Keep prose metadata narrow so build-time and browser parsing stay aligned.
-function checkFrontMatter(path: string, raw: string): boolean {
+// Front matter is exactly `title:` — a collapsed note is its own block, marked
+// with {{< prose id details=true >}}, so nothing is nested here.
+function checkFrontMatter(path: string, raw: string): void {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!m) {
     problems.push(`${path}: missing YAML front matter`);
-    return false;
+    return;
   }
   let fm: unknown;
   try {
@@ -38,11 +39,11 @@ function checkFrontMatter(path: string, raw: string): boolean {
     problems.push(
       `${path}: front matter is not valid YAML (${(e as Error).message})`,
     );
-    return false;
+    return;
   }
   const fields = fm as Record<string, unknown>;
   for (const key of Object.keys(fields ?? {})) {
-    if (!["title", "details"].includes(key)) {
+    if (key !== "title") {
       problems.push(`${path}: unsupported front matter field '${key}'`);
     }
   }
@@ -50,29 +51,6 @@ function checkFrontMatter(path: string, raw: string): boolean {
   if (typeof title !== "string" || title.trim() === "") {
     problems.push(`${path}: \`title:\` must be a non-empty string`);
   }
-  if (fields?.details === undefined || fields.details === null) return false;
-
-  if (typeof fields.details !== "object" || Array.isArray(fields.details)) {
-    problems.push(`${path}: \`details:\` must contain title and body fields`);
-    return false;
-  }
-  const details = fields.details as Record<string, unknown>;
-  for (const key of Object.keys(details)) {
-    if (!["title", "body"].includes(key)) {
-      problems.push(`${path}: unsupported details field '${key}'`);
-    }
-  }
-  for (const key of ["title", "body"]) {
-    if (typeof details[key] !== "string" || details[key].trim() === "") {
-      problems.push(`${path}: \`details.${key}:\` must be a non-empty string`);
-    }
-  }
-  if (!/^  body:\s*\|-\s*$/m.test(m[1])) {
-    problems.push(
-      `${path}: \`details.body\` must use the literal form \`body: |-\``,
-    );
-  }
-  return true;
 }
 
 const textDirs = new Set<string>();
@@ -111,7 +89,6 @@ for (const dir of textDirs) {
 
   // Validate every localized prose block.
   const ids = new Map<string, Set<string>>();
-  const detailsById = new Map<string, Set<string>>();
   for await (const e of Deno.readDir(dir)) {
     const m = e.name.match(/^(.+)\.([a-z]{2})\.md$/);
     if (!m) continue;
@@ -132,39 +109,25 @@ for (const dir of textDirs) {
     ids.get(id)!.add(loc);
     const path = `${rel}/${e.name}`;
     const raw = await Deno.readTextFile(`${dir}/${e.name}`);
-    const hasDetails = checkFrontMatter(path, raw);
+    checkFrontMatter(path, raw);
     // The {{< prose >}} marker owns the section heading; an h1 in the body would
-    // add a second top-level section. Indented details bodies can't match.
+    // add a second top-level section.
     if (/^#\s/m.test(raw)) {
       problems.push(
         `${path}: \`# \` heading in the body — use \`## \` or lower`,
       );
-    }
-    if (hasDetails) {
-      if (!detailsById.has(id)) detailsById.set(id, new Set());
-      detailsById.get(id)!.add(loc);
     }
   }
   for (const [id, present] of ids) {
     for (const loc of LOCALES) {
       if (!present.has(loc)) problems.push(`${rel}/${id}.${loc}.md is missing`);
     }
-    const detailsLocales = detailsById.get(id);
-    if (detailsLocales) {
-      for (const loc of LOCALES) {
-        if (!detailsLocales.has(loc)) {
-          problems.push(
-            `${rel}/${id}.${loc}.md is missing its \`details:\` content`,
-          );
-        }
-      }
-    }
   }
   blocksByDir.set(rel, new Set(ids.keys()));
   referencedByDir.set(rel, new Set());
 
   console.log(
-    `${rel}: ${en.size} keys, ${ids.size} prose blocks, ${detailsById.size} with details`,
+    `${rel}: ${en.size} keys, ${ids.size} prose blocks`,
   );
 }
 

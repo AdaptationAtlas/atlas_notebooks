@@ -1,9 +1,5 @@
 ---
 title: "Overview"
-details:
-  title: "How can I use this Notebook?"
-  body: |-
-    See the [Vulnerability Notebook](https://notebooks-vulnerability-note.adaptation-atlas-nb.pages.dev/notebooks/nb_vulnerability/notebook) to identify climate change vulnerability, exposure, urgency and adaptive capacities at a continental level, as well as how climate hazards are affecting livelihoods. This notebook helps you explore each of these dimensions from a gender lens. Use these insights to guide smarter, gender-responsive investments, policies, and support systems for the people and places that need them most.
 ---
 
 Climate change affects agri-food systems, i.e. through droughts, floods, heat stress, shortened growing seasons, crop losses, reduced pasture availability, and livestock productivity declines, but these impacts are not experienced equally. Women often play central roles as farmers, yet their ability to respond to climate stress is constrained by unequal access to land, credit, inputs, extension services, climate information, technologies, mobility, and decision-making power. As a result, climate hazards can deepen existing gender inequalities by increasing women's workloads, reducing livelihood security, and limiting adaptive capacity. Understanding the gender-agriculture-climate nexus therefore requires looking beyond climate exposure alone and examining where climate hazards overlap with women's specific roles in crop and livestock systems and with the structural barriers that shape vulnerability.

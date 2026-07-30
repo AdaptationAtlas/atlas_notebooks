@@ -1,13 +1,5 @@
 ---
 title: Climate Readiness Index
-details:
-  title: "How to interpret the capacity index"
-  body: |-
-    **What it combines** — The index is the geometric mean of four normalized components: weather-station density, precipitation-product agreement, short-term forecast skill, and long-term forecast skill.
-
-    **Reading the score** — Higher values indicate stronger technical conditions for producing climate information. Because the index uses a geometric mean, one weak component pulls down the overall score; a high value requires reasonably balanced performance across all four.
-
-    **What it leaves out** — The index does not assess staffing, funding, governance, advisory quality, trust, or whether information reaches farmers. Its classes compare places at the same administrative level across Sub-Saharan Africa.
 ---
 
 To provide a composite measure of climate information services’ data and forecast capacity, we defined the CIS Data and Forecast Capacity Index as the geometric average of the following indices: weather station density index, satellite precipitation variability agreement, short-term and long-term forecast skill. High values indicate places where CIS products are more likely to be supported by better data and skill conditions, i.e. high technical enabling conditions for CIS products. Conversely, low values suggest potential technical bottlenecks, such as, sparse stations, low satellite agreement on precipitation variability, or low forecast skill at short or long lead periods.

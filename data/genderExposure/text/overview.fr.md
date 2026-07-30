@@ -1,9 +1,5 @@
 ---
 title: "Vue d’Ensemble"
-details:
-  title: "Comment utiliser ce notebook?"
-  body: |-
-    Consultez le [notebook sur la vulnérabilité](https://notebooks-vulnerability-note.adaptation-atlas-nb.pages.dev/notebooks/nb_vulnerability/notebook) pour identifier la vulnérabilité au changement climatique, l'exposition, l'urgence et les capacités d'adaptation à l'échelle continentale, ainsi que la manière dont les aléas climatiques affectent les moyens de subsistance. Ce notebook vous aide à explorer chacune de ces dimensions sous l'angle du genre. Utilisez ces informations pour orienter des investissements, des politiques et des systèmes de soutien plus intelligents et sensibles au genre, vers les personnes et les lieux qui en ont le plus besoin.
 ---
 
 Le changement climatique affecte les systèmes agroalimentaires — sécheresses, inondations, stress thermique, raccourcissement des saisons de culture, pertes de récoltes, diminution de la disponibilité des pâturages et baisse de la productivité du bétail — mais ces impacts ne sont pas vécus de manière égale. Les femmes jouent souvent un rôle central en tant qu'agricultrices, mais leur capacité à répondre au stress climatique est limitée par un accès inégal à la terre, au crédit, aux intrants, aux services de vulgarisation, à l'information climatique, aux technologies, à la mobilité et au pouvoir de décision. Par conséquent, les aléas climatiques peuvent aggraver les inégalités de genre existantes en augmentant la charge de travail des femmes, en réduisant la sécurité des moyens de subsistance et en limitant la capacité d'adaptation. Comprendre le nexus genre-agriculture-climat exige donc d'aller au-delà de la seule exposition climatique et d'examiner où les aléas climatiques recoupent les rôles spécifiques des femmes dans les systèmes de culture et d'élevage ainsi que les barrières structurelles qui façonnent la vulnérabilité.

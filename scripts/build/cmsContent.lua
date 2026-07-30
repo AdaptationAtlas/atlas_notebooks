@@ -7,7 +7,7 @@
 -- same contracts in CI.
 --
 -- 1. Notebook prose — one file per block: data/<notebook>/text/<id>.<lang>.md,
---    front matter (`title:` plus an optional `details:` object) + markdown
+--    front matter (exactly one `title:` field) + markdown
 --    body, parsed with Pandoc's own reader. The block id is the filename;
 --    authors never see or edit it.
 --
@@ -15,7 +15,8 @@
 --
 --    Notebooks place blocks with the {{< prose <id> >}} shortcode
 --    (scripts/build/proseShortcode.lua) — `level=N` sets the heading level,
---    `heading=false` drops the heading for free-floating blocks. The
+--    `heading=false` drops the heading for free-floating blocks,
+--    `details=true` renders the block collapsed. The
 --    shortcode expands to the markers this filter consumes: a heading whose
 --    {#id} matches a block file is retitled from the block's `title:` and
 --    the block body is injected right after it, wrapped in
@@ -26,8 +27,8 @@
 --
 --    Both languages are rendered as static, lang-tagged HTML. CSS shows the
 --    active language, so switching languages does not fetch or parse prose
---    in the browser. Optional details are rendered the same way inside one
---    native <details> note. Developers control heading level and placement
+--    in the browser. `details=true` renders a block collapsed inside a native
+--    <details> note (title -> <summary>). Developers control heading level and placement
 --    in the .qmd; authors control the displayed text.
 --    A heading anchor that matches no block file is left alone —
 --    scripts/build/checkTranslations.ts flags block files nothing
@@ -45,7 +46,7 @@
 
 local textDir = nil
 local locales = { "en", "fr" } -- keep in sync with admin/config.yml
-local blocks = {} -- locale -> id -> { title, body, details } | false
+local blocks = {} -- locale -> id -> { title, body } | false
 local runtimeConfigRaw = nil
 
 -- ---------- shared helpers ----------
@@ -116,55 +117,6 @@ end
 
 -- ---------- notebook prose ----------
 
--- Pandoc flattens YAML block scalars, so preserve the raw Markdown for details.
-local function extractDetailsBody(raw)
-	local frontMatter = raw:gsub("\r\n", "\n"):match("^%-%-%-\n(.-)\n%-%-%-\n")
-	if not frontMatter then
-		return nil
-	end
-
-	local lines = {}
-	for line in (frontMatter .. "\n"):gmatch("(.-)\n") do
-		table.insert(lines, line)
-	end
-
-	for i, line in ipairs(lines) do
-		if line:match("^details:%s*$") then
-			for j = i + 1, #lines do
-				local indent = lines[j]:match("^( *)body:%s*|%-%s*$")
-				if indent then
-					local fieldIndent = #indent
-					local contentIndent = nil
-					local value = {}
-
-					for k = j + 1, #lines do
-						local child = lines[k]
-						if child == "" then
-							table.insert(value, "")
-						else
-							local childIndent = #(child:match("^( *)") or "")
-							if childIndent <= fieldIndent then
-								break
-							end
-							contentIndent = contentIndent or childIndent
-							table.insert(value, child:sub(contentIndent + 1))
-						end
-					end
-
-					while value[#value] == "" do
-						table.remove(value)
-					end
-					return table.concat(value, "\n")
-				end
-				if lines[j]:match("^%S") then
-					break
-				end
-			end
-		end
-	end
-	return nil
-end
-
 local function localizeHeadingIds(body, locale)
 	local wrapper = pandoc.walk_block(pandoc.Div(body), {
 		Header = function(header)
@@ -188,21 +140,9 @@ local function loadBlock(id, locale)
 		local raw = readFile(path)
 		if raw then
 			local doc = pandoc.read(raw, "markdown")
-			local details = nil
-			if doc.meta.details then
-				local detailsMarkdown = extractDetailsBody(raw)
-				if not detailsMarkdown then
-					error("cmsContent: details.body must use a literal block (`body: |-`) in " .. path)
-				end
-				details = {
-					title = doc.meta.details.title,
-					blocks = localizeHeadingIds(pandoc.read(detailsMarkdown, "markdown").blocks, locale),
-				}
-			end
 			blocks[locale][id] = {
 				title = doc.meta.title and pandoc.Inlines(doc.meta.title) or nil,
 				body = localizeHeadingIds(doc.blocks, locale),
-				details = details,
 			}
 		end
 	end
@@ -239,27 +179,18 @@ local function appendProse(out, localized, id)
 	end
 end
 
-local function appendDetails(out, localized, id)
-	local hasDetails = false
-	for _, locale in ipairs(locales) do
-		hasDetails = hasDetails or localized[locale].details ~= nil
-	end
-	if not hasDetails then
-		return
-	end
-
+-- A collapsed note is a normal block rendered inside <details>: its `title:` is
+-- the <summary>, its body the panel. Marked by {{< prose id details=true >}}.
+local function appendCollapsed(out, localized, id)
 	local summaries = {}
 	for _, locale in ipairs(locales) do
-		local details = localized[locale].details
-		if not details or not details.title or #details.blocks == 0 then
-			error(("cmsContent: details for prose block '%s' are incomplete in %s"):format(id, locale))
+		local title = localized[locale].title
+		if not title then
+			error(("cmsContent: collapsed prose block '%s' has no %s title"):format(id, locale))
 		end
 		table.insert(
 			summaries,
-			('<span class="nb-i18n" lang="%s">%s</span>'):format(
-				locale,
-				esc(pandoc.utils.stringify(details.title))
-			)
+			('<span class="nb-i18n" lang="%s">%s</span>'):format(locale, esc(pandoc.utils.stringify(title)))
 		)
 	end
 
@@ -268,8 +199,12 @@ local function appendDetails(out, localized, id)
 		pandoc.RawBlock("html", '<details class="nb-details"><summary>' .. table.concat(summaries) .. "</summary>")
 	)
 	for _, locale in ipairs(locales) do
+		local body = localized[locale].body
+		if #body == 0 then
+			error(("cmsContent: collapsed prose block '%s' has an empty %s body"):format(id, locale))
+		end
 		table.insert(out, pandoc.RawBlock("html", ('<div class="nb-details__body nb-i18n" lang="%s">'):format(locale)))
-		for _, child in ipairs(localized[locale].details.blocks) do
+		for _, child in ipairs(body) do
 			table.insert(out, child)
 		end
 		table.insert(out, pandoc.RawBlock("html", "</div>"))
@@ -284,8 +219,11 @@ local function injectProse(div)
 		error(("cmsContent: no prose block '%s' in %s"):format(tostring(id), tostring(textDir)))
 	end
 	local out = {}
-	appendProse(out, localized, id)
-	appendDetails(out, localized, id)
+	if div.classes:includes("nb-details") then
+		appendCollapsed(out, localized, id)
+	else
+		appendProse(out, localized, id)
+	end
 	return out
 end
 
@@ -310,7 +248,6 @@ local function expandHeader(el)
 
 	local out = { el }
 	appendProse(out, localized, el.identifier)
-	appendDetails(out, localized, el.identifier)
 	return out
 end
 
