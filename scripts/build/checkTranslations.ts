@@ -1,4 +1,4 @@
-// Validate locale parity, prose front matter, and QMD↔block references.
+// Validate locale parity, prose front matter, manifests, and QMD↔block references.
 // Usage: deno run --allow-read scripts/build/checkTranslations.ts
 
 import { expandGlob } from "https://deno.land/std@0.224.0/fs/expand_glob.ts";
@@ -24,21 +24,30 @@ async function readOr(path: string): Promise<string | null> {
   }
 }
 
-// Keep front matter to one title so CI and Lang.parseBlock cannot disagree.
-function checkFrontMatter(path: string, raw: string) {
-  const m = raw.match(/^---\r?\n(title:[^\r\n]*)\r?\n---\r?\n?/);
+// Front matter is exactly `title:` — a collapsed note is its own block, marked
+// with {{< prose id details=true >}}, so nothing is nested here.
+function checkFrontMatter(path: string, raw: string): void {
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!m) {
-    problems.push(`${path}: front matter must be exactly \`---\\ntitle: ...\\n---\``);
+    problems.push(`${path}: missing YAML front matter`);
     return;
   }
   let fm: unknown;
   try {
     fm = parseYaml(m[1]);
   } catch (e) {
-    problems.push(`${path}: front matter is not valid YAML (${(e as Error).message})`);
+    problems.push(
+      `${path}: front matter is not valid YAML (${(e as Error).message})`,
+    );
     return;
   }
-  const title = (fm as Record<string, unknown>)?.title;
+  const fields = fm as Record<string, unknown>;
+  for (const key of Object.keys(fields ?? {})) {
+    if (key !== "title") {
+      problems.push(`${path}: unsupported front matter field '${key}'`);
+    }
+  }
+  const title = fields?.title;
   if (typeof title !== "string" || title.trim() === "") {
     problems.push(`${path}: \`title:\` must be a non-empty string`);
   }
@@ -70,7 +79,11 @@ for (const dir of textDirs) {
       if (!other.has(k)) problems.push(`${rel}/${loc}.json missing: ${k}`);
     }
     for (const k of other) {
-      if (!en.has(k)) problems.push(`${rel}/${loc}.json has extra key (not in en.json): ${k}`);
+      if (!en.has(k)) {
+        problems.push(
+          `${rel}/${loc}.json has extra key (not in en.json): ${k}`,
+        );
+      }
     }
   }
 
@@ -85,12 +98,25 @@ for (const dir of textDirs) {
       continue;
     }
     if (!LOCALES.includes(loc)) {
-      problems.push(`${rel}/${e.name}: unexpected locale '${loc}' (expected ${LOCALES.join(", ")})`);
+      problems.push(
+        `${rel}/${e.name}: unexpected locale '${loc}' (expected ${
+          LOCALES.join(", ")
+        })`,
+      );
       continue;
     }
     if (!ids.has(id)) ids.set(id, new Set());
     ids.get(id)!.add(loc);
-    checkFrontMatter(`${rel}/${e.name}`, await Deno.readTextFile(`${dir}/${e.name}`));
+    const path = `${rel}/${e.name}`;
+    const raw = await Deno.readTextFile(`${dir}/${e.name}`);
+    checkFrontMatter(path, raw);
+    // The {{< prose >}} marker owns the section heading; an h1 in the body would
+    // add a second top-level section.
+    if (/^#\s/m.test(raw)) {
+      problems.push(
+        `${path}: \`# \` heading in the body — use \`## \` or lower`,
+      );
+    }
   }
   for (const [id, present] of ids) {
     for (const loc of LOCALES) {
@@ -100,7 +126,9 @@ for (const dir of textDirs) {
   blocksByDir.set(rel, new Set(ids.keys()));
   referencedByDir.set(rel, new Set());
 
-  console.log(`${rel}: ${en.size} keys, ${ids.size} prose blocks`);
+  console.log(
+    `${rel}: ${en.size} keys, ${ids.size} prose blocks`,
+  );
 }
 
 // Include one fragment level so split-notebook prose markers count as references.
@@ -114,54 +142,89 @@ async function readIncludes(path: string, entry: string): Promise<string> {
     try {
       parts.push(await Deno.readTextFile(target));
     } catch {
-      problems.push(`${relative(Deno.cwd(), path)}: cannot read include '${m[1]}'`);
+      problems.push(
+        `${relative(Deno.cwd(), path)}: cannot read include '${m[1]}'`,
+      );
     }
   }
 
   return parts.join("\n");
 }
 
+// A `common` contributor id that no longer resolves throws in resolveContributors()
+// and takes the whole notebook down in the browser, so catch it at build.
+const commonContributors = new Set<string>(
+  (JSON.parse(await readOr("data/shared/contributors.json") ?? "{}")
+    .contributors ?? []).map((c: { id: string }) => c.id),
+);
+
 // Require every referenced prose block to exist.
 for await (const f of expandGlob("notebooks/**/*.qmd")) {
-  // Read nb-text-dir from the entry file, not its includes.
   const entry = await Deno.readTextFile(f.path);
-  const textDir = entry.match(/^nb-text-dir:\s*(\S+)\s*$/m)?.[1];
-  if (!textDir) continue;
+  const configPath = entry.match(/^nb-config:\s*(\S+)\s*$/m)?.[1];
+  if (!configPath) continue;
+  const configRaw = await readOr(configPath);
+  if (configRaw === null) {
+    problems.push(
+      `${relative(Deno.cwd(), f.path)}: cannot read nb-config '${configPath}'`,
+    );
+    continue;
+  }
+  let config: {
+    textDir?: string;
+    contributors?: Record<string, { type?: string; id?: string }[]>;
+  };
+  try {
+    config = JSON.parse(configRaw);
+  } catch {
+    problems.push(`${configPath}: notebook config is not valid JSON`);
+    continue;
+  }
+  const textDir = config.textDir;
+  if (!textDir) {
+    problems.push(`${configPath}: notebook config is missing textDir`);
+    continue;
+  }
+  for (const group of ["authors", "developers"]) {
+    if (!config.contributors?.[group]?.length) {
+      problems.push(
+        `${configPath}: contributors.${group} must list at least one person`,
+      );
+    }
+  }
+  for (const [group, list] of Object.entries(config.contributors ?? {})) {
+    for (const c of list ?? []) {
+      if (c?.type === "common" && !commonContributors.has(c.id!)) {
+        problems.push(
+          `${configPath}: contributors.${group} references unknown common contributor '${c.id}'`,
+        );
+      }
+    }
+  }
+
   const qmd = await readIncludes(f.path, entry);
   const rel = relative(Deno.cwd(), f.path);
   const blocks = blocksByDir.get(textDir);
   if (!blocks) {
-    problems.push(`${rel}: nb-text-dir '${textDir}' has no en.json / prose blocks`);
+    problems.push(`${rel}: textDir '${textDir}' has no en.json / prose blocks`);
     continue;
   }
-  const refs = new Set<string>([
-    // Collect rendered markers and code references.
-    ...[...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
-    ...[...qmd.matchAll(/\bsections\.([A-Za-z0-9_]+)/g)].map((m) => m[1]),
-    ...[...qmd.matchAll(/\bsections\[["']([^"']+)["']\]/g)].map((m) => m[1]),
-  ]);
+  const refs = new Set(
+    [...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
+  );
   for (const id of refs) referencedByDir.get(textDir)?.add(id);
 
-  // Require runtime attachments for every referenced block and locale.
-  const mapped = new Map<string, Set<string>>();
-  const attachmentRe = new RegExp(
-    `FileAttachment\\("/?${textDir}/([A-Za-z0-9_-]+)\\.([a-z]{2})\\.md"\\)`,
-    "g",
-  );
-  for (const m of qmd.matchAll(attachmentRe)) {
-    if (!mapped.has(m[1])) mapped.set(m[1], new Set());
-    mapped.get(m[1])!.add(m[2]);
+  for (const id of ["overview", "methods"]) {
+    if (!refs.has(id)) {
+      problems.push(`${rel}: must place a '${id}' prose block`);
+    }
   }
 
   for (const id of refs) {
     if (!blocks.has(id)) {
-      problems.push(`${rel} references block '${id}' but ${textDir}/${id}.en.md does not exist`);
-      continue;
-    }
-    for (const loc of LOCALES) {
-      if (!mapped.get(id)?.has(loc)) {
-        problems.push(`${rel}: proseFiles map is missing FileAttachment for '${id}' (${loc})`);
-      }
+      problems.push(
+        `${rel} references block '${id}' but ${textDir}/${id}.en.md does not exist`,
+      );
     }
   }
 }
@@ -171,7 +234,9 @@ for (const [dir, ids] of blocksByDir) {
   const referenced = referencedByDir.get(dir)!;
   for (const id of ids) {
     if (!referenced.has(id)) {
-      problems.push(`${dir}/${id}.*.md is referenced by no .qmd (typo'd {{< prose >}} id? dead content?)`);
+      problems.push(
+        `${dir}/${id}.*.md is referenced by no .qmd (typo'd {{< prose >}} id? dead content?)`,
+      );
     }
   }
 }

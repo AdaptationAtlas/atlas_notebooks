@@ -12,7 +12,7 @@ class BackToTop extends HTMLElement {
       <style>
         .back-to-top {
           position: fixed;
-          bottom: calc(25px + env(safe-area-inset-bottom));
+          bottom: calc(80px + env(safe-area-inset-bottom));
           right: calc(30px + env(safe-area-inset-right));
           padding: 12px 16px;
           font-size: 16px;
@@ -40,7 +40,7 @@ class BackToTop extends HTMLElement {
 
         @media (max-width: 640px) {
           .back-to-top {
-            bottom: calc(16px + env(safe-area-inset-bottom));
+            bottom: calc(72px + env(safe-area-inset-bottom));
             right: calc(16px + env(safe-area-inset-right));
             padding: 10px 12px;
             font-size: 14px;

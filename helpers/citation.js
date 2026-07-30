@@ -86,8 +86,15 @@ function peopleSection(heading, people) {
   return section;
 }
 
-/** Resolve contributor IDs or inline entries and number affiliations by appearance. */
+function contributorMap(registry = {}) {
+  return Object.fromEntries(
+    (registry.contributors ?? []).map((person) => [person.id, person]),
+  );
+}
+
+/** Resolve common or custom contributors and number affiliations by appearance. */
 export function resolveContributors(groups = {}, registry = {}) {
+  const contributors = contributorMap(registry);
   const orgNumbers = new Map();
   const numberFor = (org) => {
     if (!orgNumbers.has(org)) orgNumbers.set(org, orgNumbers.size + 1);
@@ -95,14 +102,18 @@ export function resolveContributors(groups = {}, registry = {}) {
   };
   const resolve = (list = []) =>
     list.map((entry) => {
-      const person = typeof entry === "string" ? registry[entry] : entry;
+      const person = entry?.type === "common"
+        ? contributors[entry.id]
+        : entry?.type === "custom"
+        ? entry
+        : null;
       if (!person?.name) {
         throw new Error(`Unknown contributor: ${JSON.stringify(entry)}`);
       }
       return {
         name: person.name,
         url: person.url,
-        orgs: [].concat(person.org ?? []).map(numberFor),
+        orgs: person.org.map(numberFor),
       };
     });
 

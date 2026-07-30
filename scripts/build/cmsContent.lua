@@ -7,14 +7,16 @@
 -- same contracts in CI.
 --
 -- 1. Notebook prose — one file per block: data/<notebook>/text/<id>.<lang>.md,
---    front matter (`title:` only) + markdown body, parsed with Pandoc's own
---    reader. The block id is the filename; authors never see or edit it.
+--    front matter (exactly one `title:` field) + markdown
+--    body, parsed with Pandoc's own reader. The block id is the filename;
+--    authors never see or edit it.
 --
---      front matter:  nb-text-dir: data/economicReturns/text
+--      front matter:  nb-config: data/economicReturns/notebook.json
 --
 --    Notebooks place blocks with the {{< prose <id> >}} shortcode
 --    (scripts/build/proseShortcode.lua) — `level=N` sets the heading level,
---    `heading=false` drops the heading for free-floating blocks. The
+--    `heading=false` drops the heading for free-floating blocks,
+--    `details=true` renders the block collapsed. The
 --    shortcode expands to the markers this filter consumes: a heading whose
 --    {#id} matches a block file is retitled from the block's `title:` and
 --    the block body is injected right after it, wrapped in
@@ -23,11 +25,11 @@
 --    (Shortcodes expand in Quarto's built-in pass, so _quarto.yml lists
 --    `- quarto` before this filter.)
 --
---    Default-language prose is baked in as static HTML — crawlable and
---    visible before the OJS runtime boots; the client-side language toggle
---    swaps the same nodes at runtime (Lang.applyTranslations /
---    Lang.parseBlock in helpers/lang.js). Developers control heading level
---    and placement in the .qmd; authors control the displayed text.
+--    Both languages are rendered as static, lang-tagged HTML. CSS shows the
+--    active language, so switching languages does not fetch or parse prose
+--    in the browser. `details=true` renders a block collapsed inside a native
+--    <details> note (title -> <summary>). Developers control heading level and placement
+--    in the .qmd; authors control the displayed text.
 --    A heading anchor that matches no block file is left alone —
 --    scripts/build/checkTranslations.ts flags block files nothing
 --    references, which catches typo'd anchors in CI.
@@ -43,8 +45,9 @@
 --                ::: {.docs-glossary data-src="data/docs/glossary.json"}
 
 local textDir = nil
-local lang = "en"
-local blocks = {} -- id -> { title = Inlines, body = Blocks } | false (missing)
+local locales = { "en", "fr" } -- keep in sync with admin/config.yml
+local blocks = {} -- locale -> id -> { title, body } | false
+local runtimeConfigRaw = nil
 
 -- ---------- shared helpers ----------
 
@@ -77,52 +80,175 @@ local function mdToHtml(md)
 	return pandoc.write(pandoc.read(md or "", "markdown"), "html")
 end
 
+local function metaStrings(values)
+	local out = {}
+	for _, value in ipairs(values or {}) do
+		table.insert(out, pandoc.MetaString(value))
+	end
+	return pandoc.MetaList(out)
+end
+
+local function applyNotebookConfig(meta)
+	local configPath = meta["nb-config"] and pandoc.utils.stringify(meta["nb-config"])
+	if not configPath or configPath == "" then
+		return meta
+	end
+
+	local path = projectRoot() .. "/" .. configPath
+	local raw = readFile(path)
+	if not raw then
+		error("cmsContent: cannot read notebook config " .. path)
+	end
+	local ok, config = pcall(pandoc.json.decode, raw)
+	if not ok or type(config) ~= "table" then
+		error("cmsContent: notebook config is not valid JSON: " .. path)
+	end
+	if type(config.title) ~= "table" or type(config.title.en) ~= "string" or type(config.textDir) ~= "string" then
+		error("cmsContent: notebook config is missing title or textDir: " .. path)
+	end
+
+	textDir = config.textDir
+	runtimeConfigRaw = raw
+	meta.pagetitle = pandoc.MetaString(config.title.en)
+	meta.description = pandoc.MetaString(config.description or "")
+	meta.keywords = metaStrings(config.keywords)
+	return meta
+end
+
 -- ---------- notebook prose ----------
 
-local function loadBlock(id)
-	if blocks[id] ~= nil then
-		return blocks[id]
+local function localizeHeadingIds(body, locale)
+	local wrapper = pandoc.walk_block(pandoc.Div(body), {
+		Header = function(header)
+			if header.identifier ~= "" then
+				header.identifier = header.identifier .. "-" .. locale
+			end
+			return header
+		end,
+	})
+	return wrapper.content
+end
+
+local function loadBlock(id, locale)
+	blocks[locale] = blocks[locale] or {}
+	if blocks[locale][id] ~= nil then
+		return blocks[locale][id]
 	end
-	blocks[id] = false
+	blocks[locale][id] = false
 	if textDir then
-		local raw = readFile(projectRoot() .. "/" .. textDir .. "/" .. id .. "." .. lang .. ".md")
+		local path = projectRoot() .. "/" .. textDir .. "/" .. id .. "." .. locale .. ".md"
+		local raw = readFile(path)
 		if raw then
 			local doc = pandoc.read(raw, "markdown")
-			blocks[id] = {
+			blocks[locale][id] = {
 				title = doc.meta.title and pandoc.Inlines(doc.meta.title) or nil,
-				body = doc.blocks,
+				body = localizeHeadingIds(doc.blocks, locale),
 			}
 		end
 	end
-	return blocks[id]
+	return blocks[locale][id]
+end
+
+local function loadLocalizedBlocks(id)
+	local localized = {}
+	local default = loadBlock(id, locales[1])
+	if not default then
+		return nil
+	end
+	localized[locales[1]] = default
+	for i = 2, #locales do
+		local locale = locales[i]
+		localized[locale] = loadBlock(id, locale)
+		if not localized[locale] then
+			error(("cmsContent: prose block '%s' is missing its %s translation"):format(id, locale))
+		end
+	end
+	return localized
+end
+
+local function appendProse(out, localized, id)
+	for _, locale in ipairs(locales) do
+		local block = localized[locale]
+		if #block.body == 0 then
+			error(("cmsContent: prose block '%s' has an empty %s body"):format(id, locale))
+		end
+		table.insert(
+			out,
+			pandoc.Div(block.body, pandoc.Attr("", { "nb-prose", "nb-i18n" }, { lang = locale }))
+		)
+	end
+end
+
+-- A collapsed note is a normal block rendered inside <details>: its `title:` is
+-- the <summary>, its body the panel. Marked by {{< prose id details=true >}}.
+local function appendCollapsed(out, localized, id)
+	local summaries = {}
+	for _, locale in ipairs(locales) do
+		local title = localized[locale].title
+		if not title then
+			error(("cmsContent: collapsed prose block '%s' has no %s title"):format(id, locale))
+		end
+		table.insert(
+			summaries,
+			('<span class="nb-i18n" lang="%s">%s</span>'):format(locale, esc(pandoc.utils.stringify(title)))
+		)
+	end
+
+	table.insert(
+		out,
+		pandoc.RawBlock("html", '<details class="nb-details"><summary>' .. table.concat(summaries) .. "</summary>")
+	)
+	for _, locale in ipairs(locales) do
+		local body = localized[locale].body
+		if #body == 0 then
+			error(("cmsContent: collapsed prose block '%s' has an empty %s body"):format(id, locale))
+		end
+		table.insert(out, pandoc.RawBlock("html", ('<div class="nb-details__body nb-i18n" lang="%s">'):format(locale)))
+		for _, child in ipairs(body) do
+			table.insert(out, child)
+		end
+		table.insert(out, pandoc.RawBlock("html", "</div>"))
+	end
+	table.insert(out, pandoc.RawBlock("html", "</details>"))
 end
 
 local function injectProse(div)
 	local id = div.attributes["data-section"]
-	local block = loadBlock(id)
-	if not block or #block.body == 0 then
-		error(("cmsContent: no prose block '%s' (%s/%s.%s.md)"):format(tostring(id), tostring(textDir), tostring(id), lang))
+	local localized = loadLocalizedBlocks(id)
+	if not localized then
+		error(("cmsContent: no prose block '%s' in %s"):format(tostring(id), tostring(textDir)))
 	end
-	div.content = block.body
-	return div
+	local out = {}
+	if div.classes:includes("nb-details") then
+		appendCollapsed(out, localized, id)
+	else
+		appendProse(out, localized, id)
+	end
+	return out
 end
 
 local function expandHeader(el)
 	if el.identifier == "" then
 		return nil
 	end
-	local block = loadBlock(el.identifier)
-	if not block then
+	local localized = loadLocalizedBlocks(el.identifier)
+	if not localized then
 		return nil
 	end
-	if block.title then
-		el.content = block.title
+
+	local titles = {}
+	for _, locale in ipairs(locales) do
+		local title = localized[locale].title
+		if not title then
+			error(("cmsContent: prose block '%s' has no %s title"):format(el.identifier, locale))
+		end
+		table.insert(titles, pandoc.Span(title, pandoc.Attr("", { "nb-i18n" }, { lang = locale })))
 	end
-	if #block.body == 0 then
-		return el
-	end
-	local div = pandoc.Div(block.body, pandoc.Attr("", { "nb-prose" }, { ["data-section"] = el.identifier }))
-	return { el, div }
+	el.content = titles
+
+	local out = { el }
+	appendProse(out, localized, el.identifier)
+	return out
 end
 
 -- ---------- docs data pages ----------
@@ -153,11 +279,9 @@ local function renderFaq(entries)
 			lastSection = e.section_en
 			table.insert(
 				out,
-				('<h2 id="faq-%s" data-en="%s" data-fr="%s">%s</h2>'):format(
+				('<h2 id="faq-%s">%s</h2>'):format(
 					slug(e.section_en),
-					esc(e.section_en),
-					esc(e.section_fr),
-					esc(e.section_en)
+					pairSpan(e.section_en, e.section_fr)
 				)
 			)
 		end
@@ -213,12 +337,11 @@ end
 -- ---------- dispatch ----------
 
 local function getMeta(meta)
-	if meta["nb-text-dir"] then
-		textDir = pandoc.utils.stringify(meta["nb-text-dir"])
-	end
-	if meta["lang"] then
-		lang = pandoc.utils.stringify(meta["lang"])
-	end
+	textDir = nil
+	runtimeConfigRaw = nil
+	blocks = {}
+	meta = applyNotebookConfig(meta)
+	return meta
 end
 
 local function fillDiv(div)
@@ -232,7 +355,18 @@ local function fillDiv(div)
 	return nil
 end
 
+local function injectNotebookConfig(doc)
+	if not runtimeConfigRaw then
+		return doc
+	end
+	local safe = runtimeConfigRaw:gsub("</", "<\\/")
+	local script = ('<script id="atlas-notebook-config" type="application/json">%s</script>'):format(safe)
+	table.insert(doc.blocks, 1, pandoc.RawBlock("html", script))
+	return doc
+end
+
 return {
 	{ Meta = getMeta },
 	{ Div = fillDiv, Header = expandHeader },
+	{ Pandoc = injectNotebookConfig },
 }

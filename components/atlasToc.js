@@ -13,7 +13,7 @@ const TOC_LAYOUT = {
 };
 
 const HIDDEN_ANCESTOR_SELECTOR =
-  "[hidden], [aria-hidden='true'], .hidden";
+  "[hidden], [aria-hidden='true'], .hidden, .unlisted";
 
 let atlasTocInstanceCount = 0;
 
@@ -22,6 +22,15 @@ function parseList(value) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function headingFor(element, lang = document.documentElement.lang) {
+  return (
+    element.getAttribute(lang === "fr" ? "heading-fr" : "heading-en") ||
+    element.getAttribute("heading") ||
+    element.getAttribute("title") ||
+    "Contents"
+  );
 }
 
 function readConfig(element) {
@@ -35,14 +44,10 @@ function readConfig(element) {
     .join(", ");
 
   return {
-    heading:
-      element.getAttribute("heading") ||
-      element.getAttribute("title") ||
-      "Contents",
+    heading: headingFor(element),
     selector: element.getAttribute("selector")?.trim() || fallbackSelector,
     fallbackSelector,
     ignoredIds: new Set(parseList(element.getAttribute("ids-to-ignore"))),
-    activeClass: element.getAttribute("active-class") || "active",
   };
 }
 
@@ -105,18 +110,33 @@ function ancestorSectionIds(heading) {
   return ids;
 }
 
+function headingText(heading) {
+  const lang = document.documentElement.lang;
+  const localized = heading.querySelector(
+    `:scope > [lang="${lang}"]`,
+  );
+  return (localized ?? heading).textContent.trim();
+}
+
 function createHeadingRecord(heading, ignoredIds) {
   if (heading.closest(HIDDEN_ANCESTOR_SELECTOR)) return null;
+  const localizedContainer = heading.closest(".nb-i18n[lang]");
+  if (
+    localizedContainer &&
+    localizedContainer.lang !== document.documentElement.lang
+  ) {
+    return null;
+  }
 
-  const headingText = heading.textContent.trim();
+  const text = headingText(heading);
   const parentSection = heading.closest("section[id]");
-  const id = ensureHeadingId(heading, headingText, parentSection);
+  const id = ensureHeadingId(heading, text, parentSection);
   const ignoredValues = [
     id,
     heading.id,
     parentSection?.id,
     ...ancestorSectionIds(heading),
-    headingText,
+    text,
     ...heading.classList,
   ].filter(Boolean);
 
@@ -125,23 +145,10 @@ function createHeadingRecord(heading, ignoredIds) {
   const levelMatch = heading.tagName.match(/^H([1-6])$/);
   return {
     heading,
-    headingText,
+    headingText: text,
     id,
     level: levelMatch ? Number(levelMatch[1]) : 1,
   };
-}
-
-function nodeContainsSelector(node, selector) {
-  if (
-    node.nodeType === Node.ELEMENT_NODE &&
-    node.matches(selector)
-  ) {
-    return true;
-  }
-  return (
-    typeof node.querySelector === "function" &&
-    Boolean(node.querySelector(selector))
-  );
 }
 
 class AtlasToc extends HTMLElement {
@@ -180,7 +187,7 @@ class AtlasToc extends HTMLElement {
     this.style.display = "none";
     this._createUi();
     this._listen();
-    this._observeContent();
+    this._observeContentWidth();
     this._refreshHeadings();
     this._scheduleFrame("layout", () => this._layout());
   }
@@ -189,7 +196,6 @@ class AtlasToc extends HTMLElement {
     if (!this._initialized) return;
 
     this._connectionEvents?.abort();
-    this._mutationObserver?.disconnect();
     this._resizeObserver?.disconnect();
     this._intersectionObserver?.disconnect();
     this._cancelFrames();
@@ -213,14 +219,14 @@ class AtlasToc extends HTMLElement {
     this._panel.tabIndex = -1;
     this._panel.setAttribute("aria-labelledby", headingId);
 
-    const heading = document.createElement("span");
-    heading.className = "atlas-toc-heading";
-    heading.id = headingId;
-    heading.textContent = this._config.heading;
+    this._heading = document.createElement("span");
+    this._heading.className = "atlas-toc-heading";
+    this._heading.id = headingId;
+    this._heading.textContent = this._config.heading;
 
     this._linksContainer = document.createElement("ol");
     this._linksContainer.className = "atlas-toc-links";
-    this._panel.append(heading, this._linksContainer);
+    this._panel.append(this._heading, this._linksContainer);
 
     this._toggleButton = document.createElement("button");
     this._toggleButton.type = "button";
@@ -251,6 +257,14 @@ class AtlasToc extends HTMLElement {
       passive: true,
       signal,
     });
+    window.addEventListener(
+      "atlas:lang",
+      (event) => {
+        this._setHeading(event.detail);
+        this._refreshHeadings();
+      },
+      { signal },
+    );
     document.addEventListener("keydown", this._onOverlayKeydown, {
       signal,
     });
@@ -261,31 +275,14 @@ class AtlasToc extends HTMLElement {
     );
   }
 
-  _observeContent() {
+  _setHeading(lang) {
+    const heading = headingFor(this, lang);
+    this._heading.textContent = heading;
+    this._toggleButton.textContent = heading;
+  }
+
+  _observeContentWidth() {
     if (!this._content) return;
-
-    this._mutationObserver = new MutationObserver((mutations) => {
-      const headingsChanged = mutations.some((mutation) => {
-        // OJS may fill text inside an existing heading after initial render.
-        const target =
-          mutation.target.nodeType === Node.ELEMENT_NODE
-            ? mutation.target
-            : mutation.target.parentElement;
-        if (target?.closest(this._headingSelector)) return true;
-
-        return [...mutation.addedNodes, ...mutation.removedNodes].some(
-          (node) => nodeContainsSelector(node, this._headingSelector),
-        );
-      });
-      if (headingsChanged) {
-        this._scheduleFrame("headings", () => this._refreshHeadings());
-      }
-    });
-    this._mutationObserver.observe(this._content, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
 
     if (!("ResizeObserver" in window)) return;
     this._resizeObserver = new ResizeObserver((entries) => {
@@ -428,7 +425,7 @@ class AtlasToc extends HTMLElement {
 
     this._entries.forEach(({ link }, entryIndex) => {
       const isCurrent = entryIndex === index;
-      link.classList.toggle(this._config.activeClass, isCurrent);
+      link.classList.toggle("active", isCurrent);
       if (isCurrent) {
         link.setAttribute("aria-current", "location");
       } else {
