@@ -13,7 +13,7 @@ const TOC_LAYOUT = {
 };
 
 const HIDDEN_ANCESTOR_SELECTOR =
-  "[hidden], [aria-hidden='true'], .hidden";
+  "[hidden], [aria-hidden='true'], .hidden, .unlisted";
 
 let atlasTocInstanceCount = 0;
 
@@ -48,7 +48,6 @@ function readConfig(element) {
     selector: element.getAttribute("selector")?.trim() || fallbackSelector,
     fallbackSelector,
     ignoredIds: new Set(parseList(element.getAttribute("ids-to-ignore"))),
-    activeClass: element.getAttribute("active-class") || "active",
   };
 }
 
@@ -152,19 +151,6 @@ function createHeadingRecord(heading, ignoredIds) {
   };
 }
 
-function nodeContainsSelector(node, selector) {
-  if (
-    node.nodeType === Node.ELEMENT_NODE &&
-    node.matches(selector)
-  ) {
-    return true;
-  }
-  return (
-    typeof node.querySelector === "function" &&
-    Boolean(node.querySelector(selector))
-  );
-}
-
 class AtlasToc extends HTMLElement {
   constructor() {
     super();
@@ -201,7 +187,7 @@ class AtlasToc extends HTMLElement {
     this.style.display = "none";
     this._createUi();
     this._listen();
-    this._observeContent();
+    this._observeContentWidth();
     this._refreshHeadings();
     this._scheduleFrame("layout", () => this._layout());
   }
@@ -210,7 +196,6 @@ class AtlasToc extends HTMLElement {
     if (!this._initialized) return;
 
     this._connectionEvents?.abort();
-    this._mutationObserver?.disconnect();
     this._resizeObserver?.disconnect();
     this._intersectionObserver?.disconnect();
     this._cancelFrames();
@@ -296,31 +281,8 @@ class AtlasToc extends HTMLElement {
     this._toggleButton.textContent = heading;
   }
 
-  _observeContent() {
+  _observeContentWidth() {
     if (!this._content) return;
-
-    this._mutationObserver = new MutationObserver((mutations) => {
-      const headingsChanged = mutations.some((mutation) => {
-        // OJS may fill text inside an existing heading after initial render.
-        const target =
-          mutation.target.nodeType === Node.ELEMENT_NODE
-            ? mutation.target
-            : mutation.target.parentElement;
-        if (target?.closest(this._headingSelector)) return true;
-
-        return [...mutation.addedNodes, ...mutation.removedNodes].some(
-          (node) => nodeContainsSelector(node, this._headingSelector),
-        );
-      });
-      if (headingsChanged) {
-        this._scheduleFrame("headings", () => this._refreshHeadings());
-      }
-    });
-    this._mutationObserver.observe(this._content, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
 
     if (!("ResizeObserver" in window)) return;
     this._resizeObserver = new ResizeObserver((entries) => {
@@ -463,7 +425,7 @@ class AtlasToc extends HTMLElement {
 
     this._entries.forEach(({ link }, entryIndex) => {
       const isCurrent = entryIndex === index;
-      link.classList.toggle(this._config.activeClass, isCurrent);
+      link.classList.toggle("active", isCurrent);
       if (isCurrent) {
         link.setAttribute("aria-current", "location");
       } else {

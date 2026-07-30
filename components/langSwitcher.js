@@ -25,28 +25,10 @@ function setLang(key, select) {
 }
 
 function init() {
-  const navEnd = document.querySelector(".navbar-nav.ms-auto .nav-item.compact");
+  const navEnd = document.querySelector(
+    ".navbar-nav.ms-auto .nav-item.compact",
+  );
   if (!navEnd || document.getElementById("nav-lang-selector")) return;
-
-  const style = document.createElement("style");
-  style.textContent = `
-    #nav-lang-selector {
-      margin-left: 10px;
-      font: inherit;
-      color: #000;
-      background: transparent;
-      border: none;
-      padding: 0.15rem 0.3rem;
-      cursor: pointer;
-      transition: color 0.15s;
-    }
-    #nav-lang-selector:hover,
-    #nav-lang-selector:focus-visible {
-      color: var(--atlas-color-primary, #2e7636);
-    }
-    #nav-lang-selector option { color: initial; }
-  `;
-  document.head.appendChild(style);
 
   const select = document.createElement("select");
   select.id = "nav-lang-selector";

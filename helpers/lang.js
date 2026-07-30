@@ -52,71 +52,6 @@ export function withFallback(obj, fallback) {
   return out;
 }
 
-/** List object-tree leaves missing any required key. */
-export function listLeavesMissingObjectKeys(obj, keys) {
-  const missingLeaves = [];
-
-  function traverse(obj, path) {
-    if (typeof obj !== "object" || obj === null) return;
-
-    if (Array.isArray(obj)) {
-      if (obj.length === 0) {
-        missingLeaves.push({ [path]: obj });
-        return;
-      }
-      obj.forEach((item, index) => traverse(item, `${path}[${index}]`));
-      return;
-    }
-
-    if (Object.keys(obj).length === 0) {
-      missingLeaves.push({ [path]: obj });
-      return;
-    }
-
-    for (let key in obj) {
-      if (Object.hasOwnProperty.call(obj, key)) {
-        if (typeof obj[key] === "object" && obj[key] !== null) {
-          traverse(obj[key], `${path}.${key}`);
-        } else {
-          const missingKeys = keys.filter((k) => !(k in obj));
-          if (missingKeys.length > 0) {
-            missingLeaves.push({ [path]: obj });
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  traverse(obj, "");
-  return missingLeaves;
-}
-
-/** Return a query parameter only when it is in the allowed list. */
-export async function getParamFromList(
-  { name, list, search = location.search } = {},
-) {
-  if (!name || !list) {
-    throw new Error("'name' and 'list' parameters are required.");
-  }
-
-  const params = new URLSearchParams(search);
-  const param = params.get(name);
-
-  return param && list.includes(param) ? param : null;
-}
-
-/** Convert a string to title case. */
-export function toTitleCase(str) {
-  if (typeof str !== "string") {
-    throw new Error("Input must be a string");
-  }
-  return str.replace(
-    /\w\S*/g,
-    (txt) => txt.charAt(0).toUpperCase() + txt.slice(1),
-  );
-}
-
 /** Convert a string to sentence case. */
 export function toSentenceCase(str) {
   if (typeof str !== "string") {
@@ -132,9 +67,6 @@ export const lang = {
   getRegexForNamedInsertion,
   reduceReplaceTemplateItems,
   withFallback,
-  listLeavesMissingObjectKeys,
-  getParamFromList,
-  toTitleCase,
   toSentenceCase,
 };
 
