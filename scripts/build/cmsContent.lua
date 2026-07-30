@@ -102,13 +102,8 @@ local function applyNotebookConfig(meta)
 	if not ok or type(config) ~= "table" then
 		error("cmsContent: notebook config is not valid JSON: " .. path)
 	end
-	if
-		type(config.title) ~= "table"
-		or type(config.title.en) ~= "string"
-		or type(config.textDir) ~= "string"
-		or type(config.blocks) ~= "table"
-	then
-		error("cmsContent: notebook config is missing title, textDir, or blocks: " .. path)
+	if type(config.title) ~= "table" or type(config.title.en) ~= "string" or type(config.textDir) ~= "string" then
+		error("cmsContent: notebook config is missing title or textDir: " .. path)
 	end
 
 	textDir = config.textDir

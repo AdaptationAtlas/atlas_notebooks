@@ -209,7 +209,6 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
   }
   let config: {
     textDir?: string;
-    blocks?: string[];
     contributors?: Record<string, { type?: string; id?: string }[]>;
   };
   try {
@@ -247,35 +246,21 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
     problems.push(`${rel}: textDir '${textDir}' has no en.json / prose blocks`);
     continue;
   }
-  const declared = new Set(config.blocks ?? []);
-  for (const id of ["overview", "methods"]) {
-    if (!declared.has(id)) {
-      problems.push(`${configPath}: blocks must include '${id}'`);
-    }
-  }
   const refs = new Set(
     [...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
   );
   for (const id of refs) referencedByDir.get(textDir)?.add(id);
 
+  for (const id of ["overview", "methods"]) {
+    if (!refs.has(id)) {
+      problems.push(`${rel}: must place a '${id}' prose block`);
+    }
+  }
+
   for (const id of refs) {
     if (!blocks.has(id)) {
       problems.push(
         `${rel} references block '${id}' but ${textDir}/${id}.en.md does not exist`,
-      );
-      continue;
-    }
-    if (!declared.has(id)) {
-      problems.push(
-        `${rel} references block '${id}' but ${configPath} does not declare it`,
-      );
-    }
-  }
-
-  for (const id of declared) {
-    if (!blocks.has(id)) {
-      problems.push(
-        `${configPath} declares '${id}' but ${textDir}/${id}.en.md does not exist`,
       );
     }
   }
