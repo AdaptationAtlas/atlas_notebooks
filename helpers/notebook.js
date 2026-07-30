@@ -26,8 +26,8 @@ export function readNotebookConfig(doc = document) {
   return JSON.parse(node.textContent);
 }
 
-/** Load widget strings and CMS prose for every supported locale. */
-export async function loadNotebookContent(config) {
+/** Load widget strings for every supported locale. */
+export async function loadNotebookText(config) {
   const textEntries = await Promise.all(
     LOCALES.map(async (locale) => [
       locale,
@@ -41,24 +41,5 @@ export async function loadNotebookContent(config) {
   for (const locale of LOCALES) {
     text[locale] = Lang.withFallback(text[locale], text.en);
   }
-
-  const sectionEntries = await Promise.all(
-    LOCALES.map(async (locale) => {
-      const blocks = await Promise.all(
-        config.blocks.map(async (id) => {
-          const raw = await fetchRequired(
-            contentUrl(config.textDir, `${id}.${locale}.md`),
-            "text",
-          );
-          return [id, Lang.parseBlock(raw)];
-        }),
-      );
-      return [locale, Object.fromEntries(blocks)];
-    }),
-  );
-
-  return {
-    text,
-    sections: Object.fromEntries(sectionEntries),
-  };
+  return text;
 }

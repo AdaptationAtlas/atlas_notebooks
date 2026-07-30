@@ -111,18 +111,33 @@ function ancestorSectionIds(heading) {
   return ids;
 }
 
+function headingText(heading) {
+  const lang = document.documentElement.lang;
+  const localized = heading.querySelector(
+    `:scope > [lang="${lang}"]`,
+  );
+  return (localized ?? heading).textContent.trim();
+}
+
 function createHeadingRecord(heading, ignoredIds) {
   if (heading.closest(HIDDEN_ANCESTOR_SELECTOR)) return null;
+  const localizedContainer = heading.closest(".nb-i18n[lang]");
+  if (
+    localizedContainer &&
+    localizedContainer.lang !== document.documentElement.lang
+  ) {
+    return null;
+  }
 
-  const headingText = heading.textContent.trim();
+  const text = headingText(heading);
   const parentSection = heading.closest("section[id]");
-  const id = ensureHeadingId(heading, headingText, parentSection);
+  const id = ensureHeadingId(heading, text, parentSection);
   const ignoredValues = [
     id,
     heading.id,
     parentSection?.id,
     ...ancestorSectionIds(heading),
-    headingText,
+    text,
     ...heading.classList,
   ].filter(Boolean);
 
@@ -131,7 +146,7 @@ function createHeadingRecord(heading, ignoredIds) {
   const levelMatch = heading.tagName.match(/^H([1-6])$/);
   return {
     heading,
-    headingText,
+    headingText: text,
     id,
     level: levelMatch ? Number(levelMatch[1]) : 1,
   };
@@ -259,7 +274,10 @@ class AtlasToc extends HTMLElement {
     });
     window.addEventListener(
       "atlas:lang",
-      (event) => this._setHeading(event.detail),
+      (event) => {
+        this._setHeading(event.detail);
+        this._refreshHeadings();
+      },
       { signal },
     );
     document.addEventListener("keydown", this._onOverlayKeydown, {

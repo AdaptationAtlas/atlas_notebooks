@@ -8,7 +8,7 @@
 --   {{< prose overview-closing heading=false >}} -> ::: {.nb-prose data-section="overview-closing"} :::
 --
 -- The heading text emitted here is just the block id — cmsContent.lua replaces
--- it with the block's `title:`, and Lang.applyTranslations retitles at runtime.
+-- it with both localized titles and bodies at build time.
 -- Registered via `shortcodes:` in _quarto.yml; the shortcode pass runs before
 -- project filters, so cmsContent.lua sees the expanded markers.
 

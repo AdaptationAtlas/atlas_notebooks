@@ -24,13 +24,11 @@
 --    (Shortcodes expand in Quarto's built-in pass, so _quarto.yml lists
 --    `- quarto` before this filter.)
 --
---    Optional details contain a localized title and markdown body rendered
---    as a native <details> note. Default-language prose is baked in as
---    static HTML — crawlable and
---    visible before the OJS runtime boots; the client-side language toggle
---    swaps the same nodes at runtime (Lang.applyTranslations /
---    Lang.parseBlock in helpers/lang.js). Developers control heading level
---    and placement in the .qmd; authors control the displayed text.
+--    Both languages are rendered as static, lang-tagged HTML. CSS shows the
+--    active language, so switching languages does not fetch or parse prose
+--    in the browser. Optional details are rendered the same way inside one
+--    native <details> note. Developers control heading level and placement
+--    in the .qmd; authors control the displayed text.
 --    A heading anchor that matches no block file is left alone —
 --    scripts/build/checkTranslations.ts flags block files nothing
 --    references, which catches typo'd anchors in CI.
@@ -46,8 +44,8 @@
 --                ::: {.docs-glossary data-src="data/docs/glossary.json"}
 
 local textDir = nil
-local lang = "en"
-local blocks = {} -- id -> { title = Inlines, body = Blocks } | false (missing)
+local locales = { "en", "fr" } -- keep in sync with admin/config.yml
+local blocks = {} -- locale -> id -> { title, body, details } | false
 local runtimeConfigRaw = nil
 
 -- ---------- shared helpers ----------
@@ -172,13 +170,26 @@ local function extractDetailsBody(raw)
 	return nil
 end
 
-local function loadBlock(id)
-	if blocks[id] ~= nil then
-		return blocks[id]
+local function localizeHeadingIds(body, locale)
+	local wrapper = pandoc.walk_block(pandoc.Div(body), {
+		Header = function(header)
+			if header.identifier ~= "" then
+				header.identifier = header.identifier .. "-" .. locale
+			end
+			return header
+		end,
+	})
+	return wrapper.content
+end
+
+local function loadBlock(id, locale)
+	blocks[locale] = blocks[locale] or {}
+	if blocks[locale][id] ~= nil then
+		return blocks[locale][id]
 	end
-	blocks[id] = false
+	blocks[locale][id] = false
 	if textDir then
-		local path = projectRoot() .. "/" .. textDir .. "/" .. id .. "." .. lang .. ".md"
+		local path = projectRoot() .. "/" .. textDir .. "/" .. id .. "." .. locale .. ".md"
 		local raw = readFile(path)
 		if raw then
 			local doc = pandoc.read(raw, "markdown")
@@ -190,43 +201,96 @@ local function loadBlock(id)
 				end
 				details = {
 					title = doc.meta.details.title,
-					blocks = pandoc.read(detailsMarkdown, "markdown").blocks,
+					blocks = localizeHeadingIds(pandoc.read(detailsMarkdown, "markdown").blocks, locale),
 				}
 			end
-			blocks[id] = {
+			blocks[locale][id] = {
 				title = doc.meta.title and pandoc.Inlines(doc.meta.title) or nil,
-				body = doc.blocks,
+				body = localizeHeadingIds(doc.blocks, locale),
 				details = details,
 			}
 		end
 	end
-	return blocks[id]
+	return blocks[locale][id]
 end
 
-local function appendDetails(out, block, id)
-	local details = block.details
-	if not details or not details.title or #details.blocks == 0 then
+local function loadLocalizedBlocks(id)
+	local localized = {}
+	local default = loadBlock(id, locales[1])
+	if not default then
+		return nil
+	end
+	localized[locales[1]] = default
+	for i = 2, #locales do
+		local locale = locales[i]
+		localized[locale] = loadBlock(id, locale)
+		if not localized[locale] then
+			error(("cmsContent: prose block '%s' is missing its %s translation"):format(id, locale))
+		end
+	end
+	return localized
+end
+
+local function appendProse(out, localized, id)
+	for _, locale in ipairs(locales) do
+		local block = localized[locale]
+		if #block.body == 0 then
+			error(("cmsContent: prose block '%s' has an empty %s body"):format(id, locale))
+		end
+		table.insert(
+			out,
+			pandoc.Div(block.body, pandoc.Attr("", { "nb-prose", "nb-i18n" }, { lang = locale }))
+		)
+	end
+end
+
+local function appendDetails(out, localized, id)
+	local hasDetails = false
+	for _, locale in ipairs(locales) do
+		hasDetails = hasDetails or localized[locale].details ~= nil
+	end
+	if not hasDetails then
 		return
 	end
-	table.insert(out, pandoc.RawBlock("html", ('<details class="nb-details" data-section="%s"><summary>%s</summary><div class="nb-details__body">'):format(
-		esc(id),
-		esc(pandoc.utils.stringify(details.title))
-	)))
-	for _, child in ipairs(details.blocks) do
-		table.insert(out, child)
+
+	local summaries = {}
+	for _, locale in ipairs(locales) do
+		local details = localized[locale].details
+		if not details or not details.title or #details.blocks == 0 then
+			error(("cmsContent: details for prose block '%s' are incomplete in %s"):format(id, locale))
+		end
+		table.insert(
+			summaries,
+			('<span class="nb-i18n" lang="%s">%s</span>'):format(
+				locale,
+				esc(pandoc.utils.stringify(details.title))
+			)
+		)
 	end
-	table.insert(out, pandoc.RawBlock("html", "</div></details>"))
+
+	table.insert(
+		out,
+		pandoc.RawBlock("html", '<details class="nb-details"><summary>' .. table.concat(summaries) .. "</summary>")
+	)
+	for _, locale in ipairs(locales) do
+		table.insert(out, pandoc.RawBlock("html", ('<div class="nb-details__body nb-i18n" lang="%s">'):format(locale)))
+		for _, child in ipairs(localized[locale].details.blocks) do
+			table.insert(out, child)
+		end
+		table.insert(out, pandoc.RawBlock("html", "</div>"))
+	end
+	table.insert(out, pandoc.RawBlock("html", "</details>"))
 end
 
 local function injectProse(div)
 	local id = div.attributes["data-section"]
-	local block = loadBlock(id)
-	if not block or #block.body == 0 then
-		error(("cmsContent: no prose block '%s' (%s/%s.%s.md)"):format(tostring(id), tostring(textDir), tostring(id), lang))
+	local localized = loadLocalizedBlocks(id)
+	if not localized then
+		error(("cmsContent: no prose block '%s' in %s"):format(tostring(id), tostring(textDir)))
 	end
-	div.content = block.body
-	local out = { div }
-	appendDetails(out, block, id)
+	local out = {}
+	appendProse(out, localized, id)
+	appendDetails(out, localized, id)
 	return out
 end
 
@@ -234,19 +298,25 @@ local function expandHeader(el)
 	if el.identifier == "" then
 		return nil
 	end
-	local block = loadBlock(el.identifier)
-	if not block then
+	local localized = loadLocalizedBlocks(el.identifier)
+	if not localized then
 		return nil
 	end
-	if block.title then
-		el.content = block.title
+
+	local titles = {}
+	for _, locale in ipairs(locales) do
+		local title = localized[locale].title
+		if not title then
+			error(("cmsContent: prose block '%s' has no %s title"):format(el.identifier, locale))
+		end
+		table.insert(titles, pandoc.Span(title, pandoc.Attr("", { "nb-i18n" }, { lang = locale })))
 	end
+	el.content = titles
+
 	local out = { el }
-	if #block.body > 0 then
-		table.insert(out, pandoc.Div(block.body, pandoc.Attr("", { "nb-prose" }, { ["data-section"] = el.identifier })))
-	end
-	appendDetails(out, block, el.identifier)
-	return #out == 1 and el or out
+	appendProse(out, localized, el.identifier)
+	appendDetails(out, localized, el.identifier)
+	return out
 end
 
 -- ---------- docs data pages ----------
@@ -277,11 +347,9 @@ local function renderFaq(entries)
 			lastSection = e.section_en
 			table.insert(
 				out,
-				('<h2 id="faq-%s" data-en="%s" data-fr="%s">%s</h2>'):format(
+				('<h2 id="faq-%s">%s</h2>'):format(
 					slug(e.section_en),
-					esc(e.section_en),
-					esc(e.section_fr),
-					esc(e.section_en)
+					pairSpan(e.section_en, e.section_fr)
 				)
 			)
 		end
@@ -338,13 +406,9 @@ end
 
 local function getMeta(meta)
 	textDir = nil
-	lang = "en"
 	runtimeConfigRaw = nil
 	blocks = {}
 	meta = applyNotebookConfig(meta)
-	if meta["lang"] then
-		lang = pandoc.utils.stringify(meta["lang"])
-	end
 	return meta
 end
 

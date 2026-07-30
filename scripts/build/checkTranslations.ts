@@ -4,7 +4,6 @@
 import { expandGlob } from "https://deno.land/std@0.224.0/fs/expand_glob.ts";
 import { dirname, relative } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { parse as parseYaml } from "https://deno.land/std@0.224.0/yaml/mod.ts";
-import { parseBlock as parseRuntimeBlock } from "../../helpers/lang.js";
 
 const LOCALES = ["en", "fr"]; // keep in sync with admin/config.yml i18n.locales
 
@@ -134,13 +133,6 @@ for (const dir of textDirs) {
     const path = `${rel}/${e.name}`;
     const raw = await Deno.readTextFile(`${dir}/${e.name}`);
     const hasDetails = checkFrontMatter(path, raw);
-    try {
-      parseRuntimeBlock(raw);
-    } catch (error) {
-      problems.push(
-        `${path}: runtime parser failed (${(error as Error).message})`,
-      );
-    }
     if (hasDetails) {
       if (!detailsById.has(id)) detailsById.set(id, new Set());
       detailsById.get(id)!.add(loc);
@@ -229,15 +221,9 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
       problems.push(`${configPath}: blocks must include '${id}'`);
     }
   }
-  const refs = new Set<string>([
-    ...[...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
-    ...[...qmd.matchAll(/(?<!\.)\bsections\.([A-Za-z0-9_]+)/g)].map((m) =>
-      m[1]
-    ),
-    ...[...qmd.matchAll(/(?<!\.)\bsections\[["']([^"']+)["']\]/g)].map((m) =>
-      m[1]
-    ),
-  ]);
+  const refs = new Set(
+    [...qmd.matchAll(/\{\{<\s*prose\s+([A-Za-z0-9_-]+)/g)].map((m) => m[1]),
+  );
   for (const id of refs) referencedByDir.get(textDir)?.add(id);
 
   for (const id of refs) {
