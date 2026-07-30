@@ -181,6 +181,13 @@ async function readIncludes(path: string, entry: string): Promise<string> {
   return parts.join("\n");
 }
 
+// A `common` contributor id that no longer resolves throws in resolveContributors()
+// and takes the whole notebook down in the browser, so catch it at build.
+const commonContributors = new Set<string>(
+  (JSON.parse(await readOr("data/shared/contributors.json") ?? "{}")
+    .contributors ?? []).map((c: { id: string }) => c.id),
+);
+
 // Require every referenced prose block to exist.
 for await (const f of expandGlob("notebooks/**/*.qmd")) {
   const entry = await Deno.readTextFile(f.path);
@@ -196,6 +203,7 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
   let config: {
     textDir?: string;
     blocks?: string[];
+    contributors?: Record<string, { type?: string; id?: string }[]>;
   };
   try {
     config = JSON.parse(configRaw);
@@ -208,6 +216,23 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
     problems.push(`${configPath}: notebook config is missing textDir`);
     continue;
   }
+  for (const group of ["authors", "developers"]) {
+    if (!config.contributors?.[group]?.length) {
+      problems.push(
+        `${configPath}: contributors.${group} must list at least one person`,
+      );
+    }
+  }
+  for (const [group, list] of Object.entries(config.contributors ?? {})) {
+    for (const c of list ?? []) {
+      if (c?.type === "common" && !commonContributors.has(c.id!)) {
+        problems.push(
+          `${configPath}: contributors.${group} references unknown common contributor '${c.id}'`,
+        );
+      }
+    }
+  }
+
   const qmd = await readIncludes(f.path, entry);
   const rel = relative(Deno.cwd(), f.path);
   const blocks = blocksByDir.get(textDir);
