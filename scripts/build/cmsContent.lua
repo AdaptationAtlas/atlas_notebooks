@@ -123,19 +123,80 @@ end
 
 -- ---------- notebook prose ----------
 
+-- Pandoc flattens YAML block scalars, so preserve the raw Markdown for details.
+local function extractDetailsBody(raw)
+	local frontMatter = raw:gsub("\r\n", "\n"):match("^%-%-%-\n(.-)\n%-%-%-\n")
+	if not frontMatter then
+		return nil
+	end
+
+	local lines = {}
+	for line in (frontMatter .. "\n"):gmatch("(.-)\n") do
+		table.insert(lines, line)
+	end
+
+	for i, line in ipairs(lines) do
+		if line:match("^details:%s*$") then
+			for j = i + 1, #lines do
+				local indent = lines[j]:match("^( *)body:%s*|%-%s*$")
+				if indent then
+					local fieldIndent = #indent
+					local contentIndent = nil
+					local value = {}
+
+					for k = j + 1, #lines do
+						local child = lines[k]
+						if child == "" then
+							table.insert(value, "")
+						else
+							local childIndent = #(child:match("^( *)") or "")
+							if childIndent <= fieldIndent then
+								break
+							end
+							contentIndent = contentIndent or childIndent
+							table.insert(value, child:sub(contentIndent + 1))
+						end
+					end
+
+					while value[#value] == "" do
+						table.remove(value)
+					end
+					return table.concat(value, "\n")
+				end
+				if lines[j]:match("^%S") then
+					break
+				end
+			end
+		end
+	end
+	return nil
+end
+
 local function loadBlock(id)
 	if blocks[id] ~= nil then
 		return blocks[id]
 	end
 	blocks[id] = false
 	if textDir then
-		local raw = readFile(projectRoot() .. "/" .. textDir .. "/" .. id .. "." .. lang .. ".md")
+		local path = projectRoot() .. "/" .. textDir .. "/" .. id .. "." .. lang .. ".md"
+		local raw = readFile(path)
 		if raw then
 			local doc = pandoc.read(raw, "markdown")
+			local details = nil
+			if doc.meta.details then
+				local detailsMarkdown = extractDetailsBody(raw)
+				if not detailsMarkdown then
+					error("cmsContent: details.body must use a literal block (`body: |-`) in " .. path)
+				end
+				details = {
+					title = doc.meta.details.title,
+					blocks = pandoc.read(detailsMarkdown, "markdown").blocks,
+				}
+			end
 			blocks[id] = {
 				title = doc.meta.title and pandoc.Inlines(doc.meta.title) or nil,
 				body = doc.blocks,
-				details = doc.meta.details,
+				details = details,
 			}
 		end
 	end
@@ -144,14 +205,16 @@ end
 
 local function appendDetails(out, block, id)
 	local details = block.details
-	if not details or not details.title or not details.body then
+	if not details or not details.title or #details.blocks == 0 then
 		return
 	end
 	table.insert(out, pandoc.RawBlock("html", ('<details class="nb-details" data-section="%s"><summary>%s</summary><div class="nb-details__body">'):format(
 		esc(id),
 		esc(pandoc.utils.stringify(details.title))
 	)))
-	table.insert(out, pandoc.Para(pandoc.Inlines(details.body)))
+	for _, child in ipairs(details.blocks) do
+		table.insert(out, child)
+	end
 	table.insert(out, pandoc.RawBlock("html", "</div></details>"))
 end
 

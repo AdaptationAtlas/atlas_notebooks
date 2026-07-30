@@ -68,6 +68,11 @@ function checkFrontMatter(path: string, raw: string): boolean {
       problems.push(`${path}: \`details.${key}:\` must be a non-empty string`);
     }
   }
+  if (!/^  body:\s*\|-\s*$/m.test(m[1])) {
+    problems.push(
+      `${path}: \`details.body\` must use the literal form \`body: |-\``,
+    );
+  }
   return true;
 }
 
