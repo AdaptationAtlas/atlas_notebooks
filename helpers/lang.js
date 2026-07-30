@@ -1,5 +1,4 @@
 // Authors: Zach Bogart, Brayden Youngberg
-const VERSION = "3.0.0";
 
 /** Bind a default language key for getText. */
 export function lg(defaultKey) {
@@ -61,7 +60,6 @@ export function toSentenceCase(str) {
 }
 
 export const lang = {
-  version: VERSION,
   lg,
   getText,
   getRegexForNamedInsertion,
@@ -69,5 +67,3 @@ export const lang = {
   withFallback,
   toSentenceCase,
 };
-
-export default lang; // Backward-compatible default export.
