@@ -35,11 +35,14 @@
 --    references, which catches typo'd anchors in CI.
 --
 -- 2. Docs data pages (FAQ / glossary) — structured JSON with side-by-side
---    languages per entry. BOTH languages are baked in as lang-tagged nodes;
---    styles/main.css shows the active one via <html lang>, which
+--    languages per entry, built as Pandoc blocks (not an HTML string) so section
+--    headings are real headers and every value is escaped by the writer. BOTH
+--    languages are baked in as .nb-i18n nodes, the same mechanism notebook prose
+--    uses; styles/main.css shows the active one via <html lang>, which
 --    components/langSwitcher.js keeps in sync — no client-side rendering.
---    FAQ answers are markdown (rendered through Pandoc); all other values
---    are plain text and escaped. Entry order = page order.
+--    FAQ answers are markdown, read straight into blocks. Entry order = page order.
+--    The marker div is REPLACED by its blocks, not filled: Quarto builds its TOC
+--    from top-level headers only, so nested headings would be missing from it.
 --
 --      markers:  ::: {.docs-faq data-src="data/docs/faq.json"}
 --                ::: {.docs-glossary data-src="data/docs/glossary.json"}
@@ -74,10 +77,6 @@ end
 
 local function slug(s)
 	return (s or ""):lower():gsub("[^%w]+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
-end
-
-local function mdToHtml(md)
-	return pandoc.write(pandoc.read(md or "", "markdown"), "html")
 end
 
 local function metaStrings(values)
@@ -266,11 +265,16 @@ local function readEntries(src)
 	return data.entries
 end
 
--- <span lang="en">…</span><span lang="fr">…</span>, plain text
-local function pairSpan(en, fr)
-	return ('<span lang="en">%s</span><span lang="fr">%s</span>'):format(esc(en), esc(fr))
+-- Bilingual plain-text inlines; the .nb-i18n rules in main.css show the active one.
+local function pairSpans(en, fr)
+	return pandoc.Inlines({
+		pandoc.Span(pandoc.Str(en or ""), pandoc.Attr("", { "nb-i18n" }, { lang = "en" })),
+		pandoc.Span(pandoc.Str(fr or ""), pandoc.Attr("", { "nb-i18n" }, { lang = "fr" })),
+	})
 end
 
+-- Both renderers return Pandoc blocks, not an HTML string: section headings are real
+-- headers (so the TOC sees them) and every value is escaped by the writer, not by hand.
 local function renderFaq(entries)
 	local out = {}
 	local lastSection = nil
@@ -279,22 +283,23 @@ local function renderFaq(entries)
 			lastSection = e.section_en
 			table.insert(
 				out,
-				('<h2 id="faq-%s">%s</h2>'):format(
-					slug(e.section_en),
-					pairSpan(e.section_en, e.section_fr)
-				)
+				pandoc.Header(2, pairSpans(e.section_en, e.section_fr), pandoc.Attr("faq-" .. slug(e.section_en)))
 			)
 		end
-		table.insert(out, "<details><summary>" .. pairSpan(e.question_en, e.question_fr) .. "</summary>")
-		table.insert(
-			out,
-			('<div lang="en">%s</div><div lang="fr">%s</div></details>'):format(
-				mdToHtml(e.answer_en),
-				mdToHtml(e.answer_fr)
-			)
-		)
+		table.insert(out, pandoc.RawBlock("html", "<details><summary>"))
+		table.insert(out, pandoc.Plain(pairSpans(e.question_en, e.question_fr)))
+		table.insert(out, pandoc.RawBlock("html", "</summary>"))
+		for _, locale in ipairs(locales) do
+			local answer = locale == "en" and e.answer_en or e.answer_fr
+			table.insert(out, pandoc.RawBlock("html", ('<div class="nb-i18n" lang="%s">'):format(locale)))
+			for _, block in ipairs(pandoc.read(answer or "", "markdown").blocks) do
+				table.insert(out, block)
+			end
+			table.insert(out, pandoc.RawBlock("html", "</div>"))
+		end
+		table.insert(out, pandoc.RawBlock("html", "</details>"))
 	end
-	return table.concat(out, "\n")
+	return out
 end
 
 local function renderGlossary(entries)
@@ -303,7 +308,14 @@ local function renderGlossary(entries)
 	for _, e in ipairs(entries) do
 		if e.section ~= lastSection then
 			lastSection = e.section
-			table.insert(out, ('<h2 id="section-%s">%s</h2>'):format(slug(e.section), esc(e.section)))
+			table.insert(
+				out,
+				pandoc.Header(
+					2,
+					pandoc.Str(e.section or ""),
+					pandoc.Attr("section-" .. slug(e.section), { "glossary-section" })
+				)
+			)
 		end
 		local search = table.concat({
 			e.term or "",
@@ -317,21 +329,21 @@ local function renderGlossary(entries)
 		if e.acronym and e.acronym ~= "" then
 			title = title .. " (" .. e.acronym .. ")"
 		end
-		table.insert(out, ('<div class="glossary-entry" data-search="%s">'):format(esc(search)))
-		table.insert(out, ("<h3>%s</h3>"):format(esc(title)))
+
+		local entry = { pandoc.Header(3, pandoc.Str(title)) }
 		if (e.tooltip_en or "") ~= "" or (e.tooltip_fr or "") ~= "" then
-			table.insert(out, "<p><em>" .. pairSpan(e.tooltip_en, e.tooltip_fr) .. "</em></p>")
+			table.insert(entry, pandoc.Para(pandoc.Emph(pairSpans(e.tooltip_en, e.tooltip_fr))))
 		end
-		table.insert(out, "<p>" .. pairSpan(e.definition_en, e.definition_fr) .. "</p></div>")
+		table.insert(entry, pandoc.Para(pairSpans(e.definition_en, e.definition_fr)))
+		table.insert(out, pandoc.Div(entry, pandoc.Attr("", { "glossary-entry" }, { ["data-search"] = search })))
 	end
-	return table.concat(out, "\n")
+	return out
 end
 
+-- Return the blocks, not the div: Quarto builds its TOC from top-level headers only,
+-- so anything left nested inside the marker div would be missing from the TOC.
 local function fillDocs(div, render)
-	local entries = readEntries(div.attributes["data-src"] or "")
-	div.classes:insert("docs-i18n")
-	div.content = { pandoc.RawBlock("html", render(entries)) }
-	return div
+	return render(readEntries(div.attributes["data-src"] or ""))
 end
 
 -- ---------- dispatch ----------
