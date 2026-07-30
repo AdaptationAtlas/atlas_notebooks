@@ -133,6 +133,13 @@ for (const dir of textDirs) {
     const path = `${rel}/${e.name}`;
     const raw = await Deno.readTextFile(`${dir}/${e.name}`);
     const hasDetails = checkFrontMatter(path, raw);
+    // The {{< prose >}} marker owns the section heading; an h1 in the body would
+    // add a second top-level section. Indented details bodies can't match.
+    if (/^#\s/m.test(raw)) {
+      problems.push(
+        `${path}: \`# \` heading in the body — use \`## \` or lower`,
+      );
+    }
     if (hasDetails) {
       if (!detailsById.has(id)) detailsById.set(id, new Set());
       detailsById.get(id)!.add(loc);
