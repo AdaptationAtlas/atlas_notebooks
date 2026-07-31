@@ -1,7 +1,7 @@
 -- ============================================================
 -- cmsContent: embed CMS-managed content at render time
 -- ============================================================
--- One filter, two content shapes — both edited with Sveltia at /admin/
+-- One filter, three content shapes — all edited with Sveltia at /admin/
 -- (config in admin/config.yml), both failing the render when content a page
 -- references is missing. scripts/build/checkTranslations.ts enforces the
 -- same contracts in CI.
@@ -46,11 +46,23 @@
 --
 --      markers:  ::: {.docs-faq data-src="data/docs/faq.json"}
 --                ::: {.docs-glossary data-src="data/docs/glossary.json"}
+--
+-- 3. Contributors — the manifest's `contributors` groups resolved against the
+--    shared registry (data/shared/contributors.json), with affiliations numbered
+--    in first-appearance order ONCE so the markers agree across both localized
+--    copies. Only the four headings and the citation title differ by language.
+--    The citation year comes from the entry's `date-modified`, which Quarto
+--    resolves before this filter runs and renders nowhere itself.
+--
+--      marker:   ::: {.nb-contributors}
 
 local textDir = nil
 local locales = { "en", "fr" } -- keep in sync with admin/config.yml
 local blocks = {} -- locale -> id -> { title, body } | false
 local runtimeConfigRaw = nil
+local notebookTitles = nil -- locale -> page title, for the citation
+local notebookContributors = nil -- manifest contributors groups
+local citationYear = nil -- from the entry's `date-modified`
 
 -- ---------- shared helpers ----------
 
@@ -108,6 +120,10 @@ local function applyNotebookConfig(meta)
 
 	textDir = config.textDir
 	runtimeConfigRaw = raw
+	notebookTitles = config.title
+	notebookContributors = config.contributors
+	local modified = meta["date-modified"] and pandoc.utils.stringify(meta["date-modified"])
+	citationYear = modified and modified:match("(%d%d%d%d)")
 	meta.pagetitle = pandoc.MetaString(config.title.en)
 	meta.description = pandoc.MetaString(config.description or "")
 	meta.keywords = metaStrings(config.keywords)
@@ -250,6 +266,168 @@ local function expandHeader(el)
 	return out
 end
 
+-- ---------- contributors ----------
+
+-- Structure and the four labels are ours; every value from the manifest or the
+-- shared registry goes through esc(). Raw HTML rather than Pandoc blocks because
+-- real Headers here would be swallowed by Quarto's section wrapping.
+local CONTRIBUTOR_LABELS = {
+	authors = { en = "Authors", fr = "Auteurs" },
+	developers = { en = "Technical Development", fr = "Développement technique" },
+	affiliations = { en = "Affiliations", fr = "Affiliations" },
+	citation = { en = "Citation", fr = "Référence" },
+}
+
+local CITATION_PUBLISHER = "Africa Agriculture Adaptation Atlas"
+local CITATION_URL = "https://adaptationatlas.cgiar.org"
+
+-- Profile URLs come from CMS data: absolute http(s) only, anything else renders
+-- as a plain name rather than becoming a link.
+local function safeProfileUrl(url)
+	if type(url) ~= "string" then
+		return nil
+	end
+	return url:match("^https?://[^%s\"'<>]+$")
+end
+
+local function contributorRegistry()
+	local path = projectRoot() .. "/data/shared/contributors.json"
+	local raw = readFile(path)
+	if not raw then
+		error("cmsContent: cannot read " .. path)
+	end
+	local data = pandoc.json.decode(raw)
+	local byId = {}
+	for _, person in ipairs((type(data) == "table" and data.contributors) or {}) do
+		byId[person.id] = person
+	end
+	return byId
+end
+
+-- Affiliations are numbered in first-appearance order and resolved ONCE, so the
+-- markers agree between the two localized copies.
+local function resolveContributors(groups)
+	local registry = contributorRegistry()
+	local orgNumber, orgOrder = {}, {}
+	local function numberFor(org)
+		if not orgNumber[org] then
+			table.insert(orgOrder, org)
+			orgNumber[org] = #orgOrder
+		end
+		return orgNumber[org]
+	end
+
+	local function resolve(list)
+		local out = {}
+		for _, entry in ipairs(list or {}) do
+			local person = nil
+			if entry.type == "common" then
+				person = registry[entry.id]
+			elseif entry.type == "custom" then
+				person = entry
+			end
+			if not person or type(person.name) ~= "string" then
+				error(("cmsContent: unknown contributor '%s'"):format(tostring(entry.id or entry.name)))
+			end
+			local orgs = {}
+			for _, org in ipairs(person.org or {}) do
+				table.insert(orgs, numberFor(org))
+			end
+			table.sort(orgs)
+			table.insert(out, { name = person.name, url = person.url, orgs = orgs })
+		end
+		return out
+	end
+
+	return {
+		authors = resolve(groups and groups.authors),
+		developers = resolve(groups and groups.developers),
+		organizations = orgOrder,
+	}
+end
+
+local function peopleHtml(people)
+	local parts = {}
+	for _, person in ipairs(people) do
+		local label = esc(person.name)
+		local href = safeProfileUrl(person.url)
+		if href then
+			label = ('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>'):format(esc(href), label)
+		end
+		if #person.orgs > 0 then
+			label = label .. "<sup>" .. table.concat(person.orgs, ",") .. "</sup>"
+		end
+		table.insert(parts, "<span>" .. label .. "</span>")
+	end
+	return table.concat(parts, ", ")
+end
+
+local function peopleSectionHtml(label, people)
+	if #people == 0 then
+		return ""
+	end
+	return ('<section class="atlas-contributions__section"><h4 class="atlas-contributions__heading">%s</h4><div class="atlas-contributions__people">%s</div></section>')
+		:format(esc(label), peopleHtml(people))
+end
+
+local function contributionsHtml(locale, data)
+	local function label(key)
+		return CONTRIBUTOR_LABELS[key][locale] or CONTRIBUTOR_LABELS[key].en
+	end
+
+	local affiliations = {}
+	for number, org in ipairs(data.organizations) do
+		table.insert(
+			affiliations,
+			('<div class="atlas-contributions__affiliation"><sup>%d</sup> %s</div>'):format(number, esc(org))
+		)
+	end
+
+	local title = notebookTitles[locale] or notebookTitles.en
+	local citation = ('<span>CGIAR. (%s). <em>%s</em>. %s. <a href="%s">%s</a></span>'):format(
+		citationYear,
+		esc(title),
+		CITATION_PUBLISHER,
+		CITATION_URL,
+		CITATION_URL
+	)
+
+	return table.concat({
+		('<div class="atlas-contributions nb-i18n" lang="%s">'):format(locale),
+		'<div class="atlas-contributions__columns">',
+		'<div class="atlas-contributions__primary">',
+		peopleSectionHtml(label("authors"), data.authors),
+		peopleSectionHtml(label("developers"), data.developers),
+		"</div>",
+		'<section class="atlas-contributions__affiliations">',
+		('<h4 class="atlas-contributions__heading">%s</h4>'):format(esc(label("affiliations"))),
+		table.concat(affiliations),
+		"</section>",
+		"</div>",
+		'<section class="atlas-contributions__citation">',
+		('<h4 class="atlas-contributions__heading">%s</h4>'):format(esc(label("citation"))),
+		'<div class="atlas-contributions__citation-text">',
+		citation,
+		"</div></section></div>",
+	})
+end
+
+local function fillContributors()
+	if not notebookContributors or not notebookTitles then
+		error("cmsContent: {.nb-contributors} needs a notebook with an nb-config manifest")
+	end
+	if not citationYear then
+		error("cmsContent: the citation needs a year — add `date-modified: last-modified` to the notebook front matter")
+	end
+
+	local data = resolveContributors(notebookContributors)
+	local out = {}
+	for _, locale in ipairs(locales) do
+		table.insert(out, pandoc.RawBlock("html", contributionsHtml(locale, data)))
+	end
+	return out
+end
+
 -- ---------- docs data pages ----------
 
 local function readEntries(src)
@@ -351,6 +529,9 @@ end
 local function getMeta(meta)
 	textDir = nil
 	runtimeConfigRaw = nil
+	notebookTitles = nil
+	notebookContributors = nil
+	citationYear = nil
 	blocks = {}
 	meta = applyNotebookConfig(meta)
 	return meta
@@ -359,6 +540,8 @@ end
 local function fillDiv(div)
 	if div.classes:includes("nb-prose") then
 		return injectProse(div)
+	elseif div.classes:includes("nb-contributors") then
+		return fillContributors()
 	elseif div.classes:includes("docs-faq") then
 		return fillDocs(div, renderFaq)
 	elseif div.classes:includes("docs-glossary") then
