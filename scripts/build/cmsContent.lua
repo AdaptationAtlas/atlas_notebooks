@@ -125,6 +125,9 @@ local function applyNotebookConfig(meta)
 	notebookContributors = config.contributors
 	local modified = meta["date-modified"] and pandoc.utils.stringify(meta["date-modified"])
 	citationYear = modified and modified:match("(%d%d%d%d)")
+	-- Both: pagetitle drives <title>, `title` labels every search hit. Without it
+	-- search falls back to the first h1, which carries both locales at once.
+	meta.title = pandoc.MetaString(config.title.en)
 	meta.pagetitle = pandoc.MetaString(config.title.en)
 	meta.description = pandoc.MetaString(config.description or "")
 	meta.keywords = metaStrings(config.keywords)
