@@ -48,9 +48,10 @@
 --                ::: {.docs-glossary data-src="data/docs/glossary.json"}
 --
 -- 3. Contributors — the manifest's `contributors` groups resolved against the
---    shared registry (data/shared/contributors.json), with affiliations numbered
---    in first-appearance order ONCE so the markers agree across both localized
---    copies. Only the four headings and the citation title differ by language.
+--    shared registry (data/shared/contributors.json), affiliations numbered in
+--    first-appearance order. Built once, not per locale: names, affiliations and
+--    structure are language-independent, so only the four headings and the
+--    citation title carry both languages as .nb-i18n spans.
 --    The citation year comes from the entry's `date-modified`, which Quarto
 --    resolves before this filter runs and renders nowhere itself.
 --
@@ -268,9 +269,11 @@ end
 
 -- ---------- contributors ----------
 
--- Structure and the four labels are ours; every value from the manifest or the
--- shared registry goes through esc(). Raw HTML rather than Pandoc blocks because
--- real Headers here would be swallowed by Quarto's section wrapping.
+-- Names, affiliations and structure are language-independent, so the block is
+-- built ONCE; only the four labels and the citation title carry both languages.
+-- Raw HTML rather than Pandoc blocks: real Headers here would be swallowed by
+-- Quarto's section wrapping. Every value from the manifest or the shared
+-- registry goes through esc().
 local CONTRIBUTOR_LABELS = {
 	authors = { en = "Authors", fr = "Auteurs" },
 	developers = { en = "Technical Development", fr = "Développement technique" },
@@ -281,135 +284,90 @@ local CONTRIBUTOR_LABELS = {
 local CITATION_PUBLISHER = "Africa Agriculture Adaptation Atlas"
 local CITATION_URL = "https://adaptationatlas.cgiar.org"
 
--- Profile URLs come from CMS data: absolute http(s) only, anything else renders
--- as a plain name rather than becoming a link.
-local function safeProfileUrl(url)
-	if type(url) ~= "string" then
-		return nil
+local function bilingual(byLocale)
+	local out = {}
+	for _, locale in ipairs(locales) do
+		table.insert(
+			out,
+			('<span class="nb-i18n" lang="%s">%s</span>'):format(locale, esc(byLocale[locale] or byLocale.en))
+		)
 	end
-	return url:match("^https?://[^%s\"'<>]+$")
+	return table.concat(out)
 end
 
-local function contributorRegistry()
+local function heading(labels)
+	return ('<h4 class="atlas-contributions__heading">%s</h4>'):format(bilingual(labels))
+end
+
+-- Profile URLs come from CMS data: absolute http(s) only, so anything else
+-- renders as a plain name rather than becoming a link.
+local function safeProfileUrl(url)
+	return type(url) == "string" and url:match("^https?://[^%s\"'<>]+$") or nil
+end
+
+-- Resolve ids against the shared registry, numbering affiliations in
+-- first-appearance order. Returns authors, developers, and the ordered orgs
+-- whose index is the printed marker.
+local function resolveContributors(groups)
 	local path = projectRoot() .. "/data/shared/contributors.json"
 	local raw = readFile(path)
 	if not raw then
 		error("cmsContent: cannot read " .. path)
 	end
-	local data = pandoc.json.decode(raw)
-	local byId = {}
-	for _, person in ipairs((type(data) == "table" and data.contributors) or {}) do
-		byId[person.id] = person
+	local registry = {}
+	for _, person in ipairs(pandoc.json.decode(raw).contributors or {}) do
+		registry[person.id] = person
 	end
-	return byId
-end
 
--- Affiliations are numbered in first-appearance order and resolved ONCE, so the
--- markers agree between the two localized copies.
-local function resolveContributors(groups)
-	local registry = contributorRegistry()
-	local orgNumber, orgOrder = {}, {}
-	local function numberFor(org)
-		if not orgNumber[org] then
-			table.insert(orgOrder, org)
-			orgNumber[org] = #orgOrder
+	local orgs = {}
+	local function markerFor(org)
+		for index, seen in ipairs(orgs) do
+			if seen == org then
+				return index
+			end
 		end
-		return orgNumber[org]
+		table.insert(orgs, org)
+		return #orgs
 	end
 
 	local function resolve(list)
-		local out = {}
+		local people = {}
 		for _, entry in ipairs(list or {}) do
-			local person = nil
-			if entry.type == "common" then
-				person = registry[entry.id]
-			elseif entry.type == "custom" then
-				person = entry
-			end
-			if not person or type(person.name) ~= "string" then
+			local person = entry.type == "custom" and entry or registry[entry.id]
+			if type(person) ~= "table" or type(person.name) ~= "string" then
 				error(("cmsContent: unknown contributor '%s'"):format(tostring(entry.id or entry.name)))
 			end
-			local orgs = {}
+			local markers = {}
 			for _, org in ipairs(person.org or {}) do
-				table.insert(orgs, numberFor(org))
+				table.insert(markers, markerFor(org))
 			end
-			table.sort(orgs)
-			table.insert(out, { name = person.name, url = person.url, orgs = orgs })
+			table.sort(markers)
+			table.insert(people, { name = person.name, url = person.url, markers = markers })
 		end
-		return out
+		return people
 	end
 
-	return {
-		authors = resolve(groups and groups.authors),
-		developers = resolve(groups and groups.developers),
-		organizations = orgOrder,
-	}
+	return resolve(groups and groups.authors), resolve(groups and groups.developers), orgs
 end
 
-local function peopleHtml(people)
-	local parts = {}
-	for _, person in ipairs(people) do
-		local label = esc(person.name)
-		local href = safeProfileUrl(person.url)
-		if href then
-			label = ('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>'):format(esc(href), label)
-		end
-		if #person.orgs > 0 then
-			label = label .. "<sup>" .. table.concat(person.orgs, ",") .. "</sup>"
-		end
-		table.insert(parts, "<span>" .. label .. "</span>")
-	end
-	return table.concat(parts, ", ")
-end
-
-local function peopleSectionHtml(label, people)
+local function peopleSection(labels, people)
 	if #people == 0 then
 		return ""
 	end
-	return ('<section class="atlas-contributions__section"><h4 class="atlas-contributions__heading">%s</h4><div class="atlas-contributions__people">%s</div></section>')
-		:format(esc(label), peopleHtml(people))
-end
-
-local function contributionsHtml(locale, data)
-	local function label(key)
-		return CONTRIBUTOR_LABELS[key][locale] or CONTRIBUTOR_LABELS[key].en
+	local spans = {}
+	for _, person in ipairs(people) do
+		local name = esc(person.name)
+		local href = safeProfileUrl(person.url)
+		if href then
+			name = ('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>'):format(esc(href), name)
+		end
+		if #person.markers > 0 then
+			name = name .. "<sup>" .. table.concat(person.markers, ",") .. "</sup>"
+		end
+		table.insert(spans, "<span>" .. name .. "</span>")
 	end
-
-	local affiliations = {}
-	for number, org in ipairs(data.organizations) do
-		table.insert(
-			affiliations,
-			('<div class="atlas-contributions__affiliation"><sup>%d</sup> %s</div>'):format(number, esc(org))
-		)
-	end
-
-	local title = notebookTitles[locale] or notebookTitles.en
-	local citation = ('<span>CGIAR. (%s). <em>%s</em>. %s. <a href="%s">%s</a></span>'):format(
-		citationYear,
-		esc(title),
-		CITATION_PUBLISHER,
-		CITATION_URL,
-		CITATION_URL
-	)
-
-	return table.concat({
-		('<div class="atlas-contributions nb-i18n" lang="%s">'):format(locale),
-		'<div class="atlas-contributions__columns">',
-		'<div class="atlas-contributions__primary">',
-		peopleSectionHtml(label("authors"), data.authors),
-		peopleSectionHtml(label("developers"), data.developers),
-		"</div>",
-		'<section class="atlas-contributions__affiliations">',
-		('<h4 class="atlas-contributions__heading">%s</h4>'):format(esc(label("affiliations"))),
-		table.concat(affiliations),
-		"</section>",
-		"</div>",
-		'<section class="atlas-contributions__citation">',
-		('<h4 class="atlas-contributions__heading">%s</h4>'):format(esc(label("citation"))),
-		'<div class="atlas-contributions__citation-text">',
-		citation,
-		"</div></section></div>",
-	})
+	return ('<section class="atlas-contributions__section">%s<div class="atlas-contributions__people">%s</div></section>')
+		:format(heading(labels), table.concat(spans, ", "))
 end
 
 local function fillContributors()
@@ -420,12 +378,38 @@ local function fillContributors()
 		error("cmsContent: the citation needs a year — add `date-modified: last-modified` to the notebook front matter")
 	end
 
-	local data = resolveContributors(notebookContributors)
-	local out = {}
-	for _, locale in ipairs(locales) do
-		table.insert(out, pandoc.RawBlock("html", contributionsHtml(locale, data)))
+	local authors, developers, orgs = resolveContributors(notebookContributors)
+
+	local affiliations = {}
+	for marker, org in ipairs(orgs) do
+		table.insert(
+			affiliations,
+			('<div class="atlas-contributions__affiliation"><sup>%d</sup> %s</div>'):format(marker, esc(org))
+		)
 	end
-	return out
+
+	return { pandoc.RawBlock("html", table.concat({
+		'<div class="atlas-contributions">',
+		'<div class="atlas-contributions__columns">',
+		'<div class="atlas-contributions__primary">',
+		peopleSection(CONTRIBUTOR_LABELS.authors, authors),
+		peopleSection(CONTRIBUTOR_LABELS.developers, developers),
+		"</div>",
+		'<section class="atlas-contributions__affiliations">',
+		heading(CONTRIBUTOR_LABELS.affiliations),
+		table.concat(affiliations),
+		"</section></div>",
+		'<section class="atlas-contributions__citation">',
+		heading(CONTRIBUTOR_LABELS.citation),
+		('<div class="atlas-contributions__citation-text"><span>CGIAR. (%s). <em>%s</em>. %s. <a href="%s">%s</a></span></div>'):format(
+			citationYear,
+			bilingual(notebookTitles),
+			CITATION_PUBLISHER,
+			CITATION_URL,
+			CITATION_URL
+		),
+		"</section></div>",
+	})) }
 end
 
 -- ---------- docs data pages ----------
