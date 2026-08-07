@@ -142,14 +142,13 @@ report series = one dataset). Build scripts live in [`_sources/`](./_sources/).
 - Reproducible from git alone: **git-full** = the `enso_*` driver/outlook set (§4 self-fetch, §5 derived).
   **git-transform** = NAPR, GESI, AFA-rice, NDVI, XBT, exposure, ASAP (script in repo, raw on OneDrive).
   **D409-only** = CHIRPS, FAOSTAT, IPC, market prices, ACLED, ReliefWeb, driver_indices.
-- `.meta.json` present for **7** datasets; missing for the newer ENSO/gesi_v2/afa_rice/monthly-CHIRPS and
-  several harmonized layers. NAPR `.meta.json` is stale (12 vs 31 crops).
+- `.meta.json` present for **all 26 parquet files** (written/refreshed 2026-08-07 by
+  `_sources/meta_build.py`; re-run after any dataset change). Each records source, URL, citation,
+  licence, method, coverage, columns, used_by.
 - Publicly reachable as GitHub blobs: all. Submitted to the CGIAR Climate Data Hub: **0**.
 
 ## To make fully repeatable + Hub-ready (open actions)
-1. Add `.meta.json` for the datasets lacking one (enso_drivers_*, enso_state_probabilities,
-   enso_outlook_base, gesi_v2, afa_rice, chirps_county_monthly, faostat, ipc_county, market_prices,
-   acled_conflict, reliefweb_county, driver_indices); refresh the stale NAPR record.
+1. ~~Add `.meta.json` for every dataset~~ **DONE (2026-08-07)** — all 26 via `_sources/meta_build.py`.
 2. Bring the **D409-only** acquisition steps into `_sources/` as scripts (or copy the D409 pipeline
    scripts here) so CHIRPS/FAOSTAT/IPC/prices/ACLED/ReliefWeb/driver_indices are git-reproducible.
 3. Move raw sources to a versioned/citable store (or record exact source URLs + retrieval dates per file).
