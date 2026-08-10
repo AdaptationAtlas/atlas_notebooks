@@ -13,40 +13,39 @@ function initialLang() {
   return LANGS.some((l) => l.key === docLang) ? docLang : LANGS[0].key;
 }
 
-function setLang(key, select) {
+function setLang(key) {
   window.atlasLang = key;
   document.documentElement.lang = key;
   const url = new URL(location);
   if (key === LANGS[0].key) url.searchParams.delete("lang");
   else url.searchParams.set("lang", key);
   history.replaceState(null, "", url);
-  if (select) select.value = key;
   window.dispatchEvent(new CustomEvent("atlas:lang", { detail: key }));
 }
 
-function init() {
-  const navEnd = document.querySelector(
-    ".navbar-nav.ms-auto .nav-item.compact",
+// In the nav list so Bootstrap's collapse hides it behind the hamburger for free,
+// as its own <li> because a bare <select> is not valid in a <ul>.
+function mountControl() {
+  const list = document.querySelector(".navbar-collapse .navbar-nav");
+  if (!list || document.getElementById("nav-lang-selector")) return;
+
+  list.insertAdjacentHTML(
+    "afterbegin",
+    `<li class="nav-item"><select id="nav-lang-selector" aria-label="Language">${
+      LANGS.map((l) => `<option value="${l.key}">${l.label}</option>`).join("")
+    }</select></li>`,
   );
-  if (!navEnd || document.getElementById("nav-lang-selector")) return;
 
-  const select = document.createElement("select");
-  select.id = "nav-lang-selector";
-  select.setAttribute("aria-label", "Language");
-  for (const lang of LANGS) {
-    const opt = document.createElement("option");
-    opt.value = lang.key;
-    opt.textContent = lang.label;
-    select.appendChild(opt);
-  }
-  select.addEventListener("change", () => setLang(select.value, select));
-
-  navEnd.parentNode.appendChild(select);
-  setLang(initialLang(), select);
+  const select = document.getElementById("nav-lang-selector");
+  select.value = window.atlasLang;
+  select.addEventListener("change", () => setLang(select.value));
 }
 
+// State first: ?lang has to apply even if the navbar markup ever stops matching.
+setLang(initialLang());
+
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", init);
+  document.addEventListener("DOMContentLoaded", mountControl);
 } else {
-  init();
+  mountControl();
 }
