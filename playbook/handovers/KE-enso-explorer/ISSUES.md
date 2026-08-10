@@ -117,3 +117,13 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   WITH metadata included in each download. Extend `chartDownloadButton`.
 - **KE-16 · Feedback widget for the team · OPEN (next).** Quick in-notebook way for the team to flag
   improvements/bugs (incl. screengrabs). Pete: "note for next."
+- **KE-17 · Drop redundant §2.2 maize chart · DONE 2026-08-10.** Once AFA≡KNBS was confirmed and AFA
+  dropped, §2.2 (KNBS maize trend) duplicated §1.1 (Crops → Lineplot → Maize). Removed the maize
+  chart/appendix cell/title var; B1 now = §2.1 GESI only. Unused nbText b1.maize* keys left harmless.
+- **KE-18 · DESIGN: production vs climate drivers · OPEN (design, priority).** Pete: "really need to
+  think about the design so we can show production vs ENSO/IOD/Western-V and/or SPEI / rainfall-impact."
+  Current state disconnected: county production (§1.1 KNBS, 2019-24 short) vs drivers (§3) vs national
+  FAOStat regression (§7.3-7.4). Design a coherent production×climate view. Notes: county production
+  series is short (weak for teleconnection) — SPEI (county, 1981+, in chirps_county) or CHIRPS seasonal
+  anomaly is the long county-level rainfall-impact bridge; be honest about n. Options: crop-anomaly ×
+  SPEI/driver per county; or bad-season shading on a production trend. Needs a design pass before build.
