@@ -102,14 +102,21 @@ export function heroImage(title, bgImage, group = "") {
 class AtlasNotebookHero extends HTMLElement {
   connectedCallback() {
     const config = readNotebookConfig();
-    const render = (lang) =>
-      this.replaceChildren(
-        atlasHero({
-          title: config.title?.[lang] ?? config.title?.en ?? config.id,
-          image: config.image,
-          alt: config.imageAlt?.[lang] ?? config.imageAlt?.en ?? "",
-        }),
-      );
+    const hero = atlasHero({
+      title: config.title?.en ?? config.id,
+      image: config.image,
+      alt: config.imageAlt?.en ?? "",
+    });
+    this.replaceChildren(hero);
+
+    // Retitle in place: config.image has no locale, so rebuilding the subtree
+    // only threw away the loaded <img>.
+    const heading = hero.querySelector("#notebook-title");
+    const image = hero.querySelector(".atlas-hero__image");
+    const render = (lang) => {
+      heading.textContent = config.title?.[lang] ?? config.title?.en ?? config.id;
+      image.alt = config.imageAlt?.[lang] ?? config.imageAlt?.en ?? "";
+    };
 
     this._onLanguageChange = (event) => render(event.detail);
     window.addEventListener("atlas:lang", this._onLanguageChange);

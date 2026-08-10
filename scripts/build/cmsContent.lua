@@ -1,7 +1,7 @@
 -- ============================================================
 -- cmsContent: embed CMS-managed content at render time
 -- ============================================================
--- One filter, two content shapes — both edited with Sveltia at /admin/
+-- One filter, three content shapes — all edited with Sveltia at /admin/
 -- (config in admin/config.yml), both failing the render when content a page
 -- references is missing. scripts/build/checkTranslations.ts enforces the
 -- same contracts in CI.
@@ -46,11 +46,24 @@
 --
 --      markers:  ::: {.docs-faq data-src="data/docs/faq.json"}
 --                ::: {.docs-glossary data-src="data/docs/glossary.json"}
+--
+-- 3. Contributors — the manifest's `contributors` groups resolved against the
+--    shared registry (data/shared/contributors.json), affiliations numbered in
+--    first-appearance order. Built once, not per locale: names, affiliations and
+--    structure are language-independent, so only the four headings and the
+--    citation title carry both languages as .nb-i18n spans.
+--    The citation year comes from the entry's `date-modified`, which Quarto
+--    resolves before this filter runs and renders nowhere itself.
+--
+--      marker:   ::: {.nb-contributors}
 
 local textDir = nil
 local locales = { "en", "fr" } -- keep in sync with admin/config.yml
 local blocks = {} -- locale -> id -> { title, body } | false
 local runtimeConfigRaw = nil
+local notebookTitles = nil -- locale -> page title, for the citation
+local notebookContributors = nil -- manifest contributors groups
+local citationYear = nil -- from the entry's `date-modified`
 
 -- ---------- shared helpers ----------
 
@@ -108,6 +121,13 @@ local function applyNotebookConfig(meta)
 
 	textDir = config.textDir
 	runtimeConfigRaw = raw
+	notebookTitles = config.title
+	notebookContributors = config.contributors
+	local modified = meta["date-modified"] and pandoc.utils.stringify(meta["date-modified"])
+	citationYear = modified and modified:match("(%d%d%d%d)")
+	-- Both: pagetitle drives <title>, `title` labels every search hit. Without it
+	-- search falls back to the first h1, which carries both locales at once.
+	meta.title = pandoc.MetaString(config.title.en)
 	meta.pagetitle = pandoc.MetaString(config.title.en)
 	meta.description = pandoc.MetaString(config.description or "")
 	meta.keywords = metaStrings(config.keywords)
@@ -250,6 +270,151 @@ local function expandHeader(el)
 	return out
 end
 
+-- ---------- contributors ----------
+
+-- Names, affiliations and structure are language-independent, so the block is
+-- built ONCE; only the four labels and the citation title carry both languages.
+-- Raw HTML rather than Pandoc blocks: real Headers here would be swallowed by
+-- Quarto's section wrapping. Every value from the manifest or the shared
+-- registry goes through esc().
+local CONTRIBUTOR_LABELS = {
+	authors = { en = "Authors", fr = "Auteurs" },
+	developers = { en = "Technical Development", fr = "Développement technique" },
+	affiliations = { en = "Affiliations", fr = "Affiliations" },
+	citation = { en = "Citation", fr = "Référence" },
+}
+
+local CITATION_PUBLISHER = "Africa Agriculture Adaptation Atlas"
+local CITATION_URL = "https://adaptationatlas.cgiar.org"
+
+local function bilingual(byLocale)
+	local out = {}
+	for _, locale in ipairs(locales) do
+		table.insert(
+			out,
+			('<span class="nb-i18n" lang="%s">%s</span>'):format(locale, esc(byLocale[locale] or byLocale.en))
+		)
+	end
+	return table.concat(out)
+end
+
+local function heading(labels)
+	return ('<h4 class="atlas-contributions__heading">%s</h4>'):format(bilingual(labels))
+end
+
+-- Profile URLs come from CMS data: absolute http(s) only, so anything else
+-- renders as a plain name rather than becoming a link.
+local function safeProfileUrl(url)
+	return type(url) == "string" and url:match("^https?://[^%s\"'<>]+$") or nil
+end
+
+-- Resolve ids against the shared registry, numbering affiliations in
+-- first-appearance order. Returns authors, developers, and the ordered orgs
+-- whose index is the printed marker.
+local function resolveContributors(groups)
+	local path = projectRoot() .. "/data/shared/contributors.json"
+	local raw = readFile(path)
+	if not raw then
+		error("cmsContent: cannot read " .. path)
+	end
+	local registry = {}
+	for _, person in ipairs(pandoc.json.decode(raw).contributors or {}) do
+		registry[person.id] = person
+	end
+
+	local orgs = {}
+	local function markerFor(org)
+		for index, seen in ipairs(orgs) do
+			if seen == org then
+				return index
+			end
+		end
+		table.insert(orgs, org)
+		return #orgs
+	end
+
+	local function resolve(list)
+		local people = {}
+		for _, entry in ipairs(list or {}) do
+			local person = entry.type == "custom" and entry or registry[entry.id]
+			if type(person) ~= "table" or type(person.name) ~= "string" then
+				error(("cmsContent: unknown contributor '%s'"):format(tostring(entry.id or entry.name)))
+			end
+			local markers = {}
+			for _, org in ipairs(person.org or {}) do
+				table.insert(markers, markerFor(org))
+			end
+			table.sort(markers)
+			table.insert(people, { name = person.name, url = person.url, markers = markers })
+		end
+		return people
+	end
+
+	return resolve(groups and groups.authors), resolve(groups and groups.developers), orgs
+end
+
+local function peopleSection(labels, people)
+	if #people == 0 then
+		return ""
+	end
+	local spans = {}
+	for _, person in ipairs(people) do
+		local name = esc(person.name)
+		local href = safeProfileUrl(person.url)
+		if href then
+			name = ('<a href="%s" target="_blank" rel="noopener noreferrer">%s</a>'):format(esc(href), name)
+		end
+		if #person.markers > 0 then
+			name = name .. "<sup>" .. table.concat(person.markers, ",") .. "</sup>"
+		end
+		table.insert(spans, "<span>" .. name .. "</span>")
+	end
+	return ('<section class="atlas-contributions__section">%s<div class="atlas-contributions__people">%s</div></section>')
+		:format(heading(labels), table.concat(spans, ", "))
+end
+
+local function fillContributors()
+	if not notebookContributors or not notebookTitles then
+		error("cmsContent: {.nb-contributors} needs a notebook with an nb-config manifest")
+	end
+	if not citationYear then
+		error("cmsContent: the citation needs a year — add `date-modified: last-modified` to the notebook front matter")
+	end
+
+	local authors, developers, orgs = resolveContributors(notebookContributors)
+
+	local affiliations = {}
+	for marker, org in ipairs(orgs) do
+		table.insert(
+			affiliations,
+			('<div class="atlas-contributions__affiliation"><sup>%d</sup> %s</div>'):format(marker, esc(org))
+		)
+	end
+
+	return { pandoc.RawBlock("html", table.concat({
+		'<div class="atlas-contributions">',
+		'<div class="atlas-contributions__columns">',
+		'<div class="atlas-contributions__primary">',
+		peopleSection(CONTRIBUTOR_LABELS.authors, authors),
+		peopleSection(CONTRIBUTOR_LABELS.developers, developers),
+		"</div>",
+		'<section class="atlas-contributions__affiliations">',
+		heading(CONTRIBUTOR_LABELS.affiliations),
+		table.concat(affiliations),
+		"</section></div>",
+		'<section class="atlas-contributions__citation">',
+		heading(CONTRIBUTOR_LABELS.citation),
+		('<div class="atlas-contributions__citation-text"><span>CGIAR. (%s). <em>%s</em>. %s. <a href="%s">%s</a></span></div>'):format(
+			citationYear,
+			bilingual(notebookTitles),
+			CITATION_PUBLISHER,
+			CITATION_URL,
+			CITATION_URL
+		),
+		"</section></div>",
+	})) }
+end
+
 -- ---------- docs data pages ----------
 
 local function readEntries(src)
@@ -351,6 +516,9 @@ end
 local function getMeta(meta)
 	textDir = nil
 	runtimeConfigRaw = nil
+	notebookTitles = nil
+	notebookContributors = nil
+	citationYear = nil
 	blocks = {}
 	meta = applyNotebookConfig(meta)
 	return meta
@@ -359,6 +527,8 @@ end
 local function fillDiv(div)
 	if div.classes:includes("nb-prose") then
 		return injectProse(div)
+	elseif div.classes:includes("nb-contributors") then
+		return fillContributors()
 	elseif div.classes:includes("docs-faq") then
 		return fillDocs(div, renderFaq)
 	elseif div.classes:includes("docs-glossary") then
