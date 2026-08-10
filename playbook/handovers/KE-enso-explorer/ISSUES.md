@@ -100,3 +100,20 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
 **13 livestock species** (2021–23), **11 products** (2021–22). Produce figure gained a Products view
 + methodology/citations panel. Final full-PDF sweep = zero unaccounted pages. See dispatch addenda
 6–14 and `DECISIONS.md`.
+
+## Pete review 2026-08-10 (§4.3 prices + plot-UX, open)
+- **KE-12 · §4.3 prices chart — dots + gap breaks · OPEN.** Add per-point dots; do NOT join points
+  separated by long gaps (orange Marsabit-Town line interpolates 2019→2024 across missing data =
+  misleading). Break the line at gaps > N months (segment via `z`), overlay `Plot.dot`. Cell
+  `pricesChart` ~line 522; data `pricesCty`.
+- **KE-13 · Caption vs "About this plot" split · OPEN (cross-cutting).** Caption = SHORT plain-language
+  what-it-shows. "About this plot" = detailed technical/methodology + how-to-interpret (answers user
+  questions). `plotFooter` (in-notebook ~line 1057) = `captionDetails(caption, details, download)`;
+  the `details` (2nd arg) is currently `undefined` → move methodology/attribution there, keep caption short.
+- **KE-14 · Visible figure/table numbers · OPEN.** Ensure every figure/table shows its number (Figure
+  N.M / Table N.M) clearly (heading has it; make the caption/label carry it too).
+- **KE-15 · Table view + downloadable table (all plots) · OPEN (cross-cutting).** Every plot gets a
+  show-table-view toggle + a neatly-formatted table (understandable field names) that is downloadable,
+  WITH metadata included in each download. Extend `chartDownloadButton`.
+- **KE-16 · Feedback widget for the team · OPEN (next).** Quick in-notebook way for the team to flag
+  improvements/bugs (incl. screengrabs). Pete: "note for next."
