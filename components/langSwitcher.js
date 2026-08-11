@@ -44,8 +44,4 @@ function mountControl() {
 // State first: ?lang has to apply even if the navbar markup ever stops matching.
 setLang(initialLang());
 
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", mountControl);
-} else {
-  mountControl();
-}
+document.addEventListener("DOMContentLoaded", mountControl);

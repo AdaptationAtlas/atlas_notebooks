@@ -120,22 +120,24 @@ function bivariateClassify(
 
 // Colour only. What each cell means, and how the cells rank, is policy: see
 // bivariatePriority in data/cis/thresholds.json and the s2Priority* strings.
-bivariateColors = {
-  return {
-    "Low × Low": "#e8e8e8",
-    "Low × Moderate": "#b8d6be",
-    "Low × High": "#6c9a8b",
-    "Moderate × Low": "#c8b2d6",
-    "Moderate × Moderate": "#9c9eba",
-    "Moderate × High": "#627a8e",
-    "High × Low": "#b8a0c2",
-    "High × Moderate": "#8b7fa8",
-    "High × High": "#5a5f8f",
-    // Distinct from "Low × Low": a unit with no hazard value must not read as a
-    // low-hazard one. Matches the missing-data grey section 3 uses.
-    "No data": "#cccccc"
-  };
-}
+// x = readiness (purple), y = hazard (green).
+bivariatePalette = bivariatePalettes.purpleGreen
+
+// The maps still fill by the bivariateClass string, and thresholds.json ranks by
+// the same key, so name the palette cells for them. Indices stay the source of
+// truth: nothing here is joined on a translated word.
+BIVARIATE_CLASSES = ["Low", "Moderate", "High"]
+
+bivariateColors = Object.fromEntries([
+  ...bivariatePalette.map((cell) => [
+    `${BIVARIATE_CLASSES[cell.x]} × ${BIVARIATE_CLASSES[cell.y]}`,
+    cell.color,
+  ]),
+  // Unfilled rather than grey: the palette's own low-low cell is #e8e8e8, so a
+  // grey no-data class would be indistinguishable from "low readiness, low
+  // hazard". Its outline below is what keeps the unit visible.
+  ["No data", "#fff"],
+])
 ```
 
 ```{ojs}
@@ -290,16 +292,16 @@ s2BivariateMap = {
       bivariateClass: true
     },
     baseMarkOptions: {
-      fillOpacity: d => d.properties.hasData ? 1 : 0.3
+      stroke: d => d.properties.hasData ? "#fff" : "#bbb"
     },
     adminHighlight
   });
 }
 
-{
+s2Figure = {
   if (s2ViewToggle === "map") {
     return bivariateMapWithLegend(s2BivariateMap, {
-      colors: bivariateColors,
+      ...CIS_BIVARIATE_LEGEND,
       yLabel: S2_HAZARDS[s2HazardType].severity,
     });
   } else {
@@ -358,26 +360,31 @@ s2BivariateMap = {
 ```{ojs}
 //| echo: false
 
-// Download button for Section 2
-downloadCsvButton(
-  s2MapData.map((d) => {
-    const adminName = adminDisplayName(d);
+// Download buttons for Section 2
+inputTemplate({ gap: "0.5rem" })([
+  ...(s2ViewToggle === "map"
+    ? [downloadPngButton(s2Figure, { filename: `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`, label: nbText.downloadFigure })]
+    : []),
+  downloadCsvButton(
+    s2MapData.map((d) => {
+      const adminName = adminDisplayName(d);
 
-    const hazardName = S2_HAZARDS[s2HazardType].label;
+      const hazardName = S2_HAZARDS[s2HazardType].label;
 
-    return {
-      "Admin Level":
-        currentAdminLevel === 0 ? "0" : currentAdminLevel === 1 ? "1" : "2",
-      "Admin Name": adminName,
-      "CIS Readiness Raw": fmt(d.cis_readiness_index, 3),
-      "CIS Readiness Class": d.readinessClass,
-      [hazardName + " Raw"]: fmt(d.hazardValue, 1),
-      [hazardName + " Class"]: d.hazardClass,
-      "Bivariate Category": d.bivariateClass,
-    };
-  }),
-  { filename: `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`, label: nbText.downloadLabel },
-);
+      return {
+        "Admin Level":
+          currentAdminLevel === 0 ? "0" : currentAdminLevel === 1 ? "1" : "2",
+        "Admin Name": adminName,
+        "CIS Readiness Raw": fmt(d.cis_readiness_index, 3),
+        "CIS Readiness Class": d.readinessClass,
+        [hazardName + " Raw"]: fmt(d.hazardValue, 1),
+        [hazardName + " Class"]: d.hazardClass,
+        "Bivariate Category": d.bivariateClass,
+      };
+    }),
+    { filename: `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`, label: nbText.downloadLabel },
+  ),
+]);
 ```
 
 ```{ojs}

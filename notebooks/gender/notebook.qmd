@@ -8,11 +8,19 @@ execute:
 {{< include /components/_notebookHeader.qmd >}}
 
 ```{ojs}
-import { makeBivariateLegend, makeChoropleth, mergeDataToBoundaries } from "/helpers/atlasMap.ojs";
+import {
+  bivariateMapWithLegend,
+  bivariatePalettes,
+  makeChoropleth,
+  mergeDataToBoundaries,
+} from "/helpers/atlasMap.ojs";
 
-import { downloadCsvButton, downloadSvgButton } from "/helpers/uiComponents.ojs";
+import {
+  downloadCsvButton,
+  downloadPngButton,
+} from "/helpers/uiComponents.ojs";
 
-import { chartStyle, inputTemplate, wrapTickLabel } from "/helpers/std.ojs";
+import { chartStyle, inputTemplate } from "/helpers/std.ojs";
 ```
 
 {{< prose overview >}}
@@ -33,6 +41,9 @@ viewof afsSex = Inputs.radio(["F", "M", "diff"], {
 afsEmploymentChart = {
   const t = nbText.GenderedAfriAG.afsEmployment;
   const isDiff = afsSex === "diff";
+  // The field name is what the tip prints, and a plain name keeps the sort option
+  // working, so localize the key rather than wrap the channel.
+  const country = nbText.General.axes.country;
   let long;
   if (isDiff) {
     // Women minus men, per segment; the stacked (diverging) bars sum to the
@@ -43,34 +54,40 @@ afsEmploymentChart = {
       const m = sexes.get("M")?.[0];
       if (!f || !m) return [];
       return [
-        { country: countryNameN(f.iso3n, f.area), segment: t.segments.onFarm, pct: +(f.pctAgr - m.pctAgr).toFixed(1) },
-        { country: countryNameN(f.iso3n, f.area), segment: t.segments.offFarm, pct: +(f.pctOffFarm - m.pctOffFarm).toFixed(1) },
+        { [country]: countryNameN(f.iso3n, f.area), segment: t.segments.onFarm, pct: +(f.pctAgr - m.pctAgr).toFixed(1) },
+        { [country]: countryNameN(f.iso3n, f.area), segment: t.segments.offFarm, pct: +(f.pctOffFarm - m.pctOffFarm).toFixed(1) },
       ];
     });
   } else {
     const rows = afsEmployment.filter((d) => d.sex === afsSex);
     long = rows.flatMap((d) => [
-      { country: countryNameN(d.iso3n, d.area), segment: t.segments.onFarm, pct: d.pctAgr, empl: d.emplAgrK },
-      { country: countryNameN(d.iso3n, d.area), segment: t.segments.offFarm, pct: d.pctOffFarm, empl: d.emplOffFarmK },
+      { [country]: countryNameN(d.iso3n, d.area), segment: t.segments.onFarm, pct: d.pctAgr, empl: d.emplAgrK },
+      { [country]: countryNameN(d.iso3n, d.area), segment: t.segments.offFarm, pct: d.pctOffFarm, empl: d.emplOffFarmK },
     ]);
   }
   return Plot.plot({
     style: chartStyle,
-    width: Math.min(width, 820),
+    width: Math.min(width, 980),
     height: 60 + (long.length / 2) * 26,
-    marginLeft: 130,
+    marginLeft: 185,
     marginTop: isDiff ? 24 : 20,
+    // chartStyle runs at 13px, but Plot sizes its default margins for a ~10px
+    // font, so the default 30px bottom margin puts the axis label on the ticks.
+    marginBottom: 44,
     x: { label: isDiff ? t.axisDiff : t.axis, grid: true },
-    y: { label: null, tickFormat: (d) => wrapTickLabel(d, 18) },
+    y: { label: null },
     color: {
       legend: true,
+      // Names the legend and the tip row, which read "segment" otherwise.
+      label: t.segmentLabel,
       domain: [t.segments.onFarm, t.segments.offFarm],
       range: ["#216729", "#64acbe"],
     },
     marks: [
+      Plot.axisY({ lineWidth: 13 }),
       Plot.barX(long, {
         x: "pct",
-        y: "country",
+        y: country,
         fill: "segment",
         stroke: "white",
         strokeWidth: 0.75,
@@ -103,22 +120,22 @@ afsEmploymentChart = {
 
 ```{ojs}
 inputTemplate({ gap: "0.5rem" })([
-  downloadSvgButton(afsEmploymentChart, {
-    filename: "gender_afs_employment.svg",
+  downloadPngButton(afsEmploymentChart, {
+    filename: "gender_afs_employment.png",
     label: nbText.General.downloadFigure,
   }),
   downloadCsvButton(afsEmployment, {
     filename: "afs_employment_by-sex_faostat.csv",
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose women-dominate level=2 >}}
 
 ```{ojs}
 // Add row, column, and grand means around a heatmap and label them in bold.
-heatmapMeanMarks = (rows, { x, y, v, avg, textThreshold = 50 }) => {
+heatmapMeanMarks = (rows, { x, y, v, avg, xLabel, yLabel, textThreshold = 50 }) => {
   const cells = rows.map((d) => ({ x: x(d), y: y(d), v: v(d) }));
   const mean = (subset) => (subset.length ? Math.round(d3.mean(subset, (c) => c.v) * 10) / 10 : null);
   const columns = [...new Set(cells.map((c) => c.x))];
@@ -129,7 +146,15 @@ heatmapMeanMarks = (rows, { x, y, v, avg, textThreshold = 50 }) => {
     { x: avg, y: avg, v: mean(cells) },
   ].filter((c) => c.v != null);
   return [
-    Plot.cell([...cells, ...means], { x: "x", y: "y", fill: "v", inset: 1, tip: true }),
+    // The {value, label} channel form names the tip rows; the scales keep
+    // label: null, so the axes stay bare. Fill takes its name from the legend.
+    Plot.cell([...cells, ...means], {
+      x: { value: "x", label: xLabel },
+      y: { value: "y", label: yLabel },
+      fill: "v",
+      inset: 1,
+      tip: true,
+    }),
     Plot.text(means, {
       x: "x", y: "y", text: (c) => c.v, fontWeight: "bold",
       fill: (c) => (c.v >= textThreshold ? "white" : "#222"),
@@ -149,23 +174,33 @@ womenCropsChart = {
     height: 70 + (order.length + 1) * 44,
     marginLeft: 95,
     marginBottom: 55,
-    x: { label: null, domain: [...Object.values(t.plot.crops), avg], tickFormat: (d) => wrapTickLabel(d, 14) },
+    x: { label: null, domain: [...Object.values(t.plot.crops), avg] },
     y: { label: null, domain: [...order, avg] },
     color: { type: "linear", range: ["#F7D732", "#216729"], legend: true, label: t.legend },
-    marks: heatmapMeanMarks(rows, {
-      x: (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup,
-      y: country, v: (d) => d.pctFemale, avg, textThreshold: 45,
-    }),
+    marks: [
+      Plot.axisX({ lineWidth: 7 }),
+      ...heatmapMeanMarks(rows, {
+        x: (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup,
+        y: country, v: (d) => d.pctFemale, avg, textThreshold: 45,
+        xLabel: nbText.General.axes.crop, yLabel: nbText.General.axes.country,
+      }),
+    ],
     caption: t.caption,
   });
 }
 ```
 
 ```{ojs}
-downloadSvgButton(womenCropsChart, {
-  filename: "gender_women_crops.svg",
-  label: nbText.General.downloadFigure,
-})
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(womenCropsChart, {
+    filename: "gender_women_crops.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(cropGenderData, {
+    filename: "female_participation_crops_palacios-lopez2017.csv",
+    label: nbText.General.download,
+  }),
+]);
 ```
 
 {{< prose women-livestock level=2 >}}
@@ -178,73 +213,118 @@ womenLivestockChart = {
   const order = d3.groupSort(livestockControl, (g) => -d3.mean(g, (d) => d.pctFemale), country);
   return Plot.plot({
     style: chartStyle,
-    width: Math.min(width, 640),
+    width: Math.min(width, 820),
     height: 70 + (order.length + 1) * 32,
-    marginLeft: 110,
+    marginLeft: 175,
     x: { label: null, domain: [...Object.values(t.species), avg] },
-    y: { label: null, domain: [...order, avg], tickFormat: (d) => wrapTickLabel(d, 16) },
+    y: { label: null, domain: [...order, avg] },
     color: { type: "linear", domain: [0, 100], range: ["#F7D732", "#216729"], legend: true, label: t.legend },
-    marks: heatmapMeanMarks(livestockControl, {
-      x: (d) => t.species[d.species] ?? d.species,
-      y: country, v: (d) => d.pctFemale, avg,
-    }),
+    marks: [
+      Plot.axisY({ lineWidth: 12 }),
+      ...heatmapMeanMarks(livestockControl, {
+        x: (d) => t.species[d.species] ?? d.species,
+        y: country, v: (d) => d.pctFemale, avg,
+        xLabel: nbText.General.axes.livestock, yLabel: nbText.General.axes.country,
+      }),
+    ],
     caption: t.caption,
   });
 }
 ```
 
 ```{ojs}
-downloadSvgButton(womenLivestockChart, {
-  filename: "gender_women_livestock.svg",
-  label: nbText.General.downloadFigure,
-})
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(womenLivestockChart, {
+    filename: "gender_women_livestock.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(livestockControl, {
+    filename: "womens_livestock_sale_income_rhomis.csv",
+    label: nbText.General.download,
+  }),
+]);
 ```
 
 {{< prose gender-hotspots >}}
 
 {{< prose human-heat-stress level=2 >}}
 
+{{< prose crop-heat-stress level=2 >}}
+
+{{< prose livestock-heat-stress level=2 >}}
+
 ```{ojs}
-viewof heatControls = Inputs.form(
+heatHazardText = nbText.GenderHotspots.wbgtMap.selectors.hazard
+
+// One cell per control, composed into a row below. Separate cells rather than one
+// Inputs.form so a change to any of them re-emits only its own value.
+viewof heatHazard = Inputs.radio(Object.keys(heatHazardText.options), {
+  value: "human",
+  label: heatHazardText.title,
+  format: (k) => heatHazardText.options[k],
+})
+
+viewof heatTimeframe = Inputs.select(["historic", "2030", "2050"], {
+  label: nbText.GenderHotspots.wbgtMap.selectors.timeframe.title,
+  format: (k) => nbText.GenderHotspots.wbgtMap.selectors.timeframe.options[k],
+  width: 190,
+})
+
+viewof heatScenario = Inputs.select(["ssp245", "ssp585"], {
+  label: nbText.GenderHotspots.wbgtMap.selectors.scenario.title,
+  format: (k) => nbText.GenderHotspots.wbgtMap.selectors.scenario.options[k],
+  width: 190,
+})
+
+inputTemplate({ gap: "1.5em" })([
+  viewof heatHazard,
+  viewof heatTimeframe,
+  viewof heatScenario,
+])
+
+scenarioAvailable = {
+  const disabled = heatTimeframe === "historic";
+  viewof heatScenario.querySelector("select").disabled = disabled;
+  viewof heatScenario.style.opacity = disabled ? 0.45 : 1;
+  return !disabled;
+}
+
+heatThresholds = ({ human: [28, 30], crop: [35, 40] })[heatHazard]
+
+viewof heatThresholdControl = Inputs.form(
   {
-    threshold: Inputs.radio([28, 30], {
-      value: 28,
-      label: nbText.GenderHotspots.wbgtMap.selectors.threshold.title,
-      format: (v) => `${v}°C WBGT`,
-    }),
-    timeframe: Inputs.select(["historic", "2030", "2050"], {
-      label: nbText.GenderHotspots.wbgtMap.selectors.timeframe.title,
-      format: (k) => nbText.GenderHotspots.wbgtMap.selectors.timeframe.options[k],
-    }),
-    // Ignored when the historic period is selected.
-    scenario: Inputs.select(["ssp245", "ssp585"], {
-      label: nbText.GenderHotspots.wbgtMap.selectors.scenario.title,
-      format: (k) => nbText.GenderHotspots.wbgtMap.selectors.scenario.options[k],
+    ...(heatThresholds && {
+      threshold: Inputs.radio(heatThresholds, {
+        value: heatThresholds[0],
+        label: nbText.GenderHotspots.wbgtMap.selectors.threshold.title,
+        format: (v) => `${v}°C${heatHazard === "human" ? " WBGT" : ""}`,
+      }),
     }),
   },
-  { template: inputTemplate({ gap: "3em" }) },
+  { template: inputTemplate({ gap: "1.5em" }) },
 )
 
-heatThreshold = heatControls.threshold
-heatTimeframe = heatControls.timeframe
-heatScenario = heatControls.scenario
+heatThreshold = heatThresholdControl.threshold
 ```
 
 ```{ojs}
 biVarMap = {
-  const heatTooltip = Lang.reduceReplaceTemplateItems(
-    nbText.GenderHotspots.wbgtMap.tooltip.heat,
-    [{ name: "threshold", value: heatThreshold }],
-  );
+  const heatTooltip = tmpl(nbText.GenderHotspots.wbgtMap.tooltip[heatHazard], {
+    threshold: heatThreshold,
+  });
   const map = makeChoropleth({
     features: biVarFeatures.features,
     width: Math.min(width, 760),
     height: 520,
     fill: (d) => biVarColor(d.properties.data),
     channels: {
+      country: {
+        label: nbText.General.axes.country,
+        value: (d) => countryNameN(d.properties.iso3n),
+      },
       region: {
-        label: " ",
-        value: (d) => `${d.properties.admin1_name} — ${countryNameN(d.properties.iso3n)}`,
+        label: nbText.General.axes.region,
+        value: (d) => d.properties.admin1_name,
       },
       heat: { label: heatTooltip, value: (d) => d.properties.data?.value },
       women: {
@@ -252,32 +332,35 @@ biVarMap = {
         value: (d) => d.properties.data?.pct_women_agri,
       },
     },
-    tooltip: { region: true, heat: true, women: true },
+    tooltip: { country: true, region: true, heat: true, women: true },
+    caption: nbText.GenderHotspots.wbgtMap.caption,
+    // A unit with no data keeps its outline, so it reads as empty rather than as
+    // a missing hole in the map.
+    baseMarkOptions: { stroke: (d) => (d.properties.data ? "#fff" : "#bbb") },
     extraMarks: [Plot.geo(africaA0, { stroke: "#333", strokeWidth: 0.8, fill: null })],
   });
-  const legend = makeBivariateLegend({
+  return bivariateMapWithLegend(map, {
     colors: biVarColors,
     xLabel: nbText.GenderHotspots.wbgtMap.legend.women,
-    yLabel: nbText.GenderHotspots.wbgtMap.legend.heat,
+    yLabel: nbText.GenderHotspots.wbgtMap.legend[heatHazard],
     width: 235,
     height: 225,
     fontSize: 13,
   });
-  return htl.html`<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:0.25rem">${map}${legend}</div>`;
 }
 ```
 
 ```{ojs}
 inputTemplate({ gap: "0.5rem" })([
-  downloadSvgButton(biVarMap, {
-    filename: "gender_wbgt_women_bivariate.svg",
+  downloadPngButton(biVarMap, {
+    filename: "gender_wbgt_women_bivariate.png",
     label: nbText.General.downloadFigure,
   }),
   downloadCsvButton(biVarRows, {
-    filename: `wbgt${heatThreshold}C_women-agri_${heatTimeframe}${heatTimeframe === "historic" ? "" : "_" + heatScenario}.csv`,
+    filename: `${heatHazard}-heat${heatThreshold ?? ""}_women-agri_${heatTimeframe}${heatTimeframe === "historic" ? "" : "_" + heatScenario}.csv`,
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose hotspot-ranking >}}
@@ -303,7 +386,7 @@ hotspotMap = makeChoropleth({
   },
   channels: {
     country: {
-      label: " ",
+      label: nbText.General.axes.country,
       value: (d) => countryNameN(d.properties.iso3n),
     },
     rank: {
@@ -312,20 +395,21 @@ hotspotMap = makeChoropleth({
     },
   },
   tooltip: { country: true, rank: true },
-})
+  caption: nbText.GlobalHotspots.caption,
+});
 ```
 
 ```{ojs}
 inputTemplate({ gap: "0.5rem" })([
-  downloadSvgButton(hotspotMap, {
-    filename: "gender_hotspot_map.svg",
+  downloadPngButton(hotspotMap, {
+    filename: "gender_hotspot_map.png",
     label: nbText.General.downloadFigure,
   }),
   downloadCsvButton(hotspotData, {
     filename: "ifpri_gender_climate_hotspots_africa.csv",
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose gender-investments >}}
@@ -362,38 +446,41 @@ adaptiveCapacityChart = {
   const plot = Plot.plot({
     style: chartStyle,
     width: Math.min(width, 760),
-    height: 440,
+    height: 500,
     marginBottom: 70,
-    x: { domain: order, label: null, tickFormat: (d) => wrapTickLabel(d, 16) },
+    x: { domain: order, label: null },
     y: { domain: [0, 100], grid: true, label: t.axisY },
-    color: { legend: true, domain: [t.sexes.F, t.sexes.M], range: ["#d6604d", "#4393c3"] },
+    color: {
+      legend: true,
+      label: nbText.General.axes.gender,
+      domain: [t.sexes.F, t.sexes.M],
+      range: ["#d6604d", "#4393c3"],
+    },
     marks: [
+      Plot.axisX({ lineWidth: 8 }),
       Plot.ruleX(pairs, { x: "indicator", y1: "lo", y2: "hi", stroke: "#bbb", strokeWidth: 2 }),
       Plot.dot(rows, {
-        x: label,
+        x: { value: label, label: t.selectors.indicator.title },
         y: "value",
         fill: (d) => t.sexes[d.sex],
         r: 7,
         stroke: "white",
         strokeWidth: 1,
         tip: true,
-        channels: { year: "year" },
+        channels: { [nbText.General.axes.year]: "year" },
       }),
     ],
     caption: t.caption,
   });
-  return htl.html`<div>
-    <h4 style="margin:0 0 0.25rem;">${countryNameN(capCountry)}</h4>
-    ${plot}
-  </div>`;
+  return plot;
 }
 ```
 
 ```{ojs}
-downloadSvgButton(adaptiveCapacityChart, {
-  filename: "gender_adaptive_capacity.svg",
+downloadPngButton(adaptiveCapacityChart, {
+  filename: "gender_adaptive_capacity.png",
   label: nbText.General.downloadFigure,
-})
+});
 ```
 
 {{< prose indicator-deep-dive level=2 >}}
@@ -452,11 +539,12 @@ adaptiveCapacityMap = {
       ? { type: "linear", scheme: "RdBu", domain: [-maxGap, maxGap], unknown: "#e0e0e0", label: t.map.legendGap }
       : { type: "linear", scheme: "YlGnBu", domain: [0, 100], unknown: "#e0e0e0", label: `${t.indicators[indicator]} (%)` },
     channels: {
-      country: { label: " ", value: (d) => countryNameN(d.properties.iso3n) },
+      country: { label: nbText.General.axes.country, value: (d) => countryNameN(d.properties.iso3n) },
       women: { label: t.sexes.F, value: (d) => d.properties.data?.F },
       men: { label: t.sexes.M, value: (d) => d.properties.data?.M },
     },
     tooltip: { country: true, women: true, men: true },
+    caption: t.map.caption,
     adminHighlight: {
       filter: (d) => d.properties.iso3n === capCountry,
       stroke: "#111",
@@ -469,15 +557,15 @@ adaptiveCapacityMap = {
 
 ```{ojs}
 inputTemplate({ gap: "0.5rem" })([
-  downloadSvgButton(adaptiveCapacityMap, {
-    filename: "gender_adaptive_capacity_map.svg",
+  downloadPngButton(adaptiveCapacityMap, {
+    filename: "gender_adaptive_capacity_map.png",
     label: nbText.General.downloadFigure,
   }),
   downloadCsvButton(adaptiveCapacity, {
     filename: "adaptive_capacity_by-sex_faostat.csv",
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose bridge-gap >}}
@@ -504,11 +592,12 @@ bridgeGapMatrix = {
     };
   });
   const outcomeKeys = ["enabling", "reinforcing", "constraining", "counteracting"];
+
   const outcomeColors = {
-    enabling: "#216729",
-    reinforcing: "#74c476",
-    constraining: "#ef8a62",
-    counteracting: "#b2182b",
+    enabling: "#1b587f",
+    reinforcing: "#86bcd8",
+    constraining: "#eba43a",
+    counteracting: "#a1500f",
   };
   const lightFills = [t.table.values.reinforcing, t.table.values.constraining];
   const riskOrder = d3.groupSort(cells, (g) => -d3.sum(g, (d) => d.n), (d) => d.risk);
@@ -518,7 +607,7 @@ bridgeGapMatrix = {
     height: 80 + riskOrder.length * 42,
     marginLeft: 150,
     marginBottom: 55,
-    x: { label: null, domain: Object.values(t.selector.options), tickFormat: (d) => wrapTickLabel(d, 16) },
+    x: { label: null, domain: Object.values(t.selector.options) },
     y: { label: null, domain: riskOrder },
     color: {
       legend: true,
@@ -527,12 +616,16 @@ bridgeGapMatrix = {
       range: outcomeKeys.map((k) => outcomeColors[k]),
     },
     marks: [
+      Plot.axisX({ lineWidth: 8 }),
       Plot.cell(cells, {
-        x: "cat",
-        y: "risk",
+        x: { value: "cat", label: t.selector.title },
+        y: { value: "risk", label: t.table.headings.Risk },
         fill: "outcome",
         inset: 1,
-        tip: true,
+        // Plot truncates a tip row past lineWidth (20 ems by default) and, in this
+        // version, puts the truncated text in the title too, so the full geography
+        // list is unreachable. Widen it rather than lose the words.
+        tip: { lineWidth: 60 },
         channels: {
           [t.table.headings["Gender Outcome Score"]]: "outcomes",
           [t.table.headings.Geography]: "geographies",
@@ -552,15 +645,15 @@ bridgeGapMatrix = {
 
 ```{ojs}
 inputTemplate({ gap: "0.5rem" })([
-  downloadSvgButton(bridgeGapMatrix, {
-    filename: "gender_bridge_gap_matrix.svg",
+  downloadPngButton(bridgeGapMatrix, {
+    filename: "gender_bridge_gap_matrix.png",
     label: nbText.General.downloadFigure,
   }),
   downloadCsvButton(genderSolutions, {
     filename: "gender_adaptation_solutions_roy2022.csv",
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose summary >}}
@@ -613,17 +706,23 @@ hotspotIndicators = nbText.GlobalHotspots.indicators
 // Use pinned hyparquet for these small Snappy files; no DuckDB worker is needed.
 hypq = import("https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/+esm")
 
+
 // WBGT heat stress + women-in-agriculture tables extracted to GAUL24 admin0/1
 // by notebookv2/scripts/extract_gender_layers.R (join key: gaul1_code).
-wbgtData = {
-  const buf = await FileAttachment("/data/genderExposure/wbgt_gaul24_africa.parquet").arrayBuffer();
-  return hypq.parquetQuery({ file: buf });
-}
+wbgtData = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/wbgt_gaul24_africa.parquet").arrayBuffer(),
+})
 
-womenAgriData = {
-  const buf = await FileAttachment("/data/genderExposure/women-agri_gaul24_africa.parquet").arrayBuffer();
-  return hypq.parquetQuery({ file: buf });
-}
+// Crop (NTx) and livestock (THI), same shape as wbgtData. Historic comes from the
+// CIS baseline and the futures from the ensemble export; both are aggregated over
+// Jägermeyr growing seasons, which is what makes the two halves comparable.
+heatHazardData = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/heatHazards_gaul24_africa.parquet").arrayBuffer(),
+})
+
+womenAgriData = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/women-agri_gaul24_africa.parquet").arrayBuffer(),
+})
 
 africaA1 = {
   const topo = await FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json();
@@ -631,16 +730,14 @@ africaA1 = {
 }
 
 // Latest FAOSTAT/ILO agrifood employment by sex and country.
-afsEmployment = {
-  const buf = await FileAttachment("/data/genderExposure/afsEmployment_faostat.parquet").arrayBuffer();
-  return hypq.parquetQuery({ file: buf });
-}
+afsEmployment = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/afsEmployment_faostat.parquet").arrayBuffer(),
+})
 
 // Latest sex-disaggregated FAOSTAT capacity indicators; higher percentages are better.
-adaptiveCapacity = {
-  const buf = await FileAttachment("/data/genderExposure/adaptiveCapacity_faostat.parquet").arrayBuffer();
-  return hypq.parquetQuery({ file: buf });
-}
+adaptiveCapacity = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/adaptiveCapacity_faostat.parquet").arrayBuffer(),
+})
 
 capCountryNames = new Map(
   adaptiveCapacity.map((d) => [d.iso3n, countryNameN(d.iso3n, d.area)]),
@@ -666,7 +763,6 @@ cropGenderData = {
     Object.entries(groups).map(([cropGroup, pctFemale]) => ({ country, cropGroup, pctFemale })),
   );
 }
-
 ```
 
 ```{ojs}
@@ -678,12 +774,12 @@ womenByGaul1 = new Map(
 
 biVarRows = {
   const scen = heatTimeframe === "historic" ? "historic" : heatScenario;
-  return wbgtData
+  return heatRows
     .filter((d) =>
       d.admin1_name != null &&
       d.timeframe === heatTimeframe &&
       d.scenario === scen &&
-      d.threshold === heatThreshold
+      (heatThresholds == null || d.threshold === heatThreshold)
     )
     .map((d) => {
       const w = womenByGaul1.get(d.gaul1_code);
@@ -698,32 +794,40 @@ biVarFeatures = mergeDataToBoundaries({
   dataKey: "gaul1_code",
 })
 
-// Fixed breaks keep colors comparable: heat 30/90 days, women 20/50%.
-heatClass = d3.scaleThreshold([30, 90], d3.range(3))
+heatRows = heatHazard === "human"
+  ? wbgtData
+  : heatHazardData.filter((d) => d.hazard === heatHazard)
+
+// Each hazard is a different quantity: WBGT counts days per YEAR above a cutoff,
+// NTx days per MONTH of the growing season, THI is an index. Livestock cuts follow
+// the standard THI scale (no/mild <79, moderate 79-89, severe >=90) — the bivariate
+// palette is 3x3, so no-stress and mild share a class, which is also where the
+// fewest units sit. Crop 40°C needs its own breaks because two thirds of units sat
+// at or below 0.3 days historically. Women 20/50%.
+heatClass = d3.scaleThreshold(
+  heatHazard === "human" ? [30, 90]
+  : heatHazard === "livestock" ? [79, 90]
+  : heatThreshold === 40 ? [0.3, 2]
+  : [1, 6],
+  d3.range(3),
+)
 
 womenClass = d3.scaleThreshold([20, 50], d3.range(3))
 
-// 3x3 bivariate ramp from the previous notebook version (women axis = rows,
-// heat axis = columns; index 0 = both low, 8 = both high).
-biVarPalette = ["#e8e8e8", "#e4acac", "#c85a5a", "#b0d5df", "#ad9ea5", "#985356", "#64acbe", "#627f8c", "#574249"]
+// x = women (blue), y = heat (red).
+biVarColors = bivariatePalettes.blueRed
 
+// A threshold scale bands NaN into its lowest class, so missing values have to be
+// caught before the lookup or they would read as low heat and few women.
 biVarColor = (row) => {
-  if (!row || !Number.isFinite(row.value) || !Number.isFinite(row.pct_women_agri)) {
-    return "#e0e0e0";
+  // Unfilled rather than grey: the palette's own low-low cell is #e8e8e8, so a
+  // grey no-data class would be indistinguishable from "low heat, few women".
+  if (!Number.isFinite(row?.value) || !Number.isFinite(row?.pct_women_agri)) {
+    return "#fff";
   }
-  return biVarPalette[womenClass(row.pct_women_agri) * 3 + heatClass(row.value)];
-}
-
-// makeBivariateLegend expects colors keyed "<x> × <y>" (x = women, y = heat).
-biVarColors = {
-  const cls = ["Low", "Moderate", "High"];
-  const out = {};
-  for (let w = 0; w < 3; w++) {
-    for (let h = 0; h < 3; h++) {
-      out[`${cls[w]} × ${cls[h]}`] = biVarPalette[w * 3 + h];
-    }
-  }
-  return out;
+  const x = womenClass(row.pct_women_agri);
+  const y = heatClass(row.value);
+  return biVarColors.find((cell) => cell.x === x && cell.y === y).color;
 }
 ```
 
