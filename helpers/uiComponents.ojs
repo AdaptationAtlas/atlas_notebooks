@@ -60,69 +60,6 @@ function downloadCsv(data, { filename = "atlas-data", columns } = {}) {
   );
 }
 
-SVG_NS = "http://www.w3.org/2000/svg";
-
-// Plot overflows its own box; a file's root svg clips, so reserve room for it.
-FIGURE_PADDING = 12;
-
-// Range, not the element: a label is a text node inside a wider span.
-function htmlLabels(chart, box) {
-  const walker = document.createTreeWalker(chart, NodeFilter.SHOW_TEXT);
-  const labels = [];
-
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const text = node.textContent.trim();
-    if (!text || node.parentElement.closest("svg")) continue;
-
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    const rect = range.getBoundingClientRect();
-    if (!rect.width) continue;
-
-    const style = window.getComputedStyle(node.parentElement);
-    const label = document.createElementNS(SVG_NS, "text");
-    label.setAttribute("x", rect.left - box.left + FIGURE_PADDING);
-    label.setAttribute("y", rect.bottom - box.top + FIGURE_PADDING);
-    label.setAttribute("dy", `-${parseFloat(style.fontSize) * 0.22}`);
-    label.setAttribute("font-family", style.fontFamily);
-    label.setAttribute("font-size", style.fontSize);
-    label.setAttribute("font-weight", style.fontWeight);
-    label.setAttribute("fill", style.color);
-    label.textContent = text;
-    labels.push(label);
-  }
-
-  return labels;
-}
-
-function chartSvgSource(chart) {
-  const svgs = chart.tagName === "svg" ? [chart] : [...chart.querySelectorAll("svg")];
-
-  const box = chart.getBoundingClientRect();
-  const outer = document.createElementNS(SVG_NS, "svg");
-  outer.setAttribute("xmlns", SVG_NS);
-  outer.setAttribute("width", box.width + FIGURE_PADDING * 2);
-  outer.setAttribute("height", box.height + FIGURE_PADDING * 2);
-
-  for (const svg of svgs) {
-    const rect = svg.getBoundingClientRect();
-    const clone = svg.cloneNode(true);
-    clone.setAttribute("x", rect.left - box.left + FIGURE_PADDING);
-    clone.setAttribute("y", rect.top - box.top + FIGURE_PADDING);
-    clone.setAttribute("width", rect.width);
-    clone.setAttribute("height", rect.height);
-    // Each nested svg is its own viewport and would otherwise clip the same
-    // overflow the padding just made room for.
-    clone.setAttribute("overflow", "visible");
-    outer.append(clone);
-  }
-
-  // After the svgs so a label is never hidden behind a plot background.
-  for (const label of htmlLabels(chart, box)) outer.append(label);
-
-  return new XMLSerializer().serializeToString(outer);
-}
-
 /** Create a button that downloads object rows as CSV. */
 function downloadCsvButton(
   data,
@@ -137,13 +74,28 @@ function downloadCsvButton(
   });
 }
 
-/** Create a button that downloads a Plot figure as SVG. */
-function downloadSvgButton(chart, { filename = "atlas-figure", label = "Download figure" } = {}) {
+// Pinned like the other CDN deps. Renders the live DOM — including HTML legends and
+// anything positioned by CSS — by wrapping the clone in an SVG foreignObject, which
+// is why this is the PNG path and not the SVG one.
+htmlToImage = import("https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/+esm")
+
+/** Create a button that downloads a figure as a raster PNG of what is on screen. */
+function downloadPngButton(
+  chart,
+  { filename = "atlas-figure", label = "Download figure", scale = 2 } = {},
+) {
   return Inputs.button(label, {
-    reduce: () => downloadBlob(
-      new Blob([chartSvgSource(chart)], { type: "image/svg+xml;charset=utf-8" }),
-      downloadName(filename, ".svg"),
-    ),
+    // toBlob rather than toPng so the existing download plumbing is reused. Plot
+    // paints its own white background, so match it rather than ship a raster that
+    // is opaque in the middle and transparent at the edges.
+    reduce: async () =>
+      downloadBlob(
+        await htmlToImage.toBlob(chart, {
+          pixelRatio: scale,
+          backgroundColor: "#fff",
+        }),
+        downloadName(filename, ".png"),
+      ),
   });
 }
 
