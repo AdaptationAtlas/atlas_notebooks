@@ -8,9 +8,16 @@ execute:
 {{< include /components/_notebookHeader.qmd >}}
 
 ```{ojs}
-import { makeBivariateLegend, makeChoropleth, mergeDataToBoundaries } from "/helpers/atlasMap.ojs";
+import {
+  makeBivariateLegend,
+  makeChoropleth,
+  mergeDataToBoundaries,
+} from "/helpers/atlasMap.ojs";
 
-import { downloadCsvButton, downloadSvgButton } from "/helpers/uiComponents.ojs";
+import {
+  downloadCsvButton,
+  downloadSvgButton,
+} from "/helpers/uiComponents.ojs";
 
 import { chartStyle, inputTemplate, wrapTickLabel } from "/helpers/std.ojs";
 ```
@@ -111,7 +118,7 @@ inputTemplate({ gap: "0.5rem" })([
     filename: "afs_employment_by-sex_faostat.csv",
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose women-dominate level=2 >}}
@@ -165,7 +172,7 @@ womenCropsChart = {
 downloadSvgButton(womenCropsChart, {
   filename: "gender_women_crops.svg",
   label: nbText.General.downloadFigure,
-})
+});
 ```
 
 {{< prose women-livestock level=2 >}}
@@ -197,45 +204,88 @@ womenLivestockChart = {
 downloadSvgButton(womenLivestockChart, {
   filename: "gender_women_livestock.svg",
   label: nbText.General.downloadFigure,
-})
+});
 ```
 
 {{< prose gender-hotspots >}}
 
 {{< prose human-heat-stress level=2 >}}
 
+{{< prose crop-heat-stress level=2 >}}
+
+{{< prose livestock-heat-stress level=2 >}}
+
 ```{ojs}
-viewof heatControls = Inputs.form(
+heatHazardText = nbText.GenderHotspots.wbgtMap.selectors.hazard
+
+// Built once: nothing in here depends on the hazard, so changing one field cannot
+// rebuild the others and all three keep their values.
+viewof heatSettings = {
+  const scenario = Inputs.select(["ssp245", "ssp585"], {
+    label: nbText.GenderHotspots.wbgtMap.selectors.scenario.title,
+    format: (k) => nbText.GenderHotspots.wbgtMap.selectors.scenario.options[k],
+    width: 190,
+  });
+  // Tagged so the cell below can disable it in place; rebuilding this form to pass
+  // `disabled` would reset the hazard and period along with it.
+  scenario.dataset.control = "scenario";
+
+  return Inputs.form(
+    {
+      hazard: Inputs.radio(Object.keys(heatHazardText.options), {
+        value: "human",
+        label: heatHazardText.title,
+        format: (k) => heatHazardText.options[k],
+      }),
+      timeframe: Inputs.select(["historic", "2030", "2050"], {
+        label: nbText.GenderHotspots.wbgtMap.selectors.timeframe.title,
+        format: (k) => nbText.GenderHotspots.wbgtMap.selectors.timeframe.options[k],
+        width: 190,
+      }),
+      scenario,
+    },
+    { template: inputTemplate({ gap: "1.5em" }) },
+  );
+}
+
+heatHazard = heatSettings.hazard
+heatTimeframe = heatSettings.timeframe
+heatScenario = heatSettings.scenario
+
+// Livestock has none: THI is an index, not a count above a cutoff. An empty
+// Inputs.form is still a real element with an empty value, so the control can
+// disappear and come back — Inputs.input returns no element and cannot.
+heatThresholds = ({ human: [28, 30], crop: [35, 40] })[heatHazard]
+
+viewof heatThresholdControl = Inputs.form(
   {
-    threshold: Inputs.radio([28, 30], {
-      value: 28,
-      label: nbText.GenderHotspots.wbgtMap.selectors.threshold.title,
-      format: (v) => `${v}°C WBGT`,
-    }),
-    timeframe: Inputs.select(["historic", "2030", "2050"], {
-      label: nbText.GenderHotspots.wbgtMap.selectors.timeframe.title,
-      format: (k) => nbText.GenderHotspots.wbgtMap.selectors.timeframe.options[k],
-    }),
-    // Ignored when the historic period is selected.
-    scenario: Inputs.select(["ssp245", "ssp585"], {
-      label: nbText.GenderHotspots.wbgtMap.selectors.scenario.title,
-      format: (k) => nbText.GenderHotspots.wbgtMap.selectors.scenario.options[k],
+    ...(heatThresholds && {
+      threshold: Inputs.radio(heatThresholds, {
+        value: heatThresholds[0],
+        label: nbText.GenderHotspots.wbgtMap.selectors.threshold.title,
+        format: (v) => `${v}°C${heatHazard === "human" ? " WBGT" : ""}`,
+      }),
     }),
   },
-  { template: inputTemplate({ gap: "3em" }) },
+  { template: inputTemplate({ gap: "1.5em" }) },
 )
 
-heatThreshold = heatControls.threshold
-heatTimeframe = heatControls.timeframe
-heatScenario = heatControls.scenario
+heatThreshold = heatThresholdControl.threshold
+
+// A scenario means nothing for the historic period, so grey it out. Disabled rather
+// than hidden: removing it would reflow the row under the cursor.
+{
+  const scenario = viewof heatSettings.querySelector('[data-control="scenario"]');
+  scenario.querySelector("select").disabled = heatTimeframe === "historic";
+  scenario.style.opacity = heatTimeframe === "historic" ? 0.45 : 1;
+}
 ```
 
 ```{ojs}
 biVarMap = {
-  const heatTooltip = Lang.reduceReplaceTemplateItems(
-    nbText.GenderHotspots.wbgtMap.tooltip.heat,
-    [{ name: "threshold", value: heatThreshold }],
-  );
+  const heatTooltip = tmpl(nbText.GenderHotspots.wbgtMap.tooltip[heatHazard], {
+    threshold: heatThreshold,
+  });
   const map = makeChoropleth({
     features: biVarFeatures.features,
     width: Math.min(width, 760),
@@ -258,7 +308,7 @@ biVarMap = {
   const legend = makeBivariateLegend({
     colors: biVarColors,
     xLabel: nbText.GenderHotspots.wbgtMap.legend.women,
-    yLabel: nbText.GenderHotspots.wbgtMap.legend.heat,
+    yLabel: nbText.GenderHotspots.wbgtMap.legend[heatHazard],
     width: 235,
     height: 225,
     fontSize: 13,
@@ -274,10 +324,10 @@ inputTemplate({ gap: "0.5rem" })([
     label: nbText.General.downloadFigure,
   }),
   downloadCsvButton(biVarRows, {
-    filename: `wbgt${heatThreshold}C_women-agri_${heatTimeframe}${heatTimeframe === "historic" ? "" : "_" + heatScenario}.csv`,
+    filename: `${heatHazard}-heat${heatThreshold ?? ""}_women-agri_${heatTimeframe}${heatTimeframe === "historic" ? "" : "_" + heatScenario}.csv`,
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose hotspot-ranking >}}
@@ -312,7 +362,7 @@ hotspotMap = makeChoropleth({
     },
   },
   tooltip: { country: true, rank: true },
-})
+});
 ```
 
 ```{ojs}
@@ -325,7 +375,7 @@ inputTemplate({ gap: "0.5rem" })([
     filename: "ifpri_gender_climate_hotspots_africa.csv",
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose gender-investments >}}
@@ -362,7 +412,7 @@ adaptiveCapacityChart = {
   const plot = Plot.plot({
     style: chartStyle,
     width: Math.min(width, 760),
-    height: 440,
+    height: 500,
     marginBottom: 70,
     x: { domain: order, label: null, tickFormat: (d) => wrapTickLabel(d, 16) },
     y: { domain: [0, 100], grid: true, label: t.axisY },
@@ -382,10 +432,7 @@ adaptiveCapacityChart = {
     ],
     caption: t.caption,
   });
-  return htl.html`<div>
-    <h4 style="margin:0 0 0.25rem;">${countryNameN(capCountry)}</h4>
-    ${plot}
-  </div>`;
+  return plot;
 }
 ```
 
@@ -393,7 +440,7 @@ adaptiveCapacityChart = {
 downloadSvgButton(adaptiveCapacityChart, {
   filename: "gender_adaptive_capacity.svg",
   label: nbText.General.downloadFigure,
-})
+});
 ```
 
 {{< prose indicator-deep-dive level=2 >}}
@@ -477,7 +524,7 @@ inputTemplate({ gap: "0.5rem" })([
     filename: "adaptive_capacity_by-sex_faostat.csv",
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose bridge-gap >}}
@@ -560,7 +607,7 @@ inputTemplate({ gap: "0.5rem" })([
     filename: "gender_adaptation_solutions_roy2022.csv",
     label: nbText.General.download,
   }),
-])
+]);
 ```
 
 {{< prose summary >}}
@@ -613,17 +660,23 @@ hotspotIndicators = nbText.GlobalHotspots.indicators
 // Use pinned hyparquet for these small Snappy files; no DuckDB worker is needed.
 hypq = import("https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/+esm")
 
+
 // WBGT heat stress + women-in-agriculture tables extracted to GAUL24 admin0/1
 // by notebookv2/scripts/extract_gender_layers.R (join key: gaul1_code).
-wbgtData = {
-  const buf = await FileAttachment("/data/genderExposure/wbgt_gaul24_africa.parquet").arrayBuffer();
-  return hypq.parquetQuery({ file: buf });
-}
+wbgtData = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/wbgt_gaul24_africa.parquet").arrayBuffer(),
+})
 
-womenAgriData = {
-  const buf = await FileAttachment("/data/genderExposure/women-agri_gaul24_africa.parquet").arrayBuffer();
-  return hypq.parquetQuery({ file: buf });
-}
+// Crop (NTx) and livestock (THI), same shape as wbgtData. Historic comes from the
+// CIS baseline and the futures from the ensemble export; both are aggregated over
+// Jägermeyr growing seasons, which is what makes the two halves comparable.
+heatHazardData = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/heatHazards_gaul24_africa.parquet").arrayBuffer(),
+})
+
+womenAgriData = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/women-agri_gaul24_africa.parquet").arrayBuffer(),
+})
 
 africaA1 = {
   const topo = await FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json();
@@ -631,16 +684,14 @@ africaA1 = {
 }
 
 // Latest FAOSTAT/ILO agrifood employment by sex and country.
-afsEmployment = {
-  const buf = await FileAttachment("/data/genderExposure/afsEmployment_faostat.parquet").arrayBuffer();
-  return hypq.parquetQuery({ file: buf });
-}
+afsEmployment = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/afsEmployment_faostat.parquet").arrayBuffer(),
+})
 
 // Latest sex-disaggregated FAOSTAT capacity indicators; higher percentages are better.
-adaptiveCapacity = {
-  const buf = await FileAttachment("/data/genderExposure/adaptiveCapacity_faostat.parquet").arrayBuffer();
-  return hypq.parquetQuery({ file: buf });
-}
+adaptiveCapacity = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/adaptiveCapacity_faostat.parquet").arrayBuffer(),
+})
 
 capCountryNames = new Map(
   adaptiveCapacity.map((d) => [d.iso3n, countryNameN(d.iso3n, d.area)]),
@@ -666,7 +717,6 @@ cropGenderData = {
     Object.entries(groups).map(([cropGroup, pctFemale]) => ({ country, cropGroup, pctFemale })),
   );
 }
-
 ```
 
 ```{ojs}
@@ -678,12 +728,12 @@ womenByGaul1 = new Map(
 
 biVarRows = {
   const scen = heatTimeframe === "historic" ? "historic" : heatScenario;
-  return wbgtData
+  return heatRows
     .filter((d) =>
       d.admin1_name != null &&
       d.timeframe === heatTimeframe &&
       d.scenario === scen &&
-      d.threshold === heatThreshold
+      (heatThresholds == null || d.threshold === heatThreshold)
     )
     .map((d) => {
       const w = womenByGaul1.get(d.gaul1_code);
@@ -698,8 +748,23 @@ biVarFeatures = mergeDataToBoundaries({
   dataKey: "gaul1_code",
 })
 
-// Fixed breaks keep colors comparable: heat 30/90 days, women 20/50%.
-heatClass = d3.scaleThreshold([30, 90], d3.range(3))
+heatRows = heatHazard === "human"
+  ? wbgtData
+  : heatHazardData.filter((d) => d.hazard === heatHazard)
+
+// Each hazard is a different quantity: WBGT counts days per YEAR above a cutoff,
+// NTx days per MONTH of the growing season, THI is an index. Livestock cuts follow
+// the standard THI scale (no/mild <79, moderate 79-89, severe >=90) — the bivariate
+// palette is 3x3, so no-stress and mild share a class, which is also where the
+// fewest units sit. Crop 40°C needs its own breaks because two thirds of units sat
+// at or below 0.3 days historically. Women 20/50%.
+heatClass = d3.scaleThreshold(
+  heatHazard === "human" ? [30, 90]
+  : heatHazard === "livestock" ? [79, 90]
+  : heatThreshold === 40 ? [0.3, 2]
+  : [1, 6],
+  d3.range(3),
+)
 
 womenClass = d3.scaleThreshold([20, 50], d3.range(3))
 
