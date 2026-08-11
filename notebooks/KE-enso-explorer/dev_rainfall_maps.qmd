@@ -71,11 +71,11 @@ Selected county: **${county}**.`
 ::: {.controls-row}
 
 ```{ojs}
-viewof yearFrom = Inputs.range([1981, 2025], {step: 1, value: 2015, label: "From year"})
+viewof yearFrom = Inputs.range([1981, 2025], {step: 1, value: 2000, label: "From year"})
 ```
 
 ```{ojs}
-viewof yearTo = Inputs.range([1981, 2025], {step: 1, value: 2020, label: "To year"})
+viewof yearTo = Inputs.range([1981, 2025], {step: 1, value: 2025, label: "To year"})
 ```
 
 ```{ojs}
@@ -443,6 +443,25 @@ zByYear = (col, mons) => {
 ```
 
 ```{ojs}
+// raw season-mean of a single index for a year
+rawSeasonMean = (col, season, year) => {
+  const rows = drivers.filter((d) => seasonMonthsFor[season].includes(d.month) && d[col] != null && d.year === year);
+  return rows.length ? d3.mean(rows, (d) => d[col]) : null;
+}
+// title label showing raw index value(s) — no category text (state is the card colour)
+labelFor = (driver, season, year) => {
+  const f = (v) => v == null ? "—" : v.toFixed(2);
+  const oni = () => f(rawSeasonMean("nino34_anom_noaa", season, year));
+  const dmi = () => f(rawSeasonMean("dmi_hadisst", season, year));
+  const wnp = () => f(rawSeasonMean("wnp_std_mam", season, year));
+  if (driver === "ENSO + IOD") return `ENSO: ${oni()} · IOD: ${dmi()}`;
+  if (driver === "ENSO (Niño 3.4)") return `ENSO: ${oni()}`;
+  if (driver === "IOD (DMI)") return `IOD: ${dmi()}`;
+  return `Western-V: ${wnp()}`;
+}
+```
+
+```{ojs}
 // driver value + intensity category for one (driver, season, year)
 driverSignalFor = (driver, season, year) => {
   const def = phaseDefs[driver], mons = seasonMonthsFor[season];
@@ -505,7 +524,7 @@ buildSeasonPanels = async (season, driver, phaseFilter) => {
         data = out;
       }
       const signal = driverSignalFor(driver, season, year);
-      return renderRainPanel({season, year, signal, driver},
+      return renderRainPanel({season, year, signal, driver, label: labelFor(driver, season, year)},
         {data, w: win.w, h: win.h, noData: NaN, bbox: win.bbox});
     } catch (e) {
       return html`<div class="rain-panel-err">${season} ${year}: ${e.message}</div>`;
@@ -607,15 +626,14 @@ renderRainPanel = (spec, raster) => {
   const meanTxt = meanmm == null ? "—"
     : `${anomaly && meanmm > 0 ? "+" : ""}${Math.round(meanmm)} mm`;
 
-  const sig = spec.signal || {value: null, category: "—"};
-  const sigTxt = sig.value == null ? sig.category : `${sig.value.toFixed(2)} (${sig.category})`;
+  const sig = spec.signal || {value: null};
   const coarse = spec.year < 2000
     ? html`<span class="rain-coarse" title="Pre-2000 CHIRPS is spatially coarser (fewer input stations) — cells look blockier. Faithful, not smoothed.">⚠</span>`
     : "";
   return html`<div class="rain-panel" style="background:${cardColor(sig.value, spec.driver)}">
     <div class="rain-title"><strong>${spec.year}</strong>${coarse}
       <span class="rain-mean">${meanTxt}</span>
-      <div class="rain-signal">${spec.driver.replace(/ \(.*\)$/, "")}: ${sigTxt}</div></div>
+      <div class="rain-signal">${spec.label}</div></div>
     <div class="rain-stack" style="position:relative;width:${W}px;height:${H}px">
       ${canvas}${svg}</div>
   </div>`;
