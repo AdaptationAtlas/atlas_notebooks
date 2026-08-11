@@ -1,0 +1,168 @@
+---
+pagetitle: "DEV — ENSO Explorer rainfall-map panel"
+hide: true
+---
+
+<!--
+DEVELOPMENT SANDBOX — not part of the site build.
+Filename is underscore-prefixed, so Quarto skips it in the project render
+(`quarto render` of the whole site ignores it). Work on it in isolation with:
+  quarto preview notebooks/KE-enso-explorer/_dev_rainfall_maps.qmd --no-browser --port 4344
+or render just this file:
+  quarto render notebooks/KE-enso-explorer/_dev_rainfall_maps.qmd
+
+Purpose: build the OND/MAM CHIRPS-v3 seasonal-rainfall RASTER panel (admin-2
+overlain, title bar = seasonal ENSO/IOD/Western-V signal, filterable by driver)
+away from the main notebook. Phase II: biomass-productivity maps (rangelands).
+Carries ONLY the main notebook's controls + the driver-signal computation it
+needs; everything else is deliberately absent.
+-->
+
+# Rainfall-map panel — development
+
+```{ojs}
+md`Controls mirror the main notebook (county · season · ocean driver). This is a
+dev sandbox — i18n (\`_lang\`/nbText) is intentionally dropped for plain English
+labels so the file compiles standalone; wire \`_lang\` back when this folds into
+the main notebook. The map panel below is a stub — see the build-plan note.`
+```
+
+::: {.controls-row}
+
+```{ojs}
+viewof county = Inputs.select(countyNames, {label: "County", value: "Marsabit"})
+```
+
+```{ojs}
+viewof season = Inputs.select(["OND", "MAM", "OND+MAM", "annual"], {
+  label: "Climate season", value: "OND",
+})
+```
+
+```{ojs}
+// ENSO is the entry-point lens; IOD couples in OND; Western-V is a
+// partly-independent control on MAM.
+viewof driverKind = Inputs.radio(["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"], {
+  label: "Ocean driver", value: "ENSO (Niño 3.4)",
+})
+```
+
+:::
+
+```{ojs}
+// Seasonal driver signal for the map title bar. For each year, the mean of the
+// selected driver index over the selected season's months, tagged with the
+// ENSO phase. This is what will label each seasonal map panel.
+md`**Current state** (as of ${d3.utcFormat("%Y-%m")(currentState.asOf)}) —
+Niño 3.4 (ONI) **${currentState.oni?.toFixed(2)} °C** (**${currentState.phase}**)${
+  currentState.dmi != null ? `, IOD (DMI) **${currentState.dmi.toFixed(2)}**` : ""}.
+Selected: **${county}** · **${season}** · driver **${driverKind}**.`
+```
+
+```{ojs}
+// latest season's driver value + phase (drives the title bar once maps exist)
+seasonSignal = {
+  const rows = driverSeasonal;
+  const last = rows[rows.length - 1];
+  return last
+    ? {year: last.year, value: last.v, phase: last.enso, driver: driverName}
+    : null;
+}
+```
+
+```{ojs}
+md`_Signal for the title bar_: ${seasonSignal
+  ? `${seasonSignal.year} ${seasonSignal.driver} = ${seasonSignal.value?.toFixed(2)} (${seasonSignal.phase})`
+  : "—"}`
+```
+
+## Map panel (stub)
+
+```{ojs}
+html`<div style="border:1px dashed #b7c3bd;border-radius:8px;padding:2rem;
+  text-align:center;color:#5a6b62;background:#f7faf8;">
+  <strong>OND / MAM CHIRPS-v3 rainfall raster panel — to build</strong><br>
+  Target: two seasonal maps (OND, MAM) for <em>${county}</em>, cells coloured by
+  seasonal rainfall, admin-2 boundaries overlain, title bar = seasonal
+  ${driverKind} signal, filterable by driver phase.
+</div>`
+```
+
+```{ojs}
+md`### Sources are available — build plan (from the climateRationale reference)
+No new data bake needed:
+- **Per-pixel CHIRPS = a Cloud-Optimized GeoTIFF on Atlas S3**, read client-side
+  with \`geotiff@2.1.3\` (esm.sh). URL pattern (season token in the filename):
+  \`…/source=chirps-chirts-era5/…/variable=PTOT/period=annual/clim=wmo_1991-2020/stat=mean/PTOT_{OND|MAM}_1991-2020_mean.tif\`
+  (dir partition tokens are a fixed publish-quirk; only the filename tokens matter —
+  verify the OND/MAM COGs actually exist / have a sane extent, there's a known
+  mispublish caveat). Returns a Float array + bbox; window-read to the county bbox.
+- **Admin-2 boundaries = existing topojson** \`/data/shared/atlas_gaul24_a2_africa_simple-lowres.topojson\`
+  (load like a0/a1, filter to the county via iso3/admin name).
+
+Rendering technique to reuse verbatim from climateRationale \`notebook.qmd\`
+(\`recentChangesMap_obs\`, ~L2998–3384): offscreen ImageData → per-cell
+\`fillRect\` with **integer** pixel boundaries (\`Math.round(i*cellW)\`, no
+antialiased seams), \`imageSmoothingEnabled=false\` + CSS \`image-rendering:pixelated\`,
+\`ctx.clip(Path2D)\` to the admin shape, SVG admin overlay on top, hand-rolled RGB
+rainfall ramp (white→deep-blue, 0…2500 mm). Two-panel OND|MAM (and per-driver-phase
+facets) via the sandbox CR-097 chunked flex-grid layout.`
+```
+
+# Appendix — data {#appendix}
+
+::: {.hidden}
+
+```{ojs}
+dbDrivers = DuckDBClient.of({
+  driver_indices: FileAttachment("../../data/KE-enso-explorer/driver_indices.parquet"),
+})
+drivers = dbDrivers.query(`SELECT * FROM driver_indices ORDER BY date`)
+```
+
+```{ojs}
+dbCounties = DuckDBClient.of({
+  county_key: FileAttachment("../../data/KE-enso-explorer/county_key.parquet"),
+})
+counties = dbCounties.query(`SELECT county, gaul1_code FROM county_key ORDER BY county`)
+countyNames = counties.map((d) => d.county)
+```
+
+```{ojs}
+seasonMonths = ({"OND": [10, 11, 12], "MAM": [3, 4, 5], "OND+MAM": [3, 4, 5, 10, 11, 12],
+  "annual": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]})[season]
+driverCol = ({"ENSO (Niño 3.4)": "nino34_anom_noaa", "IOD (DMI)": "dmi_hadisst", "Western-V (WNP)": "wnp_std_mam"})[driverKind]
+driverName = driverKind
+```
+
+```{ojs}
+ensoPhaseByYear = {
+  const by = d3.rollups(drivers.filter((d) => seasonMonths.includes(d.month) && d.nino34_anom_noaa != null),
+    (v) => d3.mean(v, (d) => d.nino34_anom_noaa), (d) => d.year);
+  return new Map(by.map(([y, v]) => [y, v > 0.5 ? "El Niño" : v < -0.5 ? "La Niña" : "Neutral"]));
+}
+```
+
+```{ojs}
+driverSeasonal = {
+  const by = d3.rollups(drivers.filter((d) => seasonMonths.includes(d.month) && d[driverCol] != null),
+    (v) => d3.mean(v, (d) => d[driverCol]), (d) => d.year)
+    .map(([year, v]) => ({year, v, enso: ensoPhaseByYear.get(year) ?? "Neutral"}));
+  return by.sort((a, b) => a.year - b.year);
+}
+```
+
+```{ojs}
+currentState = {
+  const n34 = drivers.filter((d) => d.nino34_anom_noaa != null);
+  const oni = d3.mean(n34.slice(-3), (d) => d.nino34_anom_noaa);
+  const asOf = n34.slice(-1)[0].date;
+  const dmiRows = drivers.filter((d) => d.dmi_hadisst != null || d.dmi_ersst != null);
+  const last = dmiRows.slice(-1)[0];
+  const dmi = last ? (last.dmi_hadisst ?? last.dmi_ersst) : null;
+  const phase = oni > 0.5 ? "El Niño" : oni < -0.5 ? "La Niña" : "neutral";
+  return {oni, dmi, phase, asOf};
+}
+```
+
+:::
