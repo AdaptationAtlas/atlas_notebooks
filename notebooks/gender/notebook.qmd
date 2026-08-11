@@ -63,14 +63,18 @@ afsEmploymentChart = {
   }
   return Plot.plot({
     style: chartStyle,
-    width: Math.min(width, 820),
+    width: Math.min(width, 980),
     height: 60 + (long.length / 2) * 26,
-    marginLeft: 130,
+    // Country names run long; the margin fits ~26 characters at 13px, so most
+    // stay on one line.
+    marginLeft: 185,
     marginTop: isDiff ? 24 : 20,
     x: { label: isDiff ? t.axisDiff : t.axis, grid: true },
-    y: { label: null, tickFormat: (d) => wrapTickLabel(d, 18) },
+    y: { label: null, tickFormat: (d) => wrapTickLabel(d, 26) },
     color: {
       legend: true,
+      // Names the legend and the tip row, which read "segment" otherwise.
+      label: t.segmentLabel,
       domain: [t.segments.onFarm, t.segments.offFarm],
       range: ["#216729", "#64acbe"],
     },
@@ -125,7 +129,7 @@ inputTemplate({ gap: "0.5rem" })([
 
 ```{ojs}
 // Add row, column, and grand means around a heatmap and label them in bold.
-heatmapMeanMarks = (rows, { x, y, v, avg, textThreshold = 50 }) => {
+heatmapMeanMarks = (rows, { x, y, v, avg, xLabel, yLabel, textThreshold = 50 }) => {
   const cells = rows.map((d) => ({ x: x(d), y: y(d), v: v(d) }));
   const mean = (subset) => (subset.length ? Math.round(d3.mean(subset, (c) => c.v) * 10) / 10 : null);
   const columns = [...new Set(cells.map((c) => c.x))];
@@ -136,7 +140,15 @@ heatmapMeanMarks = (rows, { x, y, v, avg, textThreshold = 50 }) => {
     { x: avg, y: avg, v: mean(cells) },
   ].filter((c) => c.v != null);
   return [
-    Plot.cell([...cells, ...means], { x: "x", y: "y", fill: "v", inset: 1, tip: true }),
+    // The {value, label} channel form names the tip rows; the scales keep
+    // label: null, so the axes stay bare. Fill takes its name from the legend.
+    Plot.cell([...cells, ...means], {
+      x: { value: "x", label: xLabel },
+      y: { value: "y", label: yLabel },
+      fill: "v",
+      inset: 1,
+      tip: true,
+    }),
     Plot.text(means, {
       x: "x", y: "y", text: (c) => c.v, fontWeight: "bold",
       fill: (c) => (c.v >= textThreshold ? "white" : "#222"),
@@ -162,6 +174,7 @@ womenCropsChart = {
     marks: heatmapMeanMarks(rows, {
       x: (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup,
       y: country, v: (d) => d.pctFemale, avg, textThreshold: 45,
+      xLabel: nbText.General.axes.crop, yLabel: nbText.General.axes.country,
     }),
     caption: t.caption,
   });
@@ -185,15 +198,16 @@ womenLivestockChart = {
   const order = d3.groupSort(livestockControl, (g) => -d3.mean(g, (d) => d.pctFemale), country);
   return Plot.plot({
     style: chartStyle,
-    width: Math.min(width, 640),
+    width: Math.min(width, 820),
     height: 70 + (order.length + 1) * 32,
-    marginLeft: 110,
+    marginLeft: 175,
     x: { label: null, domain: [...Object.values(t.species), avg] },
-    y: { label: null, domain: [...order, avg], tickFormat: (d) => wrapTickLabel(d, 16) },
+    y: { label: null, domain: [...order, avg], tickFormat: (d) => wrapTickLabel(d, 24) },
     color: { type: "linear", domain: [0, 100], range: ["#F7D732", "#216729"], legend: true, label: t.legend },
     marks: heatmapMeanMarks(livestockControl, {
       x: (d) => t.species[d.species] ?? d.species,
       y: country, v: (d) => d.pctFemale, avg,
+      xLabel: nbText.General.axes.livestock, yLabel: nbText.General.axes.country,
     }),
     caption: t.caption,
   });
@@ -280,9 +294,13 @@ biVarMap = {
     height: 520,
     fill: (d) => biVarColor(d.properties.data),
     channels: {
+      country: {
+        label: nbText.General.axes.country,
+        value: (d) => countryNameN(d.properties.iso3n),
+      },
       region: {
-        label: " ",
-        value: (d) => `${d.properties.admin1_name} — ${countryNameN(d.properties.iso3n)}`,
+        label: nbText.General.axes.region,
+        value: (d) => d.properties.admin1_name,
       },
       heat: { label: heatTooltip, value: (d) => d.properties.data?.value },
       women: {
@@ -290,7 +308,7 @@ biVarMap = {
         value: (d) => d.properties.data?.pct_women_agri,
       },
     },
-    tooltip: { region: true, heat: true, women: true },
+    tooltip: { country: true, region: true, heat: true, women: true },
     extraMarks: [Plot.geo(africaA0, { stroke: "#333", strokeWidth: 0.8, fill: null })],
   });
   const legend = makeBivariateLegend({
@@ -341,7 +359,7 @@ hotspotMap = makeChoropleth({
   },
   channels: {
     country: {
-      label: " ",
+      label: nbText.General.axes.country,
       value: (d) => countryNameN(d.properties.iso3n),
     },
     rank: {
@@ -487,7 +505,7 @@ adaptiveCapacityMap = {
       ? { type: "linear", scheme: "RdBu", domain: [-maxGap, maxGap], unknown: "#e0e0e0", label: t.map.legendGap }
       : { type: "linear", scheme: "YlGnBu", domain: [0, 100], unknown: "#e0e0e0", label: `${t.indicators[indicator]} (%)` },
     channels: {
-      country: { label: " ", value: (d) => countryNameN(d.properties.iso3n) },
+      country: { label: nbText.General.axes.country, value: (d) => countryNameN(d.properties.iso3n) },
       women: { label: t.sexes.F, value: (d) => d.properties.data?.F },
       men: { label: t.sexes.M, value: (d) => d.properties.data?.M },
     },
@@ -539,9 +557,7 @@ bridgeGapMatrix = {
     };
   });
   const outcomeKeys = ["enabling", "reinforcing", "constraining", "counteracting"];
-  // Blue-to-amber rather than green-to-red: the same good-to-bad reading survives
-  // red-green colour blindness. Worst adjacent pair separates by ΔE 19.5 under
-  // protanopia, and the two pale steps still take dark text below.
+
   const outcomeColors = {
     enabling: "#1b587f",
     reinforcing: "#86bcd8",
