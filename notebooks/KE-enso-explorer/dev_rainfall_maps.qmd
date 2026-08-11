@@ -26,7 +26,8 @@ Phase II: biomass-productivity maps (rangelands) — needs a new NPP source.
 
 ```{ojs}
 md`Controls are the **main notebook's** county / season / ocean-driver bar, plus a
-**phase** selector for the maps below.`
+**year-range** selector for the per-year maps below. (The ocean-driver pick sets
+which index each panel's title reports; season is shown for both OND and MAM.)`
 ```
 
 ::: {.controls-row .ke-sticky-controls}
@@ -63,47 +64,49 @@ Niño 3.4 (ONI) **${currentState.oni?.toFixed(2)} °C** (**${currentState.phase}
 Selected county: **${county}**.`
 ```
 
-## OND / MAM rainfall by driver phase
+## OND & MAM seasonal rainfall — one map per year
+
+::: {.controls-row}
 
 ```{ojs}
-// phase options depend on the selected driver (ENSO/IOD/Western-V)
-viewof phase = Inputs.select(phaseOptions, {
-  label: `${driverKind.split(" ")[0]} phase`, value: phaseOptions[0],
-})
+viewof yearFrom = Inputs.range([1981, 2025], {step: 1, value: 2015, label: "From year"})
 ```
 
 ```{ojs}
-mapPanels = {
-  const specs = [
-    {season: "OND", label: "OND — short rains (Oct–Dec)"},
-    {season: "MAM", label: "MAM — long rains (Mar–May)"},
-  ];
-  const win = await gridWindow;
-  const nodes = [];
-  for (const s of specs) {
-    let node;
-    try {
-      const years = phaseYears(s.season, phase);
-      if (!years.length) { node = html`<div class="rain-panel-err">${s.label}: no ${phase} years</div>`; }
-      else {
-        const raster = await compositeRaster(s.season, years, win);
-        node = renderRainPanel({...s, years, phase}, raster);
-      }
-    } catch (e) {
-      node = html`<div class="rain-panel-err">${s.label}: ${e.message}</div>`;
-    }
-    nodes.push(node);
-  }
-  return html`<div class="rain-panel-row">${nodes}</div>`;
+viewof yearTo = Inputs.range([1981, 2025], {step: 1, value: 2020, label: "To year"})
+```
+
+:::
+
+```{ojs}
+yearsSel = {
+  const a = Math.min(Math.round(yearFrom), Math.round(yearTo));
+  const b = Math.max(Math.round(yearFrom), Math.round(yearTo));
+  const out = [];
+  for (let y = a; y <= b; y++) out.push(y);
+  return out;
 }
 ```
 
 ```{ojs}
-md`Per-pixel CHIRPS-v3 seasonal totals (~5 km) clipped to **${county}**, sub-county
-(admin-2) boundaries overlain. Each map is the **mean seasonal rainfall (mm) across
-the ${phase === "All years" ? "full record" : phase + " years"}** for the selected
-driver — years listed under each title. Built by summing the monthly PTOT COGs
-client-side (composite computed last). ${phase === "All years" ? "**All years is slow** (~45 × 3 fetches per map)." : ""}`
+md`Per-pixel CHIRPS-v3 seasonal rainfall totals (~5 km) for **${county}**, admin-2
+overlain — **one map per year**, ${yearsSel[0]}–${yearsSel[yearsSel.length - 1]}
+(**${yearsSel.length} years**). Each title carries the year + that season's
+${driverKind.split(" ")[0]} state. Summed from the monthly PTOT COGs client-side;
+≈ **${yearsSel.length * 6} COG-window fetches** — a wide range is slow. Colour scale
+is locked (0–${rainDomain[1]} mm) so years are directly comparable.`
+```
+
+### OND — short rains (Oct–Dec)
+
+```{ojs}
+gridOND = seasonGrid("OND", yearsSel)
+```
+
+### MAM — long rains (Mar–May)
+
+```{ojs}
+gridMAM = seasonGrid("MAM", yearsSel)
 ```
 
 ```{ojs}
@@ -127,16 +130,17 @@ rainLegend = {
 ```{ojs}
 md`### Notes
 - **Data:** per-pixel monthly PTOT COGs (D409 obs pipeline, \`processing=monthly\`,
-  1981-01→2026-04, CORS + range). Seasonal totals summed from the 3 month files
-  client-side; phase composite = mean of per-year totals over the phase's years
-  (computed last). Phase membership is **season-scoped**. 2026 excluded (incomplete).
-- **Phases:** ENSO ONI ±0.5 °C · IOD (DMI) ±0.4 · Western-V (WNP, std) ±0.5, from
+  1981-01→2026-04, CORS + range). Each map = one year's seasonal total = sum of the
+  3 season months, window-read to the county. 2026 excluded (season incomplete).
+- **Driver state per panel:** season-mean of the selected index that year, classified
+  ENSO ONI ±0.5 °C · IOD (DMI) ±0.4 · Western-V (WNP, std) ±0.5, from
   \`driver_indices.parquet\` (notebook-consistent).
-- **Perf:** a phase composite fetches (n years × 3 months) COG windows; "All years"
-  is ~135 reads per map → slow. Pipeline can pre-bake per-phase seasonal COGs
-  (reply dispatch §5b) if it drags.
-- **TODO:** multi-county select; lock the colour domain across panels for
-  cross-phase comparison; Phase II biomass/NPP (needs a new source — no NPP ingested).`
+- **Colour scale locked** 0–${rainDomain[1]} mm so years are directly comparable.
+- **Perf:** ≈ (n years × 3 months × 2 seasons) COG-window fetches; keep the year
+  range tight. If it drags, the pipeline can pre-bake per-year seasonal COGs
+  (reply dispatch §5b) → one fetch per panel.
+- **TODO:** phase-composite view (mean over El-Niño/La-Niña years) as an option;
+  multi-county; Phase II biomass/NPP (needs a new source — no NPP ingested).`
 ```
 
 # Appendix — data + i18n {#appendix}
@@ -287,38 +291,41 @@ seasonalYear = async (season, year, win) => {
 ```
 
 ```{ojs}
-compositeRaster = async (season, years, win) => {
-  const n = win.w * win.h;
-  const sum = new Float64Array(n), cnt = new Int32Array(n);
-  const stacks = await Promise.all(years.map((y) => seasonalYear(season, y, win)));
-  for (const g of stacks)
-    for (let i = 0; i < n; i++) { const v = g[i]; if (!Number.isNaN(v)) { sum[i] += v; cnt[i] += 1; } }
-  const data = new Float32Array(n);
-  for (let i = 0; i < n; i++) data[i] = cnt[i] ? sum[i] / cnt[i] : NaN;
-  return {data, w: win.w, h: win.h, noData: NaN, bbox: win.bbox};
-}
-```
-
-```{ojs}
-// driver phase per (season, year), from the season-mean of the driver index.
+// classification thresholds per driver (used for each panel's title-bar phase)
 phaseDefs = ({
   "ENSO (Niño 3.4)": {col: "nino34_anom_noaa", hi: 0.5, lo: -0.5, labels: ["El Niño", "La Niña", "Neutral"]},
   "IOD (DMI)":        {col: "dmi_hadisst",     hi: 0.4, lo: -0.4, labels: ["Positive", "Negative", "Neutral"]},
   "Western-V (WNP)":  {col: "wnp_std_mam",     hi: 0.5, lo: -0.5, labels: ["High", "Low", "Neutral"]},
 })
-phaseOptions = [...phaseDefs[driverKind].labels, "All years"]
 ```
 
 ```{ojs}
-phaseYears = (season, ph) => {
+// selected driver's value + phase for one season-year (season-mean of the index)
+driverSignalFor = (season, year) => {
   const def = phaseDefs[driverKind], mons = seasonMonthsFor[season];
-  const byYear = d3.rollups(
-    drivers.filter((d) => mons.includes(d.month) && d[def.col] != null && d.year >= YEAR_LO && d.year <= YEAR_HI),
-    (v) => d3.mean(v, (d) => d[def.col]), (d) => d.year);
-  const classify = (v) => v > def.hi ? def.labels[0] : v < def.lo ? def.labels[1] : def.labels[2];
-  return byYear
-    .filter(([, v]) => ph === "All years" ? true : classify(v) === ph)
-    .map(([y]) => y).sort((a, b) => a - b);
+  const rows = drivers.filter((d) => mons.includes(d.month) && d[def.col] != null && d.year === year);
+  if (!rows.length) return {value: null, phase: "—"};
+  const v = d3.mean(rows, (d) => d[def.col]);
+  return {value: v, phase: v > def.hi ? def.labels[0] : v < def.lo ? def.labels[1] : def.labels[2]};
+}
+```
+
+```{ojs}
+// one map per year for a season, laid out as a wrapped grid of small panels
+seasonGrid = async (season, years) => {
+  const win = await gridWindow;
+  const cells = await Promise.all(years.map(async (year) => {
+    try {
+      const data = await seasonalYear(season, year, win);
+      const signal = driverSignalFor(season, year);
+      return renderRainPanel(
+        {season, year, signal},
+        {data, w: win.w, h: win.h, noData: NaN, bbox: win.bbox});
+    } catch (e) {
+      return html`<div class="rain-panel-err">${season} ${year}: ${e.message}</div>`;
+    }
+  }));
+  return html`<div class="rain-grid">${cells}</div>`;
 }
 ```
 
@@ -350,7 +357,7 @@ pixelColor = (v) => {
 renderRainPanel = (spec, raster) => {
   const {data, w, h, bbox, noData} = raster;
   const [bx0, by0, bx1, by1] = bbox;
-  const TARGET_H = 340;
+  const TARGET_H = 180;
   const aspect = ((bx1 - bx0) / (by1 - by0)) * Math.cos((by0 + by1) / 2 * Math.PI / 180);
   const H = TARGET_H, W = Math.max(120, Math.round(TARGET_H * aspect));
   const tx = (lon) => (lon - bx0) / (bx1 - bx0) * W;
@@ -391,15 +398,11 @@ renderRainPanel = (spec, raster) => {
     <path d="${cntyPaths}" fill="none" stroke="#111" stroke-width="1.4"/>
   </svg>`;
 
-  const yrs = spec.years || [];
-  const yrList = yrs.length > 12
-    ? `${yrs.slice(0, 12).join(", ")}, +${yrs.length - 12} more`
-    : yrs.join(", ");
+  const sig = spec.signal || {value: null, phase: "—"};
+  const sigTxt = sig.value == null ? sig.phase : `${sig.value.toFixed(2)} (${sig.phase})`;
   return html`<div class="rain-panel">
-    <div class="rain-title"><strong>${spec.label}</strong><br>
-      <span class="rain-signal">${driverKind.split(" ")[0]} — ${spec.phase}
-        (n=${yrs.length})</span>
-      <div class="rain-years">${yrList}</div></div>
+    <div class="rain-title"><strong>${spec.year}</strong>
+      <span class="rain-signal">${driverKind.split(" ")[0]}: ${sigTxt}</span></div>
     <div class="rain-stack" style="position:relative;width:${W}px;height:${H}px">
       ${canvas}${svg}</div>
   </div>`;
@@ -409,13 +412,12 @@ renderRainPanel = (spec, raster) => {
 ```{=html}
 <style>
   .controls-row { display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-end; margin:0.5rem 0 1rem; }
-  .rain-panel-row { display:flex; flex-wrap:wrap; gap:1.5rem; align-items:flex-start; margin:0.5rem 0 1rem; }
-  .rain-panel { border:1px solid #e5e7eb; border-radius:8px; padding:0.6rem; background:#fff; }
-  .rain-title { font-size:0.9em; margin-bottom:0.4rem; }
-  .rain-signal { color:#666; font-size:0.85em; }
-  .rain-years { color:#8a978f; font-size:0.72em; margin-top:0.15rem; max-width:340px; }
+  .rain-grid { display:flex; flex-wrap:wrap; gap:0.8rem; align-items:flex-start; margin:0.4rem 0 1.2rem; }
+  .rain-panel { border:1px solid #e5e7eb; border-radius:6px; padding:0.4rem; background:#fff; }
+  .rain-title { font-size:0.8em; margin-bottom:0.3rem; line-height:1.2; }
+  .rain-signal { color:#666; font-size:0.9em; margin-left:0.3rem; }
   .rain-stack { border:1px solid #eef1ef; }
-  .rain-panel-err { color:#b45309; font-size:0.85em; padding:1rem; border:1px dashed #e0b466; border-radius:6px; }
+  .rain-panel-err { color:#b45309; font-size:0.8em; padding:0.6rem; border:1px dashed #e0b466; border-radius:6px; }
 </style>
 ```
 
