@@ -126,22 +126,22 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
 - **KE-17 · Drop redundant §2.2 maize chart · DONE 2026-08-10.** Once AFA≡KNBS was confirmed and AFA
   dropped, §2.2 (KNBS maize trend) duplicated §1.1 (Crops → Lineplot → Maize). Removed the maize
   chart/appendix cell/title var; B1 now = §2.1 GESI only. Unused nbText b1.maize* keys left harmless.
-- **KE-19 · Seasonal rainfall raster-map panel · DEV IN PROGRESS.** New dev
-  sandbox `notebooks/KE-enso-explorer/_dev_rainfall_maps.qmd` (`_`-prefixed → out
-  of site build). Working: OND|MAM per-pixel CHIRPS-v3 climatology rasters
-  (1991–2020 mean) clipped to the selected county, admin-2 overlay, title bar with
-  driver state, legend. Data = Atlas S3 climatology COGs read via geotiff.js
-  (`…/variable=PTOT/…/stat=max/PTOT_{OND,MAM}_1991-2020_mean.tif`; dir `stat=max`
-  is a fixed partition quirk, real stat is in the filename); admin-2 =
-  `atlas_gaul24_a2_africa_simple-lowres.topojson`; renderer ported from
-  climateRationale `recentChangesMap_obs` (integer-boundary fillRect cells, Path2D
-  clip, SVG overlay). Browser-verified: 0 OJS error cells, both panels paint.
-  **BLOCKER for the "filter by ENSO/IOD/Western-V phase" + per-year timeseries:**
-  S3 has NO per-year seasonal rasters — only `climatology` (period statistics) +
-  admin-zonal parquets. Phase-composite maps need a **D409 bake**: raw CHIRPS v3 →
-  per-year seasonal totals → composite over each phase's year-set → per-pixel COG
-  (or adm-2 zonal). Decide raster-composite vs adm-2 choropleth with Pete first.
-  Phase II (Pete): biomass-productivity maps for rangeland counties.
+- **KE-19 · Seasonal rainfall raster-map panel · PHASE FILTERING WORKS (dev).** Dev
+  sandbox `notebooks/KE-enso-explorer/_dev_rainfall_maps.qmd` (`_`-prefixed → out of
+  site build). OND|MAM per-pixel CHIRPS-v3 maps clipped to the selected county,
+  admin-2 overlay, legend; renderer ported from climateRationale `recentChangesMap_obs`
+  (integer-boundary fillRect cells, Path2D clip, SVG overlay). **Phase filtering DONE
+  client-side, no bake** (2026-08-11): pipeline published per-pixel **monthly** PTOT
+  COGs (`…/processing=monthly/variable=PTOT/PTOT-{YYYY}-{MM}.tif`, 1981-01..2026-04,
+  CORS + range — reply dispatch). Notebook sums the 3 season months per year →
+  per-year seasonal total → composite = mean over the phase's years (computed last);
+  phase membership season-scoped, from `driver_indices.parquet` (ENSO ONI ±0.5 / IOD
+  DMI ±0.4 / Western-V WNP-std ±0.5). Phase selector (per-driver + All years); title
+  bar = phase + n + years. Verified: OND El Niño n=15, MAM El Niño n=9 paint (Marsabit).
+  Remaining: multi-county select; lock colour domain across panels; perf (All years
+  ~135 reads/map — pipeline can pre-bake per-phase COGs, reply dispatch §5b, if it
+  drags). **Not folded into the main notebook yet — stays in the dev sandbox.**
+  **Phase II biomass/NPP: no source ingested — needs a new dispatch (not a URL swap).**
 - **KE-18 · DESIGN: production vs climate drivers · OPEN (design, priority).** Pete: "really need to
   think about the design so we can show production vs ENSO/IOD/Western-V and/or SPEI / rainfall-impact."
   Current state disconnected: county production (§1.1 KNBS, 2019-24 short) vs drivers (§3) vs national
