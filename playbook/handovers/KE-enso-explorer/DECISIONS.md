@@ -108,3 +108,23 @@ Pete is the sole human owner of this branch (notebook + data pipeline) — no ot
 ## Open
 - **D10 — 2026 NAPR refresh (OPEN).** When KNBS releases the 2026 edition: run `/extract-knbs-napr`
   (add the path + new year to the `Y*` lists, re-audit, shift pages). See ISSUES KE-01.
+
+## D15 — v2 redesign strategy ratified (Pete, 2026-08-11)
+- **RESOLVED.** The 9-agent panel strategy (`STRATEGY_v2_redesign.md`) is the plan of record.
+  Pete's calls, one by one:
+  1. **Story spine + visible technical annexes, NOT top-level tabs** (OJS-in-hidden-tabs cost,
+     Plot/PNG-export breakage, TOC/deep-link loss). Within-section tabsets for view variants OK.
+  2. **English-only v2.** FR definitively not required; Kiswahili nice-to-have but probably wasted
+     effort (audience has strong English) — translate, if ever, only after the EN version is done.
+     Keep `_lang` plumbing with fr→en fallback.
+  3. **Conflict (ACLED) moves to the technical annex** — do-no-harm/framing risk in a
+     government-facing product; suggestive-only caveat stays verbatim; spine beat 3 carries
+     IPC/prices/NDVI instead.
+  4. **County watchlist table declined** — n=8 modal tercile must not compound into a ranked risk
+     product; early-warning ranking is KMD/NDMA territory. Card context lines (calendar alignment,
+     current NDVI/IPC) are fine. Revisit when KMD machine-readable outlook lands.
+  5. **Outlook section always shows BOTH seasons side by side** (OND analogue outlook + MAM
+     Western-V historical composite, each honestly labelled) — no season toggle on the section.
+  6. **Green-lit both new pipelines**: D409 admin2 CHIRPS v3 zonal rerun (~0.3 MB parquet +
+     ~0.2 MB Kenya a2 topojson cut) and the GHCN-Daily/GSOD station pipeline (git-full,
+     `_sources/`, point-validation framing).

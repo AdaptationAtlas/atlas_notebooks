@@ -1,6 +1,6 @@
 # STRATEGY — ENSO Explorer (Kenya) v2 redesign
 
-**Date:** 2026-08-11 · **Owner:** Pete Steward · **Status:** PROPOSED (awaiting Pete's ratification of §8 open decisions)
+**Date:** 2026-08-11 · **Owner:** Pete Steward · **Status:** RATIFIED 2026-08-11 (Pete's calls recorded in §8; Waves 1–4 are a go) — logged as D15 in DECISIONS.md
 
 **Method:** 9-agent review panel — 7 expert personas (county policymaker, teleconnection climate
 scientist, UX/information architect, dataviz critic, agricultural economist / food-security analyst,
@@ -77,8 +77,9 @@ Quarto TOC/scrollspy and deep links don't reach tab panes, and print/PDF export 
 3. **What did past El Niño / La Niña years do here?** — NEW: event-anchored impact stack (rainfall,
    NDVI, IPC, prices, production) with named-event bands; per-analogue-year event strips.
 4. **What is the coming season likely to bring?** — §6 rebuilt: plain-language status chips,
-   OND analogue outlook (integrity-fixed), MAM Western-V historical composite, KMD CAP warnings +
-   KMD-first "what to watch", crop-calendar alignment line.
+   OND analogue outlook (integrity-fixed) AND MAM Western-V historical composite **rendered side
+   by side, no season toggle** (Pete, §8.5 — zero control confusion, each honestly labelled),
+   KMD CAP warnings + KMD-first "what to watch", crop-calendar alignment line.
 Then: **Explore & compare** (produce multi-view, county comparison defaulting to neighbours, price
 explorer, subcounty map explorer) and the **Technical annexes**.
 
@@ -177,9 +178,11 @@ parquets load lazily (section-gated clients).
 - **Goat:maize terms-of-trade panel**: sound and feasible (verified: Goats (Local Quality),
   4,864 rows / 20 counties / 2000–2026) — but it is an addition; ships in Wave 3, not before the
   core fixes.
-- **FR translation**: frozen until the EN restructure lands (all 126 fr keys are currently null —
-  translating today's text wastes a full pass). Then one professional pass + a publish-gate lint
-  (no null fr keys). See §8: EN/FR vs EN/Kiswahili is Pete's call BEFORE paying for translation.
+- **Translation** (Pete, §8.2): **English-only v2.** FR is definitively not required. Kiswahili
+  would be nice but is probably wasted effort (the educated Kenyan audience has strong English) —
+  revisit only after v2 ships and only if demand appears. Keep the `_lang({en,fr})` plumbing
+  intact (Atlas convention) with fr falling back to en; no translation spend, no null-fr lint
+  needed until a second language is actually commissioned.
 
 ---
 
@@ -194,7 +197,7 @@ parquets load lazily (section-gated clients).
 | **B3 What did past El Niño / La Niña years do here?** | event timeline spine + event-anchored impact stack (rainfall, SPEI-12 strip, NDVI, IPC step w/ IPC palette, price anomaly, production event panel w/ hatched not-reported cells) + analogue event strips; ReliefWeb collapsed to 5-row expander | §4.1–4.5, §2.2, new |
 | **B4 What is the coming season likely to bring?** | recent drivers (3 faceted small multiples) + OND analogue outlook v2 + MAM Western-V composite + off-diagonal guard + KMD CAP strip + calendar-alignment line + KMD-first watch box | §6.1, §6.2, KE-08/KE-09 |
 | **Explore & compare** | county comparison (defaults to neighbours) + price explorer + trade (demoted) + subcounty CHIRPS map explorer | §5, §4.3, §4.6, new |
-| **Technical annexes** (visible) | A1 driver mechanics (§7.1–7.2 + §3.2 + §6.1 detail) · A2 teleconnection evidence (correlation choropleth, tercile contingency, season-window rainfall-percentile vs production dot plot) · A3 national production regression (§7.3–7.4 verbatim honesty) · A4 subcounty maps + station validation · A5 GESI full table (redesigned strips) + trade detail · A6 Methods & data (per-dataset subsections + auto-generated served-data catalog from the 26 .meta.json sidecars + citation block) | §7, §8, new |
+| **Technical annexes** (visible) | A1 driver mechanics (§7.1–7.2 + §3.2 + §6.1 detail) · A2 teleconnection evidence (correlation choropleth, tercile contingency, season-window rainfall-percentile vs production dot plot) · A3 national production regression (§7.3–7.4 verbatim honesty) · A4 subcounty maps + station validation · A5 GESI full table (redesigned strips) + trade detail + **conflict (ACLED county chart, moved from the spine per §8.3; suggestive-only framing, no ranking)** · A6 Methods & data (per-dataset subsections + auto-generated served-data catalog from the 26 .meta.json sidecars + citation block) | §7, §8, §4.2, new |
 
 Cross-cutting: section/figure numbers **derived, never typed** (b3/b4 titles already collide at
 "4."); anchors renamed to stable semantic slugs (#stakes #drivers #events #outlook); "Block N"
@@ -309,13 +312,18 @@ Show-data-table with friendly columns + meta'd CSV, download button, "data as of
   grid ships immediately from served data; true subcounty after the admin2 rerun, ~0.5 MB).
 - **"Weather station data"** → D-I, honestly framed.
 
-## 8. Open decisions for Pete
+## 8. Decisions — RATIFIED by Pete, 2026-08-11
 
-1. **Ratify D-A** (spine + annexes instead of literal top-level tabs)?
-2. **Language**: EN/FR (Atlas standard) vs EN/Kiswahili (audience-fit) — decide before any
-   translation spend.
-3. **Conflict section**: annex, national-aggregate, or keep county-level with framing? (§5.7)
-4. **Confirm the watchlist decline** (D-K) — or scope a KMD-anchored variant later.
-5. **§6.2 season coupling**: derive outlook season from the global control (recommended) vs keep
-   the independent local toggle.
-6. **D409 admin2 rerun + station pipeline**: green-light the two new pipeline builds (both small).
+1. **D-A ratified**: story spine + visible technical annexes; no top-level tabs.
+2. **Language: English-only v2.** FR definitively not required. Kiswahili nice-to-have but
+   probably wasted effort (educated Kenyan audience has strong English); translate only after the
+   English version is done, and only if demand appears.
+3. **Conflict → technical annex** (A5): county ACLED chart survives in the annex with careful
+   framing + suggestive-only caveat; the story spine drops conflict — IPC/prices/NDVI carry beat 3.
+4. **Watchlist declined, confirmed.** Card-level context lines stay (calendar alignment, current
+   NDVI, IPC); nothing ranks counties. Revisit only when KMD's machine-readable outlook lands.
+5. **Outlook seasons: always show BOTH** — OND analogue outlook and MAM Western-V composite
+   side by side, each honestly labelled; no local season toggle (and no global-season coupling).
+6. **Both pipelines green-lit**: (a) D409 admin2 CHIRPS v3 zonal rerun (runs in the D409 pipeline
+   environment; routed via dispatch) + Kenya-only a2 topojson cut; (b) GHCN-Daily/GSOD station
+   pipeline (git-full, in this repo's `_sources/`).

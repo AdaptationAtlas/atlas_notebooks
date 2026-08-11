@@ -65,3 +65,12 @@ outlook season coupling · green-light the two pipeline builds.
 On ratification: implement Wave 1 (structure + restorations + honesty fixes; zero new data), then
 Wave 2 (association + evidence). Waves detailed in STRATEGY §6, with verification rules (real
 browser, node --check, loader-dep hygiene) baked in.
+
+---
+
+## Addendum — ratification (same day)
+Pete ratified the strategy interactively; answers logged as **D15** in DECISIONS.md and folded
+into STRATEGY §8: spine-not-tabs ✓ · English-only v2 (FR dropped; Kiswahili later only if demand) ·
+conflict → annex A5 · watchlist decline confirmed · outlook renders BOTH seasons side by side (no
+toggle) · both pipelines (admin2 CHIRPS rerun, station layer) green-lit. Next session: Wave 1
+(structure + restorations + honesty fixes — zero new data), per STRATEGY §6.
