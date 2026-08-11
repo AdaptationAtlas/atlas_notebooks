@@ -6,8 +6,9 @@ affect the rest of the atlas_notebooks repo. Keep under ~200 lines.
 ## What this is
 An AAA Atlas story-notebook: how ENSO (El Niño / La Niña), the Indian Ocean Dipole and the Western-V
 drive Kenya's rains, harvests, food security and (pastoralist) conflict — at county resolution.
-Audience: Kenya county/national policymakers (non-coders). Branch: `dev/KE-enso-explorer`
-(off `dev/climateRationale`). PRs target `develop`, never `main`.
+Audience: Kenya county/national policymakers (non-coders). Standalone notebook: branch
+`notebooks/KE-enso-explorer-dev` (off `develop`); PRs target `develop`, never `main`.
+(NOT part of climateRationale — do not base on / merge into `notebooks/climateRationale-dev`.)
 
 ## Two stores (important)
 - **Here (git, the deliverable):** notebook `notebook.qmd`; data `../../data/KE-enso-explorer/*.parquet`

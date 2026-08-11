@@ -5,8 +5,11 @@ Kenya's rains, harvests, food security and (pastoralist) conflict, at county res
 
 **Audience:** Kenya county & national policymakers (non-coders). AAA Atlas story-notebook.
 
-**Branch:** `dev/KE-enso-explorer`, based on `dev/climateRationale` (inherits components/helpers/
-_quarto.yml conventions). Created 2026-07-09.
+**Branch:** `notebooks/KE-enso-explorer-dev`, off `develop` (standalone; PR #40 → `develop`). Created
+2026-07-09 as `dev/KE-enso-explorer` off `dev/climateRationale`, then re-based to a clean standalone
+branch on 2026-08-11 (it is NOT part of climateRationale — do not merge into `climateRationale-dev`).
+The two shared helpers it imports (`helpers/toc.ojs`, `helpers/chartDownloadMenu.ojs`) are promoted
+onto this branch since `develop` lacked them.
 
 ## Status — v1 scope (honest; Fable-reviewed 2026-07-09)
 - **Data pipeline: v1 assembled; core series validated, with named gaps** (below). Lives in the
