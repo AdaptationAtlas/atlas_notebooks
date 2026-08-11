@@ -4,38 +4,44 @@ hide: true
 ---
 
 <!--
-DEVELOPMENT SANDBOX — not part of the site build.
-Filename is underscore-prefixed, so Quarto skips it in the project render
-(`quarto render` of the whole site ignores it). Work on it in isolation with:
-  quarto preview notebooks/KE-enso-explorer/_dev_rainfall_maps.qmd --no-browser --port 4344
-or render just this file:
-  quarto render notebooks/KE-enso-explorer/_dev_rainfall_maps.qmd
+DEVELOPMENT notebook for the OND/MAM CHIRPS rainfall-map panel.
+Project member (NOT underscore-prefixed) so /-absolute paths + the shared
+components/_lang.qmd i18n compile the same way as the main notebook — this is
+why it carries the REAL parent controls (county / season / ocean driver), not
+stubs. Filename is not `notebook.qmd`, so it is NOT in the site notebook grid
+and NOT translation-checked. Lives on `dev/KE-enso-explorer` (no deploy trigger);
+do not open a PR / merge until ready.
 
-Purpose: build the OND/MAM CHIRPS-v3 seasonal-rainfall RASTER panel (admin-2
-overlain, title bar = seasonal ENSO/IOD/Western-V signal, filterable by driver)
-away from the main notebook. Phase II: biomass-productivity maps (rangelands).
-Carries ONLY the main notebook's controls + the driver-signal computation it
-needs; everything else is deliberately absent.
+Preview it best via a repo-root static server (relative-safe, mirrors deploy):
+  quarto render notebooks/KE-enso-explorer/dev_rainfall_maps.qmd
+  python3 -m http.server 8899 --directory .   # then open
+  http://localhost:8899/notebooks/KE-enso-explorer/dev_rainfall_maps.html
+(`quarto preview <file>` roots the single file at its own dir and breaks the
+/-absolute asset paths — use the static-server route above.)
+
+Phase II: biomass-productivity maps (rangelands) — needs a new NPP source.
 -->
 
 # Rainfall-map panel — development
 
 ```{ojs}
-md`Controls mirror the main notebook (county · season · ocean driver) plus a
-**phase** selector for the maps. Dev sandbox — i18n (\`_lang\`/nbText) is dropped
-for plain English labels so the file compiles standalone; wire \`_lang\` back when
-this folds into the main notebook.`
+md`Controls are the **main notebook's** county / season / ocean-driver bar, plus a
+**phase** selector for the maps below.`
 ```
 
-::: {.controls-row}
+::: {.controls-row .ke-sticky-controls}
 
 ```{ojs}
-viewof county = Inputs.select(countyNames, {label: "County", value: "Marsabit"})
+viewof county = Inputs.select(countyNames, {
+  label: _lang(nbText.sections.controls.county),
+  value: "Marsabit",
+})
 ```
 
 ```{ojs}
 viewof season = Inputs.select(["OND", "MAM", "OND+MAM", "annual"], {
-  label: "Climate season", value: "OND",
+  label: _lang(nbText.sections.controls.season),
+  value: "OND",
 })
 ```
 
@@ -43,7 +49,8 @@ viewof season = Inputs.select(["OND", "MAM", "OND+MAM", "annual"], {
 // ENSO is the entry-point lens; IOD couples in OND; Western-V is a
 // partly-independent control on MAM.
 viewof driverKind = Inputs.radio(["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"], {
-  label: "Ocean driver", value: "ENSO (Niño 3.4)",
+  label: _lang(nbText.sections.controls.driver),
+  value: "ENSO (Niño 3.4)",
 })
 ```
 
@@ -102,7 +109,7 @@ client-side (composite computed last). ${phase === "All years" ? "**All years is
 ```{ojs}
 // legend (shared by both panels)
 rainLegend = {
-  const w = 260, h = 40, pad = 6;
+  const w = 260;
   const cv = html`<canvas width=${w} height=${16}></canvas>`;
   const ctx = cv.getContext("2d");
   for (let x = 0; x < w; x++) {
@@ -122,58 +129,39 @@ md`### Notes
 - **Data:** per-pixel monthly PTOT COGs (D409 obs pipeline, \`processing=monthly\`,
   1981-01→2026-04, CORS + range). Seasonal totals summed from the 3 month files
   client-side; phase composite = mean of per-year totals over the phase's years
-  (computed last). Phase membership is **season-scoped** (a year can be El-Niño in
-  OND but not MAM). 2026 excluded (season incomplete).
+  (computed last). Phase membership is **season-scoped**. 2026 excluded (incomplete).
 - **Phases:** ENSO ONI ±0.5 °C · IOD (DMI) ±0.4 · Western-V (WNP, std) ±0.5, from
   \`driver_indices.parquet\` (notebook-consistent).
 - **Perf:** a phase composite fetches (n years × 3 months) COG windows; "All years"
-  is ~135 reads per map → slow. If it drags in practice, the pipeline can pre-bake
-  per-phase seasonal COGs (dispatch §5b) and the renderer swaps to a single URL.
+  is ~135 reads per map → slow. Pipeline can pre-bake per-phase seasonal COGs
+  (reply dispatch §5b) if it drags.
 - **TODO:** multi-county select; lock the colour domain across panels for
   cross-phase comparison; Phase II biomass/NPP (needs a new source — no NPP ingested).`
 ```
 
-# Appendix — data {#appendix}
+# Appendix — data + i18n {#appendix}
 
 ::: {.hidden}
 
+{{< include /components/_lang.qmd >}}
+
+```{ojs}
+nbText = FileAttachment("/data/KE-enso-explorer/nbText.json").json()
+```
+
 ```{ojs}
 dbDrivers = DuckDBClient.of({
-  driver_indices: FileAttachment("../../data/KE-enso-explorer/driver_indices.parquet"),
+  driver_indices: FileAttachment("/data/KE-enso-explorer/driver_indices.parquet"),
 })
 drivers = dbDrivers.query(`SELECT * FROM driver_indices ORDER BY date`)
 ```
 
 ```{ojs}
 dbCounties = DuckDBClient.of({
-  county_key: FileAttachment("../../data/KE-enso-explorer/county_key.parquet"),
+  county_key: FileAttachment("/data/KE-enso-explorer/county_key.parquet"),
 })
 counties = dbCounties.query(`SELECT county, gaul1_code FROM county_key ORDER BY county`)
 countyNames = counties.map((d) => d.county)
-```
-
-```{ojs}
-seasonMonths = ({"OND": [10, 11, 12], "MAM": [3, 4, 5], "OND+MAM": [3, 4, 5, 10, 11, 12],
-  "annual": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]})[season]
-driverCol = ({"ENSO (Niño 3.4)": "nino34_anom_noaa", "IOD (DMI)": "dmi_hadisst", "Western-V (WNP)": "wnp_std_mam"})[driverKind]
-driverName = driverKind
-```
-
-```{ojs}
-ensoPhaseByYear = {
-  const by = d3.rollups(drivers.filter((d) => seasonMonths.includes(d.month) && d.nino34_anom_noaa != null),
-    (v) => d3.mean(v, (d) => d.nino34_anom_noaa), (d) => d.year);
-  return new Map(by.map(([y, v]) => [y, v > 0.5 ? "El Niño" : v < -0.5 ? "La Niña" : "Neutral"]));
-}
-```
-
-```{ojs}
-driverSeasonal = {
-  const by = d3.rollups(drivers.filter((d) => seasonMonths.includes(d.month) && d[driverCol] != null),
-    (v) => d3.mean(v, (d) => d[driverCol]), (d) => d.year)
-    .map(([year, v]) => ({year, v, enso: ensoPhaseByYear.get(year) ?? "Neutral"}));
-  return by.sort((a, b) => a.year - b.year);
-}
 ```
 
 ```{ojs}
@@ -189,18 +177,16 @@ currentState = {
 }
 ```
 
-<!-- ---- map engine (CHIRPS COG raster + admin-2 overlay) ---- -->
+<!-- ---- map engine (CHIRPS monthly COG → seasonal composite + admin-2 overlay) ---- -->
 
 ```{ojs}
-// client-side raster + topojson libs (ESM). Same versions as climateRationale.
 geotiffLib = import("https://esm.sh/geotiff@2.1.3")
 topojsonClient = import("https://esm.sh/topojson-client@3.1.0")
 ```
 
 ```{ojs}
-// admin boundaries: a1 = counties (county clip/outline), a2 = sub-counties (overlay)
-a1topo = FileAttachment("../../data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json()
-a2topo = FileAttachment("../../data/shared/atlas_gaul24_a2_africa_simple-lowres.topojson").json()
+a1topo = FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json()
+a2topo = FileAttachment("/data/shared/atlas_gaul24_a2_africa_simple-lowres.topojson").json()
 kenA1 = {
   const tj = a1topo, tc = await topojsonClient;
   return tc.feature(tj, tj.objects[Object.keys(tj.objects)[0]]).features
@@ -219,7 +205,6 @@ countySubs = kenA2.filter((f) => f.properties.admin1_name === county)
 ```
 
 ```{ojs}
-// flatten a GeoJSON feature into an array of rings ([[lon,lat],...])
 ringsOf = (feature) => {
   const g = feature.geometry, out = [];
   const push = (poly) => poly.forEach((ring) => out.push(ring));
@@ -230,7 +215,6 @@ ringsOf = (feature) => {
 ```
 
 ```{ojs}
-// county bbox [xmin,ymin,xmax,ymax] with 8% pad
 countyBbox = {
   let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
   for (const ring of ringsOf(countyA1))
@@ -244,8 +228,6 @@ countyBbox = {
 ```
 
 ```{ojs}
-// monthly per-pixel CHIRPS-v3 PTOT COGs (published by the D409 obs pipeline).
-// Seasonal totals are summed from the 3 month files client-side.
 monthlyDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=monthly/variable=PTOT"
 monthlyURL = (y, m) => `${monthlyDir}/PTOT-${y}-${String(m).padStart(2, "0")}.tif`
 seasonMonthsFor = ({OND: [10, 11, 12], MAM: [3, 4, 5]})
@@ -254,9 +236,7 @@ YEAR_HI = 2025 // 2026 season data incomplete (monthly ends 2026-04)
 ```
 
 ```{ojs}
-// pixel window (into the shared monthly grid) covering the county bbox — read
-// once from a reference COG; every monthly file shares this grid so the window
-// indices are reused, keeping all reads pixel-aligned.
+// pixel window into the shared monthly grid covering the county bbox — read once.
 gridWindow = {
   const gt = await geotiffLib;
   const tiff = await gt.fromUrl(monthlyURL(2000, 1));
@@ -267,7 +247,7 @@ gridWindow = {
   const [bx0, by0, bx1, by1] = countyBbox;
   const px0 = Math.max(0, Math.floor((bx0 - ox0) / xres));
   const px1 = Math.min(W, Math.ceil((bx1 - ox0) / xres));
-  const py0 = Math.max(0, Math.floor((oy1 - by1) / yres)); // row 0 = north
+  const py0 = Math.max(0, Math.floor((oy1 - by1) / yres));
   const py1 = Math.min(H, Math.ceil((oy1 - by0) / yres));
   return {
     window: [px0, py0, px1, py1], w: px1 - px0, h: py1 - py0,
@@ -277,7 +257,6 @@ gridWindow = {
 ```
 
 ```{ojs}
-// one monthly COG, window-read to the county → Float32Array (nodata → NaN)
 loadMonthly = async (y, m, win) => {
   const gt = await geotiffLib;
   const tiff = await gt.fromUrl(monthlyURL(y, m));
@@ -294,7 +273,6 @@ loadMonthly = async (y, m, win) => {
 ```
 
 ```{ojs}
-// seasonal total for one year = sum of the 3 month grids (NaN if any month missing)
 seasonalYear = async (season, year, win) => {
   const mons = seasonMonthsFor[season];
   const grids = await Promise.all(mons.map((m) => loadMonthly(year, m, win)));
@@ -309,8 +287,6 @@ seasonalYear = async (season, year, win) => {
 ```
 
 ```{ojs}
-// composite = mean across the phase's years of the per-year seasonal totals
-// (composite computed LAST, per the ensembling rule)
 compositeRaster = async (season, years, win) => {
   const n = win.w * win.h;
   const sum = new Float64Array(n), cnt = new Int32Array(n);
@@ -325,7 +301,6 @@ compositeRaster = async (season, years, win) => {
 
 ```{ojs}
 // driver phase per (season, year), from the season-mean of the driver index.
-// thresholds: ENSO ONI ±0.5 °C; IOD DMI ±0.4; Western-V (std) ±0.5.
 phaseDefs = ({
   "ENSO (Niño 3.4)": {col: "nino34_anom_noaa", hi: 0.5, lo: -0.5, labels: ["El Niño", "La Niña", "Neutral"]},
   "IOD (DMI)":        {col: "dmi_hadisst",     hi: 0.4, lo: -0.4, labels: ["Positive", "Negative", "Neutral"]},
@@ -335,7 +310,6 @@ phaseOptions = [...phaseDefs[driverKind].labels, "All years"]
 ```
 
 ```{ojs}
-// years belonging to a phase for a season (season-scoped: a year can differ OND vs MAM)
 phaseYears = (season, ph) => {
   const def = phaseDefs[driverKind], mons = seasonMonthsFor[season];
   const byYear = d3.rollups(
@@ -349,7 +323,6 @@ phaseYears = (season, ph) => {
 ```
 
 ```{ojs}
-// rainfall colour ramp (white -> deep blue), seasonal scale 0..900 mm
 rainDomain = [0, 900]
 rainStops = [
   {at: 0, rgb: [255, 255, 255]}, {at: 50, rgb: [224, 236, 244]},
@@ -374,7 +347,6 @@ pixelColor = (v) => {
 ```
 
 ```{ojs}
-// render one seasonal panel: raster canvas (integer cells) + admin-2 SVG overlay.
 renderRainPanel = (spec, raster) => {
   const {data, w, h, bbox, noData} = raster;
   const [bx0, by0, bx1, by1] = bbox;
@@ -384,7 +356,6 @@ renderRainPanel = (spec, raster) => {
   const tx = (lon) => (lon - bx0) / (bx1 - bx0) * W;
   const ty = (lat) => (by1 - lat) / (by1 - by0) * H;
 
-  // integer cell boundaries so fillRect tiles seamlessly (no antialiased seams)
   const colX = new Int32Array(w + 1), rowY = new Int32Array(h + 1);
   for (let i = 0; i <= w; i++) colX[i] = Math.round(i / w * W);
   for (let j = 0; j <= h; j++) rowY[j] = Math.round(j / h * H);
@@ -394,7 +365,6 @@ renderRainPanel = (spec, raster) => {
   const ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
 
-  // clip to the county polygon (pixel space)
   const clip = new Path2D();
   for (const ring of ringsOf(countyA1)) {
     ring.forEach(([lon, lat], i) => i ? clip.lineTo(tx(lon), ty(lat)) : clip.moveTo(tx(lon), ty(lat)));
@@ -412,7 +382,6 @@ renderRainPanel = (spec, raster) => {
     }
   ctx.restore();
 
-  // admin-2 overlay + county outline as an SVG on top
   const ringPath = (ring) => "M" + ring.map(([lon, lat]) => `${tx(lon).toFixed(1)},${ty(lat).toFixed(1)}`).join("L") + "Z";
   const subPaths = countySubs.flatMap((f) => ringsOf(f)).map(ringPath).join(" ");
   const cntyPaths = ringsOf(countyA1).map(ringPath).join(" ");
@@ -439,6 +408,7 @@ renderRainPanel = (spec, raster) => {
 
 ```{=html}
 <style>
+  .controls-row { display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-end; margin:0.5rem 0 1rem; }
   .rain-panel-row { display:flex; flex-wrap:wrap; gap:1.5rem; align-items:flex-start; margin:0.5rem 0 1rem; }
   .rain-panel { border:1px solid #e5e7eb; border-radius:8px; padding:0.6rem; background:#fff; }
   .rain-title { font-size:0.9em; margin-bottom:0.4rem; }
