@@ -118,7 +118,7 @@ viewof ondDriver = Inputs.select(driverOptions, {value: "ENSO + IOD", label: "ON
 
 ```{ojs}
 viewof ondPhase = Inputs.checkbox(categoryOptions(ondDriver),
-  {label: "OND phase (none = all years)"})
+  {label: `${ondDriver.replace(/ \(.*\)$/, "")} phase (none = all)`})
 ```
 
 :::
@@ -145,7 +145,7 @@ viewof mamDriver = Inputs.select(driverOptions, {value: "Western-V (WNP)", label
 
 ```{ojs}
 viewof mamPhase = Inputs.checkbox(categoryOptions(mamDriver),
-  {label: "MAM phase (none = all years)"})
+  {label: `${mamDriver.replace(/ \(.*\)$/, "")} phase (none = all)`})
 ```
 
 :::
@@ -184,13 +184,12 @@ rainLegend = {
 ```{ojs}
 // per-section card-colour key — responsive to that section's driver selection
 cardLegend = (driver) => {
-  const def = phaseDefs[driver], s = def.scale;
+  const def = phaseDefs[driver];
   return html`<div style="font-size:0.78em;color:#555;margin:0.1rem 0 0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
     <span>Card colour — <b>${driver.replace(/ \(.*\)$/, "")}</b> phase &amp; strength:</span>
-    <span>${def.labels[1]}</span>
-    <span style="display:inline-block;width:120px;height:14px;background:linear-gradient(to right, ${cardColor(-s, driver)}, ${cardColor(0, driver)}, ${cardColor(s, driver)})"></span>
-    <span>${def.labels[0]}</span>
-    <span style="color:#999">(depth = strength)</span>
+    <span>${def.neg}</span>
+    <span style="display:inline-block;width:130px;height:14px;background:linear-gradient(to right, ${cardColor(-2)}, ${cardColor(0)}, ${cardColor(2)})"></span>
+    <span>${def.pos}</span>
   </div>`;
 }
 ```
@@ -410,34 +409,51 @@ climFor = async (season, win) => {
 ```
 
 ```{ojs}
-// driver definitions. `composite` = mean of the standardised member indices.
+// driver definitions. Each driver is scored as a z-score against its OWN
+// 1991-2020 season distribution (so Western-V uses its own range, not ENSO's),
+// and the ENSO+IOD composite is the mean of the member z-scores, re-standardised.
+// `pos`/`neg` are the phase names; intensity comes from |z| in std-multiples.
 driverOptions = ["ENSO + IOD", "ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"]
-// `bands` = magnitude cut-points [weak, moderate, strong]; |v| below weak = Neutral.
 phaseDefs = ({
-  "ENSO + IOD":       {composite: ["nino34_anom_noaa", "dmi_hadisst"], scale: 1.5, bands: [0.5, 1.0, 1.5], labels: ["Wet", "Dry"]},
-  "ENSO (Niño 3.4)":  {col: "nino34_anom_noaa", scale: 2.5, bands: [0.5, 1.0, 1.5], labels: ["El Niño", "La Niña"]},
-  "IOD (DMI)":        {col: "dmi_hadisst",      scale: 1.0, bands: [0.4, 0.7, 1.0], labels: ["+IOD", "−IOD"]},
-  "Western-V (WNP)":  {col: "wnp_std_mam",      scale: 2.0, bands: [0.5, 1.0, 1.5], labels: ["High", "Low"]},
+  "ENSO + IOD":       {members: ["nino34_anom_noaa", "dmi_hadisst"], pos: "El Niño/+IOD", neg: "La Niña/−IOD"},
+  "ENSO (Niño 3.4)":  {members: ["nino34_anom_noaa"], pos: "El Niño", neg: "La Niña"},
+  "IOD (DMI)":        {members: ["dmi_hadisst"],      pos: "+IOD",    neg: "−IOD"},
+  "Western-V (WNP)":  {members: ["wnp_std_mam"],      pos: "High Western-V", neg: "Low Western-V"},
 })
+// |z| bands (std multiples): <0.5 Neutral, 0.5–1 Weak, 1–1.5 Moderate, ≥1.5 Strong
+Z_BANDS = ({weak: 0.5, moderate: 1.0, strong: 1.5})
 ```
 
 ```{ojs}
-// intensity category for a driver value: "<phase> — <weak|moderate|strong>" or "Neutral"
-categoryOf = (driver, value) => {
-  if (value == null || Number.isNaN(value)) return "—";
-  const def = phaseDefs[driver], a = Math.abs(value);
-  if (a < def.bands[0]) return "Neutral";
-  const intensity = a >= def.bands[2] ? "strong" : a >= def.bands[1] ? "moderate" : "weak";
-  return `${value > 0 ? def.labels[0] : def.labels[1]} — ${intensity}`;
+// standardised driver series for a (driver, season): mean of member z-scores,
+// re-standardised on 1991-2020 → unit-variance z per year (own-distribution range).
+zSeries = (driver, season) => {
+  const def = phaseDefs[driver], mons = seasonMonthsFor[season];
+  const maps = def.members.map((c) => zByYear(c, mons));
+  const raw = new Map();
+  for (const y of maps[0].keys()) {
+    const zs = maps.map((m) => m.get(y));
+    if (zs.every((z) => z != null && !Number.isNaN(z))) raw.set(y, d3.mean(zs));
+  }
+  const ref = [...raw].filter(([y]) => y >= 1991 && y <= 2020).map(([, v]) => v);
+  const m = d3.mean(ref), s = d3.deviation(ref) || 1;
+  return new Map([...raw].map(([y, v]) => [y, (v - m) / s]));
 }
-// full option list for the multiselect (strong → weak, both signs, + Neutral)
+```
+
+```{ojs}
+// intensity category for a driver z: "<Strong|Moderate|Weak> <phase>" or "Neutral"
+categoryOf = (driver, z) => {
+  if (z == null || Number.isNaN(z)) return "—";
+  const def = phaseDefs[driver], a = Math.abs(z);
+  if (a < Z_BANDS.weak) return "Neutral";
+  const intensity = a >= Z_BANDS.strong ? "Strong" : a >= Z_BANDS.moderate ? "Moderate" : "Weak";
+  return `${intensity} ${z > 0 ? def.pos : def.neg}`;
+}
+// multiselect options — only Strong / Moderate per phase (Pete #3)
 categoryOptions = (driver) => {
-  const def = phaseDefs[driver], ints = ["strong", "moderate", "weak"];
-  return [
-    ...ints.map((i) => `${def.labels[0]} — ${i}`),
-    "Neutral",
-    ...ints.map((i) => `${def.labels[1]} — ${i}`),
-  ];
+  const def = phaseDefs[driver];
+  return [`Strong ${def.pos}`, `Moderate ${def.pos}`, `Strong ${def.neg}`, `Moderate ${def.neg}`];
 }
 ```
 
@@ -473,29 +489,20 @@ labelFor = (driver, season, year) => {
 ```
 
 ```{ojs}
-// driver value + intensity category for one (driver, season, year)
+// standardised z + intensity category for one (driver, season, year)
 driverSignalFor = (driver, season, year) => {
-  const def = phaseDefs[driver], mons = seasonMonthsFor[season];
-  let v;
-  if (def.composite) {
-    const zs = def.composite.map((col) => zByYear(col, mons).get(year));
-    if (zs.some((z) => z == null || Number.isNaN(z))) return {value: null, category: "—"};
-    v = d3.mean(zs);
-  } else {
-    const rows = drivers.filter((d) => mons.includes(d.month) && d[def.col] != null && d.year === year);
-    if (!rows.length) return {value: null, category: "—"};
-    v = d3.mean(rows, (d) => d[def.col]);
-  }
-  return {value: v, category: categoryOf(driver, v)};
+  const z = zSeries(driver, season).get(year) ?? null;
+  return {z, category: categoryOf(driver, z)};
 }
 ```
 
 ```{ojs}
-// card background by driver strength — PRGn diverging (purple=dry, green=wet),
-// NOT the blue rainfall ramp, lightened to a subtle tint.
-cardColor = (value, driver) => {
-  if (value == null) return "#ffffff";
-  const n = Math.max(-1, Math.min(1, value / phaseDefs[driver].scale));
+// card background by driver phase & strength — PRGn diverging (purple=negative
+// phase e.g. La Niña, green=positive e.g. El Niño), NOT the blue rainfall ramp,
+// lightened to a subtle tint. Input is the standardised z; ±2 std = full colour.
+cardColor = (z) => {
+  if (z == null || Number.isNaN(z)) return "#ffffff";
+  const n = Math.max(-1, Math.min(1, z / 2));
   const white = [247, 247, 247];
   const end = n < 0 ? [118, 42, 131] : [27, 120, 55];
   const t = Math.abs(n);
@@ -637,11 +644,11 @@ renderRainPanel = (spec, raster) => {
   const meanTxt = meanmm == null ? "—"
     : `${anomaly && meanmm > 0 ? "+" : ""}${Math.round(meanmm)} mm`;
 
-  const sig = spec.signal || {value: null};
+  const sig = spec.signal || {z: null};
   const coarse = spec.year < 2000
     ? html`<span class="rain-coarse" title="Pre-2000 CHIRPS is spatially coarser (fewer input stations) — cells look blockier. Faithful, not smoothed.">⚠</span>`
     : "";
-  return html`<div class="rain-panel" style="background:${cardColor(sig.value, spec.driver)}">
+  return html`<div class="rain-panel" style="background:${cardColor(sig.z)}">
     <div class="rain-title"><strong>${spec.year}</strong>${coarse}
       <span class="rain-mean">${meanTxt}</span>
       <div class="rain-signal">${spec.label}</div></div>
