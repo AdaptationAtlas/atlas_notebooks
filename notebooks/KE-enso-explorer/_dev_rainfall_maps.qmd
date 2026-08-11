@@ -21,10 +21,10 @@ needs; everything else is deliberately absent.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`Controls mirror the main notebook (county · season · ocean driver). This is a
-dev sandbox — i18n (\`_lang\`/nbText) is intentionally dropped for plain English
-labels so the file compiles standalone; wire \`_lang\` back when this folds into
-the main notebook. The map panel below is a stub — see the build-plan note.`
+md`Controls mirror the main notebook (county · season · ocean driver) plus a
+**phase** selector for the maps. Dev sandbox — i18n (\`_lang\`/nbText) is dropped
+for plain English labels so the file compiles standalone; wire \`_lang\` back when
+this folds into the main notebook.`
 ```
 
 ::: {.controls-row}
@@ -50,33 +50,20 @@ viewof driverKind = Inputs.radio(["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (W
 :::
 
 ```{ojs}
-// Seasonal driver signal for the map title bar. For each year, the mean of the
-// selected driver index over the selected season's months, tagged with the
-// ENSO phase. This is what will label each seasonal map panel.
 md`**Current state** (as of ${d3.utcFormat("%Y-%m")(currentState.asOf)}) —
 Niño 3.4 (ONI) **${currentState.oni?.toFixed(2)} °C** (**${currentState.phase}**)${
   currentState.dmi != null ? `, IOD (DMI) **${currentState.dmi.toFixed(2)}**` : ""}.
-Selected: **${county}** · **${season}** · driver **${driverKind}**.`
+Selected county: **${county}**.`
 ```
+
+## OND / MAM rainfall by driver phase
 
 ```{ojs}
-// latest season's driver value + phase (drives the title bar once maps exist)
-seasonSignal = {
-  const rows = driverSeasonal;
-  const last = rows[rows.length - 1];
-  return last
-    ? {year: last.year, value: last.v, phase: last.enso, driver: driverName}
-    : null;
-}
+// phase options depend on the selected driver (ENSO/IOD/Western-V)
+viewof phase = Inputs.select(phaseOptions, {
+  label: `${driverKind.split(" ")[0]} phase`, value: phaseOptions[0],
+})
 ```
-
-```{ojs}
-md`_Signal for the title bar_: ${seasonSignal
-  ? `${seasonSignal.year} ${seasonSignal.driver} = ${seasonSignal.value?.toFixed(2)} (${seasonSignal.phase})`
-  : "—"}`
-```
-
-## OND / MAM seasonal rainfall (1991–2020 climatology)
 
 ```{ojs}
 mapPanels = {
@@ -84,12 +71,17 @@ mapPanels = {
     {season: "OND", label: "OND — short rains (Oct–Dec)"},
     {season: "MAM", label: "MAM — long rains (Mar–May)"},
   ];
+  const win = await gridWindow;
   const nodes = [];
   for (const s of specs) {
     let node;
     try {
-      const raster = await countyRaster(s.season);
-      node = renderRainPanel(s, raster);
+      const years = phaseYears(s.season, phase);
+      if (!years.length) { node = html`<div class="rain-panel-err">${s.label}: no ${phase} years</div>`; }
+      else {
+        const raster = await compositeRaster(s.season, years, win);
+        node = renderRainPanel({...s, years, phase}, raster);
+      }
     } catch (e) {
       node = html`<div class="rain-panel-err">${s.label}: ${e.message}</div>`;
     }
@@ -100,9 +92,11 @@ mapPanels = {
 ```
 
 ```{ojs}
-md`Per-pixel CHIRPS-v3 seasonal-total climatology (~5 km) clipped to **${county}**,
-sub-county (admin-2) boundaries overlain. Cells show the 1991–2020 mean seasonal
-rainfall (mm). Title bars carry the current ${driverKind} state.`
+md`Per-pixel CHIRPS-v3 seasonal totals (~5 km) clipped to **${county}**, sub-county
+(admin-2) boundaries overlain. Each map is the **mean seasonal rainfall (mm) across
+the ${phase === "All years" ? "full record" : phase + " years"}** for the selected
+driver — years listed under each title. Built by summing the monthly PTOT COGs
+client-side (composite computed last). ${phase === "All years" ? "**All years is slow** (~45 × 3 fetches per map)." : ""}`
 ```
 
 ```{ojs}
@@ -123,16 +117,20 @@ rainLegend = {
 }
 ```
 
-### Next: filter by ENSO / IOD / Western-V phase
-
 ```{ojs}
-md`This panel is the **1991–2020 climatology** — the only per-pixel CHIRPS product
-published on the Atlas S3 (\`processing=climatology\`; statistics mean/max/min/sd,
-no per-year rasters). To make the maps **filterable by driver phase** (e.g. mean
-OND rainfall in El-Niño vs La-Niña years) needs a **D409 bake**: raw CHIRPS v3 →
-per-year seasonal totals → composite over the year-set for each ENSO/IOD/Western-V
-phase → per-pixel COG (or adm-2 zonal). Then this same renderer swaps the COG URL
-per phase and the title bar carries the phase. Flagged for Pete before building.`
+md`### Notes
+- **Data:** per-pixel monthly PTOT COGs (D409 obs pipeline, \`processing=monthly\`,
+  1981-01→2026-04, CORS + range). Seasonal totals summed from the 3 month files
+  client-side; phase composite = mean of per-year totals over the phase's years
+  (computed last). Phase membership is **season-scoped** (a year can be El-Niño in
+  OND but not MAM). 2026 excluded (season incomplete).
+- **Phases:** ENSO ONI ±0.5 °C · IOD (DMI) ±0.4 · Western-V (WNP, std) ±0.5, from
+  \`driver_indices.parquet\` (notebook-consistent).
+- **Perf:** a phase composite fetches (n years × 3 months) COG windows; "All years"
+  is ~135 reads per map → slow. If it drags in practice, the pipeline can pre-bake
+  per-phase seasonal COGs (dispatch §5b) and the renderer swaps to a single URL.
+- **TODO:** multi-county select; lock the colour domain across panels for
+  cross-phase comparison; Phase II biomass/NPP (needs a new source — no NPP ingested).`
 ```
 
 # Appendix — data {#appendix}
@@ -246,17 +244,24 @@ countyBbox = {
 ```
 
 ```{ojs}
-cogDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=climatology/variable=PTOT/period=annual/clim=wmo_1991-2020/stat=max"
-cogURL = (season) => `${cogDir}/PTOT_${season}_1991-2020_mean.tif`
+// monthly per-pixel CHIRPS-v3 PTOT COGs (published by the D409 obs pipeline).
+// Seasonal totals are summed from the 3 month files client-side.
+monthlyDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=monthly/variable=PTOT"
+monthlyURL = (y, m) => `${monthlyDir}/PTOT-${y}-${String(m).padStart(2, "0")}.tif`
+seasonMonthsFor = ({OND: [10, 11, 12], MAM: [3, 4, 5]})
+YEAR_LO = 1981
+YEAR_HI = 2025 // 2026 season data incomplete (monthly ends 2026-04)
 ```
 
 ```{ojs}
-// fetch a CHIRPS seasonal-total COG and window-read to the county bbox.
-countyRaster = async (season) => {
+// pixel window (into the shared monthly grid) covering the county bbox — read
+// once from a reference COG; every monthly file shares this grid so the window
+// indices are reused, keeping all reads pixel-aligned.
+gridWindow = {
   const gt = await geotiffLib;
-  const tiff = await gt.fromUrl(cogURL(season));
+  const tiff = await gt.fromUrl(monthlyURL(2000, 1));
   const image = await tiff.getImage();
-  const [ox0, oy0, ox1, oy1] = image.getBoundingBox(); // lon/lat, oy1 = north
+  const [ox0, oy0, ox1, oy1] = image.getBoundingBox(); // oy1 = north
   const W = image.getWidth(), H = image.getHeight();
   const xres = (ox1 - ox0) / W, yres = (oy1 - oy0) / H;
   const [bx0, by0, bx1, by1] = countyBbox;
@@ -264,13 +269,82 @@ countyRaster = async (season) => {
   const px1 = Math.min(W, Math.ceil((bx1 - ox0) / xres));
   const py0 = Math.max(0, Math.floor((oy1 - by1) / yres)); // row 0 = north
   const py1 = Math.min(H, Math.ceil((oy1 - by0) / yres));
-  const w = px1 - px0, h = py1 - py0;
-  const rr = await image.readRasters({window: [px0, py0, px1, py1]});
-  const nd = image.getGDALNoData();
   return {
-    data: rr[0], w, h, noData: nd,
+    window: [px0, py0, px1, py1], w: px1 - px0, h: py1 - py0,
     bbox: [ox0 + px0 * xres, oy1 - py1 * yres, ox0 + px1 * xres, oy1 - py0 * yres],
   };
+}
+```
+
+```{ojs}
+// one monthly COG, window-read to the county → Float32Array (nodata → NaN)
+loadMonthly = async (y, m, win) => {
+  const gt = await geotiffLib;
+  const tiff = await gt.fromUrl(monthlyURL(y, m));
+  const image = await tiff.getImage();
+  const rr = await image.readRasters({window: win.window});
+  const src = rr[0];
+  const out = new Float32Array(src.length);
+  for (let i = 0; i < src.length; i++) {
+    const v = src[i];
+    out[i] = (v == null || !isFinite(v) || v <= -9999) ? NaN : v;
+  }
+  return out;
+}
+```
+
+```{ojs}
+// seasonal total for one year = sum of the 3 month grids (NaN if any month missing)
+seasonalYear = async (season, year, win) => {
+  const mons = seasonMonthsFor[season];
+  const grids = await Promise.all(mons.map((m) => loadMonthly(year, m, win)));
+  const n = win.w * win.h, out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0, ok = true;
+    for (const g of grids) { const v = g[i]; if (Number.isNaN(v)) { ok = false; break; } s += v; }
+    out[i] = ok ? s : NaN;
+  }
+  return out;
+}
+```
+
+```{ojs}
+// composite = mean across the phase's years of the per-year seasonal totals
+// (composite computed LAST, per the ensembling rule)
+compositeRaster = async (season, years, win) => {
+  const n = win.w * win.h;
+  const sum = new Float64Array(n), cnt = new Int32Array(n);
+  const stacks = await Promise.all(years.map((y) => seasonalYear(season, y, win)));
+  for (const g of stacks)
+    for (let i = 0; i < n; i++) { const v = g[i]; if (!Number.isNaN(v)) { sum[i] += v; cnt[i] += 1; } }
+  const data = new Float32Array(n);
+  for (let i = 0; i < n; i++) data[i] = cnt[i] ? sum[i] / cnt[i] : NaN;
+  return {data, w: win.w, h: win.h, noData: NaN, bbox: win.bbox};
+}
+```
+
+```{ojs}
+// driver phase per (season, year), from the season-mean of the driver index.
+// thresholds: ENSO ONI ±0.5 °C; IOD DMI ±0.4; Western-V (std) ±0.5.
+phaseDefs = ({
+  "ENSO (Niño 3.4)": {col: "nino34_anom_noaa", hi: 0.5, lo: -0.5, labels: ["El Niño", "La Niña", "Neutral"]},
+  "IOD (DMI)":        {col: "dmi_hadisst",     hi: 0.4, lo: -0.4, labels: ["Positive", "Negative", "Neutral"]},
+  "Western-V (WNP)":  {col: "wnp_std_mam",     hi: 0.5, lo: -0.5, labels: ["High", "Low", "Neutral"]},
+})
+phaseOptions = [...phaseDefs[driverKind].labels, "All years"]
+```
+
+```{ojs}
+// years belonging to a phase for a season (season-scoped: a year can differ OND vs MAM)
+phaseYears = (season, ph) => {
+  const def = phaseDefs[driverKind], mons = seasonMonthsFor[season];
+  const byYear = d3.rollups(
+    drivers.filter((d) => mons.includes(d.month) && d[def.col] != null && d.year >= YEAR_LO && d.year <= YEAR_HI),
+    (v) => d3.mean(v, (d) => d[def.col]), (d) => d.year);
+  const classify = (v) => v > def.hi ? def.labels[0] : v < def.lo ? def.labels[1] : def.labels[2];
+  return byYear
+    .filter(([, v]) => ph === "All years" ? true : classify(v) === ph)
+    .map(([y]) => y).sort((a, b) => a - b);
 }
 ```
 
@@ -348,15 +422,15 @@ renderRainPanel = (spec, raster) => {
     <path d="${cntyPaths}" fill="none" stroke="#111" stroke-width="1.4"/>
   </svg>`;
 
-  const state = currentState;
-  const signal = driverKind.includes("ENSO")
-    ? `Niño 3.4 ${state.oni?.toFixed(2)} °C (${state.phase})`
-    : driverKind.includes("IOD")
-      ? `IOD (DMI) ${state.dmi != null ? state.dmi.toFixed(2) : "—"}`
-      : `Western-V (WNP) — MAM control`;
+  const yrs = spec.years || [];
+  const yrList = yrs.length > 12
+    ? `${yrs.slice(0, 12).join(", ")}, +${yrs.length - 12} more`
+    : yrs.join(", ");
   return html`<div class="rain-panel">
     <div class="rain-title"><strong>${spec.label}</strong><br>
-      <span class="rain-signal">${driverKind}: ${signal}</span></div>
+      <span class="rain-signal">${driverKind.split(" ")[0]} — ${spec.phase}
+        (n=${yrs.length})</span>
+      <div class="rain-years">${yrList}</div></div>
     <div class="rain-stack" style="position:relative;width:${W}px;height:${H}px">
       ${canvas}${svg}</div>
   </div>`;
@@ -369,6 +443,7 @@ renderRainPanel = (spec, raster) => {
   .rain-panel { border:1px solid #e5e7eb; border-radius:8px; padding:0.6rem; background:#fff; }
   .rain-title { font-size:0.9em; margin-bottom:0.4rem; }
   .rain-signal { color:#666; font-size:0.85em; }
+  .rain-years { color:#8a978f; font-size:0.72em; margin-top:0.15rem; max-width:340px; }
   .rain-stack { border:1px solid #eef1ef; }
   .rain-panel-err { color:#b45309; font-size:0.85em; padding:1rem; border:1px dashed #e0b466; border-radius:6px; }
 </style>
