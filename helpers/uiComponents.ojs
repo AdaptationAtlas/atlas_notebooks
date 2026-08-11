@@ -33,9 +33,8 @@ function serializeCsv(data, { columns } = {}) {
   return `${CSV_BOM}${records.join("\r\n")}\r\n`;
 }
 
-function downloadName(filename, extension, fallback) {
-  const name = String(filename || fallback).trim() || fallback;
-  return name.toLowerCase().endsWith(extension) ? name : `${name}${extension}`;
+function downloadName(filename, extension) {
+  return filename.toLowerCase().endsWith(extension) ? filename : filename + extension;
 }
 
 function downloadBlob(blob, filename) {
@@ -57,27 +56,16 @@ function downloadCsv(data, { filename = "atlas-data", columns } = {}) {
     new Blob([serializeCsv(data, { columns })], {
       type: "text/csv;charset=utf-8",
     }),
-    downloadName(filename, ".csv", "atlas-data"),
+    downloadName(filename, ".csv"),
   );
 }
 
-// Plot returns a bare <svg>, or a <figure> once a legend or caption is configured,
-// and atlasMap hands back a div holding the map svg beside a legend svg. Nest every
-// svg found at the position it occupies on screen, so an export carries the whole
-// composition rather than just the first plot. Each svg keeps its own Plot <style>,
-// and the generated class names are per-plot, so nesting cannot cross-contaminate.
-// A categorical legend is the exception: Plot draws each swatch as a tiny svg but
-// leaves the label as HTML text, so cloning svgs alone keeps the colours and loses
-// every word. Those labels are re-emitted below as real <text>.
 SVG_NS = "http://www.w3.org/2000/svg";
 
-// Plot draws with overflow: visible, so ticks and legend text can sit outside the
-// box layout reports. A file's root svg clips to its viewport, unlike the one on the
-// page, so that overflow needs room reserved or it comes out shaved off.
+// Plot overflows its own box; a file's root svg clips, so reserve room for it.
 FIGURE_PADDING = 12;
 
-// Position from a Range rather than the element: a label is a text node inside a
-// span that may be wider than the words themselves.
+// Range, not the element: a label is a text node inside a wider span.
 function htmlLabels(chart, box) {
   const walker = document.createTreeWalker(chart, NodeFilter.SHOW_TEXT);
   const labels = [];
@@ -108,12 +96,7 @@ function htmlLabels(chart, box) {
 }
 
 function chartSvgSource(chart) {
-  const svgs = chart?.tagName?.toLowerCase() === "svg"
-    ? [chart]
-    : [...(chart?.querySelectorAll?.("svg") ?? [])];
-  if (!svgs.length) {
-    throw new TypeError("figure downloads need a Plot figure or an svg element");
-  }
+  const svgs = chart.tagName === "svg" ? [chart] : [...chart.querySelectorAll("svg")];
 
   const box = chart.getBoundingClientRect();
   const outer = document.createElementNS(SVG_NS, "svg");
@@ -140,13 +123,6 @@ function chartSvgSource(chart) {
   return new XMLSerializer().serializeToString(outer);
 }
 
-function downloadSvg(chart, { filename = "atlas-figure" } = {}) {
-  downloadBlob(
-    new Blob([chartSvgSource(chart)], { type: "image/svg+xml;charset=utf-8" }),
-    downloadName(filename, ".svg", "atlas-figure"),
-  );
-}
-
 /** Create a button that downloads object rows as CSV. */
 function downloadCsvButton(
   data,
@@ -162,15 +138,12 @@ function downloadCsvButton(
 }
 
 /** Create a button that downloads a Plot figure as SVG. */
-function downloadSvgButton(
-  chart,
-  {
-    filename = "atlas-figure",
-    label = "Download figure",
-  } = {},
-) {
+function downloadSvgButton(chart, { filename = "atlas-figure", label = "Download figure" } = {}) {
   return Inputs.button(label, {
-    reduce: () => downloadSvg(chart, { filename }),
+    reduce: () => downloadBlob(
+      new Blob([chartSvgSource(chart)], { type: "image/svg+xml;charset=utf-8" }),
+      downloadName(filename, ".svg"),
+    ),
   });
 }
 
