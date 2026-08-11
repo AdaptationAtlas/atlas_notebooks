@@ -76,6 +76,20 @@ viewof yearFrom = Inputs.range([1981, 2025], {step: 1, value: 2015, label: "From
 viewof yearTo = Inputs.range([1981, 2025], {step: 1, value: 2020, label: "To year"})
 ```
 
+```{ojs}
+viewof strengthFilter = Inputs.select(
+  ["All years", ...phaseDefs[driverKind].labels],
+  {label: `${driverKind.split(" ")[0]} phase`, value: "All years"})
+```
+
+```{ojs}
+viewof anomaly = Inputs.toggle({label: "Anomaly vs 1991–2020", value: false})
+```
+
+```{ojs}
+viewof facetCols = Inputs.range([1, 8], {step: 1, value: 4, label: "Facet columns"})
+```
+
 :::
 
 ```{ojs}
@@ -89,24 +103,32 @@ yearsSel = {
 ```
 
 ```{ojs}
-md`Per-pixel CHIRPS-v3 seasonal rainfall totals (~5 km) for **${county}**, admin-2
-overlain — **one map per year**, ${yearsSel[0]}–${yearsSel[yearsSel.length - 1]}
-(**${yearsSel.length} years**). Each title carries the year + that season's
-${driverKind.split(" ")[0]} state. Summed from the monthly PTOT COGs client-side;
-≈ **${yearsSel.length * 6} COG-window fetches** — a wide range is slow. Colour scale
-is locked (0–${rainDomain[1]} mm) so years are directly comparable.`
+md`Per-pixel CHIRPS-v3 seasonal ${anomaly ? "rainfall **anomaly** (vs the 1991–2020 mean)" : "rainfall totals"} (~5 km)
+for **${county}**, admin-2 overlain — **one map per year**. Each panel's **card colour**
+= that year's ${driverKind.split(" ")[0]} strength (dry ↔ wet; a hue distinct from the
+rainfall cells). Titles carry the year + driver value/phase. Cells drawn faithfully
+(nearest-neighbour, no smoothing) — pre-2000 years look blockier because early CHIRPS
+is genuinely coarser (flagged ⚠, not smoothed). Colour scale locked so years compare.`
 ```
 
 ### OND — short rains (Oct–Dec)
 
 ```{ojs}
-gridOND = seasonGrid("OND", yearsSel)
+ondPanels = buildSeasonPanels("OND")
+```
+
+```{ojs}
+gridWrap(ondPanels)
 ```
 
 ### MAM — long rains (Mar–May)
 
 ```{ojs}
-gridMAM = seasonGrid("MAM", yearsSel)
+mamPanels = buildSeasonPanels("MAM")
+```
+
+```{ojs}
+gridWrap(mamPanels)
 ```
 
 ```{ojs}
@@ -120,10 +142,22 @@ rainLegend = {
     const c = pixelColor(v); ctx.fillStyle = c || "#fff"; ctx.fillRect(x, 0, 1, 16);
   }
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(rainDomain[0] + t * (rainDomain[1] - rainDomain[0])));
-  return html`<div style="font-size:0.8em;color:#444">
-    <div>Seasonal rainfall (mm)</div>${cv}
-    <div style="display:flex;justify-content:space-between;width:${w}px">
-      ${ticks.map((t) => html`<span>${t}</span>`)}</div></div>`;
+  const drv = driverKind.split(" ")[0];
+  return html`<div style="font-size:0.8em;color:#444;display:flex;gap:2.5rem;flex-wrap:wrap">
+    <div>
+      <div>${anomaly ? "Rainfall anomaly vs 1991–2020 (mm)" : "Seasonal rainfall (mm)"} — map cells</div>${cv}
+      <div style="display:flex;justify-content:space-between;width:${w}px">
+        ${ticks.map((t) => html`<span>${t}</span>`)}</div>
+    </div>
+    <div>
+      <div>Card colour — ${drv} strength</div>
+      <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.2rem">
+        <span style="display:inline-block;width:80px;height:16px;background:linear-gradient(to right, ${cardColor(-phaseDefs[driverKind].scale)}, ${cardColor(0)}, ${cardColor(phaseDefs[driverKind].scale)})"></span>
+      </div>
+      <div style="display:flex;justify-content:space-between;width:80px">
+        <span>dry</span><span>wet</span></div>
+    </div>
+  </div>`;
 }
 ```
 
@@ -291,11 +325,12 @@ seasonalYear = async (season, year, win) => {
 ```
 
 ```{ojs}
-// classification thresholds per driver (used for each panel's title-bar phase)
+// classification thresholds per driver (title-bar phase + card colour scale).
+// `scale` = the value mapped to full card-colour saturation.
 phaseDefs = ({
-  "ENSO (Niño 3.4)": {col: "nino34_anom_noaa", hi: 0.5, lo: -0.5, labels: ["El Niño", "La Niña", "Neutral"]},
-  "IOD (DMI)":        {col: "dmi_hadisst",     hi: 0.4, lo: -0.4, labels: ["Positive", "Negative", "Neutral"]},
-  "Western-V (WNP)":  {col: "wnp_std_mam",     hi: 0.5, lo: -0.5, labels: ["High", "Low", "Neutral"]},
+  "ENSO (Niño 3.4)": {col: "nino34_anom_noaa", hi: 0.5, lo: -0.5, scale: 2.5, labels: ["El Niño", "La Niña", "Neutral"]},
+  "IOD (DMI)":        {col: "dmi_hadisst",     hi: 0.4, lo: -0.4, scale: 1.0, labels: ["Positive", "Negative", "Neutral"]},
+  "Western-V (WNP)":  {col: "wnp_std_mam",     hi: 0.5, lo: -0.5, scale: 2.0, labels: ["High", "Low", "Neutral"]},
 })
 ```
 
@@ -311,35 +346,98 @@ driverSignalFor = (season, year) => {
 ```
 
 ```{ojs}
-// one map per year for a season, laid out as a wrapped grid of small panels
-seasonGrid = async (season, years) => {
+// card background by driver strength — PRGn diverging (purple=dry/negative,
+// green=wet/positive), deliberately NOT the blue rainfall ramp, and lightened
+// so it reads as a subtle card tint behind the map.
+cardColor = (value) => {
+  if (value == null) return "#ffffff";
+  const n = Math.max(-1, Math.min(1, value / phaseDefs[driverKind].scale));
+  const white = [247, 247, 247];
+  const end = n < 0 ? [118, 42, 131] : [27, 120, 55]; // purple (dry) / green (wet)
+  const t = Math.abs(n);
+  const mix = white.map((w, k) => w + t * (end[k] - w));       // white -> endpoint
+  const soft = mix.map((c) => Math.round(c + 0.45 * (255 - c))); // lighten 45%
+  return `rgb(${soft.join(",")})`;
+}
+```
+
+```{ojs}
+// years in the selected range that match the strength/phase filter (season-scoped)
+yearsFor = (season) => yearsSel.filter((y) =>
+  strengthFilter === "All years" ? true : driverSignalFor(season, y).phase === strengthFilter)
+```
+
+```{ojs}
+// 1991-2020 seasonal climatology mean (for the anomaly mode) — same grid, window-read
+climDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=climatology/variable=PTOT/period=annual/clim=wmo_1991-2020/stat=max"
+climFor = async (season, win) => {
+  const gt = await geotiffLib;
+  const tiff = await gt.fromUrl(`${climDir}/PTOT_${season}_1991-2020_mean.tif`);
+  const image = await tiff.getImage();
+  const rr = await image.readRasters({window: win.window});
+  const src = rr[0], out = new Float32Array(src.length);
+  for (let i = 0; i < src.length; i++) {
+    const v = src[i];
+    out[i] = (v == null || !isFinite(v) || v <= -9999) ? NaN : v;
+  }
+  return out;
+}
+```
+
+```{ojs}
+// build the per-year panel nodes for one season (DATA step — depends on data
+// inputs only, NOT facetCols, so column changes don't refetch)
+buildSeasonPanels = async (season) => {
   const win = await gridWindow;
-  const cells = await Promise.all(years.map(async (year) => {
+  const years = yearsFor(season);
+  if (!years.length)
+    return [html`<div class="rain-panel-err">No ${strengthFilter} years in ${yearsSel[0]}–${yearsSel[yearsSel.length - 1]}</div>`];
+  const clim = anomaly ? await climFor(season, win) : null;
+  const n = win.w * win.h;
+  return Promise.all(years.map(async (year) => {
     try {
-      const data = await seasonalYear(season, year, win);
+      let data = await seasonalYear(season, year, win);
+      if (anomaly && clim) {
+        const out = new Float32Array(n);
+        for (let i = 0; i < n; i++)
+          out[i] = (Number.isNaN(data[i]) || Number.isNaN(clim[i])) ? NaN : data[i] - clim[i];
+        data = out;
+      }
       const signal = driverSignalFor(season, year);
-      return renderRainPanel(
-        {season, year, signal},
+      return renderRainPanel({season, year, signal},
         {data, w: win.w, h: win.h, noData: NaN, bbox: win.bbox});
     } catch (e) {
       return html`<div class="rain-panel-err">${season} ${year}: ${e.message}</div>`;
     }
   }));
-  return html`<div class="rain-grid">${cells}</div>`;
 }
 ```
 
 ```{ojs}
-rainDomain = [0, 900]
-rainStops = [
+// LAYOUT step — arrange pre-built panels into an N-column grid (facetCols only)
+gridWrap = (nodes) => html`<div class="rain-grid"
+  style="grid-template-columns:repeat(${Math.round(facetCols)}, max-content)">${nodes}</div>`
+```
+
+```{ojs}
+// absolute seasonal total: white -> deep blue (sequential)
+rainStopsAbs = [
   {at: 0, rgb: [255, 255, 255]}, {at: 50, rgb: [224, 236, 244]},
   {at: 150, rgb: [158, 202, 225]}, {at: 300, rgb: [66, 146, 198]},
   {at: 500, rgb: [33, 102, 172]}, {at: 700, rgb: [8, 69, 148]},
   {at: 900, rgb: [8, 48, 107]},
 ]
+// anomaly: brown (drier than normal) -> white (0) -> blue (wetter), diverging
+rainStopsAnom = [
+  {at: -300, rgb: [140, 81, 10]}, {at: -150, rgb: [191, 129, 45]}, {at: -40, rgb: [223, 194, 125]},
+  {at: 0, rgb: [245, 245, 245]},
+  {at: 40, rgb: [146, 197, 222]}, {at: 150, rgb: [67, 147, 195]}, {at: 300, rgb: [33, 102, 172]},
+]
+rainDomain = anomaly ? [-300, 300] : [0, 900]
+activeStops = anomaly ? rainStopsAnom : rainStopsAbs
 pixelColor = (v) => {
   if (v == null || !isFinite(v) || v <= -9999) return null;
-  const s = rainStops;
+  const s = activeStops;
   if (v <= s[0].at) return `rgb(${s[0].rgb.join(",")})`;
   if (v >= s[s.length - 1].at) return `rgb(${s[s.length - 1].rgb.join(",")})`;
   for (let i = 1; i < s.length; i++) {
@@ -400,8 +498,11 @@ renderRainPanel = (spec, raster) => {
 
   const sig = spec.signal || {value: null, phase: "—"};
   const sigTxt = sig.value == null ? sig.phase : `${sig.value.toFixed(2)} (${sig.phase})`;
-  return html`<div class="rain-panel">
-    <div class="rain-title"><strong>${spec.year}</strong>
+  const coarse = spec.year < 2000
+    ? html`<span class="rain-coarse" title="Pre-2000 CHIRPS is spatially coarser (fewer input stations) — cells look blockier. Faithful, not smoothed.">⚠</span>`
+    : "";
+  return html`<div class="rain-panel" style="background:${cardColor(sig.value)}">
+    <div class="rain-title"><strong>${spec.year}</strong>${coarse}
       <span class="rain-signal">${driverKind.split(" ")[0]}: ${sigTxt}</span></div>
     <div class="rain-stack" style="position:relative;width:${W}px;height:${H}px">
       ${canvas}${svg}</div>
@@ -412,11 +513,12 @@ renderRainPanel = (spec, raster) => {
 ```{=html}
 <style>
   .controls-row { display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-end; margin:0.5rem 0 1rem; }
-  .rain-grid { display:flex; flex-wrap:wrap; gap:0.8rem; align-items:flex-start; margin:0.4rem 0 1.2rem; }
-  .rain-panel { border:1px solid #e5e7eb; border-radius:6px; padding:0.4rem; background:#fff; }
+  .rain-grid { display:grid; gap:0.8rem; justify-content:start; align-items:start; margin:0.4rem 0 1.2rem; }
+  .rain-panel { border:1px solid #d7ded9; border-radius:6px; padding:0.4rem; }
   .rain-title { font-size:0.8em; margin-bottom:0.3rem; line-height:1.2; }
-  .rain-signal { color:#666; font-size:0.9em; margin-left:0.3rem; }
-  .rain-stack { border:1px solid #eef1ef; }
+  .rain-signal { color:#555; font-size:0.9em; margin-left:0.3rem; }
+  .rain-coarse { color:#b45309; font-size:0.9em; margin-left:0.2rem; cursor:help; }
+  .rain-stack { border:1px solid rgba(0,0,0,0.08); background:#fff; }
   .rain-panel-err { color:#b45309; font-size:0.8em; padding:0.6rem; border:1px dashed #e0b466; border-radius:6px; }
 </style>
 ```
