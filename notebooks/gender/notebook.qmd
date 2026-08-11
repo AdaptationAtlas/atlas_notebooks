@@ -9,8 +9,8 @@ execute:
 
 ```{ojs}
 import {
+  bivariateMapWithLegend,
   bivariatePalettes,
-  makeBivariateLegend,
   makeChoropleth,
   mergeDataToBoundaries,
 } from "/helpers/atlasMap.ojs";
@@ -20,7 +20,7 @@ import {
   downloadPngButton,
 } from "/helpers/uiComponents.ojs";
 
-import { chartStyle, inputTemplate, wrapTickLabel } from "/helpers/std.ojs";
+import { chartStyle, inputTemplate } from "/helpers/std.ojs";
 ```
 
 {{< prose overview >}}
@@ -41,6 +41,9 @@ viewof afsSex = Inputs.radio(["F", "M", "diff"], {
 afsEmploymentChart = {
   const t = nbText.GenderedAfriAG.afsEmployment;
   const isDiff = afsSex === "diff";
+  // The field name is what the tip prints, and a plain name keeps the sort option
+  // working, so localize the key rather than wrap the channel.
+  const country = nbText.General.axes.country;
   let long;
   if (isDiff) {
     // Women minus men, per segment; the stacked (diverging) bars sum to the
@@ -51,27 +54,28 @@ afsEmploymentChart = {
       const m = sexes.get("M")?.[0];
       if (!f || !m) return [];
       return [
-        { country: countryNameN(f.iso3n, f.area), segment: t.segments.onFarm, pct: +(f.pctAgr - m.pctAgr).toFixed(1) },
-        { country: countryNameN(f.iso3n, f.area), segment: t.segments.offFarm, pct: +(f.pctOffFarm - m.pctOffFarm).toFixed(1) },
+        { [country]: countryNameN(f.iso3n, f.area), segment: t.segments.onFarm, pct: +(f.pctAgr - m.pctAgr).toFixed(1) },
+        { [country]: countryNameN(f.iso3n, f.area), segment: t.segments.offFarm, pct: +(f.pctOffFarm - m.pctOffFarm).toFixed(1) },
       ];
     });
   } else {
     const rows = afsEmployment.filter((d) => d.sex === afsSex);
     long = rows.flatMap((d) => [
-      { country: countryNameN(d.iso3n, d.area), segment: t.segments.onFarm, pct: d.pctAgr, empl: d.emplAgrK },
-      { country: countryNameN(d.iso3n, d.area), segment: t.segments.offFarm, pct: d.pctOffFarm, empl: d.emplOffFarmK },
+      { [country]: countryNameN(d.iso3n, d.area), segment: t.segments.onFarm, pct: d.pctAgr, empl: d.emplAgrK },
+      { [country]: countryNameN(d.iso3n, d.area), segment: t.segments.offFarm, pct: d.pctOffFarm, empl: d.emplOffFarmK },
     ]);
   }
   return Plot.plot({
     style: chartStyle,
     width: Math.min(width, 980),
     height: 60 + (long.length / 2) * 26,
-    // Country names run long; the margin fits ~26 characters at 13px, so most
-    // stay on one line.
     marginLeft: 185,
     marginTop: isDiff ? 24 : 20,
+    // chartStyle runs at 13px, but Plot sizes its default margins for a ~10px
+    // font, so the default 30px bottom margin puts the axis label on the ticks.
+    marginBottom: 44,
     x: { label: isDiff ? t.axisDiff : t.axis, grid: true },
-    y: { label: null, tickFormat: (d) => wrapTickLabel(d, 26) },
+    y: { label: null },
     color: {
       legend: true,
       // Names the legend and the tip row, which read "segment" otherwise.
@@ -80,9 +84,10 @@ afsEmploymentChart = {
       range: ["#216729", "#64acbe"],
     },
     marks: [
+      Plot.axisY({ lineWidth: 13 }),
       Plot.barX(long, {
         x: "pct",
-        y: "country",
+        y: country,
         fill: "segment",
         stroke: "white",
         strokeWidth: 0.75,
@@ -169,24 +174,33 @@ womenCropsChart = {
     height: 70 + (order.length + 1) * 44,
     marginLeft: 95,
     marginBottom: 55,
-    x: { label: null, domain: [...Object.values(t.plot.crops), avg], tickFormat: (d) => wrapTickLabel(d, 14) },
+    x: { label: null, domain: [...Object.values(t.plot.crops), avg] },
     y: { label: null, domain: [...order, avg] },
     color: { type: "linear", range: ["#F7D732", "#216729"], legend: true, label: t.legend },
-    marks: heatmapMeanMarks(rows, {
-      x: (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup,
-      y: country, v: (d) => d.pctFemale, avg, textThreshold: 45,
-      xLabel: nbText.General.axes.crop, yLabel: nbText.General.axes.country,
-    }),
+    marks: [
+      Plot.axisX({ lineWidth: 7 }),
+      ...heatmapMeanMarks(rows, {
+        x: (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup,
+        y: country, v: (d) => d.pctFemale, avg, textThreshold: 45,
+        xLabel: nbText.General.axes.crop, yLabel: nbText.General.axes.country,
+      }),
+    ],
     caption: t.caption,
   });
 }
 ```
 
 ```{ojs}
-downloadPngButton(womenCropsChart, {
-  filename: "gender_women_crops.png",
-  label: nbText.General.downloadFigure,
-});
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(womenCropsChart, {
+    filename: "gender_women_crops.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(cropGenderData, {
+    filename: "female_participation_crops_palacios-lopez2017.csv",
+    label: nbText.General.download,
+  }),
+]);
 ```
 
 {{< prose women-livestock level=2 >}}
@@ -203,23 +217,32 @@ womenLivestockChart = {
     height: 70 + (order.length + 1) * 32,
     marginLeft: 175,
     x: { label: null, domain: [...Object.values(t.species), avg] },
-    y: { label: null, domain: [...order, avg], tickFormat: (d) => wrapTickLabel(d, 24) },
+    y: { label: null, domain: [...order, avg] },
     color: { type: "linear", domain: [0, 100], range: ["#F7D732", "#216729"], legend: true, label: t.legend },
-    marks: heatmapMeanMarks(livestockControl, {
-      x: (d) => t.species[d.species] ?? d.species,
-      y: country, v: (d) => d.pctFemale, avg,
-      xLabel: nbText.General.axes.livestock, yLabel: nbText.General.axes.country,
-    }),
+    marks: [
+      Plot.axisY({ lineWidth: 12 }),
+      ...heatmapMeanMarks(livestockControl, {
+        x: (d) => t.species[d.species] ?? d.species,
+        y: country, v: (d) => d.pctFemale, avg,
+        xLabel: nbText.General.axes.livestock, yLabel: nbText.General.axes.country,
+      }),
+    ],
     caption: t.caption,
   });
 }
 ```
 
 ```{ojs}
-downloadPngButton(womenLivestockChart, {
-  filename: "gender_women_livestock.png",
-  label: nbText.General.downloadFigure,
-});
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(womenLivestockChart, {
+    filename: "gender_women_livestock.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(livestockControl, {
+    filename: "womens_livestock_sale_income_rhomis.csv",
+    label: nbText.General.download,
+  }),
+]);
 ```
 
 {{< prose gender-hotspots >}}
@@ -310,9 +333,13 @@ biVarMap = {
       },
     },
     tooltip: { country: true, region: true, heat: true, women: true },
+    caption: nbText.GenderHotspots.wbgtMap.caption,
+    // A unit with no data keeps its outline, so it reads as empty rather than as
+    // a missing hole in the map.
+    baseMarkOptions: { stroke: (d) => (d.properties.data ? "#fff" : "#bbb") },
     extraMarks: [Plot.geo(africaA0, { stroke: "#333", strokeWidth: 0.8, fill: null })],
   });
-  const legend = makeBivariateLegend({
+  return bivariateMapWithLegend(map, {
     colors: biVarColors,
     xLabel: nbText.GenderHotspots.wbgtMap.legend.women,
     yLabel: nbText.GenderHotspots.wbgtMap.legend[heatHazard],
@@ -320,7 +347,6 @@ biVarMap = {
     height: 225,
     fontSize: 13,
   });
-  return htl.html`<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:0.25rem">${map}${legend}</div>`;
 }
 ```
 
@@ -369,6 +395,7 @@ hotspotMap = makeChoropleth({
     },
   },
   tooltip: { country: true, rank: true },
+  caption: nbText.GlobalHotspots.caption,
 });
 ```
 
@@ -421,20 +448,26 @@ adaptiveCapacityChart = {
     width: Math.min(width, 760),
     height: 500,
     marginBottom: 70,
-    x: { domain: order, label: null, tickFormat: (d) => wrapTickLabel(d, 16) },
+    x: { domain: order, label: null },
     y: { domain: [0, 100], grid: true, label: t.axisY },
-    color: { legend: true, domain: [t.sexes.F, t.sexes.M], range: ["#d6604d", "#4393c3"] },
+    color: {
+      legend: true,
+      label: nbText.General.axes.gender,
+      domain: [t.sexes.F, t.sexes.M],
+      range: ["#d6604d", "#4393c3"],
+    },
     marks: [
+      Plot.axisX({ lineWidth: 8 }),
       Plot.ruleX(pairs, { x: "indicator", y1: "lo", y2: "hi", stroke: "#bbb", strokeWidth: 2 }),
       Plot.dot(rows, {
-        x: label,
+        x: { value: label, label: t.selectors.indicator.title },
         y: "value",
         fill: (d) => t.sexes[d.sex],
         r: 7,
         stroke: "white",
         strokeWidth: 1,
         tip: true,
-        channels: { year: "year" },
+        channels: { [nbText.General.axes.year]: "year" },
       }),
     ],
     caption: t.caption,
@@ -511,6 +544,7 @@ adaptiveCapacityMap = {
       men: { label: t.sexes.M, value: (d) => d.properties.data?.M },
     },
     tooltip: { country: true, women: true, men: true },
+    caption: t.map.caption,
     adminHighlight: {
       filter: (d) => d.properties.iso3n === capCountry,
       stroke: "#111",
@@ -573,7 +607,7 @@ bridgeGapMatrix = {
     height: 80 + riskOrder.length * 42,
     marginLeft: 150,
     marginBottom: 55,
-    x: { label: null, domain: Object.values(t.selector.options), tickFormat: (d) => wrapTickLabel(d, 16) },
+    x: { label: null, domain: Object.values(t.selector.options) },
     y: { label: null, domain: riskOrder },
     color: {
       legend: true,
@@ -582,12 +616,16 @@ bridgeGapMatrix = {
       range: outcomeKeys.map((k) => outcomeColors[k]),
     },
     marks: [
+      Plot.axisX({ lineWidth: 8 }),
       Plot.cell(cells, {
-        x: "cat",
-        y: "risk",
+        x: { value: "cat", label: t.selector.title },
+        y: { value: "risk", label: t.table.headings.Risk },
         fill: "outcome",
         inset: 1,
-        tip: true,
+        // Plot truncates a tip row past lineWidth (20 ems by default) and, in this
+        // version, puts the truncated text in the title too, so the full geography
+        // list is unreachable. Widen it rather than lose the words.
+        tip: { lineWidth: 60 },
         channels: {
           [t.table.headings["Gender Outcome Score"]]: "outcomes",
           [t.table.headings.Geography]: "geographies",
@@ -782,8 +820,10 @@ biVarColors = bivariatePalettes.blueRed
 // A threshold scale bands NaN into its lowest class, so missing values have to be
 // caught before the lookup or they would read as low heat and few women.
 biVarColor = (row) => {
+  // Unfilled rather than grey: the palette's own low-low cell is #e8e8e8, so a
+  // grey no-data class would be indistinguishable from "low heat, few women".
   if (!Number.isFinite(row?.value) || !Number.isFinite(row?.pct_women_agri)) {
-    return "#e0e0e0";
+    return "#fff";
   }
   const x = womenClass(row.pct_women_agri);
   const y = heatClass(row.value);
