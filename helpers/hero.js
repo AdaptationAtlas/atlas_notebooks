@@ -1,9 +1,4 @@
-const o=`<svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 32 27"
-style="width: 20px; height: 20px; display: block">
-  <path id="Imported Path"
-        fill="white" stroke="white" stroke-width=".5"
-        d="M 31.60,25.63
+import{readNotebookConfig as m}from"./notebook.js";const d="http://www.w3.org/2000/svg";function h(){const t=document.createElementNS(d,"svg");t.classList.add("atlas-hero__mark"),t.setAttribute("viewBox","0 0 32 27");const e=document.createElementNS(d,"path");return e.setAttribute("fill","white"),e.setAttribute("stroke","white"),e.setAttribute("stroke-width",".5"),e.setAttribute("d",`M 31.60,25.63
            C 31.60,25.84 31.52,26.03 31.38,26.18
              31.23,26.32 31.04,26.40 30.84,26.40
              30.84,26.40 1.16,26.40 1.16,26.40
@@ -37,17 +32,4 @@ style="width: 20px; height: 20px; display: block">
              29.40,0.77 29.40,24.87 29.40,24.87
              29.40,24.87 30.84,24.87 30.84,24.87
              31.04,24.87 31.23,24.95 31.38,25.09
-             31.52,25.24 31.60,25.43 31.60,25.63 Z" />
-</svg>`;export const heroImage=(t,e,i="")=>`<div id="hero-image" style="position: relative; width: 100%; height: 500px; display: flex; justify-content: center; align-items: center;">
-    <img
-        src="${e}"
-        style="position: absolute; width: 100%; height: 100%; object-fit: cover;"
-    />
-    <div style="position: relative; height: 340px; width: 340px; padding: 40px; display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center; border-radius: 50%; background-color: white; z-index: 10;">
-        <div style="display: inline-block; padding: .5rem; margin-bottom: .5rem; background-color: black;">
-            ${o}
-        </div>
-        <span style="text-transform: uppercase; font-weight: 500; margin-bottom: 20px;">${i.toUpperCase()}</span>
-        <div style="margin-bottom: 12px; font-size: 1.1rem; font-weight: 700;">${t.toUpperCase()}</div>
-    </div>
-</div>`;
+             31.52,25.24 31.60,25.43 31.60,25.63 Z`),t.appendChild(e),t}export function atlasHero({title:t,image:e,group:n="",alt:s=""}={}){if(!t)throw new TypeError("atlasHero requires a title");if(!e)throw new TypeError("atlasHero requires an image");const r=document.createElement("section");r.id="hero-image",r.className="atlas-hero",r.setAttribute("aria-labelledby","notebook-title");const i=document.createElement("img");i.className="atlas-hero__image",i.src=e,i.alt=s;const o=document.createElement("div");o.className="atlas-hero__content";const a=document.createElement("div");if(a.className="atlas-hero__icon",a.setAttribute("aria-hidden","true"),a.appendChild(h()),o.appendChild(a),n){const c=document.createElement("span");c.className="atlas-hero__group",c.textContent=String(n),o.appendChild(c)}const l=document.createElement("h1");return l.id="notebook-title",l.className="atlas-hero__title",l.textContent=String(t),o.appendChild(l),r.append(i,o),r}export function heroImage(t,e,n=""){return atlasHero({title:t,image:e,group:n})}class g extends HTMLElement{connectedCallback(){const e=m(),n=window.atlasLang??document.documentElement.lang,s=atlasHero({title:e.title[n],image:e.image,alt:e.imageAlt?.[n]??""});this.replaceChildren(s);const r=s.querySelector("#notebook-title"),i=s.querySelector(".atlas-hero__image"),o=a=>{r.textContent=e.title[a],i.alt=e.imageAlt?.[a]??""};this._onLanguageChange=a=>o(a.detail),window.addEventListener("atlas:lang",this._onLanguageChange),o(n)}disconnectedCallback(){window.removeEventListener("atlas:lang",this._onLanguageChange)}}customElements.define("atlas-notebook-hero",g);

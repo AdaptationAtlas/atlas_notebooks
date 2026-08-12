@@ -1,98 +1,110 @@
-//WARNING: For this file to work correctly, it must have the OJS extension, this is because of the OJS Inputs, TOC generator and similar.
-//Alternative would be to require the libraries in the module.
+// Must remain OJS because it uses Observable built-ins such as Inputs and html.
 
-/**
- * Returns HTML for a hero image with a centered title.
- *
- * The title is placed over a background color and is centered
- * horizontally and vertically.
- *
- * @param {string} nbTitle - The title to display.
- * @param {string} image_url - The URL of the hero image.
- * @returns {object} An object containing the HTML content for the hero image.
- */
-function atlasHero(nbTitle, image_url) {
-  return htl.html`
-    <div id="hero-image" style="position: relative; width: 100%; max-width: 100%; overflow: visible; display: flex; justify-content: center;">
-      <img src="${image_url}" style="width: 100%; height: 175px; object-fit: cover;" />
-      <div style="position: absolute; bottom: 0; width: 60%; max-width: 90%; padding: 15px; display: flex; justify-content: center; align-items: center; flex-direction: column; text-align: center; background-color: white; z-index: 10; box-sizing: border-box;">
-        <h1 class='title' id='notebook-title' style="all: unset; font-size: 28px; font-weight: 700; word-wrap: break-word; line-height: 1.2;">${nbTitle}</h1>
-      </div>
-    </div>`
+CSV_BOM = "\uFEFF";
+
+function csvColumns(data, columns) {
+  if (columns !== undefined && !Array.isArray(columns)) {
+    throw new TypeError("CSV columns must be an array");
+  }
+
+  return columns ?? Object.keys(data[0] ?? {});
 }
 
+function escapeCsvField(value) {
+  if (value == null) return "";
 
-/**
- * Converts an array of objects into a CSV string.
- *
- * @param {Array<object>} data - The data to convert, where each object represents a row.
- * @returns {string} A CSV formatted string representing the input data.
- *                   Returns an empty string if the input data is empty or not provided.
- *
- * Each object's keys are used as CSV column headers. Values are escaped if they contain
- * commas, quotes, or newlines. Null or undefined values are converted to empty strings.
- */
-function convertToCSV(data) {
-  if (!data?.length) return '';
+  const text = String(value).replace(/\r\n?|\n/g, "\r\n");
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
 
-  const headers = Object.keys(data[0]);
-  const escapeValue = val => {
-    if (val == null) return '';
-    const str = String(val);
-    return str.includes(',') || str.includes('"') || str.includes('\n')
-      ? `"${str.replace(/"/g, '""')}"` : str;
-  };
+/** Serialize rows as RFC 4180 CSV with a BOM for spreadsheet Unicode support. */
+function serializeCsv(data, { columns } = {}) {
+  const rows = Array.isArray(data) ? data : [];
+  const selectedColumns = csvColumns(rows, columns);
+  if (!selectedColumns.length) return CSV_BOM;
 
-  return [
-    headers.map(escapeValue).join(','),
-    ...data.map(row => headers.map(key => escapeValue(row[key])).join(','))
-  ].join('\n');
-};
+  const records = [
+    selectedColumns.map(escapeCsvField).join(","),
+    ...rows.map((row) =>
+      selectedColumns.map((column) => escapeCsvField(row?.[column])).join(","),
+    ),
+  ];
 
-/**
- * Generate a download button for a given dataset.
- * @param {Array<object>} data - The dataset to download.
- * @param {string} filename - The name of the file to download.
- */
-function downloadData(data, filename) {
-  const filename_csv = filename + ".csv";
-  const blob = new Blob([convertToCSV(data)], { type: 'text/csv;charset=utf-8;' });
+  return `${CSV_BOM}${records.join("\r\n")}\r\n`;
+}
+
+function downloadName(filename, extension) {
+  return filename.toLowerCase().endsWith(extension) ? filename : filename + extension;
+}
+
+function downloadBlob(blob, filename) {
   const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
+  const link = document.createElement("a");
+
   link.href = url;
-  link.setAttribute('download', filename_csv);
+  link.download = filename;
+  link.hidden = true;
   document.body.appendChild(link);
-  link.style.display = 'none';
   link.click();
+  link.remove();
 
-  window.URL.revokeObjectURL(url);
-  document.body.removeChild(link);
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
 }
 
-
-/**
- * Create a button that downloads the given dataset as a CSV file.
- * @param {Array<object>} data - The dataset to download.
- * @param {string} filename - The name of the file to download (without the .csv extension).
- * @param {string} [label="Download"] - The label to display on the button.
- * @returns {Button} - The download button.
- */
-function downloadButton(data, filename, label = "Download") {
-  return Inputs.button(label, {reduce: () => downloadData(data, filename)})
+function downloadCsv(data, { filename = "atlas-data", columns } = {}) {
+  downloadBlob(
+    new Blob([serializeCsv(data, { columns })], {
+      type: "text/csv;charset=utf-8",
+    }),
+    downloadName(filename, ".csv"),
+  );
 }
 
-/**
- * Creates an interactive collapsible section (using `<details>` and `<summary>`)
- * with a custom title and content blocks. This is designed for use in
- * Observable or other template-literal HTML environments.
- *
- * @param {string}  title - The title of the collapsible section
- * @param {boolean} initiallyOpen - If true, the section is expanded on load.
- * @param {...any} contents - One or more HTML or string elements to display
- *                            inside the dropdown body.
- *
- * @returns {object} An object containing the HTML content for the dropdown.
- */
+/** Create a button that downloads object rows as CSV. */
+function downloadCsvButton(
+  data,
+  {
+    filename = "atlas-data",
+    label = "Download CSV",
+    columns,
+  } = {},
+) {
+  return Inputs.button(label, {
+    reduce: () => downloadCsv(data, { filename, columns }),
+  });
+}
+
+// Pinned like the other CDN deps. Renders the live DOM — including HTML legends and
+// anything positioned by CSS — by wrapping the clone in an SVG foreignObject, which
+// is why this is the PNG path and not the SVG one.
+htmlToImage = import("https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/+esm")
+
+/** Create a button that downloads a figure as a raster PNG of what is on screen. */
+function downloadPngButton(
+  chart,
+  { filename = "atlas-figure", label = "Download figure", scale = 2 } = {},
+) {
+  return Inputs.button(label, {
+    // toBlob rather than toPng so the existing download plumbing is reused. Plot
+    // paints its own white background, so match it rather than ship a raster that
+    // is opaque in the middle and transparent at the edges.
+    // The canvas is grown by 16px a side and the clone is border-boxed, so the
+    // figure renders at its on-screen size with white margin around it.
+    reduce: async () =>
+      downloadBlob(
+        await htmlToImage.toBlob(chart, {
+          pixelRatio: scale,
+          backgroundColor: "#fff",
+          width: chart.clientWidth + 32,
+          height: chart.clientHeight + 32,
+          style: { padding: "16px", boxSizing: "border-box" },
+        }),
+        downloadName(filename, ".png"),
+      ),
+  });
+}
+
+/** Create a collapsible <details> section from Observable content blocks. */
 dropdown_section = (title, initiallyOpen, ...contents) => {
   return html`
     <details ${initiallyOpen ? "open" : ""} style="border-radius:5px; background:none; max-width:900px; padding:0;">
@@ -108,45 +120,17 @@ dropdown_section = (title, initiallyOpen, ...contents) => {
   `;
 };
 
-/**
- * Creates a label with a CSS-based hover tooltip.
- *
- * @param {Object} options - Configuration options for the tooltip label
- * @param {string} [options.labelText="Dropdown label"] - The visible text of the label
- * @param {string} [options.tooltipText="Tooltip text"] - The text shown in the tooltip on hover
- *
- * @returns {HTMLElement} An HTML span element with tooltip functionality and associated styles
- *
- */
+/** Create an Atlas label with a keyboard-accessible CSS tooltip. */
 function makeTooltipLabel({
   labelText = "Dropdown label",
   tooltipText = "Tooltip text",
 } = {}) {
   return htl.html`
     <span
-      data-title-text="${tooltipText}"
-      style="
-        position:relative;
-        cursor:pointer;
-      "
+      class="atlas-tooltip-label"
+      data-atlas-tooltip="${tooltipText}"
+      aria-label="${`${labelText}: ${tooltipText}`}"
+      tabindex="0"
     >${labelText}</span>
-    <style>
-      [data-title-text]:hover::after {
-        content: attr(data-title-text);
-        position: absolute;
-        left: 0;
-        top: 100%;
-        background: #cfcfcf;
-        color: #333;
-        font-size: 14px;
-        padding: 6px 10px;
-        border-radius: 4px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        white-space: normal;
-        min-width: 200px;
-        max-width: min(450px, calc(100vw - 20px));
-        z-index: 1;
-      }
-    </style>
   `;
 }
