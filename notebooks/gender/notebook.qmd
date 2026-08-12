@@ -1,0 +1,851 @@
+---
+nb-config: data/genderExposure/notebook.json
+date-modified: last-modified # citation year; renders nowhere
+execute:
+  echo: false
+---
+
+{{< include /components/_notebookHeader.qmd >}}
+
+```{ojs}
+import {
+  bivariateMapWithLegend,
+  bivariatePalettes,
+  makeChoropleth,
+  mergeDataToBoundaries,
+} from "/helpers/atlasMap.ojs";
+
+import { downloadCsvButton, downloadPngButton } from "/helpers/uiComponents.ojs";
+
+import { chartStyle, inputTemplate } from "/helpers/std.ojs";
+```
+
+{{< prose overview >}}
+
+{{< prose overview-note details=true >}}
+
+{{< prose gendered-agriculture >}}
+
+```{ojs}
+viewof afsSex = Inputs.radio(["F", "M", "diff"], {
+  value: "F",
+  label: nbText.GenderedAfriAG.afsEmployment.selectors.sex.title,
+  format: (k) => nbText.GenderedAfriAG.afsEmployment.selectors.sex.options[k],
+})
+```
+
+```{ojs}
+afsEmploymentChart = {
+  const t = nbText.GenderedAfriAG.afsEmployment;
+  const isDiff = afsSex === "diff";
+  // The field name is what the tip prints, and a plain name keeps the sort option
+  // working, so localize the key rather than wrap the channel.
+  const country = nbText.General.axes.country;
+  let long;
+  if (isDiff) {
+    // Women minus men, per segment; the stacked (diverging) bars sum to the
+    // total AFS-share gap.
+    const bySex = d3.group(afsEmployment, (d) => d.iso3n, (d) => d.sex);
+    long = [...bySex.values()].flatMap((sexes) => {
+      const f = sexes.get("F")?.[0];
+      const m = sexes.get("M")?.[0];
+      if (!f || !m) return [];
+      return [
+        { [country]: countryNameN(f.iso3n, f.area), segment: t.segments.onFarm, pct: +(f.pctAgr - m.pctAgr).toFixed(1) },
+        { [country]: countryNameN(f.iso3n, f.area), segment: t.segments.offFarm, pct: +(f.pctOffFarm - m.pctOffFarm).toFixed(1) },
+      ];
+    });
+  } else {
+    const rows = afsEmployment.filter((d) => d.sex === afsSex);
+    long = rows.flatMap((d) => [
+      { [country]: countryNameN(d.iso3n, d.area), segment: t.segments.onFarm, pct: d.pctAgr, empl: d.emplAgrK },
+      { [country]: countryNameN(d.iso3n, d.area), segment: t.segments.offFarm, pct: d.pctOffFarm, empl: d.emplOffFarmK },
+    ]);
+  }
+  return Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 980),
+    height: 60 + (long.length / 2) * 26,
+    marginLeft: 185,
+    marginTop: isDiff ? 24 : 20,
+    // chartStyle runs at 13px, but Plot sizes its default margins for a ~10px
+    // font, so the default 30px bottom margin puts the axis label on the ticks.
+    marginBottom: 44,
+    x: { label: isDiff ? t.axisDiff : t.axis, grid: true },
+    y: { label: null },
+    color: {
+      legend: true,
+      // Names the legend and the tip row, which read "segment" otherwise.
+      label: t.segmentLabel,
+      domain: [t.segments.onFarm, t.segments.offFarm],
+      range: ["#216729", "#64acbe"],
+    },
+    marks: [
+      Plot.axisY({ lineWidth: 13 }),
+      Plot.barX(long, {
+        x: "pct",
+        y: country,
+        fill: "segment",
+        stroke: "white",
+        strokeWidth: 0.75,
+        sort: { y: "-x", reduce: "sum" },
+        channels: isDiff ? {} : { [t.tooltip.employed]: "empl" },
+        tip: true,
+      }),
+      Plot.ruleX([0]),
+      ...(isDiff
+        ? [
+            Plot.text([t.diffHints.men], {
+              frameAnchor: "top-left",
+              dy: -18,
+              fontWeight: "bold",
+              fill: "currentColor",
+            }),
+            Plot.text([t.diffHints.women], {
+              frameAnchor: "top-right",
+              dy: -18,
+              fontWeight: "bold",
+              fill: "currentColor",
+            }),
+          ]
+        : []),
+    ],
+    caption: t.caption,
+  });
+}
+```
+
+```{ojs}
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(afsEmploymentChart, {
+    filename: "gender_afs_employment.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(afsEmployment, {
+    filename: "afs_employment_by-sex_faostat.csv",
+    label: nbText.General.download,
+  }),
+])
+```
+
+{{< prose women-dominate level=2 >}}
+
+```{ojs}
+// Add row, column, and grand means around a heatmap and label them in bold.
+heatmapMeanMarks = (rows, { x, y, v, avg, xLabel, yLabel, textThreshold = 50 }) => {
+  const cells = rows.map((d) => ({ x: x(d), y: y(d), v: v(d) }));
+  const mean = (subset) =>
+    subset.length ? Math.round(d3.mean(subset, (c) => c.v) * 10) / 10 : null;
+  const columns = [...new Set(cells.map((c) => c.x))];
+  const countries = [...new Set(cells.map((c) => c.y))];
+  const means = [
+    ...columns.map((xv) => ({ x: xv, y: avg, v: mean(cells.filter((c) => c.x === xv)) })),
+    ...countries.map((yv) => ({ x: avg, y: yv, v: mean(cells.filter((c) => c.y === yv)) })),
+    { x: avg, y: avg, v: mean(cells) },
+  ].filter((c) => c.v != null);
+  return [
+    // The {value, label} channel form names the tip rows; the scales keep
+    // label: null, so the axes stay bare. Fill takes its name from the legend.
+    Plot.cell([...cells, ...means], {
+      x: { value: "x", label: xLabel },
+      y: { value: "y", label: yLabel },
+      fill: "v",
+      inset: 1,
+      tip: true,
+    }),
+    Plot.text(means, {
+      x: "x",
+      y: "y",
+      text: (c) => c.v,
+      fontWeight: "bold",
+      fill: (c) => (c.v >= textThreshold ? "white" : "#222"),
+    }),
+  ];
+}
+
+womenCropsChart = {
+  const t = nbText.GenderedAfriAG.FemaleParticipationCrops;
+  const avg = t.average;
+  const country = (d) => nbText.General.adminNames[d.country] ?? d.country;
+  const rows = cropGenderData.filter((d) => d.pctFemale != null);
+  const order = d3.groupSort(rows, (g) => -d3.mean(g, (d) => d.pctFemale), country);
+  return Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 760),
+    height: 70 + (order.length + 1) * 44,
+    marginLeft: 95,
+    marginBottom: 55,
+    x: { label: null, domain: [...Object.values(t.plot.crops), avg] },
+    y: { label: null, domain: [...order, avg] },
+    color: { type: "linear", range: ["#F7D732", "#216729"], legend: true, label: t.legend },
+    marks: [
+      Plot.axisX({ lineWidth: 7 }),
+      ...heatmapMeanMarks(rows, {
+        x: (d) => t.plot.crops[d.cropGroup] ?? d.cropGroup,
+        y: country,
+        v: (d) => d.pctFemale,
+        avg,
+        textThreshold: 45,
+        xLabel: nbText.General.axes.crop,
+        yLabel: nbText.General.axes.country,
+      }),
+    ],
+    caption: t.caption,
+  });
+}
+```
+
+```{ojs}
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(womenCropsChart, {
+    filename: "gender_women_crops.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(cropGenderData, {
+    filename: "female_participation_crops_palacios-lopez2017.csv",
+    label: nbText.General.download,
+  }),
+])
+```
+
+{{< prose women-livestock level=2 >}}
+
+```{ojs}
+womenLivestockChart = {
+  const t = nbText.GenderedAfriAG.livestockControl;
+  const avg = t.average;
+  const country = (d) => countryNameN(iso3ToN.get(d.iso3), d.iso3);
+  const order = d3.groupSort(livestockControl, (g) => -d3.mean(g, (d) => d.pctFemale), country);
+  return Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 820),
+    height: 70 + (order.length + 1) * 32,
+    marginLeft: 175,
+    x: { label: null, domain: [...Object.values(t.species), avg] },
+    y: { label: null, domain: [...order, avg] },
+    color: {
+      type: "linear",
+      domain: [0, 100],
+      range: ["#F7D732", "#216729"],
+      legend: true,
+      label: t.legend,
+    },
+    marks: [
+      Plot.axisY({ lineWidth: 12 }),
+      ...heatmapMeanMarks(livestockControl, {
+        x: (d) => t.species[d.species] ?? d.species,
+        y: country,
+        v: (d) => d.pctFemale,
+        avg,
+        xLabel: nbText.General.axes.livestock,
+        yLabel: nbText.General.axes.country,
+      }),
+    ],
+    caption: t.caption,
+  });
+}
+```
+
+```{ojs}
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(womenLivestockChart, {
+    filename: "gender_women_livestock.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(livestockControl, {
+    filename: "womens_livestock_sale_income_rhomis.csv",
+    label: nbText.General.download,
+  }),
+])
+```
+
+{{< prose gender-hotspots >}}
+
+{{< prose human-heat-stress level=2 >}}
+
+{{< prose crop-heat-stress level=2 >}}
+
+{{< prose livestock-heat-stress level=2 >}}
+
+```{ojs}
+heatHazardText = nbText.GenderHotspots.wbgtMap.selectors.hazard
+
+// One cell per control, composed into a row below. Separate cells rather than one
+// Inputs.form so a change to any of them re-emits only its own value.
+viewof heatHazard = Inputs.radio(Object.keys(heatHazardText.options), {
+  value: "human",
+  label: heatHazardText.title,
+  format: (k) => heatHazardText.options[k],
+})
+
+viewof heatTimeframe = Inputs.select(["historic", "2030", "2050"], {
+  label: nbText.GenderHotspots.wbgtMap.selectors.timeframe.title,
+  format: (k) => nbText.GenderHotspots.wbgtMap.selectors.timeframe.options[k],
+  width: 190,
+})
+
+viewof heatScenario = Inputs.select(["ssp245", "ssp585"], {
+  label: nbText.GenderHotspots.wbgtMap.selectors.scenario.title,
+  format: (k) => nbText.GenderHotspots.wbgtMap.selectors.scenario.options[k],
+  width: 190,
+})
+
+inputTemplate({ gap: "1.5em" })([viewof heatHazard, viewof heatTimeframe, viewof heatScenario])
+
+scenarioAvailable = {
+  const disabled = heatTimeframe === "historic";
+  viewof heatScenario.querySelector("select").disabled = disabled;
+  viewof heatScenario.style.opacity = disabled ? 0.45 : 1;
+  return !disabled;
+}
+
+heatThresholds = ({ human: [28, 30], crop: [35, 40] }[heatHazard])
+
+viewof heatThresholdControl = Inputs.form(
+  {
+    ...(heatThresholds && {
+      threshold: Inputs.radio(heatThresholds, {
+        value: heatThresholds[0],
+        label: nbText.GenderHotspots.wbgtMap.selectors.threshold.title,
+        format: (v) => `${v}°C${heatHazard === "human" ? " WBGT" : ""}`,
+      }),
+    }),
+  },
+  { template: inputTemplate({ gap: "1.5em" }) }
+)
+
+heatThreshold = heatThresholdControl.threshold
+```
+
+```{ojs}
+biVarMap = {
+  const heatTooltip = tmpl(nbText.GenderHotspots.wbgtMap.tooltip[heatHazard], {
+    threshold: heatThreshold,
+  });
+  const map = makeChoropleth({
+    features: biVarFeatures.features,
+    width: Math.min(width, 760),
+    height: 520,
+    fill: (d) => biVarColor(d.properties.data),
+    channels: {
+      country: {
+        label: nbText.General.axes.country,
+        value: (d) => countryNameN(d.properties.iso3n),
+      },
+      region: {
+        label: nbText.General.axes.region,
+        value: (d) => d.properties.admin1_name,
+      },
+      heat: { label: heatTooltip, value: (d) => d.properties.data?.value },
+      women: {
+        label: nbText.GenderHotspots.wbgtMap.tooltip.women,
+        value: (d) => d.properties.data?.pct_women_agri,
+      },
+    },
+    tooltip: { country: true, region: true, heat: true, women: true },
+    caption: nbText.GenderHotspots.wbgtMap.caption,
+    // A unit with no data keeps its outline, so it reads as empty rather than as
+    // a missing hole in the map.
+    baseMarkOptions: { stroke: (d) => (d.properties.data ? "#fff" : "#bbb") },
+    extraMarks: [Plot.geo(africaA0, { stroke: "#333", strokeWidth: 0.8, fill: null })],
+  });
+  return bivariateMapWithLegend(map, {
+    colors: biVarColors,
+    xLabel: nbText.GenderHotspots.wbgtMap.legend.women,
+    yLabel: nbText.GenderHotspots.wbgtMap.legend[heatHazard],
+    width: 235,
+    height: 225,
+    fontSize: 13,
+  });
+}
+```
+
+```{ojs}
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(biVarMap, {
+    filename: "gender_wbgt_women_bivariate.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(biVarRows, {
+    filename: `${heatHazard}-heat${heatThreshold ?? ""}_women-agri_${heatTimeframe}${
+      heatTimeframe === "historic" ? "" : "_" + heatScenario
+    }.csv`,
+    label: nbText.General.download,
+  }),
+])
+```
+
+{{< prose hotspot-ranking >}}
+
+```{ojs}
+viewof hotspotIndicator = Inputs.select(Object.keys(hotspotIndicators), {
+  label: nbText.GlobalHotspots.selectorTitle,
+  format: (k) => hotspotIndicators[k].label,
+})
+```
+
+```{ojs}
+hotspotMap = makeChoropleth({
+  features: hotspotFeatures.features,
+  width: Math.min(width, 900),
+  height: 500,
+  fill: (d) => d.properties.data?.[hotspotIndicator],
+  color: {
+    type: "linear",
+    scheme: "YlOrRd",
+    unknown: "#e0e0e0",
+    label: hotspotIndicators[hotspotIndicator].legend,
+  },
+  channels: {
+    country: {
+      label: nbText.General.axes.country,
+      value: (d) => countryNameN(d.properties.iso3n),
+    },
+    rank: {
+      label: nbText.GlobalHotspots.rankLabel,
+      value: (d) => d.properties.data?.rank,
+    },
+  },
+  tooltip: { country: true, rank: true },
+  caption: nbText.GlobalHotspots.caption,
+});
+```
+
+```{ojs}
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(hotspotMap, {
+    filename: "gender_hotspot_map.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(hotspotData, {
+    filename: "ifpri_gender_climate_hotspots_africa.csv",
+    label: nbText.General.download,
+  }),
+])
+```
+
+{{< prose gender-investments >}}
+
+{{< prose gender-investments-note details=true >}}
+
+{{< prose country-deep-dive level=2 >}}
+
+```{ojs}
+// Offer all FAOSTAT countries, including North Africa, with shared translations.
+viewof capCountry = Inputs.select(
+  [...capCountryNames.keys()].sort((a, b) =>
+    capCountryNames.get(a).localeCompare(capCountryNames.get(b))
+  ),
+  {
+    value: 404, // Kenya — good indicator coverage
+    label: nbText.GenderInvestments.adaptiveCapacity.selectors.country.title,
+    format: (n) => capCountryNames.get(n),
+  }
+)
+```
+
+```{ojs}
+adaptiveCapacityChart = {
+  const t = nbText.GenderInvestments.adaptiveCapacity;
+  const rows = adaptiveCapacity.filter((d) => d.iso3n === capCountry);
+  const label = (d) => t.indicators[d.indicator];
+  const order = Object.values(t.indicators);
+  const pairs = d3.groups(rows, label).map(([indicator, g]) => ({
+    indicator,
+    lo: d3.min(g, (d) => d.value),
+    hi: d3.max(g, (d) => d.value),
+  }));
+  const plot = Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 760),
+    height: 500,
+    marginBottom: 70,
+    x: { domain: order, label: null },
+    y: { domain: [0, 100], grid: true, label: t.axisY },
+    color: {
+      legend: true,
+      label: nbText.General.axes.gender,
+      domain: [t.sexes.F, t.sexes.M],
+      range: ["#d6604d", "#4393c3"],
+    },
+    marks: [
+      Plot.axisX({ lineWidth: 8 }),
+      Plot.ruleX(pairs, { x: "indicator", y1: "lo", y2: "hi", stroke: "#bbb", strokeWidth: 2 }),
+      Plot.dot(rows, {
+        x: { value: label, label: t.selectors.indicator.title },
+        y: "value",
+        fill: (d) => t.sexes[d.sex],
+        r: 7,
+        stroke: "white",
+        strokeWidth: 1,
+        tip: true,
+        channels: { [nbText.General.axes.year]: "year" },
+      }),
+    ],
+    caption: t.caption,
+  });
+  return plot;
+}
+```
+
+```{ojs}
+downloadPngButton(adaptiveCapacityChart, {
+  filename: "gender_adaptive_capacity.png",
+  label: nbText.General.downloadFigure,
+})
+```
+
+{{< prose indicator-deep-dive level=2 >}}
+
+```{ojs}
+viewof capMapControls = Inputs.form(
+  {
+    indicator: Inputs.select(Object.keys(nbText.GenderInvestments.adaptiveCapacity.indicators), {
+      label: nbText.GenderInvestments.adaptiveCapacity.selectors.indicator.title,
+      format: (k) => nbText.GenderInvestments.adaptiveCapacity.indicators[k],
+    }),
+    view: Inputs.radio(["gap", "F", "M"], {
+      value: "gap",
+      label: nbText.GenderInvestments.adaptiveCapacity.map.viewTitle,
+      format: (k) => nbText.GenderInvestments.adaptiveCapacity.map.views[k],
+    }),
+  },
+  { template: inputTemplate({ gap: "3em" }) }
+)
+```
+
+```{ojs}
+adaptiveCapacityMap = {
+  const t = nbText.GenderInvestments.adaptiveCapacity;
+  const { indicator, view } = capMapControls;
+  const rows = adaptiveCapacity.filter((d) => d.indicator === indicator);
+  const byIso = d3.rollup(
+    rows,
+    (g) => {
+      const f = g.find((d) => d.sex === "F");
+      const m = g.find((d) => d.sex === "M");
+      return {
+        F: f?.value ?? null,
+        M: m?.value ?? null,
+        gap: f && m ? +(f.value - m.value).toFixed(1) : null,
+        year: f?.year ?? m?.year,
+      };
+    },
+    (d) => d.iso3n,
+  );
+  const data = [...byIso].map(([iso3n, v]) => ({ iso3n, ...v }));
+  const features = mergeDataToBoundaries({
+    boundaries: africaA0,
+    data,
+    boundaryKey: "iso3n",
+    dataKey: "iso3n",
+  });
+  const isGap = view === "gap";
+  const maxGap = d3.max(data, (d) => Math.abs(d.gap ?? 0)) || 10;
+  const map = makeChoropleth({
+    features: features.features,
+    width: Math.min(width, 820),
+    height: 480,
+    fill: (d) => d.properties.data?.[view] ?? undefined,
+    color: isGap
+      ? { type: "linear", scheme: "RdBu", domain: [-maxGap, maxGap], unknown: "#e0e0e0", label: t.map.legendGap }
+      : { type: "linear", scheme: "YlGnBu", domain: [0, 100], unknown: "#e0e0e0", label: `${t.indicators[indicator]} (%)` },
+    channels: {
+      country: { label: nbText.General.axes.country, value: (d) => countryNameN(d.properties.iso3n) },
+      women: { label: t.sexes.F, value: (d) => d.properties.data?.F },
+      men: { label: t.sexes.M, value: (d) => d.properties.data?.M },
+    },
+    tooltip: { country: true, women: true, men: true },
+    caption: t.map.caption,
+    adminHighlight: {
+      filter: (d) => d.properties.iso3n === capCountry,
+      stroke: "#111",
+      strokeWidth: 2,
+    },
+  });
+  return map;
+}
+```
+
+```{ojs}
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(adaptiveCapacityMap, {
+    filename: "gender_adaptive_capacity_map.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(adaptiveCapacity, {
+    filename: "adaptive_capacity_by-sex_faostat.csv",
+    label: nbText.General.download,
+  }),
+])
+```
+
+{{< prose bridge-gap >}}
+
+```{ojs}
+bridgeGapMatrix = {
+  const t = nbText.BridgeGap;
+  const rows = genderSolutions.flatMap((d) => d.Risk.split(", ").map((risk) => ({ ...d, risk })));
+  const riskLabel = (d) => t.table.tooltip[d.risk.toLowerCase()] ?? d.risk;
+  const catLabel = (d) => t.selector.options[d["Adaptation Options"]] ?? d["Adaptation Options"];
+  const outcomeLabel = (o) => t.table.values[o.toLowerCase()] ?? o;
+  const cells = d3.flatGroup(rows, catLabel, riskLabel).map(([cat, risk, g]) => {
+    const counts = d3.rollup(
+      g,
+      (v) => v.length,
+      (d) => d["Gender Outcome Score"]
+    );
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    return {
+      cat,
+      risk,
+      n: g.length,
+      outcome: outcomeLabel(top),
+      outcomes: [...counts.entries()].map(([o, n]) => `${outcomeLabel(o)}: ${n}`).join(", "),
+      geographies: [...new Set(g.map((d) => d.Geography))].join(", "),
+    };
+  });
+  const outcomeKeys = ["enabling", "reinforcing", "constraining", "counteracting"];
+
+  const outcomeColors = {
+    enabling: "#1b587f",
+    reinforcing: "#86bcd8",
+    constraining: "#eba43a",
+    counteracting: "#a1500f",
+  };
+  const lightFills = [t.table.values.reinforcing, t.table.values.constraining];
+  const riskOrder = d3.groupSort(
+    cells,
+    (g) => -d3.sum(g, (d) => d.n),
+    (d) => d.risk
+  );
+  return Plot.plot({
+    style: chartStyle,
+    width: Math.min(width, 820),
+    height: 80 + riskOrder.length * 42,
+    marginLeft: 150,
+    marginBottom: 55,
+    x: { label: null, domain: Object.values(t.selector.options) },
+    y: { label: null, domain: riskOrder },
+    color: {
+      legend: true,
+      label: t.matrix.legend,
+      domain: outcomeKeys.map((k) => t.table.values[k]),
+      range: outcomeKeys.map((k) => outcomeColors[k]),
+    },
+    marks: [
+      Plot.axisX({ lineWidth: 8 }),
+      Plot.cell(cells, {
+        x: { value: "cat", label: t.selector.title },
+        y: { value: "risk", label: t.table.headings.Risk },
+        fill: "outcome",
+        inset: 1,
+        // Plot truncates a tip row past lineWidth (20 ems by default) and, in this
+        // version, puts the truncated text in the title too, so the full geography
+        // list is unreachable. Widen it rather than lose the words.
+        tip: { lineWidth: 60 },
+        channels: {
+          [t.table.headings["Gender Outcome Score"]]: "outcomes",
+          [t.table.headings.Geography]: "geographies",
+        },
+      }),
+      Plot.text(cells, {
+        x: "cat",
+        y: "risk",
+        text: "n",
+        fill: (d) => (lightFills.includes(d.outcome) ? "#222" : "white"),
+      }),
+    ],
+    caption: t.matrix.caption,
+  });
+}
+```
+
+```{ojs}
+inputTemplate({ gap: "0.5rem" })([
+  downloadPngButton(bridgeGapMatrix, {
+    filename: "gender_bridge_gap_matrix.png",
+    label: nbText.General.downloadFigure,
+  }),
+  downloadCsvButton(genderSolutions, {
+    filename: "gender_adaptation_solutions_roy2022.csv",
+    label: nbText.General.download,
+  }),
+])
+```
+
+{{< prose summary >}}
+
+{{< prose methods >}}
+
+{{< include /components/_notebookFooter.qmd >}}
+
+## Data import and cleaning
+
+```{ojs}
+// IFPRI global ranking filtered to 41 Atlas countries; retain composite indices.
+hotspotData = FileAttachment("/data/genderExposure/ifpriGenderHotspots_africa.json").json()
+
+africaA0 = {
+  const topo = await FileAttachment("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").json();
+  return topojson.feature(topo, topo.objects.atlas_gaul24_a0_africa);
+}
+
+hotspotFeatures = mergeDataToBoundaries({
+  boundaries: africaA0,
+  data: hotspotData,
+  boundaryKey: (f) => f.properties.iso3,
+  dataKey: "iso3",
+})
+
+// Key localized country names by UN M49, falling back to boundary names.
+countryNamesByN = {
+  const atlas = await FileAttachment("/data/shared/atlas_countries.json").json();
+  const byIso3 = new Map(atlas.map((r) => [r.iso3c, r.translation]));
+  return new Map(
+    africaA0.features.map((f) => {
+      const tr = byIso3.get(f.properties.iso3) ?? {};
+      return [f.properties.iso3n, {
+        en: tr.en ?? f.properties.un_a0_en,
+        fr: tr.fr ?? f.properties.un_a0_fr,
+      }];
+    }),
+  );
+}
+
+countryNameN = (iso3n, fallback = "") =>
+  countryNamesByN.get(iso3n)?.[language.key] ?? countryNamesByN.get(iso3n)?.en ?? fallback
+
+// Keys double as the field names in hotspotData.
+hotspotIndicators = nbText.GlobalHotspots.indicators
+```
+
+```{ojs}
+// Use pinned hyparquet for these small Snappy files; no DuckDB worker is needed.
+hypq = import("https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/+esm")
+
+// WBGT heat stress + women-in-agriculture tables extracted to GAUL24 admin0/1
+// by notebookv2/scripts/extract_gender_layers.R (join key: gaul1_code).
+wbgtData = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/wbgt_gaul24_africa.parquet").arrayBuffer(),
+})
+
+// Crop (NTx) and livestock (THI), same shape as wbgtData. Historic comes from the
+// CIS baseline and the futures from the ensemble export; both are aggregated over
+// Jägermeyr growing seasons, which is what makes the two halves comparable.
+heatHazardData = hypq.parquetQuery({
+  file: await FileAttachment(
+    "/data/genderExposure/heatHazards_gaul24_africa.parquet"
+  ).arrayBuffer(),
+})
+
+womenAgriData = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/women-agri_gaul24_africa.parquet").arrayBuffer(),
+})
+
+africaA1 = {
+  const topo = await FileAttachment(
+    "/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson"
+  ).json();
+  return topojson.feature(topo, topo.objects.atlas_gaul24_a1_africa);
+}
+
+// Latest FAOSTAT/ILO agrifood employment by sex and country.
+afsEmployment = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/afsEmployment_faostat.parquet").arrayBuffer(),
+})
+
+// Latest sex-disaggregated FAOSTAT capacity indicators; higher percentages are better.
+adaptiveCapacity = hypq.parquetQuery({
+  file: await FileAttachment("/data/genderExposure/adaptiveCapacity_faostat.parquet").arrayBuffer(),
+})
+
+capCountryNames = new Map(adaptiveCapacity.map((d) => [d.iso3n, countryNameN(d.iso3n, d.area)]))
+
+// Gender outcomes of adaptation solutions: 24 coded studies on African
+// agriculture from Roy, Prakash, Some et al. (2022).
+genderSolutions = FileAttachment("/data/genderExposure/gender_solutions.json").json()
+
+iso3ToN = new Map(africaA0.features.map((f) => [f.properties.iso3, f.properties.iso3n]))
+
+// Women's control over livestock products (milk, eggs, meat) per country.
+// RHoMIS surveys, extracted by notebookv2/scripts/extract_rhomis_livestockControl.sql.
+livestockControl = FileAttachment("/data/genderExposure/livestockControl_rhomis.json").json()
+
+// Women's share of crop-production labor, 6 countries (Palacios-Lopez et al.
+// 2017; wide source rows reshaped to long).
+cropGenderData = {
+  const wide = await FileAttachment("/data/genderExposure/crop_gender_data.json").json();
+  return wide.flatMap(({ country, ...groups }) =>
+    Object.entries(groups).map(([cropGroup, pctFemale]) => ({ country, cropGroup, pctFemale }))
+  );
+}
+```
+
+```{ojs}
+// Bivariate map data: heat days for the current selection joined to the
+// women-in-agriculture percentages at admin1.
+womenByGaul1 = new Map(
+  womenAgriData.filter((d) => d.admin1_name != null).map((d) => [d.gaul1_code, d]),
+)
+
+biVarRows = {
+  const scen = heatTimeframe === "historic" ? "historic" : heatScenario;
+  return heatRows
+    .filter((d) =>
+      d.admin1_name != null &&
+      d.timeframe === heatTimeframe &&
+      d.scenario === scen &&
+      (heatThresholds == null || d.threshold === heatThreshold)
+    )
+    .map((d) => {
+      const w = womenByGaul1.get(d.gaul1_code);
+      return { ...d, pct_women_agri: w?.pct_women_agri ?? null, women_agri_count: w?.women_agri_count ?? null };
+    });
+}
+
+biVarFeatures = mergeDataToBoundaries({
+  boundaries: africaA1,
+  data: biVarRows,
+  boundaryKey: "gaul1_code",
+  dataKey: "gaul1_code",
+})
+
+heatRows = heatHazard === "human"
+  ? wbgtData
+  : heatHazardData.filter((d) => d.hazard === heatHazard)
+
+// Each hazard is a different quantity: WBGT counts days per YEAR above a cutoff,
+// NTx days per MONTH of the growing season, THI is an index. Livestock cuts follow
+// the standard THI scale (no/mild <79, moderate 79-89, severe >=90) — the bivariate
+// palette is 3x3, so no-stress and mild share a class, which is also where the
+// fewest units sit. Crop 40°C needs its own breaks because two thirds of units sat
+// at or below 0.3 days historically. Women 20/50%.
+heatClass = d3.scaleThreshold(
+  heatHazard === "human" ? [30, 90]
+  : heatHazard === "livestock" ? [79, 90]
+  : heatThreshold === 40 ? [0.3, 2]
+  : [1, 6],
+  d3.range(3),
+)
+
+womenClass = d3.scaleThreshold([20, 50], d3.range(3))
+
+// x = women (blue), y = heat (red).
+biVarColors = bivariatePalettes.blueRed
+
+// A threshold scale bands NaN into its lowest class, so missing values have to be
+// caught before the lookup or they would read as low heat and few women.
+biVarColor = (row) => {
+  // Unfilled rather than grey: the palette's own low-low cell is #e8e8e8, so a
+  // grey no-data class would be indistinguishable from "low heat, few women".
+  if (!Number.isFinite(row?.value) || !Number.isFinite(row?.pct_women_agri)) {
+    return "#fff";
+  }
+  const x = womenClass(row.pct_women_agri);
+  const y = heatClass(row.value);
+  return biVarColors.find((cell) => cell.x === x && cell.y === y).color;
+}
+```
+
+{{< include /components/_notebookRuntime.qmd >}}

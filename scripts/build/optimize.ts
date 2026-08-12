@@ -12,6 +12,37 @@ const SITE_DIR = "_site";
 const CONCURRENCY = 5;
 const loaders = { ".js": "js", ".css": "css" } as const;
 
+// Quarto always links an alternate colour-scheme stylesheet for its dark-mode
+// toggle, and the browser downloads it even when no dark theme is configured —
+// where it is byte-identical to the light one. Drop the link in that case only,
+// so configuring a real dark theme makes the files differ and revives it.
+const ALTERNATE_LINK = /<link[^>]*quarto-color-alternate[^>]*>/g;
+
+async function alternateIsRedundant(): Promise<boolean> {
+  const dir = `${SITE_DIR}/site_libs/bootstrap`;
+  const digest = async (name: string) =>
+    [...new Uint8Array(
+      await crypto.subtle.digest("SHA-256", await Deno.readFile(`${dir}/${name}`)),
+    )].map((b) => b.toString(16).padStart(2, "0")).join("");
+  try {
+    const names = [];
+    for await (const e of Deno.readDir(dir)) {
+      if (e.name.startsWith("bootstrap-") && e.name.endsWith(".min.css")) names.push(e.name);
+    }
+    const light = names.find((n) => !n.startsWith("bootstrap-dark-"));
+    const dark = names.find((n) => n.startsWith("bootstrap-dark-"));
+    if (!light || !dark) return false;
+    return (await digest(light)) === (await digest(dark));
+  } catch {
+    return false;
+  }
+}
+
+const dropAlternate = await alternateIsRedundant();
+if (dropAlternate) {
+  console.log("Dropping the alternate colour-scheme stylesheet (identical to light)");
+}
+
 const getSize = async (path: string) =>
   (await Deno.stat(path).catch(() => ({ size: 0 }))).size;
 const formatSize = (bytes: number) =>
@@ -23,10 +54,11 @@ async function processFile(
 ): Promise<number> {
   const ext = extname(path);
   try {
-    const content = await Deno.readTextFile(path);
+    let content = await Deno.readTextFile(path);
     let minified: string;
 
     if (ext === ".html") {
+      if (dropAlternate) content = content.replace(ALTERNATE_LINK, "");
       minified = await minifyHtml(content, {
         collapseWhitespace: true,
         minifyCSS: true,

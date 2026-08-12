@@ -1,0 +1,789 @@
+---
+nb-config: data/lossDamage/notebook.json
+date-modified: last-modified # citation year; renders nowhere
+execute:
+  echo: false
+---
+
+{{< include /components/_notebookHeader.qmd >}}
+
+```{ojs}
+import { makeChoropleth, mergeDataToBoundaries } from "/helpers/atlasMap.ojs";
+
+import { downloadPngButton } from "/helpers/uiComponents.ojs";
+
+import { chartStyle, formatNumCompactShort, inputTemplate } from "/helpers/std.ojs";
+```
+
+{{< prose overview >}}
+
+{{< prose farm-size >}}
+
+```{ojs}
+viewof fig1_inputs = renderS1_inputs()
+
+fig1aMap = plotMap(fig1a_spatial, "value")
+
+downloadPngButton(fig1aMap, {
+  filename: "lossdamage_farm_size_map.png",
+  label: nbText.General.downloadFigure,
+})
+
+renderS1_insight()
+```
+
+{{< prose extreme-event-loss >}}
+
+```{ojs}
+viewof fig2_inputs = renderS2_inputs()
+
+fig2Plot = renderS2_plot()
+
+downloadPngButton(fig2Plot, {
+  filename: "lossdamage_extreme_event_loss.png",
+  label: nbText.General.downloadFigure,
+})
+
+renderS2_insight()
+```
+
+{{< prose model-ensembles >}}
+
+```{ojs}
+fig3Plot = renderS3_plot()
+
+downloadPngButton(fig3Plot, {
+  filename: "lossdamage_model_ensembles.png",
+  label: nbText.General.downloadFigure,
+})
+```
+
+{{< prose ensemble-insights level=3 >}}
+
+{{< prose loss-by-farm-type >}}
+
+```{ojs}
+viewof fig4_inputs = renderS4_inputs()
+
+fig4aMap = plotMap(fig4a_spatial, "high_fs")
+
+downloadPngButton(fig4aMap, {
+  filename: "lossdamage_high_farm_size_map.png",
+  label: nbText.General.downloadFigure,
+})
+
+fig4bPlot = renderS4b_plot()
+
+downloadPngButton(fig4bPlot, {
+  filename: "lossdamage_loss_by_farm_type.png",
+  label: nbText.General.downloadFigure,
+})
+
+renderS4b_insight()
+```
+
+{{< prose summary >}}
+
+{{< prose methods >}}
+
+{{< include /components/_notebookFooter.qmd >}}
+
+<!--
+NOTE: Everything below this point will not appear in the notebook.
+This is useful to hide all of the code, master selectors (language, admin level, etc.),
+and other things that are needed for the notebook to run but would be messy if
+actually appearing in the notebook.
+-->
+
+{{< include /components/_notebookRuntime.qmd >}}
+
+```{ojs}
+// Data values (farm size class, hazard, scenario, ...) are English strings baked
+// into the parquet files, so they double as the lookup keys for their labels.
+farmSizeLabel = (k) => nbText.General.farmSizeClasses[k] ?? k
+eventLabel = (k) => nbText.General.events[k] ?? k
+lossLabel = (k) => nbText.LossFunctions.selectors.loss.options[k] ?? k
+eventTypeLabel = (k) => nbText.LossFunctions.selectors.eventType.options[k] ?? k
+scenarioLabel = (k) => nbText.Ensembles.scenarios[k] ?? k
+modelLabel = (k) => nbText.LossByFarmType.selectors.model.options[k] ?? k
+thresholdLabel = (k) => nbText.LossByFarmType.legend.options[k] ?? k
+
+//TODO: country names stay as the raw `nm_slc0` data values — translating them
+// needs an nm_slc0 -> iso3 -> data/shared/atlas_countries.json lookup, and the
+// aggregate ("Sub-Saharan Africa") has no iso3. Add when a French review asks.
+
+numFormat = formatNumCompactShort({ locale: language.locale })
+
+// Zero means the extreme event never occurred, not "0 farms".
+farmCount = (d) => (d !== 0 ? numFormat(d) : nbText.General.noEvents)
+```
+
+## Data
+
+```{ojs}
+// hyparquet (pinned): 16KB pure-JS parquet reader, no DuckDB-wasm. It decodes
+// GeoParquet WKB geometry to GeoJSON for us, so the boundaries only need
+// rewinding for d3's winding order — no separate WKB helper needed.
+// hyparquet-compressors adds ZSTD (GDAL's default).
+hypq = import("https://cdn.jsdelivr.net/npm/hyparquet@1.26.2/+esm")
+
+hypq_compress = import("https://cdn.jsdelivr.net/npm/hyparquet-compressors/+esm")
+
+// Rewinding is load-bearing, not cosmetic: the source rings wind the other way,
+// so d3 reads each polygon as the whole sphere minus the region (geoArea 4π).
+turfRewind = (await import("https://cdn.jsdelivr.net/npm/@turf/rewind/+esm")).default
+```
+
+```{ojs}
+bound_arrayBuf = await FileAttachment("/data/lossDamage/bounds.parquet").arrayBuffer()
+
+loadBounds = async (country) => {
+  const bounds = await hypq.parquetQuery({
+    file: bound_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: ["GID_0", "NAME_0", "NAME_1", "nm_slc0", "geometry"],
+    filter: !country
+      ? null
+      : {
+          nm_slc0: {
+            $eq: country,
+          },
+        },
+  });
+  return {
+    type: "FeatureCollection",
+    features: bounds.map(({ geometry, ...properties }) => ({
+      type: "Feature",
+      geometry: turfRewind(geometry, { reverse: true }),
+      properties,
+    })),
+  };
+}
+
+boundsCache = new Map()
+
+// Sections 1 and 4 pick a country independently but start on the same one, so
+// without this the ~100ms decode+rewind of the 1.4MB boundary file runs twice on
+// load and again whenever the two selections coincide. Caching the promise (not
+// the result) also collapses the two concurrent first calls into one read.
+getBounds = (country) => {
+  if (!boundsCache.has(country)) boundsCache.set(country, loadBounds(country));
+  return boundsCache.get(country);
+}
+
+fig1_mapBounds = await getBounds(fig1_inputs.country)
+fig4_mapBounds = await getBounds(fig4_inputs.country)
+```
+
+## Section code
+
+### Section 1 code
+
+```{ojs}
+fig1_arrayBuf = await FileAttachment("/data/lossDamage/fig1_allshps.parquet").arrayBuffer()
+
+fig1_selVars = {
+  const _data = await hypq.parquetQuery({
+    file: fig1_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: ["nm_slc0", "farm_sz2", "variable"],
+  });
+
+  return {
+    country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
+    farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
+    variable: Array.from(new Set(_data.map((d) => d.variable))),
+  };
+}
+```
+
+```{ojs}
+renderS1_inputs = () => {
+  return Inputs.form(
+    {
+      country: Inputs.select(fig1_selVars.country, {
+        label: nbText.General.country,
+        value: "Sub-Saharan Africa",
+      }),
+      fSize: Inputs.select(fig1_selVars.farm_sz2, {
+        label: nbText.General.farmSize,
+        value: "All Farms",
+        format: farmSizeLabel,
+      }),
+      time: Inputs.select(fig1_selVars.variable, {
+        label: nbText.FarmSize.selectors.time.title,
+        value: "Current Farms",
+        format: (k) => nbText.FarmSize.selectors.time.options[k] ?? k,
+      }),
+    },
+    { template: inputTemplate({ gap: "3em" }) }
+  );
+}
+```
+
+```{ojs}
+fig1a_filtered = await hypq.parquetQuery({
+  file: fig1_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig1_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig1_inputs.fSize,
+    },
+    variable: {
+      $eq: fig1_inputs.time,
+    },
+  },
+})
+
+fig1a_spatial = mergeDataToBoundaries({
+  boundaries: fig1_mapBounds,
+  data: fig1a_filtered,
+  boundaryKey: (f) => adminKey(f.properties),
+  dataKey: adminKey,
+})
+```
+
+```{ojs}
+fig1b_arrayBuf = await FileAttachment("/data/lossDamage/fig1_farmsizelookup.parquet").arrayBuffer()
+
+fig1b_filtered = await hypq.parquetQuery({
+  file: fig1b_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig1_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig1_inputs.fSize,
+    },
+  },
+})
+```
+
+```{ojs}
+renderS1_insight = () => {
+  const _data = fig1b_filtered;
+  const _present = _data.filter((d) => d.variable === "Current Farms");
+  const _future = _data.filter((d) => d.variable === "Farms 2050");
+
+  const sum = (arr) => arr.reduce((a, b) => a + b, 0);
+
+  const sumpr = sum(_present.map((d) => d.value));
+  const sumfr = sum(_future.map((d) => d.value));
+
+  const t = nbText.FarmSize.insight;
+  const pct = ((sumfr - sumpr) / sumpr) * 100;
+
+  // 18 of the 357 country/size combinations have no farms in the baseline
+  // (e.g. Djibouti, 10-20 ha), so the percent change is Infinity — say how many
+  // farms are projected and leave the change out.
+  const change = !sumpr
+    ? ""
+    : tmpl(t.change, {
+        trend: pct > 0 ? t.trend.increase : t.trend.decrease,
+        pct: pct.toLocaleString(language.locale, { maximumFractionDigits: 1 }),
+      });
+
+  return md`#### ${tmpl(nbText.General.quickInsights, { subject: fig1_inputs.country })}
+
+${tmpl(t.baseline, {
+  country: fig1_inputs.country,
+  farms: numFormat(sumpr),
+  size: farmSizeLabel(fig1_inputs.fSize),
+})}
+
+${tmpl(t.projection, { future: numFormat(sumfr) })} ${change}
+`;
+}
+```
+
+### Section 2 code
+
+```{ojs}
+fig2_dat = await FileAttachment("/data/lossDamage/fig2_joined_eff.json").json()
+```
+
+```{ojs}
+// Inputs
+fig2_groups = Array.from(new Set(fig2_dat.map((d) => d.group)))
+fig2_mod = Array.from(new Set(fig2_dat.map((d) => d.title)))
+
+renderS2_inputs = () => {
+  return Inputs.form(
+    [
+      Inputs.select(fig2_groups, {
+        label: nbText.LossFunctions.selectors.eventType.title,
+        value: "Drought",
+        format: eventTypeLabel,
+      }),
+      Inputs.select(fig2_mod, {
+        label: nbText.LossFunctions.selectors.loss.title,
+        value: "Predicted Probabilities of Loss",
+        format: lossLabel,
+      }),
+    ],
+    { template: inputTemplate({ gap: "3em" }) }
+  );
+}
+```
+
+```{ojs}
+figure2_filtered = (() => {
+  const [group_sel, mod_sel] = fig2_inputs;
+
+  return fig2_dat.filter((d) => d.group === group_sel && d.title === mod_sel);
+})()
+
+renderS2_plot = () => {
+  const [group_sel, mod_sel] = fig2_inputs;
+  const yax = figure2_filtered[0].yax;
+
+  return Plot.plot({
+    width,
+    height: 450,
+    marginLeft: 50,
+    style: chartStyle,
+
+    title: lossLabel(mod_sel),
+
+    x: {
+      label: nbText.LossFunctions.axis.x,
+      grid: true,
+    },
+
+    y: {
+      label: nbText.LossFunctions.axis.y[yax] ?? yax,
+      tickFormat: (d) => `${Math.round(d * 100)}%`,
+      grid: true,
+    },
+
+    marks: [
+      // Confidence ribbon (geom_ribbon)
+      Plot.areaY(figure2_filtered, {
+        x: "x",
+        y1: "conf.low",
+        y2: "conf.high",
+        fill: group_sel === "Drought" ? "red" : "blue",
+        fillOpacity: 0.3,
+      }),
+
+      // Predicted line (geom_line)
+      Plot.line(figure2_filtered, {
+        x: "x",
+        y: "predicted",
+        strokeWidth: 2,
+        tip: {
+          format: {
+            y: (d) => `${Math.round(d * 100)}%`,
+          },
+        },
+      }),
+    ],
+  });
+}
+
+renderS2_insight = () => {
+  const [_event, _loss] = fig2_inputs;
+  const t = nbText.LossFunctions.insight;
+  const _trend = figure2_filtered[0].trend;
+
+  return md`### ${tmpl(nbText.General.quickInsights, { subject: lossLabel(_loss) })}
+
+${tmpl(t.template, {
+  loss: lossLabel(_loss),
+  event: eventTypeLabel(_event),
+  trend: t.trend[_trend] ?? _trend,
+})}
+  `;
+}
+```
+
+### Section 3 code
+
+```{ojs}
+fig3_data = await FileAttachment("/data/lossDamage/figure3_spei.json").json()
+```
+
+```{ojs}
+ensemble2 = fig3_data.filter((d) => d.gcm === "Ensemble Average")
+joint3 = fig3_data.filter((d) => d.gcm !== "Ensemble Average")
+
+renderS3_plot = () => {
+  const tip = nbText.Ensembles.tooltip;
+  const channels = {
+    scenario: {
+      value: (d) => scenarioLabel(d.model),
+      label: tip.scenario,
+    },
+    hazard: {
+      value: (d) => eventLabel(d.variable),
+      label: tip.hazard,
+    },
+  };
+
+  return Plot.plot({
+    width,
+    height: 500,
+    marginLeft: 90,
+    style: chartStyle,
+
+    x: {
+      label: nbText.Ensembles.axis.x,
+    },
+
+    y: {
+      label: null,
+      tickFormat: eventLabel,
+    },
+
+    fy: {
+      label: null,
+      axis: "left",
+      tickRotate: -90,
+      tickPadding: 80,
+      tickFormat: scenarioLabel,
+    },
+
+    color: {
+      legend: true,
+    },
+
+    marks: [
+      // Ensemble Average bars (geom_col)
+      Plot.barX(ensemble2, {
+        x: "count",
+        fy: "model",
+        y: "variable",
+        fill: (d) => (d.variable === "Very Dry" ? "#F6A8A8" : "#A8D0F6"),
+        channels,
+        tip: {
+          format: {
+            fy: false,
+            x: true,
+            y: true,
+            scenario: true,
+            fill: false,
+            hazard: true,
+          },
+        },
+      }),
+
+      // Individual GCM points (geom_point)
+      Plot.dot(joint3, {
+        x: "count",
+        fy: "model",
+        y: "variable",
+        stroke: "gcm",
+        r: 4,
+        strokeOpacity: 0.7,
+        channels,
+        tip: {
+          format: {
+            fy: false,
+            x: true,
+            y: true,
+            scenario: true,
+            stroke: true,
+            hazard: true,
+          },
+        },
+      }),
+    ],
+  });
+}
+```
+
+### Section 4 code
+
+#### 4a code
+
+```{ojs}
+fig4a_arrayBuf = await FileAttachment(
+  "/data/lossDamage/fig4_map_fin_spei12_high.parquet"
+).arrayBuffer()
+
+fig4_selVars = {
+  const _data = await hypq.parquetQuery({
+    file: fig4a_arrayBuf,
+    compressors: hypq_compress.compressors,
+    columns: ["nm_slc0", "farm_sz2", "extEvent", "model"],
+  });
+
+  return {
+    country: Array.from(new Set(_data.map((d) => d.nm_slc0))),
+    farm_sz2: Array.from(new Set(_data.map((d) => d.farm_sz2))),
+    event: Array.from(new Set(_data.map((d) => d.extEvent))),
+    model: Array.from(new Set(_data.map((d) => d.model))),
+  };
+}
+
+renderS4_inputs = () => {
+  return Inputs.form(
+    {
+      country: Inputs.select(fig4_selVars.country, {
+        label: nbText.General.country,
+        value: "Sub-Saharan Africa",
+      }),
+      fSize: Inputs.select(fig4_selVars.farm_sz2, {
+        label: nbText.General.farmSize,
+        value: "All Farms",
+        format: farmSizeLabel,
+      }),
+      event: Inputs.select(fig4_selVars.event, {
+        label: nbText.LossByFarmType.selectors.event.title,
+        value: "Very Dry",
+        format: eventLabel,
+      }),
+      time: Inputs.select(fig4_selVars.model, {
+        label: nbText.LossByFarmType.selectors.model.title,
+        value: "baseline",
+        format: modelLabel,
+      }),
+    },
+    { template: inputTemplate({ gap: "3em" }) }
+  );
+}
+```
+
+```{ojs}
+fig4a_filtered = await hypq.parquetQuery({
+  file: fig4a_arrayBuf,
+  compressors: hypq_compress.compressors,
+  filter: {
+    nm_slc0: {
+      $eq: fig4_inputs.country,
+    },
+    farm_sz2: {
+      $eq: fig4_inputs.fSize,
+    },
+    extEvent: {
+      $eq: fig4_inputs.event,
+    },
+    model: {
+      $eq: fig4_inputs.time,
+    },
+  },
+  //TODO: Select only the applicable columns to boost perf.
+})
+
+fig4a_spatial = mergeDataToBoundaries({
+  boundaries: fig4_mapBounds,
+  data: fig4a_filtered,
+  boundaryKey: (f) => adminKey(f.properties),
+  dataKey: adminKey,
+})
+```
+
+#### 4b code
+
+```{ojs}
+// 126k rows across the 2100 selector combinations, and hyparquet applies `filter`
+// after decoding — so filtering in the query costs a full decode (~175ms) on every
+// selector change. Decode once into a lookup instead; each combination is ~60 rows.
+fig4b_byCombo = {
+  const rows = await hypq.parquetQuery({
+    file: await FileAttachment("/data/lossDamage/fig4b.parquet").arrayBuffer(),
+    compressors: hypq_compress.compressors,
+    columns: [
+      "nm_slc0",
+      "farm_sz2",
+      "Event",
+      "model",
+      "year",
+      "losstype",
+      "threshold",
+      "threshold2",
+      "cum_sum",
+    ],
+  });
+
+  const byCombo = new Map();
+  for (const row of rows) {
+    const key = [row.nm_slc0, row.farm_sz2, row.Event, row.model].join("|");
+    const bucket = byCombo.get(key);
+    bucket ? bucket.push(row) : byCombo.set(key, [row]);
+  }
+  return byCombo;
+}
+
+// Every combination the section 4 selectors can produce is present here (checked
+// against fig4_map_fin_spei12_high.parquet: 2100 combinations on both sides), so a
+// miss means the two files have drifted apart and should fail loudly.
+fig4b_filtered = fig4b_byCombo.get(
+  [fig4_inputs.country, fig4_inputs.fSize, fig4_inputs.event, fig4_inputs.time].join("|")
+)
+```
+
+```{ojs}
+renderS4b_plot = () => {
+  const domainOrder =
+    fig4_inputs.event === "Very Dry"
+      ? ["Farms Likely Impacted", "40% lost revenue", "50% lost revenue"]
+      : ["Farms Likely Impacted", "30% lost revenue", "40% lost revenue"];
+  const tip = nbText.LossByFarmType.tooltip;
+
+  return Plot.plot({
+    width,
+    height: 420,
+    marginLeft: 50,
+    style: chartStyle,
+
+    x: {
+      label: nbText.LossByFarmType.axis.x,
+      tickFormat: "d",
+    },
+
+    y: {
+      label: nbText.LossByFarmType.axis.y,
+      grid: true,
+      tickFormat: numFormat,
+    },
+
+    fx: {
+      label: null,
+      tickFormat: (k) => tip.lossTypes[k] ?? k,
+    },
+
+    color: {
+      legend: true,
+      label: nbText.LossByFarmType.legend.title,
+      domain: domainOrder,
+      range: ["#4E79A7", "#F28E2C", "#E15759"],
+      tickFormat: thresholdLabel,
+    },
+
+    marks: [
+      Plot.line(fig4b_filtered, {
+        x: "year",
+        y: "cum_sum",
+        fx: "losstype",
+        stroke: "threshold",
+        strokeWidth: 2,
+        opacity: 0.85,
+        channels: {
+          type: {
+            value: (d) => tip.lossTypes[d.losstype] ?? d.losstype,
+            label: tip.lossType,
+          },
+        },
+        tip: {
+          format: {
+            x: "d",
+            y: farmCount,
+            type: true,
+            stroke: false, //HACK: Keep false for now while additional "threshold", field keeps appearing
+            fx: false,
+          },
+        },
+      }),
+    ],
+  });
+}
+
+renderS4b_insight = () => {
+  const _data = fig4b_filtered;
+  const years = _data.map((d) => d.year);
+  const minyear = Math.min(...years);
+  const maxyear = Math.max(...years);
+
+  const maxYearData = _data.filter((d) => d.year === maxyear);
+
+  const maxLoss = maxYearData.find((d) => d.losstype === "Loss");
+
+  const revenueAtMax = maxYearData.filter((d) => d.losstype === "Revenue");
+
+  const minThreshold = revenueAtMax.reduce((a, b) => (a.threshold2 < b.threshold2 ? a : b));
+
+  const maxThreshold = revenueAtMax.reduce((a, b) => (a.threshold2 > b.threshold2 ? a : b));
+
+  const payout = maxLoss.cum_sum / (maxyear - minyear);
+  const t = nbText.LossByFarmType.insight;
+
+  const shared = {
+    event: eventLabel(fig4_inputs.event),
+    country: fig4_inputs.country,
+    model: modelLabel(fig4_inputs.time),
+  };
+
+  return md`### ${tmpl(nbText.General.quickInsights, { subject: fig4_inputs.country })}
+
+${tmpl(t.losses, {
+  ...shared,
+  minYear: minyear,
+  maxYear: maxyear,
+  farms: numFormat(maxLoss.cum_sum),
+  size: farmSizeLabel(fig4_inputs.fSize),
+  payout: numFormat(payout),
+})}
+
+${tmpl(t.revenue, {
+  ...shared,
+  minFarms: numFormat(minThreshold.cum_sum),
+  minPct: minThreshold.threshold2,
+  maxFarms: numFormat(maxThreshold.cum_sum),
+  maxPct: maxThreshold.threshold2,
+})}
+`;
+}
+```
+
+### Geo helpers
+
+```{ojs}
+// The tabular data and the boundaries share these four admin columns; joining on
+// the composite key keeps like-named regions in different countries apart.
+adminKey = (o) =>
+  ["GID_0", "NAME_0", "NAME_1", "nm_slc0"].map((k) => o?.[k] ?? "").join("|")
+
+// mergeDataToBoundaries parks the matched row at properties.data.
+plotMap = (features, valueField, { height = 500, scheme = "YlGnBu" } = {}) => {
+  const value = (f) => f.properties.data?.[valueField];
+
+  return makeChoropleth({
+    features,
+    width,
+    height,
+    fill: value,
+    color: {
+      scheme,
+      tickFormat: numFormat,
+      label: nbText.General.numFarms,
+    },
+    channels: {
+      value: {
+        value,
+        label: nbText.General.numFarms,
+      },
+      gid_0: {
+        value: (f) => f.properties.GID_0,
+        label: nbText.General.iso3,
+      },
+      country: {
+        value: (f) =>
+          f.properties.nm_slc0 === "Sub-Saharan Africa"
+            ? f.properties.NAME_0
+            : f.properties.nm_slc0,
+        label: nbText.General.country,
+      },
+      region: {
+        value: (f) =>
+          f.properties.nm_slc0 === "Sub-Saharan Africa"
+            ? null
+            : f.properties.NAME_0,
+        label: nbText.General.region,
+      },
+    },
+    tooltip: {
+      format: {
+        value: farmCount,
+        country: true,
+        region: true,
+        gid_0: true,
+      },
+    },
+  });
+}
+```

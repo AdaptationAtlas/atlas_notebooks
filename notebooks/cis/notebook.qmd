@@ -1,0 +1,208 @@
+---
+nb-config: data/cis/notebook.json
+date-modified: last-modified # citation year; renders nowhere
+execute:
+  echo: false
+---
+
+{{< include /components/_notebookHeader.qmd >}}
+
+```{ojs}
+// Shared orchestration for the three included CIS analysis sections.
+// CMS prose lives in *.md blocks; widget text comes from <locale>.json.
+
+import { downloadCsvButton, downloadPngButton } from "/helpers/uiComponents.ojs";
+
+import { filterableDataTable } from "/helpers/atlasTable.ojs";
+
+import {
+  adminMultiSelect,
+  admin0Select,
+  admin1Select,
+  admin2Select,
+} from "/helpers/adminSelectors.ojs";
+
+import { chartStyle, inputTemplate } from "/helpers/std.ojs";
+
+import {
+  bivariateMapWithLegend,
+  bivariatePalettes,
+  makeChoropleth,
+  mergeDataToBoundaries,
+} from "/helpers/atlasMap.ojs";
+
+import { createSqlBindings, sqlAdminWhere } from "/helpers/sql.js";
+```
+
+{{< prose overview >}}
+
+{{< include _cis_readiness_index.qmd >}}
+
+{{< include _cis_hazard_intersection.qmd >}}
+
+{{< include _cis_implementation.qmd >}}
+
+{{< prose methods >}}
+
+{{< prose acknowledgements level=2 >}}
+
+{{< include /components/_notebookFooter.qmd >}}
+
+<!-- Hidden runtime code and shared controls follow. -->
+
+{{< include /components/_notebookRuntime.qmd >}}
+
+## Admin selectors
+
+```{ojs}
+// All section controls bind to shared, per-level selection state.
+adminControls = (levels) =>
+  adminMultiSelect(levels, {
+    langKey: language.key,
+    selectAll: true,
+    searchable: { admin1: true, admin2: true },
+  })
+
+// Downstream helpers consume plain names; [] means unrestricted.
+selectedAdmin0 = admin0Select.map((d) => d.admin0_name)
+selectedAdmin1 = admin1Select.map((d) => d.admin1_name)
+selectedAdmin2 = admin2Select.map((d) => d.admin2_name)
+```
+
+## Data
+
+```{ojs}
+// Share one DuckDB instance to avoid booting multiple WASM workers.
+db = await DuckDBClient.of({
+  cis_data: FileAttachment("/data/cis/CIS_nb_data.parquet"),
+  access_data: FileAttachment("/data/cis/CIS_access.parquet"),
+  hazard_data: FileAttachment("/data/cis/nexgddpHazards_monthMean_jagermeyr_rounded.parquet"),
+})
+
+weatherStations = await FileAttachment("/data/cis/weather_stations_2025.geojson").json()
+```
+
+## Boundaries
+
+```{ojs}
+// Scope boundaries and queries to the same included countries.
+import {
+  adminBoundariesForSelection,
+  getAdminBoundaries,
+  iso3Set,
+} from "/components/_atlasBoundaries.ojs";
+
+// Levels 0 and 1 are small (14 KB and 48 KB over the wire) and always drawn.
+atlasBoundaries = await getAdminBoundaries([0, 1])
+
+// Lazy-load and memoize admin 2 because it is only needed after region selection.
+loadAdmin2Boundaries = {
+  let pending = null;
+  return () => (pending ??= getAdminBoundaries(2).then((b) => b.admin2));
+}
+
+// Fetch deep geometry only when drill-down needs it.
+admin2Boundaries = selectedAdmin0.length && selectedAdmin1.length
+  ? await loadAdmin2Boundaries()
+  : null
+
+// Resolve drill-down once; maxLevel caps shallower datasets and turns deeper
+// selections into highlights.
+adminViewFor = (maxLevel) =>
+  adminBoundariesForSelection({
+    boundaries: { ...atlasBoundaries, admin2: admin2Boundaries },
+    selection: {
+      admin0: selectedAdmin0,
+      admin1: selectedAdmin1,
+      admin2: selectedAdmin2,
+    },
+    maxLevel,
+  })
+
+adminView = adminViewFor(2)
+
+currentAdminLevel = adminView.level
+
+currentBoundaries = adminView.boundaries
+
+// Build join keys at the drawn admin level.
+adminKey = adminView.adminKey
+
+// Build highlight styling from the selection at this view's drawn level.
+highlightFor = (view) => {
+  const selected = view.selectedAtLevel;
+  if (!selected) return null;
+
+  const names = new Set(selected.names);
+  return {
+    filter: (feature) => names.has(feature.properties[selected.field]),
+    stroke: "#000",
+    strokeWidth: 2.5,
+  };
+}
+
+adminHighlight = highlightFor(adminView)
+
+// Share the readiness axis and 3×3 legend geometry between both bivariate
+// sections; spread into a bivariateMapWithLegend call.
+CIS_BIVARIATE_LEGEND = ({
+  colors: bivariatePalette,
+  xLabel: nbText.s3ReadinessLabel,
+  side: "left",
+  gap: "18px",
+  width: 220,
+  height: 210,
+  fontSize: 14,
+})
+
+// Narrow insight rows to selections at the view's drawn level.
+onlySelectedAtLevel = (rows) => {
+  const selected = adminView.selectedAtLevel;
+  if (!selected) return rows;
+
+  const names = new Set(selected.names);
+  return rows.filter((row) => names.has(row[selected.field]));
+}
+
+// Null-safe fixed-point formatting.
+fmt = (value, decimals = 3) =>
+  value == null || Number.isNaN(Number(value)) ? "N/A" : Number(value).toFixed(decimals)
+
+isFiniteNumber = (value) => value != null && Number.isFinite(Number(value))
+
+descendingDefined = (value) => (a, b) => {
+  const av = value(a);
+  const bv = value(b);
+  if (!isFiniteNumber(av)) return isFiniteNumber(bv) ? 1 : 0;
+  if (!isFiniteNumber(bv)) return -1;
+  return Number(bv) - Number(av);
+}
+
+// Use shorter table/export labels than map tooltips.
+adminDisplayName = (d, level = currentAdminLevel) =>
+  level === 0
+    ? d.admin0_name
+    : level === 1
+    ? `${d.admin1_name}, ${d.admin0_name}`
+    : `${d.admin2_name}, ${d.admin1_name}`
+
+// Estimate label width for Plot's left margin, then truncate at a proportional cap.
+// Tooltips retain full labels.
+labelAxis = (labels, chartWidth, { share = 0.35, minimum = 120 } = {}) => {
+  const perChar = 7;
+  const gutter = 12;
+  // Avoid spreading thousands of admin-2 label lengths.
+  const longest = labels.reduce((n, l) => Math.max(n, String(l).length), 0);
+  const cap = Math.max(minimum, Math.round(chartWidth * share));
+  const marginLeft = Math.min(cap, Math.max(minimum, longest * perChar + gutter));
+  const fits = Math.floor((marginLeft - gutter) / perChar);
+
+  return {
+    marginLeft,
+    tickFormat: (label) => {
+      const name = String(label);
+      return name.length > fits ? `${name.slice(0, fits - 1)}…` : name;
+    },
+  };
+}
+```

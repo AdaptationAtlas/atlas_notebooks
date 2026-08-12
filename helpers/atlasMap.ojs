@@ -1,0 +1,318 @@
+// Shared Atlas map utilities.
+
+/** Normalize a FeatureCollection or feature array to a FeatureCollection. */
+function _atlasFeatureCollection(features) {
+  if (Array.isArray(features)) {
+    return { type: "FeatureCollection", features };
+  }
+
+  if (
+    features?.type === "FeatureCollection" &&
+    Array.isArray(features.features)
+  ) {
+    return features;
+  }
+
+  throw new TypeError(
+    "features must be a GeoJSON FeatureCollection or an array of features",
+  );
+}
+
+/** Render an Atlas choropleth with optional filtered boundary highlights. */
+function makeChoropleth({
+  features,
+  width,
+  height = 550,
+  caption,
+  fill,
+  color,
+  adminHighlight,
+  channels,
+  tooltip,
+  projection = "azimuthal-equal-area",
+  noDataColor = "#e0e0e0",
+  baseMarkOptions = {},
+  hoverMarkOptions = {},
+  extraMarks = [],
+} = {}) {
+  const featureCollection = _atlasFeatureCollection(features);
+  const hasData = fill !== undefined && fill !== null;
+  const colorConfig = color ? { legend: true, ...color } : undefined;
+  const hasNestedTooltip =
+    tooltip && typeof tooltip === "object" && "channels" in tooltip;
+  const { channels: nestedChannels, ...nestedTooltipOptions } =
+    hasNestedTooltip ? tooltip : {};
+  const resolvedChannels = channels || nestedChannels || {};
+  const resolvedTooltip = hasNestedTooltip ? nestedTooltipOptions : tooltip;
+
+  const projectionConfig =
+    typeof projection === "string"
+      ? { type: projection, domain: featureCollection }
+      : typeof projection === "function"
+        ? projection
+        : {
+            ...projection,
+            domain: projection?.domain ?? featureCollection,
+          };
+
+  const highlights = adminHighlight
+    ? Array.isArray(adminHighlight)
+      ? adminHighlight.filter(Boolean)
+      : [adminHighlight]
+    : [];
+
+  const highlightMarks = highlights.map((highlight) => {
+    const { filter, ...markOptions } = highlight;
+
+    if (typeof filter !== "function") {
+      throw new TypeError("Each adminHighlight requires a filter function");
+    }
+
+    return Plot.geo(
+      {
+        type: "FeatureCollection",
+        features: featureCollection.features.filter(filter),
+      },
+      {
+        fill: null,
+        stroke: "#333",
+        strokeWidth: 1.5,
+        ...markOptions,
+      },
+    );
+  });
+
+  const additionalMarks =
+    extraMarks === null || extraMarks === undefined
+      ? []
+      : Array.isArray(extraMarks)
+        ? extraMarks.filter(Boolean)
+        : [extraMarks];
+
+  return Plot.plot({
+    caption,
+    width,
+    height,
+    marginBottom: 10,
+    style: { overflow: "visible", fontSize: "13px" }, // let hover tips escape the svg edge
+
+    projection: projectionConfig,
+    color: colorConfig,
+    marks: [
+      Plot.geo(featureCollection, {
+        fill: hasData ? fill : noDataColor,
+        stroke: "#fff",
+        strokeWidth: 0.5,
+        ...baseMarkOptions,
+      }),
+      ...highlightMarks,
+      ...additionalMarks,
+      Plot.geo(
+        featureCollection,
+        Plot.pointer(
+          Plot.centroid({
+            stroke: "#333",
+            strokeWidth: 1.5,
+            channels: resolvedChannels,
+            tip: resolvedTooltip,
+            ...hoverMarkOptions,
+          }),
+        ),
+      ),
+    ],
+  });
+}
+
+/** Join rows into feature properties without mutating either input. */
+function mergeDataToBoundaries({
+  boundaries,
+  data,
+  boundaryKey,
+  dataKey,
+  dataProp = "data",
+  defaultValue = null,
+} = {}) {
+  const featureCollection = _atlasFeatureCollection(boundaries);
+  const getBoundaryKey =
+    typeof boundaryKey === "function"
+      ? boundaryKey
+      : (feature) => feature?.properties?.[boundaryKey];
+  const getDataKey =
+    typeof dataKey === "function" ? dataKey : (row) => row?.[dataKey];
+
+  if (
+    !(typeof boundaryKey === "function" || typeof boundaryKey === "string") ||
+    !(typeof dataKey === "function" || typeof dataKey === "string")
+  ) {
+    throw new TypeError("boundaryKey and dataKey must be functions or strings");
+  }
+
+  if (!Array.isArray(data)) {
+    throw new TypeError("data must be an array");
+  }
+
+  const index = new Map();
+  for (const row of data) {
+    const key = getDataKey(row);
+    if (key !== null && key !== undefined) index.set(key, row);
+  }
+
+  return {
+    ...featureCollection,
+    features: featureCollection.features.map((feature) => {
+      const key = getBoundaryKey(feature);
+      const match =
+        key === null || key === undefined ? undefined : index.get(key);
+
+      return {
+        ...feature,
+        properties: {
+          ...feature.properties,
+          [dataProp]: match ?? defaultValue,
+        },
+      };
+    }),
+  };
+}
+
+/**
+ * Seat a legend beside a plot, inside the plot's own <figure>, so the caption
+ * below stays Plot's element and spans both. Passing the caption to the plot and
+ * then setting the legend next to it in a flex row of its own would size that row
+ * to the caption's max-content width and drop the legend onto the next line.
+ * Returns a plain row when the plot is a bare svg, i.e. has no caption.
+ */
+function withSideLegend(plot, legend, { gap = "0.5rem", side = "right" } = {}) {
+  const row = htl.html`<div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:${gap}"></div>`;
+  const svg =
+    plot.tagName.toLowerCase() === "svg" ? null : plot.querySelector("svg");
+  const graphic = svg ?? plot;
+
+  if (svg) svg.replaceWith(row);
+  row.append(...(side === "left" ? [legend, graphic] : [graphic, legend]));
+
+  return svg ? plot : row;
+}
+
+/**
+ * Draw a bivariate map with its 3×3 legend beside it, captioned as one figure.
+ * Legend geometry (width, height, fontSize, classes) passes straight through to
+ * makeBivariateLegend.
+ */
+function bivariateMapWithLegend(
+  map,
+  { colors, xLabel, yLabel, side, gap, ...legendOptions } = {},
+) {
+  return withSideLegend(
+    map,
+    makeBivariateLegend({ colors, xLabel, yLabel, ...legendOptions }),
+    { side, gap },
+  );
+}
+
+// The 3×3 ramps the Atlas maps draw from, named <x hue><Y hue>. Each cell states
+// its own class indices, 0 being the lowest class of an axis, so a palette is read
+// the same way by makeBivariateLegend and by whatever fills the map.
+bivariatePalettes = ({
+  blueRed: [
+    { x: 0, y: 0, color: "#e8e8e8" },
+    { x: 1, y: 0, color: "#b0d5df" },
+    { x: 2, y: 0, color: "#64acbe" },
+    { x: 0, y: 1, color: "#e4acac" },
+    { x: 1, y: 1, color: "#ad9ea5" },
+    { x: 2, y: 1, color: "#627f8c" },
+    { x: 0, y: 2, color: "#c85a5a" },
+    { x: 1, y: 2, color: "#985356" },
+    { x: 2, y: 2, color: "#574249" },
+  ],
+  purpleGreen: [
+    { x: 0, y: 0, color: "#e8e8e8" },
+    { x: 1, y: 0, color: "#c8b2d6" },
+    { x: 2, y: 0, color: "#b8a0c2" },
+    { x: 0, y: 1, color: "#b8d6be" },
+    { x: 1, y: 1, color: "#9c9eba" },
+    { x: 2, y: 1, color: "#8b7fa8" },
+    { x: 0, y: 2, color: "#6c9a8b" },
+    { x: 1, y: 2, color: "#627a8e" },
+    { x: 2, y: 2, color: "#5a5f8f" },
+  ],
+})
+
+/**
+ * Render the rotated 3×3 legend used by Atlas bivariate maps.
+ * `colors` is a flat list of cells, each stating its own class indices:
+ * [{ x: 0, y: 2, color: "#c85a5a" }, …], where 0 is the lowest class of an axis.
+ * `classes` names those indices for the hover title and is the only place the
+ * legend needs words at all.
+ */
+function makeBivariateLegend({
+  colors,
+  xLabel,
+  yLabel,
+  width = 305,
+  height = 290,
+  classes = ["Low", "Moderate", "High"],
+  fontSize = 18,
+} = {}) {
+  // Read the grid off the cells, so a palette that is not 3×3 still draws.
+  const ticks = (key) =>
+    [...new Set(colors.map((cell) => cell[key]))].sort((a, b) => a - b);
+
+  const legend = Plot.plot({
+    width,
+    height,
+    marginTop: 15,
+    style: {
+      fontSize: `${fontSize}px`,
+      background: "transparent",
+    },
+    x: {
+      axis: "bottom",
+      domain: ticks("x"),
+      label: null,
+      ticks: [],
+      tickSize: 0,
+    },
+    y: {
+      // Highest class on top; the wrapper rotates the whole grid 45°.
+      axis: "left",
+      domain: ticks("y").reverse(),
+      label: null,
+      ticks: [],
+      tickSize: 0,
+    },
+    color: { type: "identity" },
+    marks: [
+      Plot.cell(colors, {
+        x: "x",
+        y: "y",
+        fill: "color",
+        inset: -5,
+        tip: false,
+        title: (d) => `${classes[d.y]} ${yLabel} × ${classes[d.x]} ${xLabel}`,
+      }),
+      Plot.text([`${xLabel} →`], {
+        frameAnchor: "bottom",
+        dy: 20,
+        lineAnchor: "middle",
+        textAnchor: "middle",
+      }),
+      Plot.text([`← ${yLabel}`], {
+        frameAnchor: "left",
+        rotate: 90,
+        dx: -20,
+        lineAnchor: "middle",
+        textAnchor: "middle",
+      }),
+    ],
+  });
+
+  legend.style.display = "block";
+  legend.style.transform = "rotate(-45deg)";
+  legend.style.transformOrigin = "center center";
+  legend.style.overflow = "visible";
+
+  return htl.html`<div style="display:grid;place-items:center;padding:28px 20px 20px 40px;overflow:visible;">
+    ${legend}
+  </div>`;
+}
