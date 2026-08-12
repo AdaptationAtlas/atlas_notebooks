@@ -36,21 +36,6 @@ export function reduceReplaceTemplateItems(
   }, template);
 }
 
-/** Fill missing translation-tree values recursively from a fallback. */
-export function withFallback(obj, fallback) {
-  if (obj === undefined || obj === null) return fallback;
-  if (
-    typeof obj !== "object" || typeof fallback !== "object" || fallback === null
-  ) {
-    return obj;
-  }
-  const out = { ...obj };
-  for (const key of Object.keys(fallback)) {
-    out[key] = withFallback(obj[key], fallback[key]);
-  }
-  return out;
-}
-
 /** Convert a string to sentence case. */
 export function toSentenceCase(str) {
   if (typeof str !== "string") {
@@ -64,6 +49,5 @@ export const lang = {
   getText,
   getRegexForNamedInsertion,
   reduceReplaceTemplateItems,
-  withFallback,
   toSentenceCase,
 };

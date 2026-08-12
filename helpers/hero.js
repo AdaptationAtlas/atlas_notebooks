@@ -102,10 +102,11 @@ export function heroImage(title, bgImage, group = "") {
 class AtlasNotebookHero extends HTMLElement {
   connectedCallback() {
     const config = readNotebookConfig();
+    const initialLanguage = window.atlasLang ?? document.documentElement.lang;
     const hero = atlasHero({
-      title: config.title?.en ?? config.id,
+      title: config.title[initialLanguage],
       image: config.image,
-      alt: config.imageAlt?.en ?? "",
+      alt: config.imageAlt?.[initialLanguage] ?? "",
     });
     this.replaceChildren(hero);
 
@@ -114,13 +115,13 @@ class AtlasNotebookHero extends HTMLElement {
     const heading = hero.querySelector("#notebook-title");
     const image = hero.querySelector(".atlas-hero__image");
     const render = (lang) => {
-      heading.textContent = config.title?.[lang] ?? config.title?.en ?? config.id;
-      image.alt = config.imageAlt?.[lang] ?? config.imageAlt?.en ?? "";
+      heading.textContent = config.title[lang];
+      image.alt = config.imageAlt?.[lang] ?? "";
     };
 
     this._onLanguageChange = (event) => render(event.detail);
     window.addEventListener("atlas:lang", this._onLanguageChange);
-    render(window.atlasLang ?? document.documentElement.lang);
+    render(initialLanguage);
   }
 
   disconnectedCallback() {

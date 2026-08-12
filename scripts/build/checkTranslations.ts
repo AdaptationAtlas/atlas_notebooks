@@ -16,6 +16,18 @@ function leafPaths(node: unknown, prefix = ""): string[] {
 
 const problems: string[] = [];
 
+function checkLeafValues(path: string, node: unknown, prefix = ""): void {
+  if (typeof node === "object" && node !== null) {
+    for (const [key, value] of Object.entries(node)) {
+      checkLeafValues(path, value, prefix ? `${prefix}.${key}` : key);
+    }
+    return;
+  }
+  if (typeof node !== "string" || node.trim() === "") {
+    problems.push(`${path}: '${prefix}' must be a non-empty string`);
+  }
+}
+
 async function readOr(path: string): Promise<string | null> {
   try {
     return await Deno.readTextFile(path);
@@ -65,16 +77,20 @@ for (const dir of textDirs) {
   const rel = relative(Deno.cwd(), dir);
 
   // Require widget-string key parity with English.
-  const en = new Set(
-    leafPaths(JSON.parse(await Deno.readTextFile(`${dir}/en.json`))),
-  );
+  const enPath = `${rel}/en.json`;
+  const enText = JSON.parse(await Deno.readTextFile(`${dir}/en.json`));
+  checkLeafValues(enPath, enText);
+  const en = new Set(leafPaths(enText));
   for (const loc of LOCALES.filter((l) => l !== "en")) {
     const raw = await readOr(`${dir}/${loc}.json`);
     if (raw === null) {
       problems.push(`${rel}/${loc}.json is missing`);
       continue;
     }
-    const other = new Set(leafPaths(JSON.parse(raw)));
+    const localePath = `${rel}/${loc}.json`;
+    const localeText = JSON.parse(raw);
+    checkLeafValues(localePath, localeText);
+    const other = new Set(leafPaths(localeText));
     for (const k of en) {
       if (!other.has(k)) problems.push(`${rel}/${loc}.json missing: ${k}`);
     }
@@ -171,6 +187,7 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
     continue;
   }
   let config: {
+    title?: Record<string, unknown>;
     textDir?: string;
     contributors?: Record<string, { type?: string; id?: string }[]>;
   };
@@ -179,6 +196,14 @@ for await (const f of expandGlob("notebooks/**/*.qmd")) {
   } catch {
     problems.push(`${configPath}: notebook config is not valid JSON`);
     continue;
+  }
+  for (const locale of LOCALES) {
+    if (
+      typeof config.title?.[locale] !== "string" ||
+      config.title[locale].trim() === ""
+    ) {
+      problems.push(`${configPath}: title.${locale} must be a non-empty string`);
+    }
   }
   const textDir = config.textDir;
   if (!textDir) {

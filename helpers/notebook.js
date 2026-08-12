@@ -1,5 +1,3 @@
-import { lang as Lang } from "./lang.js";
-
 const CONFIG_SCRIPT_ID = "atlas-notebook-config";
 const LOCALES = ["en", "fr"];
 
@@ -30,9 +28,5 @@ export async function loadNotebookText(config) {
       await fetchJson(`/${config.textDir}/${locale}.json`),
     ]),
   );
-  const text = Object.fromEntries(textEntries);
-  for (const locale of LOCALES) {
-    text[locale] = Lang.withFallback(text[locale], text.en);
-  }
-  return text;
+  return Object.fromEntries(textEntries);
 }

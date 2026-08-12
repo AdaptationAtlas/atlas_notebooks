@@ -292,7 +292,7 @@ local function bilingual(byLocale)
 	for _, locale in ipairs(locales) do
 		table.insert(
 			out,
-			('<span class="nb-i18n" lang="%s">%s</span>'):format(locale, esc(byLocale[locale] or byLocale.en))
+			('<span class="nb-i18n" lang="%s">%s</span>'):format(locale, esc(byLocale[locale]))
 		)
 	end
 	return table.concat(out)
