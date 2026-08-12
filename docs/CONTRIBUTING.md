@@ -41,7 +41,7 @@ questions.
   | `template` | Minimal starting point for contributors—no notebook content or dependencies | [Template](https://template.adaptation-atlas-nb.pages.dev/) |
   | `example`  | Archived notebooks from an earlier version of the project                   | [Example](https://example.adaptation-atlas-nb.pages.dev/)   |
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 # Contributing
 
@@ -81,11 +81,11 @@ To build and preview the project locally:
    ```
 
    > By default, Quarto assigns a random port and provides the preview link in
-   > the terminal. You can specify a port if preferred:
+   >    the terminal. You can specify a port if preferred:
    >
-   >    ```bash
+   >       ```bash
    >    quarto preview --port 8080
-   >    ```
+   >       ```
 
 Go to the localhost URL shown by Quarto (for example, `http://localhost:8000`).
 
@@ -115,7 +115,7 @@ Some workarounds:
 - Serve the HTML pages locally using Python:
   `python3 -m http.server -d _site 4000`
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 ## To Propose a New Notebook
 
@@ -308,7 +308,7 @@ access. This is also why package lock files are not needed or included. These
 warnings are harmless and should not affect the build process. We've added
 `// @ts-nocheck` flags to suppress them where appropriate.
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 ## Additional Resources
 
@@ -320,4 +320,4 @@ warnings are harmless and should not affect the build process. We've added
 - [Quarto Main Guide](https://quarto.org/docs/guide/)
 - [Adaptation Atlas ObservableHQ](https://observablehq.com/@adaptationatlas)
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------

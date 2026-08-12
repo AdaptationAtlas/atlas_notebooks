@@ -13,11 +13,10 @@ adminControls([0, 1])
 ```{ojs}
 s3AccessDataRaw = {
   const bind = createSqlBindings();
-  const adminWhere = sqlAdminWhere(
-    { admin0: selectedAdmin0, admin1: selectedAdmin1 },
-    bind,
-    { maxLevel: 1, iso3: iso3Set },
-  );
+  const adminWhere = sqlAdminWhere({ admin0: selectedAdmin0, admin1: selectedAdmin1 }, bind, {
+    maxLevel: 1,
+    iso3: iso3Set,
+  });
 
   return await db.query(
     `
@@ -25,7 +24,7 @@ s3AccessDataRaw = {
     FROM access_data
     WHERE ${adminWhere}
   `,
-    bind.params,
+    bind.params
   );
 }
 
@@ -35,88 +34,75 @@ s3View = adminViewFor(1)
 // Query readiness at the access level to avoid choosing an arbitrary district row.
 s3Readiness = {
   const bind = createSqlBindings();
-  const adminWhere = sqlAdminWhere(
-    { admin0: selectedAdmin0, admin1: selectedAdmin1 },
-    bind,
-    { maxLevel: 1, iso3: iso3Set },
-  );
+  const adminWhere = sqlAdminWhere({ admin0: selectedAdmin0, admin1: selectedAdmin1 }, bind, {
+    maxLevel: 1,
+    iso3: iso3Set,
+  });
 
-  return await db.query(
-    `SELECT * FROM cis_data WHERE ${adminWhere}`,
-    bind.params,
-  );
+  return await db.query(`SELECT * FROM cis_data WHERE ${adminWhere}`, bind.params);
 }
 
-s3ReadinessByAdmin = new Map(
-  s3Readiness.map((d) => [s3View.adminKey(d), d]),
-)
-
+s3ReadinessByAdmin = new Map(s3Readiness.map((d) => [s3View.adminKey(d), d]))
 
 section3Data = {
-  return s3AccessDataRaw.map(access => {
-    const cis = s3ReadinessByAdmin.get(s3View.adminKey(access));
-    if (!cis) return null;
-    
-    // Average available access indicators; preserve an all-missing row as null.
-    const combined_access =
-      d3.mean([access.tv, access.internet, access.cellphone]) ?? null;
-    
-    return {
-      // Label at the resolved level so regions remain distinct.
-      label: adminDisplayName(access, s3View.level),
-      admin0_name: access.admin0_name,
-      admin1_name: access.admin1_name,
-      admin2_name: access.admin2_name,
-      iso3: access.iso3,
-      gaul0_code: access.gaul0_code,
-      gaul1_code: access.gaul1_code,
-      gaul2_code: access.gaul2_code,
-      cis_readiness_index: cis.cis_readiness_index,
-      tv_pct: access.tv,
-      internet_pct: access.internet,
-      cellphone_pct: access.cellphone,
-      combined_pct: combined_access,
-    };
-  }).filter(d => d !== null);
+  return s3AccessDataRaw
+    .map((access) => {
+      const cis = s3ReadinessByAdmin.get(s3View.adminKey(access));
+      if (!cis) return null;
+
+      // Average available access indicators; preserve an all-missing row as null.
+      const combined_access = d3.mean([access.tv, access.internet, access.cellphone]) ?? null;
+
+      return {
+        // Label at the resolved level so regions remain distinct.
+        label: adminDisplayName(access, s3View.level),
+        admin0_name: access.admin0_name,
+        admin1_name: access.admin1_name,
+        admin2_name: access.admin2_name,
+        iso3: access.iso3,
+        gaul0_code: access.gaul0_code,
+        gaul1_code: access.gaul1_code,
+        gaul2_code: access.gaul2_code,
+        cis_readiness_index: cis.cis_readiness_index,
+        tv_pct: access.tv,
+        internet_pct: access.internet,
+        cellphone_pct: access.cellphone,
+        combined_pct: combined_access,
+      };
+    })
+    .filter((d) => d !== null);
 }
 ```
 
 ```{ojs}
 // Access Type Selector
-viewof s3AccessType = Inputs.radio(
-  ["combined", "internet", "tv", "cellphone"],
-  {
-    label: nbText.s3AccessSelector,
-    value: "combined",
-    format: (x) => S3_ACCESS_TYPES[x].label
-  }
-)
+viewof s3AccessType = Inputs.radio(["combined", "internet", "tv", "cellphone"], {
+  label: nbText.s3AccessSelector,
+  value: "combined",
+  format: (x) => S3_ACCESS_TYPES[x].label,
+})
 ```
 
 ```{ojs}
 // View Toggle
-viewof s3ViewType = Inputs.radio(
-  ["map", "dumbbell", "table"],
-  {
-    label: nbText.s3ViewToggle,
-    value: "map",
-    format: x => x === "map" ? nbText.s3ViewMap :
-                 x === "dumbbell" ? nbText.s3ViewDumbbell :
-                 nbText.s3ViewTable
-  }
-)
+viewof s3ViewType = Inputs.radio(["map", "dumbbell", "table"], {
+  label: nbText.s3ViewToggle,
+  value: "map",
+  format: (x) =>
+    x === "map" ? nbText.s3ViewMap : x === "dumbbell" ? nbText.s3ViewDumbbell : nbText.s3ViewTable,
+})
 
 // Map Type Toggle (Only shown when view type is map)
 viewof s3MapType = {
   if (s3ViewType !== "map") {
-     const input = Inputs.radio(["bivariate"], {label: "Map Type", value: "bivariate"});
-     input.style.display = "none";
-     return input;
+    const input = Inputs.radio(["bivariate"], { label: "Map Type", value: "bivariate" });
+    input.style.display = "none";
+    return input;
   }
   return Inputs.radio(["bivariate", "univariate"], {
     label: "Map Type",
-    value: "bivariate", 
-    format: x => x === "bivariate" ? "Bivariate (Readiness × Access)" : "Access Distribution"
+    value: "bivariate",
+    format: (x) => (x === "bivariate" ? "Bivariate (Readiness × Access)" : "Access Distribution"),
   });
 }
 ```
@@ -126,26 +112,19 @@ viewof s3MapType = {
 viewof s3SortBy = {
   if (s3ViewType === "map") {
     // Return a hidden selector that maintains state but isn't displayed
-    const input = Inputs.select(
-      ["readiness", "combined", "internet", "tv", "cellphone"],
-      {
-        label: nbText.s3SortBy,
-        value: "readiness"
-      }
-    );
+    const input = Inputs.select(["readiness", "combined", "internet", "tv", "cellphone"], {
+      label: nbText.s3SortBy,
+      value: "readiness",
+    });
     input.style.display = "none";
     return input;
   }
-  
-  return Inputs.select(
-    ["readiness", "combined", "internet", "tv", "cellphone"],
-    {
-      label: nbText.s3SortBy,
-      value: "readiness",
-      format: (x) =>
-        x === "readiness" ? nbText.s3SortReadiness : S3_ACCESS_TYPES[x].label
-    }
-  );
+
+  return Inputs.select(["readiness", "combined", "internet", "tv", "cellphone"], {
+    label: nbText.s3SortBy,
+    value: "readiness",
+    format: (x) => (x === "readiness" ? nbText.s3SortReadiness : S3_ACCESS_TYPES[x].label),
+  });
 }
 ```
 
@@ -171,25 +150,27 @@ s3CurrentAccessLabel = S3_ACCESS_TYPES[s3AccessType].label
 s3AccessCutoffs = {
   const values = section3Data
     .map((d) => s3AccessNorm(d))
-    .filter(v => v !== null && !isNaN(v))
+    .filter((v) => v !== null && !isNaN(v))
     .sort((a, b) => a - b);
-  
+
   if (values.length === 0) {
     return { low: 0.33, moderate: 0.67 };
   }
-  
+
   return {
     low: d3.quantile(values, 0.333),
-    moderate: d3.quantile(values, 0.667)
+    moderate: d3.quantile(values, 0.667),
   };
 }
 ```
 
 ```{ojs}
 classifyS3Readiness = (value, rowOrLevel = s3View.level) =>
-  classifyThreshold("cis_readiness_index", value, rowOrLevel);
+  classifyThreshold("cis_readiness_index", value, rowOrLevel)
 
 function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = s3View.level) {
+
+// Collapse any missing axis to the palette's single no-data key.
   const readinessClass = classifyS3Readiness(readiness, rowOrLevel);
 
   let accessClass;
@@ -197,8 +178,7 @@ function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = 
   else if (access < accessCutoffs.low) accessClass = "Low";
   else if (access < accessCutoffs.moderate) accessClass = "Moderate";
   else accessClass = "High";
-  
-  // Collapse any missing axis to the palette's single no-data key.
+
   const missing = accessClass === "N/A" || readinessClass === "No data";
 
   return {
@@ -210,12 +190,11 @@ function bivariateClassifyAccess(readiness, access, accessCutoffs, rowOrLevel = 
 
 // Reuse Section 2's palette and add the missing-access key.
 s3BivariateColors = ({ ...bivariateColors, "N/A": "#cccccc" })
-
 ```
 
 ```{ojs}
 s3ProcessedData = {
-  return section3Data.map(d => {
+  return section3Data.map((d) => {
     const accessValue = s3AccessNorm(d);
     const classification = bivariateClassifyAccess(
       d.cis_readiness_index,
@@ -223,7 +202,7 @@ s3ProcessedData = {
       s3AccessCutoffs,
       d
     );
-    
+
     return {
       ...d,
       accessValue,
@@ -231,8 +210,7 @@ s3ProcessedData = {
       // Needs both terms: subtracting a null readiness coerces it to 0 and reports
       // the access value itself as the gap.
       gap:
-        Number.isFinite(accessValue) &&
-        Number.isFinite(d.cis_readiness_index)
+        Number.isFinite(accessValue) && Number.isFinite(d.cis_readiness_index)
           ? accessValue - d.cis_readiness_index
           : null,
     };
@@ -245,13 +223,11 @@ s3SortedData = {
   if (!s3ProcessedData || s3ProcessedData.length === 0) {
     return [];
   }
-  
+
   const data = [...s3ProcessedData];
-  
+
   const value =
-    s3SortBy === "readiness"
-      ? (d) => d.cis_readiness_index
-      : (d) => s3AccessNorm(d, s3SortBy);
+    s3SortBy === "readiness" ? (d) => d.cis_readiness_index : (d) => s3AccessNorm(d, s3SortBy);
 
   return data.sort(descendingDefined(value));
 }
@@ -264,7 +240,7 @@ s3GeoData = ({
   features: buildLevelFeatures(
     (row) => ({ ...(row || {}), hasData: Boolean(row) }),
     s3ProcessedData,
-    s3View,
+    s3View
   ).filter((f) => f.properties.hasData),
 })
 ```
@@ -298,14 +274,8 @@ function createS3AccessMap() {
     },
     channels: {
       region: {
-        label:
-          s3View.level === 2
-            ? "District"
-            : s3View.level === 1
-              ? "Region"
-              : "Country",
-        value: (d) =>
-          d.properties.regionName || d.properties.admin0_name || "N/A",
+        label: s3View.level === 2 ? "District" : s3View.level === 1 ? "Region" : "Country",
+        value: (d) => d.properties.regionName || d.properties.admin0_name || "N/A",
       },
       access: {
         label: s3CurrentAccessLabel,
@@ -341,19 +311,12 @@ function createS3BivariateMap() {
     },
     channels: {
       region: {
-        label:
-          s3View.level === 2
-            ? "District"
-            : s3View.level === 1
-              ? "Region"
-              : "Country",
-        value: (d) =>
-          d.properties.regionName || d.properties.admin0_name || "N/A",
+        label: s3View.level === 2 ? "District" : s3View.level === 1 ? "Region" : "Country",
+        value: (d) => d.properties.regionName || d.properties.admin0_name || "N/A",
       },
       readiness: {
         label: nbText.s3ReadinessLabel,
-        value: (d) =>
-          fmt(d.properties.cis_readiness_index, 2),
+        value: (d) => fmt(d.properties.cis_readiness_index, 2),
       },
       readinessClass: {
         label: "Readiness Class",
@@ -391,18 +354,22 @@ function createS3BivariateMap() {
 ```{ojs}
 function renderS3DumbbellLegend() {
   const items = [
-    {symbol: "●", color: "#377eb8", label: nbText.s3ReadinessLabel},
-    {symbol: "●", color: "#ff7f00", label: s3CurrentAccessLabel},
-    {symbol: "━", color: "#4daf4a", label: nbText.s3PositiveGap},
-    {symbol: "━", color: "#e41a1c", label: nbText.s3NegativeGap},
-    {symbol: "━", color: "#999999", label: "Similar values"}
+    { symbol: "●", color: "#377eb8", label: nbText.s3ReadinessLabel },
+    { symbol: "●", color: "#ff7f00", label: s3CurrentAccessLabel },
+    { symbol: "━", color: "#4daf4a", label: nbText.s3PositiveGap },
+    { symbol: "━", color: "#e41a1c", label: nbText.s3NegativeGap },
+    { symbol: "━", color: "#999999", label: "Similar values" },
   ];
 
-  return html`<div style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+  return html`<div
+    style="margin-bottom: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px;"
+  >
     <div style="display: flex; gap: 20px; align-items: center; font-size: 12px;">
-      ${items.map(({symbol, color, label}) => html`
-        <div><span style="color: ${color};">${symbol}</span> ${label}</div>
-      `)}
+      ${items.map(
+        ({ symbol, color, label }) => html`
+          <div><span style="color: ${color};">${symbol}</span> ${label}</div>
+        `
+      )}
     </div>
   </div>`;
 }
@@ -412,38 +379,36 @@ function makeS3DumbbellTip() {
     fontSize: 14,
     channels: {
       area: { label: "Area", value: (d) => d.label },
-      readiness: { label: nbText.s3ReadinessLabel, value: d => d.cis_readiness_index },
-      access: { label: s3CurrentAccessLabel, value: d => d.accessValue },
-      gap: { label: nbText.s3GapLabel, value: d => d.gap }
+      readiness: { label: nbText.s3ReadinessLabel, value: (d) => d.cis_readiness_index },
+      access: { label: s3CurrentAccessLabel, value: (d) => d.accessValue },
+      gap: { label: nbText.s3GapLabel, value: (d) => d.gap },
     },
     format: {
       country: true,
       x: false,
       y: false,
-      readiness: d => fmt(d, 3),
-      access: d => d != null ? `${(d * 100).toFixed(1)}%` : "N/A",
+      readiness: (d) => fmt(d, 3),
+      access: (d) => (d != null ? `${(d * 100).toFixed(1)}%` : "N/A"),
       gap: (d) => {
         if (d == null || isNaN(d)) return "N/A";
-        const label = d > 0 ? nbText.s3PositiveGap : nbText.s3NegativeGap
+        const label = d > 0 ? nbText.s3PositiveGap : nbText.s3NegativeGap;
         return `${d.toFixed(3)} (${label})`;
-      }
-    }
+      },
+    },
   };
 }
 
 function renderS3DumbbellPlot(data) {
   const chartHeight = Math.max(600, data.length * 25);
   const dataWithAccess = data.filter((d) => isFiniteNumber(d.accessValue));
-  const completeData = dataWithAccess.filter((d) =>
-    isFiniteNumber(d.cis_readiness_index),
-  );
+  const completeData = dataWithAccess.filter((d) => isFiniteNumber(d.cis_readiness_index));
   const labels = data.map((d) => d.label);
   const axis = labelAxis(labels, 1200);
   const xDomain = d3.extent(
     data
       .flatMap((d) => [d.cis_readiness_index, d.accessValue])
       .filter(isFiniteNumber)
-      .map(Number),
+      .map(Number)
   );
   const tip = makeS3DumbbellTip();
 
@@ -459,15 +424,15 @@ function renderS3DumbbellPlot(data) {
       domain: xDomain,
       label: "Value",
       grid: true,
-      axis: "top"
+      axis: "top",
     },
     y: {
       label: null,
       domain: labels,
-      tickFormat: axis.tickFormat
+      tickFormat: axis.tickFormat,
     },
     marks: [
-      Plot.axisX({anchor: "bottom", label: "Value"}),
+      Plot.axisX({ anchor: "bottom", label: "Value" }),
       Plot.link(completeData, {
         x1: "cis_readiness_index",
         x2: "accessValue",
@@ -477,7 +442,7 @@ function renderS3DumbbellPlot(data) {
           if (d.gap == null || isNaN(d.gap)) return "#999999";
           return d.gap > 0.05 ? "#4daf4a" : d.gap < -0.05 ? "#e41a1c" : "#999999";
         },
-        strokeWidth: 2
+        strokeWidth: 2,
       }),
       Plot.dot(data, {
         x: "cis_readiness_index",
@@ -488,9 +453,9 @@ function renderS3DumbbellPlot(data) {
           ...tip,
           format: {
             ...tip.format,
-            x: d => `Readiness: ${fmt(d, 3)}`
-          }
-        }
+            x: (d) => `Readiness: ${fmt(d, 3)}`,
+          },
+        },
       }),
       Plot.dot(dataWithAccess, {
         x: "accessValue",
@@ -499,24 +464,22 @@ function renderS3DumbbellPlot(data) {
         r: 5,
         stroke: "#ff7f00",
         strokeWidth: 2,
-        tip
-      })
-    ]
+        tip,
+      }),
+    ],
   });
 }
 
 function renderS3DumbbellView() {
   return html`<div style="width: 100%; overflow-x: auto;">
-    ${renderS3DumbbellLegend()}
-    ${renderS3DumbbellPlot(s3SortedData)}
-    ${renderS3DumbbellLegend()}
+    ${renderS3DumbbellLegend()} ${renderS3DumbbellPlot(s3SortedData)} ${renderS3DumbbellLegend()}
   </div>`;
 }
 
 function renderS3TableView() {
+// Derive access columns from one localized registry.
+// TODO: Move remaining English literals into data/cis/text/<locale>.json.
   return filterableDataTable(s3SortedData, {
-    // Derive access columns from one localized registry.
-    // TODO: Move remaining English literals into data/cis/text/<locale>.json.
     columns: [
       "label",
       "iso3",
@@ -531,10 +494,7 @@ function renderS3TableView() {
       cis_readiness_index: "CIS Readiness (Raw)",
       readinessClass: "CIS Class",
       ...Object.fromEntries(
-        Object.values(S3_ACCESS_TYPES).map((type) => [
-          type.pct,
-          `${type.label} (%)`,
-        ]),
+        Object.values(S3_ACCESS_TYPES).map((type) => [type.pct, `${type.label} (%)`])
       ),
       gap: nbText.s3GapLabel,
     },
@@ -542,24 +502,19 @@ function renderS3TableView() {
       cis_readiness_index: (d) => fmt(d, 3),
       gap: (d) => fmt(d, 3),
       ...Object.fromEntries(
-        Object.values(S3_ACCESS_TYPES).map((type) => [
-          type.pct,
-          (d) => fmt(d, 1),
-        ]),
+        Object.values(S3_ACCESS_TYPES).map((type) => [type.pct, (d) => fmt(d, 1)])
       ),
     },
     width: {
       label: 150,
-      iso3: 60
-    }
+      iso3: 60,
+    },
   });
 }
 
 s3Figure = {
   if (s3ViewType === "map") {
-    return html`<div style="width: 100%; overflow-x: auto;">
-      ${renderS3MapDisplay()}
-    </div>`;
+    return html`<div style="width: 100%; overflow-x: auto;">${renderS3MapDisplay()}</div>`;
   } else if (s3ViewType === "dumbbell") {
     return renderS3DumbbellView();
   }
@@ -569,64 +524,80 @@ s3Figure = {
 
 ```{ojs}
 s3DownloadButton = {
-    const safeFormat = (value, decimals) => {
-      if (value == null || isNaN(value)) return "N/A";
-      return value.toFixed(decimals);
-    };
-    
-    const filename = `cis_implementation_${s3AccessType}_access`;
+  const safeFormat = (value, decimals) => {
+    if (value == null || isNaN(value)) return "N/A";
+    return value.toFixed(decimals);
+  };
 
-    return inputTemplate({ gap: "0.5rem" })([
-      ...(s3ViewType === "table"
-        ? []
-        : [downloadPngButton(s3Figure, { filename, label: nbText.downloadFigure })]),
-      downloadCsvButton(
-        s3SortedData.map(d => ({
-          "Area": d.label || "N/A",
-          "ISO3": d.iso3 || "N/A",
-          "CIS Readiness Raw": safeFormat(d.cis_readiness_index, 3),
-          "CIS Readiness Class": d.readinessClass || "N/A",
-          "TV Access %": safeFormat(d.tv_pct, 1),
-          "Internet Access %": safeFormat(d.internet_pct, 1),
-          "Cellphone Access %": safeFormat(d.cellphone_pct, 1),
-          "Combined Access %": safeFormat(d.combined_pct, 1),
-          "Gap (Access - Readiness)": safeFormat(d.gap, 3),
-          "Bivariate Category": d.bivariateClass || "N/A"
-        })),
-        { filename, label: nbText.downloadLabel },
-      ),
-    ]);
+  const filename = `cis_implementation_${s3AccessType}_access`;
+
+  return inputTemplate({ gap: "0.5rem" })([
+    ...(s3ViewType === "table"
+      ? []
+      : [downloadPngButton(s3Figure, { filename, label: nbText.downloadFigure })]),
+    downloadCsvButton(
+      s3SortedData.map((d) => ({
+        Area: d.label || "N/A",
+        ISO3: d.iso3 || "N/A",
+        "CIS Readiness Raw": safeFormat(d.cis_readiness_index, 3),
+        "CIS Readiness Class": d.readinessClass || "N/A",
+        "TV Access %": safeFormat(d.tv_pct, 1),
+        "Internet Access %": safeFormat(d.internet_pct, 1),
+        "Cellphone Access %": safeFormat(d.cellphone_pct, 1),
+        "Combined Access %": safeFormat(d.combined_pct, 1),
+        "Gap (Access - Readiness)": safeFormat(d.gap, 3),
+        "Bivariate Category": d.bivariateClass || "N/A",
+      })),
+      { filename, label: nbText.downloadLabel }
+    ),
+  ]);
 }
 ```
 
 ```{ojs}
 s3Insights = {
-  const avgReadiness = d3.mean(section3Data, d => d.cis_readiness_index);
+  const avgReadiness = d3.mean(section3Data, (d) => d.cis_readiness_index);
   const avgAccess = d3.mean(section3Data, (d) => s3AccessNorm(d));
-  
+
   // Capacity-access gaps.
-  const capacityGaps = s3ProcessedData.filter(d => 
-    d.cis_readiness_index > 0.6 && d.accessValue !== null && !isNaN(d.accessValue) && d.accessValue < 0.4
+  const capacityGaps = s3ProcessedData.filter(
+    (d) =>
+      d.cis_readiness_index > 0.6 &&
+      d.accessValue !== null &&
+      !isNaN(d.accessValue) &&
+      d.accessValue < 0.4
   );
-  
+
   // High-readiness, high-access opportunities.
-  const optimalZones = s3ProcessedData.filter(d => 
-    d.bivariateClass === "High × High"
-  );
-  
+  const optimalZones = s3ProcessedData.filter((d) => d.bivariateClass === "High × High");
+
   // Reuse the master selection breadcrumb.
   const selectedRegion = breadcrumb || "Sub-Saharan Africa";
-  
-  const insight1 = `In ${selectedRegion}, average CIS Readiness is **${avgReadiness.toFixed(2)}** while ${s3CurrentAccessLabel} averages **${(avgAccess * 100).toFixed(1)}%**.`;
-  
-  const insight2 = capacityGaps.length > 0 
-    ? `Countries such as **${capacityGaps.slice(0, 2).map(d => d.label).join(' and ')}** show strong technical capacity but limited digital reach, highlighting the need for investment in ICT and communication channels to deliver CIS to users.`
-    : 'Most countries show balanced capacity and access.';
-  
-  const insight3 = optimalZones.length > 0
-    ? `**${optimalZones.length} countries** (${(optimalZones.length / s3ProcessedData.length * 100).toFixed(1)}%) fall in the optimal zone with both high CIS readiness and high ${s3CurrentAccessLabel.toLowerCase()}, representing prime opportunities for scaling climate services.`
-    : `No countries currently fall in the optimal zone for ${s3CurrentAccessLabel.toLowerCase()}.`;
-  
+
+  const insight1 = `In ${selectedRegion}, average CIS Readiness is **${avgReadiness.toFixed(
+    2
+  )}** while ${s3CurrentAccessLabel} averages **${(avgAccess * 100).toFixed(1)}%**.`;
+
+  const insight2 =
+    capacityGaps.length > 0
+      ? `Countries such as **${capacityGaps
+          .slice(0, 2)
+          .map((d) => d.label)
+          .join(
+            " and "
+          )}** show strong technical capacity but limited digital reach, highlighting the need for investment in ICT and communication channels to deliver CIS to users.`
+      : "Most countries show balanced capacity and access.";
+
+  const insight3 =
+    optimalZones.length > 0
+      ? `**${optimalZones.length} countries** (${(
+          (optimalZones.length / s3ProcessedData.length) *
+          100
+        ).toFixed(
+          1
+        )}%) fall in the optimal zone with both high CIS readiness and high ${s3CurrentAccessLabel.toLowerCase()}, representing prime opportunities for scaling climate services.`
+      : `No countries currently fall in the optimal zone for ${s3CurrentAccessLabel.toLowerCase()}.`;
+
   return html`
     <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;">
       <h4 style="margin-top: 0;">Key Insights</h4>

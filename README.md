@@ -24,7 +24,7 @@ Colorado, Boulder and many other institutions, programs, and individuals.
 Please see our [Contributing guidelines](docs/CONTRIBUTING.md) for instructions
 on how to set-up or contribute to the project.
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 ## Repository Structure
 
@@ -35,7 +35,7 @@ on how to set-up or contribute to the project.
   | `template` | Minimal starting point for contributors—no notebook content or dependencies | [Template](https://template.adaptation-atlas-nb.pages.dev/) |
   | `example`  | Archived notebooks from an earlier version of the project                   | [Example](https://example.adaptation-atlas-nb.pages.dev/)   |
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 ### Additional Resources
 
@@ -47,4 +47,4 @@ on how to set-up or contribute to the project.
 - [Quarto Main Guide](https://quarto.org/docs/guide/)
 - [Adaptation Atlas ObservableHQ](https://observablehq.com/@adaptationatlas)
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------

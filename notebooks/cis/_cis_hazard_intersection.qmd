@@ -46,7 +46,7 @@ hazardByAdmin = {
       AND hazard IN (${bind.list(Object.values(S2_HAZARDS).map((h) => h.code))})
       AND stat = ${bind.value("mean")}
   `,
-    bind.params,
+    bind.params
   );
 
   // Pivot mean-only hazard rows into a direct admin-unit lookup.
@@ -67,15 +67,11 @@ combinedData = {
   return filteredData
     .map((cis) => {
       const hazard =
-        hazardByAdmin.get(
-          `${cis.admin0_name}|${cis.admin1_name}|${cis.admin2_name}`,
-        ) ?? {};
+        hazardByAdmin.get(`${cis.admin0_name}|${cis.admin1_name}|${cis.admin2_name}`) ?? {};
 
       return {
         ...cis,
-        ...Object.fromEntries(
-          hazardColumns.map((col) => [col, hazard[col] ?? null]),
-        ),
+        ...Object.fromEntries(hazardColumns.map((col) => [col, hazard[col] ?? null])),
       };
     })
     .filter((d) => hazardColumns.some((col) => d[col] !== null));
@@ -83,38 +79,27 @@ combinedData = {
 
 // Classify readiness × hazard on the 3×3 palette; missing hazards remain no-data.
 
-function bivariateClassify(
-  readiness,
-  hazardValue,
-  hazardKey,
-  readinessLevel = currentAdminLevel,
-) {
-  const readinessClass = classifyThreshold(
-    "cis_readiness_index",
-    readiness,
-    readinessLevel,
-  );
+function bivariateClassify(readiness, hazardValue, hazardKey, readinessLevel = currentAdminLevel) {
 
-  // Comparisons against NaN are all false, so missing values have to be caught
-  // before the ladder — otherwise they fall through to the most severe class.
+// Comparisons against NaN are all false, so missing values have to be caught
+// before the ladder — otherwise they fall through to the most severe class.
+  const readinessClass = classifyThreshold("cis_readiness_index", readiness, readinessLevel);
+
   const numeric = Number(hazardValue);
   const [moderate, severe] = S2_HAZARDS[hazardKey].breaks;
   const hazardClass =
     hazardValue == null || Number.isNaN(numeric)
       ? "No data"
       : numeric < moderate
-        ? "Low"
-        : numeric < severe
-          ? "Moderate"
-          : "High";
+      ? "Low"
+      : numeric < severe
+      ? "Moderate"
+      : "High";
 
   return {
     readinessClass,
     hazardClass,
-    bivariateClass:
-      hazardClass === "No data"
-        ? "No data"
-        : `${readinessClass} × ${hazardClass}`,
+    bivariateClass: hazardClass === "No data" ? "No data" : `${readinessClass} × ${hazardClass}`,
   };
 }
 
@@ -143,23 +128,17 @@ bivariateColors = Object.fromEntries([
 ```{ojs}
 //| echo: false
 
-viewof s2HazardType = Inputs.radio(
-  ["drought", "waterlogging"],
-  {
-    label: nbText.s2HazardSelector,
-    value: "drought",
-    format: (d) => S2_HAZARDS[d].label
-  }
-);
+viewof s2HazardType = Inputs.radio(["drought", "waterlogging"], {
+  label: nbText.s2HazardSelector,
+  value: "drought",
+  format: (d) => S2_HAZARDS[d].label,
+})
 
-viewof s2ViewToggle = Inputs.radio(
-  ["map", "table"],
-  {
-    label: nbText.s2ViewToggle,
-    value: "map",
-    format: d => d === "map" ? nbText.s2ViewMap : nbText.s2ViewTable
-  }
-);
+viewof s2ViewToggle = Inputs.radio(["map", "table"], {
+  label: nbText.s2ViewToggle,
+  value: "map",
+  format: (d) => (d === "map" ? nbText.s2ViewMap : nbText.s2ViewTable),
+})
 ```
 
 ```{ojs}
@@ -169,51 +148,46 @@ s2ProcessedData = {
   const hazardColumn = S2_HAZARDS[s2HazardType].column;
 
   return combinedData
-    .filter(d => d.cis_readiness_index != null && d[hazardColumn] !== null)
-    .map(d => {
-    const classified = bivariateClassify(
-      d.cis_readiness_index,
-      d[hazardColumn],
-      s2HazardType,
-      d,
-    );
-    
-    return {
-      ...d,
-      hazardValue: d[hazardColumn],
-      ...classified
-    };
-  });
+    .filter((d) => d.cis_readiness_index != null && d[hazardColumn] !== null)
+    .map((d) => {
+      const classified = bivariateClassify(d.cis_readiness_index, d[hazardColumn], s2HazardType, d);
+
+      return {
+        ...d,
+        hazardValue: d[hazardColumn],
+        ...classified,
+      };
+    });
 }
 
 s2MapData = {
   const level = currentAdminLevel; //TODO: This filtering has to go / be re-used across notebook
-  
+
   if (level === 0) {
-    const grouped = d3.group(s2ProcessedData, d => d.gaul0_code);
-    return Array.from(grouped.values()).map(group => {
+    const grouped = d3.group(s2ProcessedData, (d) => d.gaul0_code);
+    return Array.from(grouped.values()).map((group) => {
       const first = group[0];
-      const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
-      const avgHazard = d3.mean(group, d => d.hazardValue);
+      const avgReadiness = d3.mean(group, (d) => d.cis_readiness_index);
+      const avgHazard = d3.mean(group, (d) => d.hazardValue);
       const classified = bivariateClassify(avgReadiness, avgHazard, s2HazardType, 0);
-      
+
       return {
         admin0_name: first.admin0_name,
         iso3: first.iso3,
         gaul0_code: first.gaul0_code,
         cis_readiness_index: avgReadiness,
         hazardValue: avgHazard,
-        ...classified
+        ...classified,
       };
     });
   } else if (level === 1) {
-    const grouped = d3.group(s2ProcessedData, d => d.gaul1_code);
-    return Array.from(grouped.values()).map(group => {
+    const grouped = d3.group(s2ProcessedData, (d) => d.gaul1_code);
+    return Array.from(grouped.values()).map((group) => {
       const first = group[0];
-      const avgReadiness = d3.mean(group, d => d.cis_readiness_index);
-      const avgHazard = d3.mean(group, d => d.hazardValue);
+      const avgReadiness = d3.mean(group, (d) => d.cis_readiness_index);
+      const avgHazard = d3.mean(group, (d) => d.hazardValue);
       const classified = bivariateClassify(avgReadiness, avgHazard, s2HazardType, 1);
-      
+
       return {
         admin0_name: first.admin0_name,
         admin1_name: first.admin1_name,
@@ -222,7 +196,7 @@ s2MapData = {
         gaul1_code: first.gaul1_code,
         cis_readiness_index: avgReadiness,
         hazardValue: avgHazard,
-        ...classified
+        ...classified,
       };
     });
   } else {
@@ -233,10 +207,7 @@ s2MapData = {
 // Join at the resolved admin level and retain unmatched no-data features.
 s2GeoData = ({
   type: "FeatureCollection",
-  features: buildLevelFeatures(
-    (row) => ({ ...(row || {}), hasData: Boolean(row) }),
-    s2MapData,
-  ),
+  features: buildLevelFeatures((row) => ({ ...(row || {}), hasData: Boolean(row) }), s2MapData),
 })
 ```
 
@@ -248,53 +219,54 @@ s2GeoData = ({
 s2BivariateMap = {
   if (s2ViewToggle !== "map") return null;
   const hazardName = S2_HAZARDS[s2HazardType].label;
-  
+
   return makeChoropleth({
     features: s2GeoData,
     width: 775,
     height: 610,
     projection: "mercator",
-    fill: d => d.properties.hasData ? d.properties.bivariateClass : "No data",
+    fill: (d) => (d.properties.hasData ? d.properties.bivariateClass : "No data"),
     color: {
       type: "categorical",
       legend: false,
       // Insertion order of the palette is the class order the legend expects.
       domain: Object.keys(bivariateColors),
       range: Object.values(bivariateColors),
-      label: "Bivariate Class"
+      label: "Bivariate Class",
     },
     channels: {
       region: {
         label: "Region",
-        value: (d) => currentAdminLevel === 0
-          ? d.properties.admin0_name
-          : currentAdminLevel === 1
-          ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
-          : `${d.properties.admin2_name}, ${d.properties.admin1_name}`
+        value: (d) =>
+          currentAdminLevel === 0
+            ? d.properties.admin0_name
+            : currentAdminLevel === 1
+            ? `${d.properties.admin1_name}, ${d.properties.admin0_name}`
+            : `${d.properties.admin2_name}, ${d.properties.admin1_name}`,
       },
       readiness: {
         label: "Readiness (0-1)",
-        value: (d) => fmt(d.properties.cis_readiness_index, 2)
+        value: (d) => fmt(d.properties.cis_readiness_index, 2),
       },
       hazard: {
         label: hazardName,
-        value: (d) => fmt(d.properties.hazardValue, 1)
+        value: (d) => fmt(d.properties.hazardValue, 1),
       },
       bivariateClass: {
         label: "Bivariate class",
-        value: (d) => d.properties.bivariateClass || "N/A"
-      }
+        value: (d) => d.properties.bivariateClass || "N/A",
+      },
     },
     tooltip: {
       region: true,
       readiness: true,
       hazard: true,
-      bivariateClass: true
+      bivariateClass: true,
     },
     baseMarkOptions: {
-      stroke: d => d.properties.hasData ? "#fff" : "#bbb"
+      stroke: (d) => (d.properties.hasData ? "#fff" : "#bbb"),
     },
-    adminHighlight
+    adminHighlight,
   });
 }
 
@@ -306,17 +278,17 @@ s2Figure = {
     });
   } else {
     const hazardName = S2_HAZARDS[s2HazardType].label;
-    
-    const tableData = s2MapData.map(d => {
+
+    const tableData = s2MapData.map((d) => {
       const adminName = adminDisplayName(d);
-      
+
       // Policy rankings come from thresholds.json; wording stays localized.
       // High readiness × high hazard ranks action potential, not warning severity.
       const priority = bivariatePriority[d.bivariateClass] ?? {
         rank: 0,
         textKey: "s2PriorityLow",
       };
-      
+
       return {
         adminName: adminName,
         readinessRaw: d.cis_readiness_index,
@@ -328,7 +300,7 @@ s2Figure = {
         priorityLevel: nbText[priority.textKey],
       };
     });
-    
+
     return filterableDataTable(tableData, {
       columns: [
         "adminName",
@@ -336,7 +308,7 @@ s2Figure = {
         "readinessClass",
         "hazardRaw",
         "hazardClass",
-        "priorityLevel"
+        "priorityLevel",
       ],
       header: {
         adminName: "Admin Name",
@@ -344,11 +316,11 @@ s2Figure = {
         readinessClass: "Readiness Class",
         hazardRaw: hazardName,
         hazardClass: "Hazard Class",
-        priorityLevel: nbText.s2PriorityColumn
+        priorityLevel: nbText.s2PriorityColumn,
       },
       format: {
-        readinessRaw: d => d.toFixed(2),
-        hazardRaw: d => d.toFixed(1)
+        readinessRaw: (d) => d.toFixed(2),
+        hazardRaw: (d) => d.toFixed(1),
       },
       sort: "priorityRank",
       reverse: true,
@@ -363,7 +335,12 @@ s2Figure = {
 // Download buttons for Section 2
 inputTemplate({ gap: "0.5rem" })([
   ...(s2ViewToggle === "map"
-    ? [downloadPngButton(s2Figure, { filename: `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`, label: nbText.downloadFigure })]
+    ? [
+        downloadPngButton(s2Figure, {
+          filename: `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`,
+          label: nbText.downloadFigure,
+        }),
+      ]
     : []),
   downloadCsvButton(
     s2MapData.map((d) => {
@@ -372,8 +349,7 @@ inputTemplate({ gap: "0.5rem" })([
       const hazardName = S2_HAZARDS[s2HazardType].label;
 
       return {
-        "Admin Level":
-          currentAdminLevel === 0 ? "0" : currentAdminLevel === 1 ? "1" : "2",
+        "Admin Level": currentAdminLevel === 0 ? "0" : currentAdminLevel === 1 ? "1" : "2",
         "Admin Name": adminName,
         "CIS Readiness Raw": fmt(d.cis_readiness_index, 3),
         "CIS Readiness Class": d.readinessClass,
@@ -382,9 +358,12 @@ inputTemplate({ gap: "0.5rem" })([
         "Bivariate Category": d.bivariateClass,
       };
     }),
-    { filename: `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`, label: nbText.downloadLabel },
+    {
+      filename: `cis_hazard_intersection_${s2HazardType}_admin${currentAdminLevel}`,
+      label: nbText.downloadLabel,
+    }
   ),
-]);
+])
 ```
 
 ```{ojs}
@@ -401,12 +380,12 @@ s2Insights = {
     insightData.length === 0
       ? tmpl(nbText.insights.s2NoData, { area })
       : highHigh.length === 0
-        ? tmpl(nbText.insights.s2NoOpportunity, { area, hazard })
-        : tmpl(nbText.insights.s2Opportunity, {
-            area,
-            hazard,
-            percent: ((highHigh.length / insightData.length) * 100).toFixed(1),
-          });
+      ? tmpl(nbText.insights.s2NoOpportunity, { area, hazard })
+      : tmpl(nbText.insights.s2Opportunity, {
+          area,
+          hazard,
+          percent: ((highHigh.length / insightData.length) * 100).toFixed(1),
+        });
 
   // No high-hazard areas is different from a 0% readiness gap.
   const highHazard = insightData.filter((d) => d.hazardClass === "High");
@@ -422,7 +401,9 @@ s2Insights = {
   return html`
     <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px;">
       <h4 style="margin-top: 0;">${nbText.s2InsightsHeading}</h4>
-      <p style="margin: 10px 0;"><strong>${nbText.s2OpportunityLabel}:</strong> ${md([opportunity])}</p>
+      <p style="margin: 10px 0;">
+        <strong>${nbText.s2OpportunityLabel}:</strong> ${md([opportunity])}
+      </p>
       <p style="margin: 10px 0;"><strong>${nbText.s2GapLabel}:</strong> ${md([gap])}</p>
     </div>
   `;

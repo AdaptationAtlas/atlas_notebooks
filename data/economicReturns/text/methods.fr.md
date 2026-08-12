@@ -161,7 +161,7 @@ d'adoption définis par l'utilisateur. Les principales étapes sont :
    Voir
    [4_roi.R](https://github.com/AdaptationAtlas/hazards_prototype/blob/main/R/4_roi.R)
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 #### Indicateurs économiques
 
@@ -193,7 +193,7 @@ diverger selon plusieurs facteurs :
 Ces indicateurs doivent être utilisés ensemble pour une lecture équilibrée de la
 performance financière.
 
---------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 #### Notes méthodologiques sur le calcul des indicateurs
 
