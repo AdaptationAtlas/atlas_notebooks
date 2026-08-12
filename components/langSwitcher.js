@@ -9,6 +9,8 @@ const LANGS = [
 function initialLang() {
   const param = new URLSearchParams(location.search).get("lang");
   if (LANGS.some((l) => l.key === param)) return param;
+  const stored = localStorage.getItem("atlas:lang");
+  if (LANGS.some((l) => l.key === stored)) return stored;
   const docLang = document.documentElement.lang;
   return LANGS.some((l) => l.key === docLang) ? docLang : LANGS[0].key;
 }
@@ -16,6 +18,7 @@ function initialLang() {
 function setLang(key) {
   window.atlasLang = key;
   document.documentElement.lang = key;
+  localStorage.setItem("atlas:lang", key);
   const url = new URL(location);
   if (key === LANGS[0].key) url.searchParams.delete("lang");
   else url.searchParams.set("lang", key);
