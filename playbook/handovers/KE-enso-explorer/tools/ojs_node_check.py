@@ -52,9 +52,48 @@ def scan_split(b):
     if cur: cells.append("\n".join(cur))
     return cells
 
+def extract_ojs_blocks(qmd):
+    """Stateful CommonMark-style fence walk (matches Quarto's extraction):
+    a ```{ojs} line opens an OJS cell ONLY when no block is open; any other
+    ```-info line opens a non-executable block; a bare ``` closes whichever
+    block is open (an info-string fence can never CLOSE a block). This
+    catches orphaned fences that regex pairing silently mis-pairs."""
+    blocks, cur, mode = [], [], None  # mode: None | 'ojs' | 'other'
+    orphans = []
+    for lineno, ln in enumerate(qmd.split("\n"), 1):
+        stripped = ln.strip()
+        if mode is None:
+            if stripped == "```{ojs}":
+                mode, cur = "ojs", []
+            elif stripped.startswith("```") and stripped != "```":
+                mode = "other"
+            elif stripped == "```":
+                orphans.append(lineno)
+                mode = "other"  # treat as opening a stray block, like Pandoc would
+        else:
+            if stripped == "```":
+                if mode == "ojs":
+                    blocks.append("\n".join(cur) + "\n")
+                mode, cur = None, []
+            else:
+                if mode == "ojs":
+                    if stripped.startswith("```"):
+                        # fence-looking line INSIDE an ojs cell: almost always a
+                        # structural break upstream
+                        print(f"FENCE WARNING: '{stripped[:20]}' inside an open ojs cell at line {lineno}")
+                    cur.append(ln)
+    if mode is not None:
+        print(f"FENCE ERROR: unclosed block at EOF (mode={mode})")
+        sys.exit(1)
+    if orphans:
+        print(f"FENCE ERROR: orphaned bare ``` opener(s) at line(s) {orphans} — "
+              "likely a missing ```{ojs} opener above; Quarto will swallow the next cell")
+        sys.exit(1)
+    return blocks
+
 def main():
     qmd = open(sys.argv[1]).read()
-    blocks = re.findall(r"```\{ojs\}\n(.*?)```", qmd, re.S)
+    blocks = extract_ojs_blocks(qmd)
     cellre = re.compile(r"^(viewof\s+)?([A-Za-z_$][\w$]*)\s*=(?!=)\s*(.*)$", re.S)
     out, n = [], 0
     for b in blocks:

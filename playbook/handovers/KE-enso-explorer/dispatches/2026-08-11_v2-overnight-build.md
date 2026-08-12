@@ -53,3 +53,51 @@ untouched at `notebook.html`; v2 at `notebook_v2.html`.
 `http://localhost:4333/notebooks/KE-enso-explorer/notebook_v2.html`, walk all 4 beats + Explore +
 annexes, click the picker (including Elgeyo Marakwet / Murang'a / Tharaka Nithi), flip every
 control, and check the MIXED-SIGNALS card state (live off-diagonal: El Niño + negative IOD).
+
+---
+
+## Addendum — cycle 3 (2026-08-12): Pete's 33-point review → v2.2 → adversarial → v2.3
+
+**Recon first:** 3 readers extracted the climateRationale machinery (loader/renderToDiv trio,
+captionDetails, filterable tables, treemaps, grouped bars, left-anchored atlasTOC panel — the
+"left sidebar" is CR's floating panel, historically left, moved right in 58a0cf9; we flipped it
+back per-page) and dev_rainfall_maps' driver conventions (composite ENSO+IOD zSeries, Z_BANDS
+0.5/1.0/1.5, PRGn cardColor — ported verbatim, then extended: see deviations below).
+
+**v2.2** (`4f2ddd1`): all 33 points implemented (checklist items A1–F2; C6/F1 deferred with notes;
+map views remain the parallel session's). **Adversarial round** (4 reviewers, 35 findings,
+`reviews/2026-08-11_adversarial/v22_findings.txt` — to be copied): star catch = a missing
+```` ```{ojs} ```` fence (introduced by a cleanup cut) that silently killed Fig 3.8 + GESI — 13
+definitions shipped as literal markdown while every consumer compiled; the node-check tool
+false-passed because it paired fences by regex. **Both fixed in v2.3**: fence restored (verified
+by decoding the compiled ojs-module-contents — all 13 definitions present) and the checker now
+does a stateful CommonMark fence walk that hard-fails on orphaned fences.
+
+**v2.3 also fixes** (all round findings): typed "eight" analogue count in the §4 honest box
+(no-typed-numbers violation) → count-free wording; coalesced-DMI (HadISST??ERSST) now feeds the
+z/strength machinery so OND-2025 is never blank/contradictory across toggles; OND ENSO strength
+uses RONI-z (same index as the phase classification — 2024 no longer flips La Niña→Neutral on a
+toggle); SPEI-3 no longer double-standardised; partial-season means dropped (full month set
+required); 3.8's "short rains before harvest" strip lane lag-shifted to match the bar fill;
+ReliefWeb bars re-centred on their year ticks; Fig 3.2 MAM bars aligned to Mar–May; multi-county
+RAINFALL compare restored on Fig 3.2 (A7 fully closed); E3 shipped minimally ("Highlight seasons
+like a wet/dry short-rains forecast" outlines matching seasons across §3); 2.3/3.4/3.2 downloads
+now export exactly what the panels show; ToT dots coloured by season strength; left-TOC toggle
+z-index above the sticky bar; GESI-annex promises repointed at Fig 1.4's All-indicators switch
+(A5 renumbered); §5 duplicate paragraph cut; Season control scope-labelled in the sticky bar;
+new control labels moved into nbText; internal "dev_rainfall_maps" references stripped from
+shipped captions/metadata; Downloads numbered A6 (Methods → A7); 2005 event blurb reworded to
+"borderline-weak La Niña" (knife-edge at exactly −0.50).
+
+**Convention deviations to coordinate with the map session** (dev_rainfall_maps is the declared
+source of truth; we deviated deliberately, they should consider adopting): (1) IOD member =
+coalesced `dmi_hadisst ?? dmi_ersst` (theirs ends 2025-04); (2) full-month-set guard in zByYear
+(no partial-season means at the data edge); (3) OND ENSO strength from RONI-z, not raw Niño 3.4 z.
+
+**Known/accepted residuals:** monthly-climatology line + A3.2 trend use native titles (no rich
+tips); treemap single-year = end-of-range year (Pete may want a dedicated selector); `ndviOndByPhase`
+cell now unused (harmless); eventDriver deliberately does not steer Fig 3.4 (stated in its caption).
+
+**MUST DO — Pete, real browser** (`notebook_v2.html`): Fig 1.4 GESI + Fig 3.8 flagship (the two
+that were dead in v2.2), the left TOC panel + toggle after scrolling at ~1100px width, the produce
+multiselect/table views, 2.3 driver panels, §3 driver/highlight controls, 3.2 multi-county panels.
