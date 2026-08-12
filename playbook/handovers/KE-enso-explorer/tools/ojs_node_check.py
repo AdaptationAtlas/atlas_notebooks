@@ -59,6 +59,9 @@ def main():
     out, n = [], 0
     for b in blocks:
         if "import {" in b or "import{" in b: continue
+        # regex literals containing quotes desync the string-skipper; the only
+        # such pattern in this codebase is /'/g — neutralise it for the check
+        b = b.replace("/'/g", "/Q/g")
         for cell in scan_split(b):
             body = cell.strip()
             if not body: continue
