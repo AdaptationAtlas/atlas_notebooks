@@ -23,14 +23,14 @@ function setLang(key) {
   window.dispatchEvent(new CustomEvent("atlas:lang", { detail: key }));
 }
 
-// In the nav list so Bootstrap's collapse hides it behind the hamburger for free,
-// as its own <li> because a bare <select> is not valid in a <ul>.
+// Keep the language control with the nav links, immediately before GitHub.
 function mountControl() {
   const list = document.querySelector(".navbar-collapse .navbar-nav");
-  if (!list || document.getElementById("nav-lang-selector")) return;
+  const githubItem = list?.querySelector(".nav-item.compact");
+  if (!githubItem || document.getElementById("nav-lang-selector")) return;
 
-  list.insertAdjacentHTML(
-    "afterbegin",
+  githubItem.insertAdjacentHTML(
+    "beforebegin",
     `<li class="nav-item"><select id="nav-lang-selector" aria-label="Language">${
       LANGS.map((l) => `<option value="${l.key}">${l.label}</option>`).join("")
     }</select></li>`,
