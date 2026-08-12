@@ -37,12 +37,12 @@ data/cis/
 
 ## Data Sources
 
-| Dataset             | Description                          | Variables                                                                                                                                        |
-| ------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| CIS_nb_data.parquet | CIS readiness metrics by admin level | wstation_density, cloud-coverage_meanannual, cv-precipitation_agreement, short-term_frcst_skill, seasonal_frcst_skill, cis_readiness_index        |
-| weather_stations_2025.geojson | Atlas-country weather-station catalogue records | station, name, source, iso3, admin0_name, admin1_name, admin2_name |
-| CIS_access.parquet  | Communication infrastructure access  | tv, internet, cellphone (% penetration)                                                                                                          |
-| nexgddpHazards\_…   | Historical climate hazards           | NDWS-mean (drought), NDWL0-mean (waterlogging)                                                                                                   |
+  | Dataset                       | Description                                     | Variables                                                                                                                                  |
+  | ----------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+  | CIS_nb_data.parquet           | CIS readiness metrics by admin level            | wstation_density, cloud-coverage_meanannual, cv-precipitation_agreement, short-term_frcst_skill, seasonal_frcst_skill, cis_readiness_index |
+  | weather_stations_2025.geojson | Atlas-country weather-station catalogue records | station, name, source, iso3, admin0_name, admin1_name, admin2_name                                                                         |
+  | CIS_access.parquet            | Communication infrastructure access             | tv, internet, cellphone (% penetration)                                                                                                    |
+  | nexgddpHazards\_…             | Historical climate hazards                      | NDWS-mean (drought), NDWL0-mean (waterlogging)                                                                                             |
 
 ## Key Features
 
@@ -99,8 +99,8 @@ import { createSqlBindings, sqlAdminWhere } from "/helpers/sql.js";
 import { lang as Lang } from "/helpers/lang.js"; // via /components/_lang.qmd
 ```
 
-Admin filtering goes through `sqlAdminWhere()` with `createSqlBindings()` — SQL
-values are always bound, never interpolated.
+Admin filtering goes through `sqlAdminWhere()` with `createSqlBindings()` ---
+SQL values are always bound, never interpolated.
 
 ### Adding New Sections
 

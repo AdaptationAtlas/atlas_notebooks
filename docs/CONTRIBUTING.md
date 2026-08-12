@@ -34,14 +34,14 @@ questions.
 
 ## Repository Structure
 
-| Branch     | Description                                                                 | Link                                                        |
-| ---------- | --------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `main`     | Production branch used to build the live version of the Atlas               | [Main](https://main.adaptation-atlas-nb.pages.dev/)         |
-| `develop`  | Development and staging branch for active work and previews                 | [Develop](https://develop.adaptation-atlas-nb.pages.dev/)   |
-| `template` | Minimal starting point for contributors—no notebook content or dependencies | [Template](https://template.adaptation-atlas-nb.pages.dev/) |
-| `example`  | Archived notebooks from an earlier version of the project                   | [Example](https://example.adaptation-atlas-nb.pages.dev/)   |
+  | Branch     | Description                                                                 | Link                                                        |
+  | ---------- | --------------------------------------------------------------------------- | ----------------------------------------------------------- |
+  | `main`     | Production branch used to build the live version of the Atlas               | [Main](https://main.adaptation-atlas-nb.pages.dev/)         |
+  | `develop`  | Development and staging branch for active work and previews                 | [Develop](https://develop.adaptation-atlas-nb.pages.dev/)   |
+  | `template` | Minimal starting point for contributors—no notebook content or dependencies | [Template](https://template.adaptation-atlas-nb.pages.dev/) |
+  | `example`  | Archived notebooks from an earlier version of the project                   | [Example](https://example.adaptation-atlas-nb.pages.dev/)   |
 
----
+--------------------------------------------------------------------------------
 
 # Contributing
 
@@ -83,9 +83,9 @@ To build and preview the project locally:
    > By default, Quarto assigns a random port and provides the preview link in
    > the terminal. You can specify a port if preferred:
    >
-   > ```bash
-   > quarto preview --port 8080
-   > ```
+   >    ```bash
+   >    quarto preview --port 8080
+   >    ```
 
 Go to the localhost URL shown by Quarto (for example, `http://localhost:8000`).
 
@@ -106,9 +106,8 @@ quarto render
 
 These rendered files can be opened in a browser, but OJS cells in HTML documents
 do not work with the `file://` protocol. Some Observable runtime features
-require `http://` or `https://`. See
-[this GitHub issue](https://github.com/quarto-dev/quarto-cli/discussions/5680)
-for details.
+require `http://` or `https://`. See [this GitHub
+issue](https://github.com/quarto-dev/quarto-cli/discussions/5680) for details.
 
 Some workarounds:
 
@@ -116,7 +115,7 @@ Some workarounds:
 - Serve the HTML pages locally using Python:
   `python3 -m http.server -d _site 4000`
 
----
+--------------------------------------------------------------------------------
 
 ## To Propose a New Notebook
 
@@ -138,7 +137,7 @@ git checkout -b my-feature-branch
 git push origin my-feature-branch
 ```
 
-5. **Submit a pull request** from your fork’s branch to the appropriate branch
+5. **Submit a pull request** from your fork's branch to the appropriate branch
    on the Atlas notebook repository (typically `develop`).
 
 **Note on site limitations:** New notebooks should be static web pages. Any R,
@@ -177,14 +176,13 @@ directory.
 
 ## Commit Guidelines
 
-We strongly encourage the use of
-[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). This is
-a community project with many people needing to maintain, modify, and build from
-the code for years to come - good commits promote this.
-[The LTER Team](https://lternet.edu/stories/databits-conventional-commits/)
-outlines some good points that are directed towards scientists and researchers.
-Commits should aim to highlight why something was changed, not just what was
-changed.
+We strongly encourage the use of [Conventional
+Commits](https://www.conventionalcommits.org/en/v1.0.0/). This is a community
+project with many people needing to maintain, modify, and build from the code
+for years to come - good commits promote this. [The LTER
+Team](https://lternet.edu/stories/databits-conventional-commits/) outlines some
+good points that are directed towards scientists and researchers. Commits should
+aim to highlight why something was changed, not just what was changed.
 
 ## Documentation Guidelines
 
@@ -219,16 +217,16 @@ Spaces, not tabs; 2 spaces is generally preferred over 4. **Organization:**
 ### OJS/JS Guidelines
 
 **Airbnb Styling:** Although not always applicable due to differences with OJS,
-we encourage following the
-[Airbnb Style guide for JavaScript](https://github.com/airbnb/javascript) where
-possible such as for names, comments, whitespace, blocks, comparison & equality,
-anonymous arrow functions, commas, etc. **Blocks:** To avoid polluting the
-global environment, use blocks to control the namespace of variables. Any
-variable defined outside of a block `{}` will not have a `const` or `let`
-declaration, and will be global. **OJS Nuances:** Take care to avoid some of the
-gotchas where OJS differs from JavaScript. In many ways it is simpler as all
-variables will automatically update when a user selection causes another
-variable to change. Read more
+we encourage following the [Airbnb Style guide for
+JavaScript](https://github.com/airbnb/javascript) where possible such as for
+names, comments, whitespace, blocks, comparison & equality, anonymous arrow
+functions, commas, etc. **Blocks:** To avoid polluting the global environment,
+use blocks to control the namespace of variables. Any variable defined outside
+of a block `{}` will not have a `const` or `let` declaration, and will be
+global. **OJS Nuances:** Take care to avoid some of the gotchas where OJS
+differs from JavaScript. In many ways it is simpler as all variables will
+automatically update when a user selection causes another variable to change.
+Read more
 [here](https://observablehq.com/@observablehq/learning-observable-javascript-and-observable)
 
 ### Quarto Guidelines
@@ -261,44 +259,26 @@ code.
 
 > **For example:** **Good**
 >
-> ```{{ojs}}
-> // All external libraries
-> d3 = require("d3@7")
-> topojson = require("topojson")
-> import { aq, op } from '@uwdata/arquero'
-> ```
+> `{{ojs}} // All external libraries d3 = require("d3@7") topojson = require("topojson") import { aq, op } from '@uwdata/arquero'`
 >
 > **Bad**
 >
-> ```{{ojs}}
-> d3 = require("d3@7")
-> topojson = require("topojson")
-> import { aq, op } from '@uwdata/arquero'
+> \`\`\`{{ojs}} d3 = require("d3@7") topojson = require("topojson") import { aq,
+> op } from '@uwdata/arquero'
 >
-> map = d3.json("https://some-url.topojson")
-> topoSimple = {
->   let simplified = topojson.presimplify(map);
->   let weight = topojson.quantile(simplified, 0.5);
->   map_simplified = topojson.simplify(simplified, weight);
->   return map_simplified;
-> }
-> geojsonSimple = topojson.feature(map, map.objects.myMap)
-> ```
+> map = d3.json("https://some-url.topojson") topoSimple = { let simplified =
+> topojson.presimplify(map); let weight = topojson.quantile(simplified, 0.5);
+> map_simplified = topojson.simplify(simplified, weight); return map_simplified;
+> } geojsonSimple = topojson.feature(map, map.objects.myMap) \`\`\`
 >
 > This second example block could easily be split into two logical ones -
 > imports and map processing. **Bad**
 >
-> ```{{ojs}}
-> d3 = require("d3@7");
-> ```
+> `{{ojs}} d3 = require("d3@7");`
 >
-> ```{{ojs}}
-> topojson = require("topojson");
-> ```
+> `{{ojs}} topojson = require("topojson");`
 >
-> ```{{ojs}}
-> import { aq, op } from "@uwdata/arquero";
-> ```
+> `{{ojs}} import { aq, op } from "@uwdata/arquero";`
 >
 > This third example could be consolidated into a single OJS block rather than 3
 
@@ -313,11 +293,11 @@ code.
 - AI Code assistants can be useful, especially for documentation tasks. However,
   they should not replace good development practices and all code and docs
   generated by them should be thoroughly checked and understood.
-- It is suggested to test and prototype code in an
-  [Observable Notebook](https://observablehq.com/platform/notebooks) first. This
-  allows for easier/quicker detection of errors, live updates, etc. without
-  needing to re-render the preview. OJS code can be easily copied between
-  ObservableHQ and quarto.
+- It is suggested to test and prototype code in an [Observable
+  Notebook](https://observablehq.com/platform/notebooks) first. This allows for
+  easier/quicker detection of errors, live updates, etc. without needing to
+  re-render the preview. OJS code can be easily copied between ObservableHQ and
+  quarto.
 
 ## Other notes
 
@@ -328,14 +308,16 @@ access. This is also why package lock files are not needed or included. These
 warnings are harmless and should not affect the build process. We've added
 `// @ts-nocheck` flags to suppress them where appropriate.
 
----
+--------------------------------------------------------------------------------
 
 ## Additional Resources
 
 - [Quarto Observable Documentation](https://quarto.org/docs/interactive/ojs/)
-- [Observable JS Documentation](https://observablehq.com/documentation/cells/observable-javascript)
-- [Observable JS vs vanilla Javascript](https://observablehq.com/@observablehq/observable-javascript)
+- [Observable JS
+  Documentation](https://observablehq.com/documentation/cells/observable-javascript)
+- [Observable JS vs vanilla
+  Javascript](https://observablehq.com/@observablehq/observable-javascript)
 - [Quarto Main Guide](https://quarto.org/docs/guide/)
 - [Adaptation Atlas ObservableHQ](https://observablehq.com/@adaptationatlas)
 
----
+--------------------------------------------------------------------------------
