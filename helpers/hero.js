@@ -1,4 +1,4 @@
-import { readNotebookConfig } from "./notebook.js";
+import { readNotebookConfig, SITE_ROOT } from "./notebook.js";
 
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
@@ -65,7 +65,10 @@ export function atlasHero({ title, image, group = "", alt = "" } = {}) {
 
   const background = document.createElement("img");
   background.className = "atlas-hero__image";
-  background.src = image;
+  // Sveltia writes root-absolute paths (public_folder: /images/uploads), which
+  // 404 under a deploy prefix once set from JS — quarto only rewrites the paths
+  // it renders itself. notebook-cards.ejs normalizes the same way.
+  background.src = new URL(String(image).replace(/^\//, ""), SITE_ROOT);
   background.alt = alt;
 
   const content = document.createElement("div");
