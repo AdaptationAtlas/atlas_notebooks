@@ -6,7 +6,7 @@ const LOCALES = ["en", "fr"];
 // origin root (Cloudflare) and 404s under a prefix (gh-pages /atlas_notebooks/).
 // Quarto's OJS runtime rewrites FileAttachment and "/"-rooted imports for us —
 // a raw fetch gets no such help.
-const SITE_ROOT = new URL("../", import.meta.url);
+export const SITE_ROOT = new URL("../", import.meta.url);
 
 async function fetchJson(url) {
   const response = await fetch(url);
