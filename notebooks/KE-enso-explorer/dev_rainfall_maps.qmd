@@ -26,6 +26,10 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.10</b> · 2026-08-13 · rainfall-map panel</span>`
+```
+
+```{ojs}
 md`County / season / ocean-driver bar are the **main notebook's** controls. The
 per-year maps below have their own **per-section driver + a min/max range filter**
 on that driver's value, a year range, an anomaly toggle, and a facet-columns
@@ -107,7 +111,7 @@ Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so
 ### OND — short rains (Oct–Dec) · driven by ENSO + IOD
 
 ```{ojs}
-md`**Driver ↔ rainfall correlation** (${county} · OND · n=${ondCache.filter((c) => c.meanmm != null).length} yrs, ${yearsSel[0]}–${yearsSel[yearsSel.length - 1]}): ${corrLine("OND", ondCache)}`
+corrHeader("OND", ondCache)
 ```
 
 ::: {.controls-row}
@@ -133,11 +137,7 @@ md`_Filter years by ${ondDriver.replace(/ \(.*\)$/, "")} value in [min, max] (bl
 ```
 
 ```{ojs}
-cardLegend(ondDriver)
-```
-
-```{ojs}
-ondPanels = buildPanels(ondCache, "OND", ondDriver, ondMin, ondMax)
+sectionLegend(ondDriver)
 ```
 
 ```{ojs}
@@ -147,7 +147,7 @@ ondGrid = gridWrap(await buildPanels(ondCache, "OND", ondDriver, parseNum(ondMin
 ### MAM — long rains (Mar–May) · Western-V control
 
 ```{ojs}
-md`**Driver ↔ rainfall correlation** (${county} · MAM · n=${mamCache.filter((c) => c.meanmm != null).length} yrs, ${yearsSel[0]}–${yearsSel[yearsSel.length - 1]}): ${corrLine("MAM", mamCache)}`
+corrHeader("MAM", mamCache)
 ```
 
 ::: {.controls-row}
@@ -171,31 +171,13 @@ md`_Filter years by ${mamDriver.replace(/ \(.*\)$/, "")} value in [min, max] (bl
 ```
 
 ```{ojs}
-cardLegend(mamDriver)
+sectionLegend(mamDriver)
 ```
 
 ```{ojs}
 mamGrid = gridWrap(await buildPanels(mamCache, "MAM", mamDriver, parseNum(mamMin), parseNum(mamMax)))
 ```
 
-```{ojs}
-// shared rainfall-cell legend
-rainLegend = {
-  const w = 260;
-  const cv = html`<canvas width=${w} height=${16}></canvas>`;
-  const ctx = cv.getContext("2d");
-  for (let x = 0; x < w; x++) {
-    const v = rainDomain[0] + (x / (w - 1)) * (rainDomain[1] - rainDomain[0]);
-    const c = pixelColor(v); ctx.fillStyle = c || "#fff"; ctx.fillRect(x, 0, 1, 16);
-  }
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(rainDomain[0] + t * (rainDomain[1] - rainDomain[0])));
-  return html`<div style="font-size:0.8em;color:#444">
-    <div>${anomaly ? "Rainfall anomaly vs 1991–2020 (mm)" : "Seasonal rainfall (mm)"} — map cells</div>${cv}
-    <div style="display:flex;justify-content:space-between;width:${w}px">
-      ${ticks.map((t) => html`<span>${t}</span>`)}</div>
-  </div>`;
-}
-```
 
 ```{ojs}
 md`### Notes
@@ -502,16 +484,55 @@ pearson = (pairs) => {
   const sy = Math.sqrt(d3.sum(pairs, (p) => (p.y - my) ** 2));
   return (sx && sy) ? cov / (sx * sy) : null;
 }
-corrLine = (season, cache) => {
-  const withMean = cache.filter((c) => c.meanmm != null);
-  const parts = driverOptions.map((d) => {
-    const z = zSeries(d, season);
-    const pairs = withMean.map((c) => ({x: z.get(c.year), y: c.meanmm})).filter((p) => p.x != null);
-    const r = pearson(pairs);
-    const label = d.replace(/ \(.*\)$/, "");
-    return `**${label}** ${r == null ? "—" : r.toFixed(2)}`;
-  });
-  return parts.join(" · ");
+// r between two aligned arrays (nulls dropped pairwise)
+corrArr = (xs, ys) => pearson(xs.map((x, i) => ({x, y: ys[i]})).filter((p) => p.x != null && !Number.isNaN(p.x) && p.y != null))
+// all driver↔rainfall correlations + ENSO×IOD combination comparison + best linear R
+corrStats = (season, cache) => {
+  const wm = cache.filter((c) => c.meanmm != null);
+  const y = wm.map((c) => c.meanmm);
+  const mons = seasonMonthsFor[season];
+  const zc = zByYear("nino34_anom_noaa", mons), zi = zByYear("dmi_hadisst", mons);
+  const enso = wm.map((c) => zc.get(c.year)), iod = wm.map((c) => zi.get(c.year));
+  const wv = (() => { const z = zSeries("Western-V (WNP)", season); return wm.map((c) => z.get(c.year)); })();
+  const rE = corrArr(enso, y), rI = corrArr(iod, y), rW = corrArr(wv, y);
+  const add = enso.map((e, i) => (e != null && iod[i] != null) ? (e + iod[i]) / 2 : null);
+  const prod = enso.map((e, i) => (e != null && iod[i] != null) ? e * iod[i] : null);
+  const rAdd = corrArr(add, y), rProd = corrArr(prod, y);
+  const rEI = corrArr(enso, iod);
+  let multiR = null;
+  if (rE != null && rI != null && rEI != null && Math.abs(rEI) < 0.999) {
+    const R2 = (rE * rE + rI * rI - 2 * rE * rI * rEI) / (1 - rEI * rEI);
+    multiR = R2 > 0 ? Math.sqrt(Math.min(1, R2)) : 0;
+  }
+  return {rE, rI, rW, rAdd, rProd, multiR, n: wm.length};
+}
+corrHeader = (season, cache) => {
+  const s = corrStats(season, cache);
+  const f = (r) => r == null ? "—" : r.toFixed(2);
+  const singles = [
+    {name: "ENSO", r: s.rE, driver: "ENSO (Niño 3.4)"},
+    {name: "IOD", r: s.rI, driver: "IOD (DMI)"},
+    {name: "ENSO+IOD", r: s.rAdd, driver: "ENSO + IOD"},
+    {name: "Western-V", r: s.rW, driver: "Western-V (WNP)"},
+  ];
+  const best = singles.filter((x) => x.r != null).sort((a, b) => Math.abs(b.r) - Math.abs(a.r))[0];
+  const strength = (r) => { const a = Math.abs(r); return a < 0.2 ? "negligible" : a < 0.4 ? "weak" : a < 0.6 ? "moderate" : "strong"; };
+  const chip = (x) => (best && x.name === best.name)
+    ? html`<b style="color:#1b7837">${x.name} ${f(x.r)}</b>` : html`<span>${x.name} ${f(x.r)}</span>`;
+  return html`<div style="font-size:0.92em;margin:0.2rem 0 0.5rem">
+    <b>Driver ↔ rainfall correlation</b> (${county} · ${season} · n=${s.n} yrs) —
+    ${singles.map((x, i) => html`${i ? " · " : ""}${chip(x)}`)}
+    <div style="font-size:0.92em;color:#444;margin-top:2px">
+      Strongest: <b>${best ? best.name : "—"}</b>${best ? ` (r=${f(best.r)}, ${strength(best.r)}; ${best.r > 0 ? "driver ↑ → wetter" : "driver ↑ → drier"})` : ""}.
+      ${best && Math.abs(best.r) >= 0.4 ? html` Suggested ${season} driver: <b>${best.driver.replace(/ \(.*\)$/, "")}</b> — set the dropdown to match.` : " No driver is a strong predictor for this county & season."}
+    </div>
+    <details style="font-size:0.85em;color:#555;margin-top:3px"><summary style="cursor:pointer">About these correlations &amp; how ENSO+IOD is combined</summary>
+      <div style="margin-top:4px;max-width:60rem">
+        <b>Reading r</b> (Pearson, over ${s.n} years): <b>+</b> = driver high → more rain (El Niño / +IOD wetter); <b>−</b> = driver high → less rain.
+        |r| guide: &lt;0.2 negligible · 0.2–0.4 weak · 0.4–0.6 moderate · &gt;0.6 strong. Correlation ≠ causation; short n → treat as indicative.<br>
+        <b>Combining ENSO &amp; IOD:</b> the card composite is the mean of the two standardised (z) indices — a scaled A+B. Sum, mean and any scaling give the <b>same</b> r (=${f(s.rAdd)}, since r is scale-invariant). The interaction A×B gives r=${f(s.rProd)}. The <b>best possible linear combination</b> (multiple regression, weights free) reaches R=${f(s.multiR)}: if that ≈ the additive r, the simple sum is adequate; if higher, ENSO &amp; IOD warrant unequal weights. (Method comparison belongs in Methods/annex when this folds into the main notebook.)
+      </div></details>
+  </div>`;
 }
 ```
 
@@ -528,13 +549,30 @@ cardColor = (z) => {
 }
 cardLegend = (driver) => {
   const def = phaseDefs[driver];
-  return html`<div style="font-size:0.78em;color:#555;margin:0.1rem 0 0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+  return html`<div style="font-size:0.78em;color:#555;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
     <span>Card colour — <b>${driver.replace(/ \(.*\)$/, "")}</b> phase &amp; strength:</span>
     <span>${def.neg}</span>
-    <span style="display:inline-block;width:130px;height:14px;background:linear-gradient(to right, ${cardColor(-2)}, ${cardColor(0)}, ${cardColor(2)})"></span>
+    <span style="display:inline-block;width:120px;height:14px;background:linear-gradient(to right, ${cardColor(-2)}, ${cardColor(0)}, ${cardColor(2)})"></span>
     <span>${def.pos}</span>
   </div>`;
 }
+// rainfall-cell colour scale (map pixels) — as a function so it can sit inline
+rainCellLegend = () => {
+  const w = 200;
+  const cv = html`<canvas width=${w} height=${14}></canvas>`;
+  const ctx = cv.getContext("2d");
+  for (let x = 0; x < w; x++) {
+    const v = rainDomain[0] + (x / (w - 1)) * (rainDomain[1] - rainDomain[0]);
+    const c = pixelColor(v); ctx.fillStyle = c || "#fff"; ctx.fillRect(x, 0, 1, 14);
+  }
+  const ticks = [0, 0.5, 1].map((t) => Math.round(rainDomain[0] + t * (rainDomain[1] - rainDomain[0])));
+  return html`<div style="font-size:0.78em;color:#555">
+    <div>Map cells — ${anomaly ? "anomaly (mm)" : "rainfall (mm)"}</div>
+    ${cv}<div style="display:flex;justify-content:space-between;width:${w}px">${ticks.map((t) => html`<span>${t}</span>`)}</div>
+  </div>`;
+}
+// both legends side by side, for a section
+sectionLegend = (driver) => html`<div style="display:flex;gap:2.5rem;flex-wrap:wrap;align-items:flex-start;margin:0.1rem 0 0.6rem">${cardLegend(driver)}${rainCellLegend()}</div>`
 ```
 
 ```{ojs}

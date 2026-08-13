@@ -239,3 +239,25 @@ still live from it is re-registered here.
   stacked; confirm whether literal columns wanted.
 - **V2-26 · dev_rainfall_maps convention deviations** — coalesced DMI member, full-month guard,
   RONI-z OND ENSO strength: coordinate adoption with the map session.
+
+## Pete review 2026-08-13 (dev rainfall-map panel — `dev_rainfall_maps.qmd`, v0.10)
+- **KE-19b · Panel batch · DONE.** Fit-to-width facet grid (responsive canvas, `repeat(N,1fr)`,
+  no page scroll); per-year seasonal COGs (`processing=seasonal`) with monthly-sum fallback;
+  min/max range filters (Inputs.text + parseNum — Inputs.number never emits initial value → hangs);
+  driver↔rainfall Pearson r per section. Version chip at top of the notebook (bump each change).
+- **KE-20 · No loading indicator · OPEN.** Long COG fetches show nothing while loading. Add a
+  loader/progress like climateRationale-dev (`/helpers/uiComponents.ojs` loaderDiv/setLoaderStage).
+- **KE-21 · Palette selectors (map + card/background) · OPEN.** Let the user pick the rainfall-cell
+  ramp and the card/background diverging palette — see climateRationale-dev `mapPalette_obs` pattern
+  (d3-chromatic interpolators, colour-blind-safe options).
+- **KE-22 · Map legend placement · DONE.** Rainfall-cell legend was hidden at the page bottom; now
+  rendered per section beside the card-colour legend (`sectionLegend`).
+- **KE-23 · Correlation methodology + guidance · DONE.** Section header now reports ENSO / IOD /
+  ENSO+IOD(additive) / Western-V r, **bolds the strongest**, suggests the driver, and states the
+  sign meaning (driver↑→wetter/drier). Foldout tests the ENSO+IOD combination — additive A+B (=sum
+  =scaled, same r), interaction A×B, and the **best linear combination via multiple regression (R)** —
+  plus |r| bands + correlation≠causation. TODO: (a) auto-SET the driver dropdown to the strongest
+  (OJS viewof can't reactively default without recreating the input — deferred); (b) promote the
+  combination-method table into the main-notebook Methods/annex when this folds in.
+- **KE-24 · OND seasonal-COG all-zero (pipeline) · OPEN (dispatched 2026-08-13).** `PTOT_OND_*_sum.tif`
+  reads all-zero; notebook falls back to monthly-sum. Rebake + verify 12 seasons — pipeline dispatch.
