@@ -1,0 +1,254 @@
+
+===============================================================================================
+DESIGNER: Teleconnection/statistics scientist — KE-18 design pass (Fig 3.8-B + V2-51 restructure), grounded in
+
+--- Q1 (Fig 3.8-B) ---
+FIG 3.8-B — "How have {county}'s harvests moved with the rains?" (HarvestStat, county×season series)
+
+DATA SCOPE (verified in the parquet):
+- Seasonal (Long/Short) series exist ONLY for Maize (1,513 rows) and Beans (mixed) (593). Sorghum seasonal = 2 harvest years — excluded from seasonal views, available in Annual. Long = harvest years 1991–2001 + 2015–2024 (21 possible yrs); Short = 1991–2001 + 2016–2024 (20 possible; Short-2015 harvest would be a 2014 planting, inside the hole). Annual = 1965–2022, calendar-year totals (planting_month=1/harvest_month=12), 39 crops.
+- The record is TWO ERAS split by the hole: era A = 1991–2001 (all district→county remap, caveat c) and era B = 2015/16–2024 (direct county records). The 2013 remap boundary and the 2002–2014 hole coincide, which is a gift: the visual segments ARE the provenance regimes.
+- qc_flag > 0 in the seasonal record = 7 rows total (4 Long-2018, 3 Short); Annual = 272.
+
+ONE FIGURE, ONE HOST (renderToDiv → "plotHarvestStat"), four views via a selector, per-plot DuckDBClient (dbHarvest), county filter with `=` (pushdown memory). Loader-reset deps = [county, hsCrop, hsVar] ONLY; hsView / season checkboxes / anomaly toggle are presentation and re-render synchronously (loader-race memory).
+
+CONTROLS (.controls-row):
+- viewof hsView = Inputs.select(["Season series", "Wet vs dry seasons", "Vs climate", "Table"]) — default "Season series".
+- viewof hsCrop = Inputs.select(["Maize", "Beans (mixed)"]) (Maize default). A separate "long-run context" checkbox swaps the Series view to the Annual 1965–2022 series (full 39-crop list enabled there only).
+- viewof hsVar = radio: Yield (t/ha, DEFAULT) | Production (t) | Area (ha). Yield is the default because production confounds the weather signal with area decisions; tooltip always carries all three.
+- viewof hsAnom = radio: "Actual values" | "% of a usual year" (anomaly; default for views 2–3, forced there).
+- Seasons: checkboxes Long ✓ Short ✓. §3's global eventDriver is reused only by the driver strip.
+
+DETREND / ANOMALY POLICY (caveat f — argued BETTER than faostat single-OLS):
+anomaly_pct = 100 × (y − era_median) / era_median, computed per county×crop×season×ERA, qc_flag=0 rows only.
+Why not the faostat linear-detrend: (1) a single OLS across both eras lets the 2013 district→county remap level-shift masquerade as trend and biases era residuals in opposite signs — that leaks provenance artefacts straight into every driver composite; (2) per-era OLS over 9–11 points confounds trend with ENSO decadal clustering — era B ends with the 2020–22 triple-dip La Niña and 2023 El Niño, so a fitted era-B slope would absorb the very droughts we want to show and shrink their anomalies. Era-MEDIAN centering removes both trend (negligible within ≤11-yr windows) and the level shift, is robust to the handful of outliers, and reads to policymakers as "% of a usual year". Gate: an era needs ≥7 qc-clean years to earn a median; below that its points render absolute-only (greyed in anomaly views, note printed). Annex A5 carries a single-OLS-detrend sensitivity toggle; the story layer never switches.
+Annual view: NO anomaly analytics at all — annual calendar totals mix both rain seasons, so season attribution is mushy; Annual is context-only (levels + optional faint OLS trend line), which also sidesteps its own remap-boundary detrend problem.
+
+qc_flag POLICY (caveat d): mark-and-exclude-from-statistics. Flag semantics are upstream (HarvestStat v1.2, Lee et al. 2025) and not re-derived here, so we neither trust nor silently delete: flagged points stay visible as hollow/hatched glyphs with "QC-flagged upstream (HarvestStat)" in the tooltip, and are excluded from era medians, bin medians and counts. Cost is 7 seasonal rows — negligible; captions report both counts ("n=20 used, 0 flagged excluded").
+
+VIEW 1 — "Season series" (default hero):
+- x = PLANTING YEAR (not harvest year) for both seasons; grouped bars per year, Long then Short in chronological planting order (Mar, Oct). This makes the lag grammar correct BY CONSTRUCTION (caveat e): the Short bar for planting-2023 (harvest Mar 2024) sits directly above the OND-2023 cell of the driver strip — no offset arithmetic, adjacency = causation, correctly.
+- Marks: Plot.barY (BARS, never lines — lines invite eye-interpolation across the hole, caveat a). Bar fill = cardColor(zSeries(eventDriver, seasonOf(bar)).get(planting_year)) — each season colored by ITS OWN planting-season driver state, house grammar. Tooltip: crop, "planted Oct 2023 → harvested Mar 2024", value(s), driver category, provenance era, qc note.
+- THE HOLE (caveat a, first-class): a hatched grey Plot.rect spanning planting years 2002–2014 (Short: 2001–2014), full height, labeled inside: "no seasonal county reporting 2002–2014 — a national statistics-system gap, not zero harvests". Nothing is drawn through it, ever.
+- PROVENANCE (caveat c): thin top-margin brackets labeling the two segments — "1991–2001 · district-era records remapped to today's counties" / "2015–2024 · county records" — the same segments the anomaly medians use, so the statistics are explainable from the picture.
+- Under the chart: makeYearStrip(plantingYears, lanes [{MAM (long rains)},{OND (short rains)}], eventDriver) — cells align 1:1 under bars (no offset), + cardLegend.
+- Missing season-years inside covered eras: "∅ not reported" glyph at the axis edge (V2-02 rule: never at y=0).
+- Anomaly toggle: diverging bars around 0 (% of usual), PALETTE.outcome wetter/drier NOT used here (that's rainfall's palette) — use neutral up/down; driver strip still carries the climate color.
+
+VIEW 2 — "Wet vs dry seasons" (the composite; becomes the new §3 centerpiece — see Q2):
+- Question: "in seasons like a drier/wetter-than-usual forecast, what did harvests do?" Anchor control `Compare seasons by:` = County rainfall tercile (DEFAULT — enso_outlook_base.tercile, OND↔Short / MAM↔Long of the PLANTING season; exactly KMD's below/near/above-normal categories) | SPEI-3 category | driver phase (eventDriver — the §2 bridge).
+- Facets fx = Long | Short; within each, three columns Dry/Normal/Wet. Marks: jittered year-labeled dots of anomaly_pct (era-hued light/dark so remap-era mixing stays visible — caveat c carried into the statistic), a fat median tick per bin, ruleY(0). NO boxplots (quartiles unstable at n≈5–8), NO whiskers, NO r/n/p (caveat g). Bin header = honest n: "Dry · n=6 of 20". Median-tick tooltip lists the actual years in the bin. Bins with n<3: dots shown, median suppressed, "too few seasons to summarise".
+- Sub-caption computes a COUNT sentence, not a correlation: "In {county}, k of n drier-than-usual short-rains plantings came in below a usual year."
+
+VIEW 3 — "Vs climate" (analyst scatter):
+- x = planting-season climate: County seasonal rainfall anomaly % (DEFAULT, same CHIRPS base as the terciles) | SPEI-3 | driver z (eventDriver). y = anomaly_pct. Facet by season (never pool Long+Short in one panel — different driver-season physics). Year labels on dots, era hue, hollow glyph for qc-flagged (displayed, excluded from any summary). NO fitted line in the story layer; instead light quadrant tint (drier∧worse) and the count annotation. The SAME scatter WITH OLS fit + live r/n/p goes to annex A5 (caveat g routes inference to the annex).
+
+TABLE VIEW: planting_year, season, planted (Mon YYYY) → harvested (Mon YYYY), area_ha, production_t, yield_t_ha, % of usual, planting-season rainfall tercile, provenance era, qc_flag; downloadCsvBtn.
+
+NAPR SEPARATION (caveat b): 3.8-A (NAPR levels) and 3.8-B never share a panel, an axis, or a unit scale. Between them (or across sections after Q2) a fixed callout: "Two rulers, one field — KNBS NAPR is today's official levels (2019–24); HarvestStat is the longer movie (1991–). Same ministry chain, different vintages: county levels can differ up to ~2×. Compare shapes here, levels there." plotFooter meta on 3.8-B: Source "Kenya MoALD → FEWS NET FDW → HarvestStat v1.2 (Lee et al. 2025)"; Note "not level-comparable with Fig 3.8-A (NAPR)". The anomaly default (% of usual) makes the levels question moot in views 2–3.
+
+EMPTY STATES: county fails both era gates (e.g. Nairobi: Long 7 yrs, Short 5) → views 2–3 return noDataPlaceholder("Too few reported seasons in Nairobi to compare wet and dry years (Long n=7, Short n=5) — see the long-run Annual series for context"); Series view always renders in absolute mode. Honest-n line in EVERY footer, auto-computed: "Long n=X of 21 possible, Short n=Y of 20; 2002–2014 unreported; Z QC-flagged shown but excluded from statistics."
+
+Build discipline: displayed cells defined in the body (not appendix), `//| output: false` on line 1 of plumbing cells, node --check the big cell, no backticks in SQL comments, single-root htl.
+
+--- Q2 (restructure) ---
+SECTION RESTRUCTURE (V2-51) — organizing principle: §2 owns "which ocean state loads the dice" (driver-anchored); new §3 owns "what a drier/wetter season DOES here" (rainfall-tercile-anchored — the exact categories a KMD 'depressed / near-normal / enhanced rainfall' outlook uses, uncoupled from ENSO/IOD). §4 becomes the join: forecast tercile → §3's composites.
+
+NEW MAP:
+§1 What's at stake (unchanged 1.1–1.4) + gains 1.5 = old 3.8-A (KNBS NAPR current production levels, 2019–24). Rationale: NAPR is "what this county produces today" — a stakes fact, not an event narrative. Moving it a section away from HarvestStat is the strongest possible enforcement of caveat b (never interchangeable); the "Two rulers" callout cross-references. NOTE: this is a deliberate deviation from V2-52's "two sub-sections" adjacency — flag to Pete; fallback if he wants adjacency is A/B sub-sections inside new §3.2 with the callout divider and no shared axes.
+
+§2 What drives Kenya's seasons? (ocean drivers — ENSO leads, IOD coupled in OND, Western-V the partly-independent MAM control):
+- 2.1 rainfall/SPEI by year + phase strips (keep).
+- 2.2 tercile-by-phase contingency (keep — it already speaks tercile language, seeding §3's anchor).
+- 2.3 = old 3.1 named-events timeline (events are driver-named — El Niño 97/98, triple-dip La Niña — so the device's home is here).
+- 2.4 = old 3.4 NDVI beeswarm BY DRIVER-INTENSITY bins (it is a driver-anchored composite; unchanged mechanics).
+- eventDriver select + cardLegend + makeYearStrip stay §2 grammar. Everything driver-colored lives here.
+
+§3 What do drier or wetter seasons mean for {county}? (NEW headline section — the KMD-alignment lens):
+- Section-global controls: viewof impactSeason (Short rains OND | Long rains MAM) + a seasonType chip row (Dry | Normal | Wet | All). ONE new tiny device: makeTercileStrip(years, county, season) — same geometry as makeYearStrip but cells colored by enso_outlook_base.tercile (PALETTE.outcome drier/wetter + neutral). §3 strips show SEASON OUTCOME, never driver state — recoupling to ENSO here would defeat V2-51. Named events survive as annotationMarks overlays (annMode) on the time views — shared vocabulary, not the anchor.
+- 3.1 What counts as a dry season here? — section opener: old 3.2 SPEI strip re-captioned as the dryness ruler, PLUS a small tercile header: county's Dry/Normal/Wet thresholds in mm for the chosen season ("a dry short-rains in Marsabit = under X mm; KMD 'depressed rainfall' ≈ this bottom third") + the 1981–2025 tercile pip row (reuse the outlook pip device). Minimal new code, states the KMD mapping once.
+- 3.2 Harvests — Q1's Fig 3.8-B moves here whole; its "Wet vs dry seasons" view is the section centerpiece and its default anchor is already the rainfall tercile.
+- 3.3 Vegetation — old 3.3 NDVI multi-county time view (keep, tercile strip under it) + a "By season type" composite variant: NDVI seasonal anomaly dots by Dry/Normal/Wet bin — the existing 3.4 beeswarm re-anchored from driver bins to rainfall terciles (the driver-bin original having moved to §2.4; ~90% code reuse).
+- 3.4 Food security — old 3.5 IPC time view + composite chip: "IPC ≥3 (Crisis) within the 9 months after k of n dry short-rains seasons vs j of m wet" (counts, no rates-with-CIs; IPC record is short — print n).
+- 3.5 Prices — old 3.6 + composite: median % change in maize price over the 6 months after Dry vs Normal vs Wet seasons (median + dots, same grammar as 3.8-B view 2).
+- 3.6 Pastoral terms of trade — old 3.7 goat:maize, same composite treatment (ToT is THE ASAL dry-season story).
+- 3.7 What people reported — old 3.9 ReliefWeb, filterable by the seasonType chips (reports whose window overlaps seasons of that tercile).
+- IMPACT-WINDOW CONVENTION (stated once in Methods): for season S of year Y, downstream-impact window = planting month → +9 months (OND-Y → Nov Y–Jul Y+1: covers the Mar harvest + lean season). One rule, every composite.
+
+§4 Outlook (mechanics unchanged) + THE ANCHOR MECHANISM: composites are computed ONCE in appendix cells (sharedComposites: per county×season×tercile → NDVI median anomaly, harvest median % of usual + k-of-n, IPC≥3 count, price-change median, ToT median). §3 figures and a NEW §4 chip row both consume them: when the current KMD/CPC-state outlook leans dry, §4 renders "In past DRY short-rains seasons in {county}: maize −23% of usual (k=5/6 below), NDVI −0.8σ, IPC reached Crisis after 4 of 6, maize price +18% median" — each chip an anchor link (#impact-harvests, #impact-ndvi, …) that jumps to the §3 figure. Forecasts remain Kenya-Met/CPC-state only (house rule); the chips are historical composites, not predictions.
+
+§5 Explore/compare + Annex: unchanged; annex A5 gains the fitted scatter with live r/n/p (from Q1 view 3) and the detrend sensitivity toggle; A3 national FAOStat stays as-is.
+
+Figure-number crosswalk: 3.1→2.3, 3.4→2.4, 3.2→3.1, 3.8-A→1.5, 3.8-B(new)→3.2, 3.3→3.3(+variant), 3.5→3.4, 3.6→3.5, 3.7→3.6, 3.9→3.7. Headings stay question-form _lang vars; H1 count unchanged (no TOC upheaval).
+
+Minimal-new-data audit: tercile anchor already served (enso_outlook_base, county×season×year, 1981–2025); new code = makeTercileStrip, sharedComposites appendix cell, the re-anchored beeswarm, chip row, threshold header. No new parquet, no pipeline work.
+
+--- TRADEOFFS ---
+REJECTED, with reasons:
+1. Single linear detrend across 1991–2024 (the faostat_detrended reuse invited by caveat f): the 2013 district→county remap level-shift would be absorbed as spurious trend and bias the two eras' residuals in opposite signs, contaminating every wet/dry composite. Also rejected per-era OLS slopes: over 9–11 points, "trend" and ENSO decadal clustering are confounded — era B's fitted slope would eat the 2020–22 triple-dip drought signal itself. Chose era-median % anomalies; single-OLS kept only as an annex sensitivity.
+2. Lines/area encodings for the season series: any path mark begs the eye to interpolate across 2002–2014, violating caveat (a). Bars + a hatched, labeled hole band; nothing drawn through it.
+3. Harvest-year x-axis (the natural column) — would need offset strip lanes and per-mark lag annotations. Planting-year indexing makes the lag grammar (caveat e) correct by construction: the Short bar sits over its OND cell. Cost: "2023 Short" means harvest Mar-2024, which the tooltip and table make explicit.
+4. Boxplots / CIs / r-values in the story-layer composites: n=5–8 per tercile bin per season — quartiles and correlations are noise at that n. Dots + median tick + honest counts ("k of n"); inference (OLS fit, r/n/p) routed to annex A5 (caveat g).
+5. NAPR/HarvestStat as adjacent A/B panels sharing a section (V2-52's literal wording): adjacency plus a warning caption is weaker than structural separation — moved NAPR levels to §1 stakes and HarvestStat to the new §3, cross-referenced by the "Two rulers" callout. Flagged as a deliberate deviation for Pete to ratify; fallback = A/B sub-sections in §3.2, never shared axes.
+6. Driver-colored strips inside the new §3: would re-couple the dry/wet-impact section to ENSO/IOD and defeat V2-51's purpose; §3 uses tercile-colored strips (season outcome), driver color stays §2. The single bridge kept is the optional "driver phase" anchor in 3.8-B's composite view.
+7. Sorghum in seasonal views (2 harvest years — no series) and hard-dropping qc_flag>0 rows (hides real data) or silently including them in medians (imports upstream-suspect values into statistics): mark-and-exclude-from-stats instead, with both counts in every caption.
+8. Any county-level yield×driver regression/beta map or gap in-filling (interpolation, national scaling): the two-era, ~20-season record legitimately supports composites-by-category and counts, not fitted surfaces — and caveat (a) forbids in-fill outright.
+9. Live forecast joins from third parties in the §4 chips: house rule is Kenya-Met/CPC-state only; the chips therefore show historical tercile composites keyed to KMD forecast language, not model predictions.
+
+
+===============================================================================================
+DESIGNER: Data-visualization designer (Observable Plot lens) — KE-18 design pass, grounded in notebook_v2.qmd 
+
+--- Q1 (Fig 3.8-B) ---
+FIG 3.8-B — "How harvests move with the seasons" (HarvestStat county×season series)
+
+CORE STRUCTURAL DECISION — the lag grammar is solved by the x-axis, not by annotation (caveat e):
+Every seasonal harvest is plotted at its GROWING-SEASON year: `season_year = planting_year` (for Short this is the OND year; for Long, planting_year == harvest_year so it is the MAM year). A Short-rains harvest gathered Mar 2024 sits at x=2023 — directly above the OND-2023 cell of the climate strip. Adjacency now IS the causal claim, correctly. No connectors, no offset bookkeeping: the existing `makeYearStrip` is called with offset 0 because both layers speak season_year. The harvest date is carried by tooltip ("Short rains 2023: planted Oct 2023, harvested ~Mar 2024 — 12,400 t") and by the visible caption ("Short-rains bars sit on the OND season that grew them"). The x-axis label reads "growing season (year the rains fell)".
+
+LAYOUT — one figure = three vertically stacked, x-aligned panels (identical width=900, marginLeft=55, x domain [1990.5, 2025.5]); Pete already requires exact bar↔grid alignment (V2-49 precedent):
+  P1 (top): Long rains (MAM) panel — Plot.plot, height ~150, x axis suppressed (axis:null), panel header "Long rains (Mar–Aug) · n = {years} seasons" (honest n, caveat g).
+  P2: Short rains (OND) panel — same, x axis at bottom, header "Short rains (Oct–Mar) · n = {years} seasons".
+  P3 (bottom): climate strip via `makeYearStrip(years, lanes, …)` — lanes = [ {label:"MAM rains (county)", season:"MAM"}, {label:"OND rains (county)", season:"OND"} ] but with a new `countyRainLane` fill: tercile per season-year from enso_outlook_base (colors PALETTE.outcome.wetter / neutral / drier), NOT driver z by default. When the figure lives under a driver-controlled section variant, eventDriver strength lanes may be appended, but the default anchor is county rainfall — this is the same quantity the section lens (Q2) speaks. Lane tooltip closes the loop: "OND 2023 rains (wet tercile) grew the Short-2023 harvest, gathered Mar 2024".
+
+MARKS (P1/P2, per panel; rows = seasonal rows for {county, crop, season}):
+  1. Hole band FIRST (painted under everything): Plot.rect([{}], {x1: 2001.5, x2: 2014.5, y1: 0, y2: yMax, fill: "#f2f2ee"}) + Plot.text center "no seasonal reporting 2002–2014" (fontSize 10, fill #999) + a tip explaining Annual-only coverage exists and pointing at the Annual view. The x scale is CONTINUOUS (never a band scale — a band domain built from observed years would silently collapse the hole); bars simply don't exist there. Caveat (a) satisfied structurally: the gap occupies its true 13-year width, labelled, never in-filled.
+  2. Bars: Plot.rectY(rows, {x: "season_year", interval: 1, inset: 1.5, y: v, fill: d => d.anom == null ? seasonHue : (d.anom >= 0 ? ABOVE_TREND : BELOW_TREND), fillOpacity: d => d.qc_flag ? 0.45 : 0.9, tip: true, title: lagTooltip}). ABOVE/BELOW_TREND = one muted good/bad pair from PALETTE.impact (NOT the wetter/drier blues/browns — those are reserved for the strip, so rainfall-color never masquerades as production-color).
+  3. Trend: per-(county,crop,season) OLS linear fit computed client-side in OJS (least squares over qc_flag==0, non-null rows; the parquet is git-full and small so no bake needed) — reusing the faostat_detrended approach exactly (caveat f): anomaly = value − trend, pct_anom = anomaly/trend. Drawn as Plot.line(trendPts, {z: "segment", stroke: "#666", strokeDasharray: "3,3"}) with trendPts generated ONLY over the two observed spans (1991–2001, 2015–2024) — a single fit, but never drawn across the hole (drawing it there would be visual in-fill, caveat a). Anomaly coloring requires n ≥ 10 seasons; below that, bars render in neutral seasonHue and the header appends "(too short to detrend — read as events)".
+  4. Provenance rule (caveat c): Plot.ruleX([2012.5], {stroke: "#bbb", strokeDasharray: "2,2"}) + small gray Plot.text "◂ district-era records, remapped to counties". Every pre-2013 bar tooltip appends "reported by district, mapped to today's county (HarvestStat remap)". About foldout carries the full note (1989 districts ≈1:1, 1982 needed 6 splits) and warns the trend straddles the remap.
+  5. Section lens overlay: ...simMarks({x: "year", y1: 0, y2: yMax}) on the matching panel only (OND lens → Short panel, MAM lens → Long panel) — dashed outlines on lens years, inherited from the Q2 section control.
+
+qc_flag POLICY (caveat d): include-but-mark. Flagged rows (~1.8%, upstream HarvestStat QC passthrough — semantics cited from Lee et al. 2025 in the About foldout) render at fillOpacity 0.45 with "⚠ upstream QC flag" in the tooltip, are EXCLUDED from the trend fit and from any per-tercile summaries, and appear as a qc_flag column in the KE-15 data table. Rationale: silently dropping 279 rows would puncture already-short seasonal series; silently including them would contaminate the fitted trend.
+
+VIEWS (one Inputs.select, same 4-slot pattern as the current 3.8 — no new control vocabulary):
+  • "By season (1991–)" — the default 3-panel layout above.
+  • "Annual (1965–)" — single panel, x domain [1964.5, 2023.5], same mark grammar (no hole band; Annual has its own gaps → bars only, no line interpolation), strip lanes switch to annual PTOT/SPEI-12 terciles. Kept as a view, not a fourth panel, because its x domain would break the shared-axis alignment.
+  • "Vs season rainfall" — scatter: x = county seasonal rainfall anomaly (or SPEI-3, via the figure's Variable pairing) for the SAME season_year (the lag join is again structural), y = pct_anom (detrended, so scale-free), Plot.dot colored by season (Long/Short), Plot.text year labels on |pct_anom| > 1 sd points, n stated in caption. NO fitted line, NO r/p in the story layer (caveat g) — slope/r/p live only in the About foldout and annex A2/A3.
+  • "Table" — KE-15 table incl. planting/harvest dates, qc_flag, fnid.
+
+CONTROLS (economy — 3 owned, everything else inherited): Crop select (default Maize; options limited to crops with ≥8 seasonal county-years in the selected county, others suffixed "(sparse)"); Variable radio [Production (t) | Yield (t/ha) | Area (ha)] — default Production (the policymaker quantity; yield available one click away as the cleaner climate-response variable); View select (above). County comes from the global selector; the rainfall lens comes from the section sticky control. MULTI-COUNTY: one enhancedMultiSelect "Compare counties" defaulting to [county] (the §3.2 rainCmpCounties pattern). length==1 → bars as above; length>1 → panels switch to pct_anom LINES (detrended per county so levels never collide), color = county, segments broken at the hole and at any ≥2-year gap (KE-12 gap-segment approach), strip shows the FIRST county's terciles with a "strip: {county}" chip. pct_anom is the only honest cross-county axis given district-remap level shifts.
+
+EMPTY/HOLE STATES: no seasonal rows for {county, crop} → honest empty card per panel: "No Short-rains {crop} series reported for {county} in HarvestStat" + a link-styled nudge to the Annual view when annual rows exist (e.g. Marsabit maize Annual has 42 years vs Short 16). Null production_t within an observed span → absent bar, and the tooltip on the neighboring axis-tick region is not attempted — the data table is the honest place for row-level nulls.
+
+3.8-A / 3.8-B COEXISTENCE (caveat b): A and B are separate sub-headed figures under one "Harvests" heading, in separate wrappers, never in a shared row or shared y-scale. A = "What the county produces now — official KNBS levels, 2019–2024" (current NAPR figure, unchanged palette). B = "How harvests move with the seasons — FEWS NET/MoALD historical series, 1991–2024" (season-hued palette). Between them, one visible sentence of connective text AND a guard line in B's always-visible caption: "Levels in this series come from a different statistical vintage and can differ from the KNBS figures above by up to ~2× in some counties — compare movement and shape here, current levels there." Both About foldouts carry the r=0.94-overall / ~2×-per-county cross-check. No toggle ever swaps one dataset into the other's chart.
+
+CAPTION LOGIC (KE-13 short/About split, view-responsive per V2-01 precedent): default view caption = "Figure {N} — {crop} {variable} by growing season, {county}, 1991–2024 (Long n={X}, Short n={Y} seasons). Short-rains bars sit on the Oct–Dec season that grew them (planted Oct, harvested ~Mar the following year). Bars are colored by departure from each series' long-run trend. No seasonal data was reported 2002–2014." About foldout = provenance chain (Kenya MoALD → FEWS NET FDW → HarvestStat v1.2, MIT, cite both), district→county remap, qc_flag policy, detrend method + per-series n, NAPR vintage caveat, and the r/n/p stats exiled from the story layer.
+
+--- Q2 (restructure) ---
+SECTION RESTRUCTURE (V2-51) — the KMD-alignment lens becomes the organizing principle. Reorganisation of existing figures + tercile-anchored variants; no new data, one generalized helper.
+
+NEW OUTLINE:
+§1 What's at stake (unchanged): 1.1 map · 1.2 produce (NAPR) · 1.3 VoP · 1.4 GESI.
+
+§2 Ocean drivers and Kenya's seasons (current §2 + the ENSO-centric figures of §3, per Pete). Sticky section controls: eventDriver + eventShade MOVE here from §3 (they are driver vocabulary). Order tells one story — what the oceans did, what that does to rain here, what vegetation saw:
+  2.1 Named climate events timeline (was 3.1) — the named-events device's home: events ARE driver episodes.
+  2.2 Season rainfall by year + driver strips (current 2.1, unchanged incl. phase chips).
+  2.3 Driver-phase → season-outcome contingency panels (current 2.2).
+  2.4 Vegetation response by driver phase — NDVI beeswarm binned by driver strength (was 3.4; it is driver-binned, hence ENSO-centric, hence here).
+
+§3 What dry and wet seasons do (NEW — "KMD says wetter/drier than usual: what has that meant here?"). ANCHOR MECHANISM: promote the existing simSeasons/simYearSet/simMarks machinery from an optional toggle to the section's sticky spine. Two sticky controls total (replacing §3's current three):
+  viewof lensSeason = Inputs.radio(["Short rains (OND)", "Long rains (MAM)"])
+  viewof seasonLens = Inputs.radio(["All years", "Drier than usual (lowest third)", "Near-normal (middle third)", "Wetter than usual (upper third)"])
+  seasonLensSet = generalized simYearSet: county-specific rainfall terciles for the chosen season, from chirpsYearlyAll (or enso_outlook_base.tercile — same thing, already baked 1981–2025), n≥9 guard retained. Terciles, not quantile variants, because KMD's seasonal outlook is itself issued in above/near/below-normal probability format — the lens IS the forecast's language, uncoupled from ENSO/IOD. A legend chip under the controls lists the lens years as clickable year-chips, each tagged with its named event where one coincides ("2020 · La Niña", "1997 · El Niño") — this keeps the named-events device visible in §3 without any driver control, and is the narrative bridge back to §2.
+  Every figure gets two treatments: (i) time-series views draw ...simMarks lens outlines (device already built); (ii) each figure offers ONE tercile-grouped variant view — outcomes summarized side-by-side for dry/normal/wet years, medians + honest n, never r/p (story-layer rule).
+  3.1 The season-quality record (was 3.2 seasonStrip) — county OND/MAM rainfall anomaly bars, now tercile-colored: this figure DEFINES dry/normal/wet for this county and legitimizes every lens highlight below it. Multi-county compare stays here.
+  3.2 Vegetation (was 3.3 NDVI multi-county series) — lens outlines on the series; grouped variant = seasonal-peak NDVI beeswarm grouped by dry/normal/wet (the tercile-anchored sibling of the driver beeswarm that moved to 2.4 — same marks, different binning column; near-zero new code).
+  3.3 Food security (was 3.5 IPC) — lens highlights on the IPC timeline; grouped variant = per-tercile summary chips ("dry short-rains years: median {X}% in IPC 3+, n={k}"), medians only, n always.
+  3.4 Market prices (was 3.6) — lens outlines; grouped variant = month-of-season price trajectories overlaid, colored dry/wet, gray normal (reuses KE-12 gap-segmented per-market series, re-keyed by season_year).
+  3.5 Terms of trade (was 3.7 goat:maize) — same two treatments.
+  3.6 Harvests — 3.6-A KNBS NAPR current levels (was 3.8 NAPR figure, unchanged) and 3.6-B HarvestStat series (the Q1 design; its bottom strip lanes are literally the lens variable, and its "Vs season rainfall" view is its grouped variant). V2-52's A/B split lands here as sub-sections of one Harvests heading.
+  3.7 The humanitarian record (was 3.9 ReliefWeb) — lens-filterable report list ("show reports from dry-OND years"); V2-49's shading removal composes cleanly since the section carries outline-only highlighting.
+
+§4 Outlook (unchanged content, stronger narrative seam): the KMD/CPC forecast state now hands off explicitly — "for what a drier-than-usual season has meant in {county}, see §3" — and §2 answers "why the forecast says that". V2-50's context-strength addition slots in untouched.
+§5 Explore / Annex: unchanged; figure numbers re-issued (KE-14 visible numbering makes this a content-only sweep); anchors #events → #impacts with the old anchor aliased.
+
+MIGRATION MECHANICS: eventDriver/eventShade sticky block moves into §2 wholesale; §3's sticky block is rebuilt as the two lens controls; simSeasons the control is retired (its machinery becomes seasonLensSet); loader dep arrays keep data inputs only (lens is presentation → render via view fns, per the loader-race house rule). Charts moving between sections keep their cell names; only titles, fig numbers, captions, and sticky-control references change.
+
+--- TRADEOFFS ---
+REJECTED, deliberately: (1) Connector lines / arrows tying OND bands to next-year harvest bars — over 30+ years they are hairball clutter and still leave the bar sitting on the wrong year; plotting at season_year makes the geometry itself truthful. (2) Plotting Short at harvest_year with the strip offset −1 (makeYearStrip supports it) — the offset fixes the strip but every OTHER x-aligned element (lens outlines, event bands, neighboring figures) would still mis-align by a year; one convention (season_year) everywhere is cheaper than per-mark offsets forever. (3) Split/dual x-axes per season — breaks the single shared-year comparison that the stacked-panel design exists to provide. (4) Band-scale x built from observed years — silently collapses the 2002–2014 hole (caveat a violation); continuous x + interval bars chosen instead, and bars (not lines) as the default mark precisely because bars cannot interpolate a gap. (5) Drawing the fitted trend across the hole — visual in-fill; trend drawn only over observed segments. (6) Excluding qc-flagged rows outright — punctures 16–20-season series; include-but-mark with exclusion from fits keeps both honesty and coverage. (7) A separate "Anomaly" view — folded into the default as trend-relative bar coloring, saving a control slot. (8) Any driver (ENSO/IOD) control on 3.8-B itself — it inherits the section's rainfall lens; driver-vs-production stays in the annex stats and §2, keeping V2-51's "uncoupled from ENSO/IOD" promise. (9) Multi-county bars or shared-tonnes overlays — district-remap level shifts and county size make tonne overlays misleading; multi-county mode is pct_anom lines only. (10) Moving 3.8-A (NAPR) into §1 next to Fig 1.2 — tempting (same dataset), but Pete's V2-52 asked for A/B sub-sections together, and A's event-context framing earns its place beside B; noted as a fallback if §3 gets crowded. (11) Quintile/SPEI-threshold lens instead of terciles — terciles match KMD's above/near/below-normal outlook format exactly, which is the whole point of the section. (12) Baking detrended HarvestStat columns in the pipeline — the parquet is git-full, small, and per-(county,crop,season) OLS is trivial client-side; a bake would slow iteration on the n≥10 policy. (13) Fitting separate pre/post-2013 trends to respect the remap — 10–11 points per segment is noise; single fit + visible remap rule + About caveat, with a build-time segment-mean cross-check instead.
+
+
+===============================================================================================
+DESIGNER: Ag-econ / food-security decision-products designer (FEWS NET / WFP VAM school) + story editor. Lens:
+
+--- Q1 (Fig 3.8-B) ---
+## FIG 3.8-B — "How harvests moved with the seasons (1991–2024)" (HarvestStat)
+
+### The one structural decision everything hangs on: SEASON-YEAR = PLANTING YEAR
+Verified in the parquet: Short rows are universally harvest_year = planting_year + 1 (plants Oct, harvests Mar); Long and Annual are lag 0. So the x-axis unit is `season_year := planting_year` for both rain seasons. A Short-rains bar at x=2015 is the crop planted Oct 2015 and harvested Mar 2016 — and the OND-2015 rainfall/driver strip cell sits directly beneath it BY CONSTRUCTION. This satisfies caveat (e) structurally: adjacency now IS causation-eligible, no caption or connector needed. Axis label: "season year (year the crop was planted)". Every bar tooltip states both dates: "planted Oct 2015 · harvested Mar 2016" from planting_month/harvest_month fields. The existing `makeYearStrip` lanes therefore use `offset: 0` here (its offset machinery stays for harvest-year-indexed charts elsewhere).
+
+### Placement & separation from 3.8-A (caveat b)
+3.8-B is its own `##` sub-section (own title cell, own plotFooter) below 3.8-A, never sharing a chart, axis, table, or download file with NAPR. Section markdown opens with the plain-language wall: "Different dataset, different job. 3.8-A (KNBS) tells you today's levels; this one (Ministry of Agriculture records compiled by FEWS NET) tells you how harvests MOVED. The two report different absolute tonnages for the same county — up to 2× apart — so never read a number off one and compare it to the other." plotFooter meta Source: "Kenya MoALD → FEWS NET FDW → HarvestStat"; the same do-not-compare note goes in `meta.Note` so it travels with the PNG/CSV download. Under the Q2 restructure this figure renumbers to Fig 3.4-B in the new impacts section (see q2_design); fig ids in plotFooter follow the new map.
+
+### Controls (`::: {.controls-row}`, house pattern)
+1. `viewof hsCrop` — Inputs.select, SINGLE crop (not multi). Options ordered by that county's seasonal record count, label carries honest n: "Maize — 20 Long / 16 Short seasons" (computed live per county; caveat g's honest-n rule). Default Maize.
+2. `viewof hsSeason` — Inputs.radio ["Both rain seasons", "Long rains", "Short rains", "Annual series (1965–2022)"], default "Both rain seasons" (two stacked panels sharing the x-domain). Annual is an opt-in SEPARATE view — calendar-year accounting, ends 2020/22, never overlaid or spliced with the seasonal panels (it would fake continuity across the hole).
+3. `viewof hsVar` — Inputs.radio Yield (t/ha) [default] / Production (t) / Area (ha), with a 10.5px helper div (house pattern from 2.1): "Yield isolates the weather; area mostly reflects planting decisions; production = both." Default yield because that is the climate-sensitive read a KMD-forecast user needs.
+4. `viewof hsView` — Inputs.radio ["My county's story", "Season type vs harvest", "Table"].
+Loader hygiene (memory rule): loader-reset deps = [county, hsCrop] ONLY (the only inputs that change queries); hsSeason/hsVar/hsView and any lens re-render synchronously via the view functions.
+
+### View A — "My county's story" (default; the recognition view)
+Per-season panel(s), width 900, `Plot.plot`, x fixed domain 1990–2025 (never data-driven — a data-driven domain would visually close the hole).
+- **Bars**: `Plot.barY(rows, {x: season_year, y: hsVar})`, fill = county season rainfall TERCILE for that season-year, read from `enso_outlook_base` (tercile column already exists per county×season×year 1981–2025 — zero new data): PALETTE.outcome.wetter / neutral grey / PALETTE.outcome.drier. The whole point in one glance: are the short bars the orange ones?
+- **Trend line**: dashed grey OLS line over the bars, labelled "trend" — trains the eye to discount the trend before the anomaly view formalises it (caveat f).
+- **The hole (caveat a)**: fixed hatched band `Plot.rect` x 2002→2014, `fill: url(#hatch)` (or repeating-linear-gradient div overlay), on-band `Plot.text` "no seasonal county records 2002–2014", tooltip explaining the national reporting gap and pointing to the Annual view for those years. NEVER interpolated, and the fixed x-domain guarantees the gap occupies its true width.
+- **Provenance marker (caveat c)**: thin vertical `Plot.ruleX([2013])` with a small "county boundaries" tag; tooltip: "values before 2013 are Ministry district records mapped onto today's 47 counties". Repeated as one caption line.
+- **qc_flag policy (caveat d)**: flags 0–1 (15,566 rows) plotted solid and used everywhere; flag 2 (229 rows) drawn as OPEN outline bars (fillOpacity .2, dashed stroke) in this levels view only — visible, honest, tooltip "failed quality checks — shown, not used in comparisons" — and EXCLUDED from the trend fit, the anomaly view, and all lens-chip statistics. Caption auto-reports "k flagged values excluded from statistics".
+- **Strips under each panel** (same x, house `makeYearStrip`): lane 1 "season rainfall (this county)" cardColor by CHIRPS PTOT z; lane 2 the section driver (`zSeries(eventDriver, 'OND'|'MAM')`) — both offset 0 thanks to planting-year indexing.
+- **Lens & events overlays**: the section tercile lens (Q2's `seasonLens`) draws the existing `simMarks` dashed outlines on matching season-years; `annotationMarks` named-event glyphs (▲ 1997/98, 2016/17, 2023 El Niño; 2020–22 La Niña) render on top when events mode is on — recognition hooks for officers.
+- **Empty state**: if county×crop×season n < 5 → replace panel with the italic message pattern from ndviSwarmPanel: "Only {k} {season} seasons of {crop} reported for {county} — too few to read a pattern. Try Maize, or the Annual series." (Marsabit maize Short n=16 passes; many ASAL minor crops won't — honest, not blank.)
+
+### View B — "Season type vs harvest" (the KMD-forecast answer view)
+Reuses the learned grammar of Fig 3.4's beeswarm, but binned by RAINFALL TERCILE instead of driver: x = Drier third / Near-normal / Wetter third (county season rainfall, enso_outlook_base), y = harvest anomaly (%), one labelled dot per season-year (year text dx like ndviSwarm), fill = cardColor(rainfall z), thick black median tick per bin (Plot.tickY groupX median), n printed under each bin label. Sub-toggle `hsScatterMode` radio ["By season type", "Continuous (vs SPEI-3)"] — the continuous scatter (x = SPEI-3 of the planting season) is the analysts' variant. Named-event years get a ring stroke.
+- **Anomaly metric (caveat f)**: reuse the faostat_detrended recipe — per county×crop×season OLS linear trend on qc≤1 points, anomaly = 100·(value−trend)/trend. One line across the 1991–2001 + 2015–2024 segments is defensible at n≈20 and also absorbs the slow drift a remap could introduce; guard: if n < 10, skip detrending and use % of the county median for that season instead, and the caption states which metric is in force ("anomalies are % departure from the linear trend" vs "% of the county median — series too short to detrend").
+- **No r/n/p in the story layer (caveat g)**: the figure shows medians and n only. The auto-caption speaks FEWS language: "In {county}, the {n_dry} drier-than-usual short-rains seasons since 1991 brought a median maize yield {−18}% below trend; wetter seasons {+9}%." Pearson r, regression fit and CIs go to annex A2 alongside the existing FAOSTAT material, linked from captionDetails.
+
+### Table view + downloads
+Table = raw rows for the selection incl. planting_year/month, harvest_year/month, area_ha, production_t, yield_t_ha, qc_flag, tercile, anomaly_pct, fnid. Download CSV = same columns (analysts get everything; caveat c/d/e auditable). meta.Note carries: hole statement, 2013 remap line, qc exclusion count, "Short-rains rows are plotted by planting year — the 2015 short rains were harvested in March 2016", and the never-compare-with-3.8-A line.
+
+Titles live in the section markdown / title cell, never Plot `title:` (h2/PNG rule); chart rendered via loaderTarget/renderToDiv; `node --check` the cell before commit.
+
+--- Q2 (restructure) ---
+## SECTION RESTRUCTURE (V2-51) — new map
+
+Organising principle (Pete's F2/P30 lens made structural): §2 = WHY seasons fail or flood (ocean drivers — ENSO/IOD/Western-V anchored); NEW §3 = WHAT a dry or wet season does (rainfall-tercile anchored, driver-free by default) — the page a county officer opens when KMD says "drier than usual", whatever ENSO is doing; §4 = outlook, which now hands off INTO §3.
+
+### New outline & figure moves
+- **§1 What's at stake** — unchanged (1.1–1.4).
+- **§2 Ocean drivers and Kenya's seasons** (absorbs the driver-anchored figures of old §3):
+  - 2.1 Season rainfall by year + phase chips (stays; unchanged).
+  - 2.2 Named climate events timeline (MOVED from 3.1 — named events are driver stories; this keeps the named-events device with a permanent home).
+  - 2.3 What each phase means for the odds (old 2.2 contingency panels).
+  - 2.4 Vegetation by driver strength (MOVED from 3.4 — the beeswarm binned by ENSO+IOD / Western-V intensity is intrinsically driver-anchored).
+  - The sticky `eventDriver` control now lives here and only here.
+- **NEW §3 "When the season is drier or wetter than usual"** — the KMD-forecast landing page. Intro copy: "KMD's seasonal forecast speaks in exactly these terms — wetter, near-normal, or drier than usual. Pick the lens that matches the forecast; every chart below highlights past seasons like it and tells you what happened to pasture, food security, harvests and prices in {county}." Anchor `{#impacts}`.
+  - **Section-level sticky controls** (replaces old §3's eventDriver stickiness): `viewof seasonLens` = two inputs — season radio [Short rains (OND) | Long rains (MAM)] + lens radio [Drier third | Near-normal | Wetter third | Off]. Mechanism: generalise the existing `simYearSet`/`simMarks` (currently OND-only, computed from chirpsYearlyAll) to key on (season, tercile) and source the tercile directly from `enso_outlook_base.tercile` (already per county×season×year, 1981–2025) — cheaper and consistent with §4's analogue pips. Zero new data. Plus `viewof showEvents` toggle (default ON) that keeps `annotationMarks` named-event bands as an underlay — lens outlines always draw ON TOP of event bands.
+  - **3.0 "What counts as drier than usual here"** — tiny new orientation strip (only genuinely new cell, built from data already loaded for 2.1/3.1): one `makeYearStrip`-style lane of the county's seasons coloured by tercile, plus a one-line legend giving the county's tercile boundaries in mm ("for Kitui, a drier-third short rains means under ~180 mm"). Grounds the abstraction before anything else.
+  - **3.1 Season-by-season climate record** (old 3.2 SPEI strip) — the carrier timeline, now with lens outlines primary.
+  - **3.2 Vegetation response** (old 3.3 NDVI multi-county series) + a tercile-anchored VARIANT of the beeswarm: same `ndviSwarmPanel` code with the binner swapped from driver-z bins to county rainfall terciles (bins: Drier third / Near-normal / Wetter third). Driver-binned original stays in §2.4; the two share the panel function with a `binner` argument.
+  - **3.3 Food security** (old 3.5 IPC) with lens outlines + lens chip.
+  - **3.4 Harvests — A: current levels (KNBS NAPR, old 3.8-A) · B: how harvests moved with the seasons (HarvestStat, the Q1 figure)**. Natural home: 3.4-B is tercile-anchored by design.
+  - **3.5 Markets** (old 3.6 prices + old 3.7 goat:maize ToT, merged into one sub-section, two figures) with lens outlines + chips.
+  - **3.6 What people reported** (old 3.9 ReliefWeb): when lens ≠ Off, reports from matching season-years float to the top with a badge.
+  - **Lens chips (the payoff device, one row per figure)**: when lens ≠ Off, a `phaseChips`-style chip computes median outcome in lens years vs all years with honest n, in plain words — "In the 7 drier-third short-rains since 2009: IPC 3+ population rose within 6 months in 5 of them" / "maize yield median −18% vs trend (n=7)". Medians + counts only; no r/p (annex A2 keeps the statistics).
+- **§4 Outlook** — content unchanged, plus the handoff: after the KMD/CPC state cards, a button row "KMD leaning drier for OND → see what drier short rains have done here" that deep-links to `#impacts` and pre-sets seasonLens (hash param read at init; OJS viewofs can't be reactively set later, so apply at load — same limitation already noted in KE-23a). §4's analogue-year pips already speak enso_outlook_base terciles, so the two sections now share one vocabulary.
+- **Explore / Annex** — unchanged; national FAOSTAT regression stays annex-only.
+
+### Renumbering table (old → new)
+2.1→2.1 · 3.1→2.2 · 2.2→2.3 · 3.4→2.4 · 3.2→3.1 · 3.3→3.2 (+tercile beeswarm variant) · 3.5→3.3 · 3.8-A/B→3.4-A/B · 3.6→3.5a · 3.7→3.5b · 3.9→3.6 · new 3.0 orientation strip. plotFooter `fig:` ids and download filenames update accordingly.
+
+### Build notes
+Reorganisation only: every §3 figure already takes `annotationMarks`/`simMarks` backgrounds, so the migration is (i) generalise simYearSet to (season, tercile) via enso_outlook_base, (ii) swap section sticky controls, (iii) move cells (watch the displayed-cell-must-be-defined-in-body rule when relocating), (iv) the two genuinely new cells are the 3.0 orientation strip and the per-figure lens chips (pure client-side aggregation of already-loaded rows). Narrative flow of the whole notebook now reads: what's at stake → why seasons fail (drivers) → what a bad/good season does (forecast-aligned impacts) → what's coming (outlook, pointing back into §3).
+
+--- TRADEOFFS ---
+DELIBERATELY REJECTED, and why:
+1. Dual-axis production-vs-rainfall overlay for 3.8-B — the classic ag-met chart, but dual axes manufacture correlation by scale choice and hide the lag; tercile-coloured bars + strip lanes say the same thing honestly.
+2. Harvest-year x-indexing with connector arrows tying Short bars back to the previous OND — connectors get illegible over 30 years and the lag remains a decoration; re-indexing to planting year (the FEWS/ASAP "season year" convention) makes the lag disappear structurally (caveat e) at the cost of one axis-label sentence and tooltips carrying both dates.
+3. Any shared axis/table/splice of NAPR and HarvestStat, including a "bridge" scaling factor — caveat b is binding; per-county vintages differ up to 2×, and a bridge would launder that into false precision. Cost: users must hop between 3.4-A and 3.4-B; the do-not-compare copy pays that down.
+4. In-filling or interpolating 2002–2014, and splicing the Annual series into the seasonal panels to cover the hole — Annual is different accounting (calendar year, no season split); splice = fake continuity. The hole is drawn, labelled, and the Annual series offered as a separate opt-in view (caveat a).
+5. Per-segment trend fits (1991–2001 vs 2015–2024) — with n≈20 total, two fits burn degrees of freedom and make segments incomparable; one linear fit + the n<10 median fallback, declared in the caption, is the least-worst (caveat f, reusing faostat_detrended).
+6. Multi-crop small multiples as the 3.8-B default — legibility and the empty-state problem (minor crops have n<5 in most ASAL counties); single crop with honest-n option labels, Table/CSV serves analysts.
+7. Scatter-with-r as the default analysis view — caveat g; the tercile beeswarm answers the county officer's actual question ("what did drier seasons do?") and reuses a grammar the notebook already taught in old Fig 3.4; continuous SPEI scatter kept as a sub-toggle, statistics in annex A2 only.
+8. Dropping qc_flag 2 rows silently OR keeping them in statistics — instead: visible-but-inert in the levels view, excluded from every computed number, count reported (caveat d).
+9. Moving IPC/prices/ToT into §2 — they are outcomes, not drivers; Pete's instinct ("the more ENSO related figures") maps cleanly to timeline + driver-beeswarm only.
+10. A new "wetness classification" dataset for the lens — enso_outlook_base already ships county×season terciles 1981–2025; reusing it keeps §3 and §4 speaking one vocabulary and honours the minimal-new-data constraint.
+11. Duplicating the named-events device in both sections as a primary encoding — kept primary in §2 (timeline) and demoted to a default-on underlay toggle in §3 so the tercile lens owns the section, while officers keep their memory anchors (1997/98, 2016/17, 2020–22).
