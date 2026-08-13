@@ -179,3 +179,37 @@ Raw findings: `reviews/2026-08-13_v26_adversarial/findings_raw.json`.
 **Pete next:** hard-refresh http://localhost:4333/notebooks/KE-enso-explorer/notebook_v2.html —
 hero must read **v2.6**. Review focus: §2/§3 restructure feel, the §3 lens controls, Fig 3.6-A/B
 and the two-rulers framing, 2.1 per-lane strips + IOD chips, 3.1 SPEI-only figure.
+
+---
+
+## Addendum — cycle 7 (2026-08-13): Pete's v2.6 review ("retry") → v2.7
+
+Pete's third-pass items V2-54..V2-62, deferred on usage, green-lit by "retry". **v2.7**
+(`c145649`) rebuilt §3's interaction model: sticky row gone, master controls at Fig 3.1 with
+**linked clone rows** (Inputs.bind) at every driver-shaded figure; a shared **background system**
+(Off / Discrete / Continuous) shades OND/MAM seasons by driver strength on 3.1–3.5 + 3.7, with the
+lens outlines drawn on top; SPEI-3/6/12 selector (already served, no data build); IPC
+phase-bands↔background mutual exclusion + yearly-bars view; price market filter +
+quarterly/yearly summary bars; ToT likewise; 3.6-A regrouped (years × crops side-by-side) with a
+**lag-shifted** background (OND(Y−1) wash + MAM(Y) band — harvest-lag rule preserved inside
+Pete's requested visual); 3.6-B Records control defaulting to 2015–2024 (V2-61 — Pete to veto);
+OND/MAM-first naming.
+
+**Adversarial round (closed, `222ba35`):** 2 hostile reviewers + refuters, 7 confirmed serious
+(0 refuted), 8 minors — all fixed. The two criticals were real reader-facing science bugs:
+(1) yearly bars (3.3/3.7) drawn with `interval: 1` sat half a slot right of their season
+backgrounds — attributing year-Y outcomes to MAM(Y+1) — and the last bar overflowed the frame
+(fixed with explicit centred x1/x2, verified on Quarto's pinned Plot 0.6.11); (2) Fig 3.1 plotted
+NDJ/DJF SPEI windows 12 months late (parquet labels year-crossing windows by END year) — the
+chart showed a false drought dip in the middle of the 1997–98 and 2023–24 El Niño peaks (fixed;
+verified monotone through the year turn). Majors: Western-V backgrounds painted OND seasons
+against the notebook's own R2 framing (now gated to MAM, absent-not-neutral in 3.6-A); 3.6-A
+exposed lens controls it ignored; 3.7 lacked its promised control row; the SPEI caption's
+2020–23-deficit claim was false for ~29/47 counties (scoped to Mandera/Turkana/West Pokot).
+Also logged **V2-63**: chirps_county's PTOT NDJ series is corrupt upstream (non-contiguous
+window) — no notebook impact, D409 fix with Wave-3.
+
+**Pete next:** hard-refresh http://localhost:4333/notebooks/KE-enso-explorer/notebook_v2.html —
+hero must read **v2.7**. Review focus: the linked controls feel (change a control at 3.4, watch
+3.1 follow), Discrete vs Continuous backgrounds, 3.6-A's grouped bars + lag-shifted wash,
+3.6-B's Records default (veto if the full record should lead), IPC yearly bars.
