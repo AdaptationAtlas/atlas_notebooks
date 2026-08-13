@@ -26,7 +26,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.11</b> · 2026-08-13 · rainfall-map panel</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.12</b> · 2026-08-13 · rainfall-map panel</span>`
 ```
 
 ```{ojs}
@@ -111,7 +111,7 @@ Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so
 ### OND — short rains (Oct–Dec) · driven by ENSO + IOD
 
 ```{ojs}
-corrHeader("OND", ondCache)
+corrHeader("OND", ondCache, ["ENSO (Niño 3.4)", "IOD (DMI)"])
 ```
 
 ::: {.controls-row}
@@ -147,7 +147,7 @@ ondGrid = gridWrap(await buildPanels(ondCache, "OND", ondDriver, parseNum(ondMin
 ### MAM — long rains (Mar–May) · Western-V control
 
 ```{ojs}
-corrHeader("MAM", mamCache)
+corrHeader("MAM", mamCache, ["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"])
 ```
 
 ::: {.controls-row}
@@ -486,51 +486,100 @@ pearson = (pairs) => {
 }
 // r between two aligned arrays (nulls dropped pairwise)
 corrArr = (xs, ys) => pearson(xs.map((x, i) => ({x, y: ys[i]})).filter((p) => p.x != null && !Number.isNaN(p.x) && p.y != null))
-// all driver↔rainfall correlations + ENSO×IOD combination comparison + best linear R
-corrStats = (season, cache) => {
-  const wm = cache.filter((c) => c.meanmm != null);
-  const y = wm.map((c) => c.meanmm);
-  const mons = seasonMonthsFor[season];
-  const zc = zByYear("nino34_anom_noaa", mons), zi = zByYear("dmi_hadisst", mons);
-  const enso = wm.map((c) => zc.get(c.year)), iod = wm.map((c) => zi.get(c.year));
-  const wv = (() => { const z = zSeries("Western-V (WNP)", season); return wm.map((c) => z.get(c.year)); })();
-  const rE = corrArr(enso, y), rI = corrArr(iod, y), rW = corrArr(wv, y);
-  const add = enso.map((e, i) => (e != null && iod[i] != null) ? (e + iod[i]) / 2 : null);
-  const prod = enso.map((e, i) => (e != null && iod[i] != null) ? e * iod[i] : null);
-  const rAdd = corrArr(add, y), rProd = corrArr(prod, y);
-  const rEI = corrArr(enso, iod);
-  let multiR = null;
-  if (rE != null && rI != null && rEI != null && Math.abs(rEI) < 0.999) {
-    const R2 = (rE * rE + rI * rI - 2 * rE * rI * rEI) / (1 - rEI * rEI);
-    multiR = R2 > 0 ? Math.sqrt(Math.min(1, R2)) : 0;
+// ---- small OLS + partial-correlation engine (evidence-based combination) ----
+solveLin = (M, v) => {
+  const n = v.length, A = M.map((r, i) => [...r, v[i]]);
+  for (let c = 0; c < n; c++) {
+    let piv = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+    if (Math.abs(A[piv][c]) < 1e-12) return null;
+    [A[c], A[piv]] = [A[piv], A[c]];
+    const d = A[c][c];
+    for (let j = c; j <= n; j++) A[c][j] /= d;
+    for (let r = 0; r < n; r++) if (r !== c) { const fr = A[r][c]; for (let j = c; j <= n; j++) A[r][j] -= fr * A[c][j]; }
   }
-  return {rE, rI, rW, rAdd, rProd, multiR, n: wm.length};
+  return A.map((r) => r[n]);
 }
-corrHeader = (season, cache) => {
-  const s = corrStats(season, cache);
+// OLS of y on intercept + cols; returns {r2, predicted}
+ols = (cols, y) => {
+  const n = y.length, k = cols.length + 1;
+  const A = [];
+  for (let i = 0; i < n; i++) { const row = [1]; for (const c of cols) row.push(c[i]); A.push(row); }
+  const AtA = Array.from({length: k}, () => new Array(k).fill(0)), Aty = new Array(k).fill(0);
+  for (let i = 0; i < n; i++) for (let a = 0; a < k; a++) { Aty[a] += A[i][a] * y[i]; for (let b = 0; b < k; b++) AtA[a][b] += A[i][a] * A[i][b]; }
+  const bcoef = solveLin(AtA, Aty);
+  if (!bcoef) return null;
+  const pred = A.map((row) => row.reduce((s, v, j) => s + v * bcoef[j], 0));
+  const my = d3.mean(y), sstot = d3.sum(y.map((v) => (v - my) ** 2)), ssres = d3.sum(y.map((v, i) => (v - pred[i]) ** 2));
+  return {r2: sstot > 0 ? 1 - ssres / sstot : null, predicted: pred};
+}
+// partial r of xk with y, controlling for the `others` predictors (residual method)
+partialR = (xk, others, y) => {
+  if (!others.length) return corrArr(xk, y);
+  const fx = ols(others, xk), fy = ols(others, y);
+  if (!fx || !fy) return null;
+  return corrArr(xk.map((v, i) => v - fx.predicted[i]), y.map((v, i) => v - fy.predicted[i]));
+}
+shortName = (k) => k.replace(/ \(.*\)$/, "")
+// evidence-based driver↔rainfall stats for a set of drivers: bivariate r,
+// partial r (each driver controlling for the others), best-linear multiple R
+// (adjusted for df), and predictor collinearity.
+corrStats = (season, cache, keys) => {
+  const zmaps = keys.map((k) => zSeries(k, season));
+  const complete = cache.filter((c) => c.meanmm != null)
+    .map((c) => ({y: c.meanmm, xs: zmaps.map((z) => z.get(c.year))}))
+    .filter((r) => r.xs.every((v) => v != null && !Number.isNaN(v)));
+  const n = complete.length;
+  const y = complete.map((r) => r.y);
+  const cols = keys.map((_, ki) => complete.map((r) => r.xs[ki]));
+  const per = keys.map((k, ki) => ({
+    key: k, name: shortName(k),
+    r: corrArr(cols[ki], y),
+    partial: partialR(cols[ki], cols.filter((_, j) => j !== ki), y),
+  }));
+  const full = n > keys.length + 1 ? ols(cols, y) : null;
+  const R2 = full && full.r2 != null ? Math.max(0, full.r2) : null;
+  const multiR = R2 != null ? Math.sqrt(R2) : null;
+  const adjR2 = R2 != null && n > keys.length + 1 ? 1 - (1 - R2) * (n - 1) / (n - keys.length - 1) : null;
+  const adjR = adjR2 != null ? Math.sqrt(Math.max(0, adjR2)) : null;
+  let maxColl = 0, collPair = "";
+  for (let a = 0; a < keys.length; a++) for (let b = a + 1; b < keys.length; b++) {
+    const rr = Math.abs(corrArr(cols[a], cols[b]) ?? 0);
+    if (rr > maxColl) { maxColl = rr; collPair = `${shortName(keys[a])}↔${shortName(keys[b])}`; }
+  }
+  return {per, multiR, adjR, n, maxColl, collPair, k: keys.length};
+}
+corrHeader = (season, cache, keys) => {
+  const s = corrStats(season, cache, keys);
   const f = (r) => r == null ? "—" : r.toFixed(2);
-  const singles = [
-    {name: "ENSO", r: s.rE, driver: "ENSO (Niño 3.4)"},
-    {name: "IOD", r: s.rI, driver: "IOD (DMI)"},
-    {name: "ENSO+IOD", r: s.rAdd, driver: "ENSO + IOD"},
-    {name: "Western-V", r: s.rW, driver: "Western-V (WNP)"},
-  ];
-  const best = singles.filter((x) => x.r != null).sort((a, b) => Math.abs(b.r) - Math.abs(a.r))[0];
   const strength = (r) => { const a = Math.abs(r); return a < 0.2 ? "negligible" : a < 0.4 ? "weak" : a < 0.6 ? "moderate" : "strong"; };
-  const chip = (x) => (best && x.name === best.name)
-    ? html`<b style="color:#1b7837">${x.name} ${f(x.r)}</b>` : html`<span>${x.name} ${f(x.r)}</span>`;
+  // rank by |partial| — the independent contribution (honest "which driver matters")
+  const ranked = s.per.filter((p) => p.partial != null).sort((a, b) => Math.abs(b.partial) - Math.abs(a.partial));
+  const best = ranked[0];
+  const chip = (p) => (best && p.key === best.key)
+    ? html`<b style="color:#1b7837">${p.name} r=${f(p.r)} (partial ${f(p.partial)})</b>`
+    : html`<span>${p.name} r=${f(p.r)} (partial ${f(p.partial)})</span>`;
+  // does combining beat the best single? compare adjusted multiple-R to best |partial-driver| bivariate r
+  const bestSingleR = best ? Math.abs(best.r ?? 0) : 0;
+  const combineHelps = s.adjR != null && s.adjR > bestSingleR + 0.05;
   return html`<div style="font-size:0.92em;margin:0.2rem 0 0.5rem">
     <b>Driver ↔ rainfall correlation</b> (${county} · ${season} · n=${s.n} yrs) —
-    ${singles.map((x, i) => html`${i ? " · " : ""}${chip(x)}`)}
+    ${s.per.map((p, i) => html`${i ? " · " : ""}${chip(p)}`)}
     <div style="font-size:0.92em;color:#444;margin-top:2px">
-      Strongest: <b>${best ? best.name : "—"}</b>${best ? ` (r=${f(best.r)}, ${strength(best.r)}; ${best.r > 0 ? "driver ↑ → wetter" : "driver ↑ → drier"})` : ""}.
-      ${best && Math.abs(best.r) >= 0.4 ? html` Suggested ${season} driver: <b>${best.driver.replace(/ \(.*\)$/, "")}</b> — set the dropdown to match.` : " No driver is a strong predictor for this county & season."}
+      Strongest independent driver: <b>${best ? best.name : "—"}</b>${best ? ` (partial ${f(best.partial)}, ${strength(best.partial)}; ${best.partial > 0 ? "↑ → wetter" : "↑ → drier"})` : ""}.
+      Best linear combination R=${f(s.multiR)} (adj ${f(s.adjR)}).
+      ${combineHelps
+        ? html` <b>Combining the drivers improves skill</b> (adj R ${f(s.adjR)} &gt; best single ${f(bestSingleR)}) — a weighted multi-driver index beats any one alone.`
+        : best && Math.abs(best.partial) >= 0.4
+          ? html` Suggested ${season} driver: <b>${shortName(best.key)}</b> — combining adds little here.`
+          : html` No driver is a strong predictor for this county &amp; season; combining doesn't rescue it.`}
     </div>
-    <details style="font-size:0.85em;color:#555;margin-top:3px"><summary style="cursor:pointer">About these correlations &amp; how ENSO+IOD is combined</summary>
-      <div style="margin-top:4px;max-width:60rem">
-        <b>Reading r</b> (Pearson, over ${s.n} years): <b>+</b> = driver high → more rain (El Niño / +IOD wetter); <b>−</b> = driver high → less rain.
-        |r| guide: &lt;0.2 negligible · 0.2–0.4 weak · 0.4–0.6 moderate · &gt;0.6 strong. Correlation ≠ causation; short n → treat as indicative.<br>
-        <b>Combining ENSO &amp; IOD:</b> the card composite is the mean of the two standardised (z) indices — a scaled A+B. Sum, mean and any scaling give the <b>same</b> r (=${f(s.rAdd)}, since r is scale-invariant). The interaction A×B gives r=${f(s.rProd)}. The <b>best possible linear combination</b> (multiple regression, weights free) reaches R=${f(s.multiR)}: if that ≈ the additive r, the simple sum is adequate; if higher, ENSO &amp; IOD warrant unequal weights. (Method comparison belongs in Methods/annex when this folds into the main notebook.)
+    <details style="font-size:0.85em;color:#555;margin-top:3px"><summary style="cursor:pointer">Method &amp; how to read it</summary>
+      <div style="margin-top:4px;max-width:62rem">
+        <b>r</b> = Pearson correlation of the county's seasonal rainfall with a driver's standardised index (over ${s.n} yrs). +: driver high → wetter; −: driver high → drier. |r|: &lt;0.2 negligible · 0.2–0.4 weak · 0.4–0.6 moderate · &gt;0.6 strong.<br>
+        <b>partial r</b> = the same, but with the <i>other</i> drivers held constant — the driver's <b>independent</b> signal. This matters because the drivers are correlated (max ${s.collPair || "n/a"} r=${f(s.maxColl)}); raw r double-counts shared variance.<br>
+        <b>Best linear combination R</b> = multiple regression of rainfall on all drivers (optimal weights) — the ceiling for a linear multi-driver index; <b>adj R</b> penalises extra predictors so a higher adj R is a genuine gain, not overfit (n is short, so treat as indicative).<br>
+        Only science-standard measures are shown: single r, partial r, multiple-regression R. An A×B interaction term was removed (not a standard teleconnection method; nonlinear phase behaviour is better seen in the phase composites). Correlation ≠ causation.
       </div></details>
   </div>`;
 }
