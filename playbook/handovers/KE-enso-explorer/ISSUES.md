@@ -283,19 +283,30 @@ still live from it is re-registered here.
   plus |r| bands + correlation≠causation. TODO: (a) auto-SET the driver dropdown to the strongest
   (OJS viewof can't reactively default without recreating the input — deferred); (b) promote the
   combination-method table into the main-notebook Methods/annex when this folds in.
-- **KE-24 · Seasonal-COG wrong extent for OND/DJF/JFM (pipeline) · ROOT-CAUSED + CODE-FIXED, rebake in flight.**
-  Reply dispatch `2026-08-13_reply-vars-and-ond-seasonal-bug.md`: not literally zero — the `5b --smoke`
-  run wrote **Kenya-cropped 170×210** COGs for **OND, DJF, JFM** into the published `seasonal/` dir
-  (skip-if-exists left them); correct files are 1500×1600 Africa. Our renderer computes the pixel
-  window on the full-Africa grid → for any KE county the window falls outside the 170×210 file → reads
-  zero → our all-zero→monthly-sum fallback fires (correct; **keep it**). **OND is the only affected
-  season we use** (MAM 1500×1600 OK; NDJ OK). Code fixed hazards_prototype develop @ a1eed51 (`--smoke`
-  → separate dir); cglabs rebaking the 3 windows with an extent hard-gate (must be 1500×1600, max>0)
-  + stale-key delete. Await "fixed" confirmation on the thread, then re-verify OND reads full extent.
-- **KE-26 · Publish SPEI-03 / SPEI-12 COGs · OPEN (small; pipeline).** SPEI computed by the obs
-  pipeline but NOT on S3 (published tiers are PTOT-only). Small tier-generalization (seasonal agg =
-  **mean** not sum, keyed off `agg_rule`). Own mini-dispatch when prioritised → then add a variable
-  toggle (PTOT/SPEI) to the map panel (same COG reader).
+- **KE-24 · Seasonal-COG extent inconsistency (OND/DJF/JFM = Kenya, others = Africa) · ROOT-CAUSED, code-fixed, rebake in flight; TWO pipeline sessions disagreed — resolved by our evidence.**
+  Two replies (`2026-08-13_reply-vars-and-ond-seasonal-bug.md` = hazards_prototype; `2026-08-13_cglabs-response-vars-and-ond.md` = cglabs) gave DIFFERENT accounts:
+  · **hazards_prototype:** `5b --smoke` wrote **Kenya-cropped 170×210** COGs for **OND/DJF/JFM** into
+    the published dir (skip-if-exists left them); MAM + others are 1500×1600 Africa; rebake in flight.
+  · **cglabs:** OND file is non-zero + correct over Marsabit (read in the file's OWN Kenya extent) →
+    "not a bake bug, client-side (NaN / missing-overview / stale-fetch)"; adds that the seasonal tier
+    is Kenya-extent (170×210) "by the 5b default crop".
+  **Our in-browser evidence resolves it:** with the IDENTICAL reader + Africa-grid window, MAM read
+  real values (80–662 mm) while OND read all-zero. If *all* seasonal COGs were Kenya-extent (cglabs),
+  MAM would also read zero — it didn't. So the extents genuinely DIFFER by season (OND=Kenya 170×210,
+  MAM=Africa 1500×1600), matching hazards_prototype; cglabs's NaN/overview reader theories are ruled
+  out (same reader works for MAM). **The fix = republish OND/DJF/JFM at Africa extent** (hazards_prototype
+  code-fixed @ a1eed51; cglabs rebake in flight with a 1500×1600 max>0 hard-gate). Only OND affects us
+  (MAM/NDJ fine). **Keep the all-zero→monthly-sum fallback** (both sessions agree) — it holds regardless.
+  ACTION: the two pipeline sessions should reconcile so the WHOLE seasonal tier lands at Africa extent
+  (not just the 3); re-verify OND reads full extent when they confirm.
+- **KE-26 · Publish SPEI COGs · OPEN (small; PUBLISH job, not ingest).** cglabs confirms
+  **SPEI-01/03/06/12/24 already on disk** — **2,720 monthly per-pixel + 780 climatology COGs**, same
+  CHIRPS/CHIRTS obs pipeline as PTOT — just **not on S3**. Publishing = a new tier in
+  `6_publish_obs_to_s3.R` mirroring PTOT (seasonal agg = **mean** not sum, keyed off `agg_rule`).
+  Target prefix `…/type=observational/source=chirps-chirts-era5/region=africa/processing={monthly|climatology}/variable=SPEI-03/`.
+  Own mini-dispatch when prioritised → then a PTOT/SPEI variable toggle on the map (same COG reader).
+- **KE-30 · Per-pixel NDVI · OPEN (net-new source).** Our NDVI (WFP VAM) is **admin-zonal only**;
+  a per-pixel NDVI raster needs a new source (e.g. MODIS/VIIRS NDVI). Net-new ingest, own dispatch.
 - **KE-27 · Publish WRSI COGs · OPEN (medium; pipeline).** Prior art in `climate-toolkit` (root-zone
   crop water-balance, CHC-aligned spec); today per-point/season, not gridded COG. Path = gridded run
   + publish. Own dispatch.
