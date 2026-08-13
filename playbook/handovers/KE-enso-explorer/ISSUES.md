@@ -317,16 +317,26 @@ still live from it is re-registered here.
   clamp already catches -Inf). **NEXT: wire a PTOT/SPEI variable toggle on the map** — SPEI ramp =
   diverging (brown dry ↔ blue/green wet), domain ~[-2.5,+2.5], fetch SPEI-03 at the season-end month.
   Pipeline offered a clamp+re-stat republish for the 2 -Inf pixels if we want clean embedded stats.
-- **KE-30 · Per-pixel NDVI · OPEN (net-new source).** Our NDVI (WFP VAM) is **admin-zonal only**;
-  a per-pixel NDVI raster needs a new source (e.g. MODIS/VIIRS NDVI). Net-new ingest, own dispatch.
+- **KE-30 · Per-pixel NDVI · PLAN AGREED (net-new ingest; gated on GEE probe).** Pipeline reply
+  `2026-08-13_reply-ndvi-plan.md`: chosen lever = **MODIS MOD13Q1 v061 NDVI** (GEE `MODIS/061/MOD13Q1`,
+  band `NDVI`, scale 1e-4), **250 m native**, 16-day → **seasonal mean** (OND/MAM), record **2000→present
+  (~26 yr)** → composite by ENSO/IOD phase exactly like rainfall. COGs w/ internal overviews (one file
+  serves county-native + continental), CORS `*` + range → renderer swaps `variable=`. Planned prefix:
+  `domain=climate/type=vegetation/source=modis-mod13q1/region=africa/processing=seasonal/variable=NDVI/season={SEASON}/NDVI_{SEASON}_{YYYY}_mean.tif`.
+  **Gate:** hazards_prototype has no GEE today → dispatched a **GEE capability probe** to the compute
+  node; if auth+reach OK ingest runs there, else one-off export elsewhere. No COGs live yet.
+  **2 questions back (answered — see reply dispatch):** (1) products = seasonal OND/MAM v1 (annual cheap
+  add); (2) co-registration = 250 m + overviews enough for side-by-side (no 0.05° pixel-math tier for v1).
+  Supersedes the old "own dispatch" note; merges the intent of KE-28.
+- **KE-28 · NPP / biomass raster · SUPERSEDED by KE-30 (dropped for v1).** Pipeline analysis
+  (`2026-08-13_reply-ndvi-plan.md`): NPP/PSN (MODIS MOD17, WaPOR, Copernicus) is modelled carbon off
+  the **same MODIS optical inputs** as NDVI → strongly correlated, not a new signal (adds carbon-magnitude
+  framing only). NDVI is the operational pastoral-forage proxy (FEWS/WFP VAM) we already trust → chose
+  per-pixel NDVI (KE-30) instead. Revisit NPP only if a carbon-productivity **magnitude** layer is
+  specifically wanted. WaPOR (100 m, 2009–) noted as optional finer-detail second source, deferred.
 - **KE-27 · Publish WRSI COGs · OPEN (medium; pipeline).** Prior art in `climate-toolkit` (root-zone
   crop water-balance, CHC-aligned spec); today per-point/season, not gridded COG. Path = gridded run
   + publish. Own dispatch.
-- **KE-28 · NPP / biomass raster · OPEN (large; net-new source; DECISION needed).** Not ingested.
-  Pipeline recommends **Copernicus NPP v2 300 m** (consistency/openness) OR **WaPOR NPP/biomass water
-  productivity** (water-productivity framing for rangeland). 300 m ≠ our 0.05° (reproject/aggregate).
-  Strongest pastoralist-story layer — pipeline suggests doing it FIRST of the net-new set. **Pete to
-  pick the framing (Copernicus vs WaPOR)** → then ingest dispatch (not this cycle).
 - **KE-29 · Riverine flood raster · OPEN (large; net-new; scope source).** Not ingested; scope a
   source first — GloFAS (return-period, pipeline lean), JRC GFM, or Global Flood Database. Own dispatch.
   Pipeline suggested sequence: OND fix → SPEI → WRSI → NPP → flood.
