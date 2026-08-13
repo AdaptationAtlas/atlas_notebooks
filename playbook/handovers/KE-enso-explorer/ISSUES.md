@@ -299,12 +299,24 @@ still live from it is re-registered here.
   (MAM/NDJ fine). **Keep the all-zero→monthly-sum fallback** (both sessions agree) — it holds regardless.
   ACTION: the two pipeline sessions should reconcile so the WHOLE seasonal tier lands at Africa extent
   (not just the 3); re-verify OND reads full extent when they confirm.
-- **KE-26 · Publish SPEI COGs · OPEN (small; PUBLISH job, not ingest).** cglabs confirms
-  **SPEI-01/03/06/12/24 already on disk** — **2,720 monthly per-pixel + 780 climatology COGs**, same
-  CHIRPS/CHIRTS obs pipeline as PTOT — just **not on S3**. Publishing = a new tier in
-  `6_publish_obs_to_s3.R` mirroring PTOT (seasonal agg = **mean** not sum, keyed off `agg_rule`).
-  Target prefix `…/type=observational/source=chirps-chirts-era5/region=africa/processing={monthly|climatology}/variable=SPEI-03/`.
-  Own mini-dispatch when prioritised → then a PTOT/SPEI variable toggle on the map (same COG reader).
+  **RESOLVED 2026-08-13 — FIXED + verified.** hazards_prototype `DISPATCH_cglabs_seasonal_rasters.md`
+  (b8aa155) #4: cglabs deleted the 136 Kenya-crop files, rebaked OND/DJF/JFM at Africa extent
+  (1500×1600, max OND 2380 / DJF 1939 / JFM 2046), deleted stale S3 keys, republished 541/541. cglabs
+  mea culpa: their earlier "not a bug, client-side" call ran the equivalence gate on the smoke
+  artifact — it WAS a real bake bug; our root-cause + evidence were right. New durable gate = an
+  **extent assertion** (must be 1500×1600). Verified from here: OND-2015 seasonal is now **5.66 MB**
+  (== MAM 5.68 MB), was a tiny Kenya crop. Our seasonal read now returns real OND values (monthly-sum
+  fallback no longer triggers); **keep the fallback as a permanent safety guard**. CLOSED.
+- **KE-26 · SPEI COGs · PUBLISHED (LIVE on S3) — notebook wiring OPEN.** hazards_prototype dispatch
+  #5 (b8aa155): **SPEI-03 + SPEI-12 monthly per-pixel COGs now LIVE**, Africa extent 1500×1600, CORS,
+  544 each. Verified 206 from here. Prefix `…/processing=monthly/variable={SPEI-03|SPEI-12}/SPEI-03-YYYY-MM.tif`.
+  SPEI-03 IS the seasonal drought signal (3-month accumulation) → **OND drought = SPEI-03 at Dec
+  (`-YYYY-12`); MAM = SPEI-03 at May (`-YYYY-05`)** — no separate seasonal-SPEI bake (redundant).
+  ⚠️ Caveat: 2 of 2.4M pixels are `-Inf` → the COGs' embedded STATISTICS tags are garbage
+  (`STATISTICS_MEAN=-9999`, `Min=-inf`). Our reader is safe (uses its OWN domain + `!isFinite`→NaN
+  clamp already catches -Inf). **NEXT: wire a PTOT/SPEI variable toggle on the map** — SPEI ramp =
+  diverging (brown dry ↔ blue/green wet), domain ~[-2.5,+2.5], fetch SPEI-03 at the season-end month.
+  Pipeline offered a clamp+re-stat republish for the 2 -Inf pixels if we want clean embedded stats.
 - **KE-30 · Per-pixel NDVI · OPEN (net-new source).** Our NDVI (WFP VAM) is **admin-zonal only**;
   a per-pixel NDVI raster needs a new source (e.g. MODIS/VIIRS NDVI). Net-new ingest, own dispatch.
 - **KE-27 · Publish WRSI COGs · OPEN (medium; pipeline).** Prior art in `climate-toolkit` (root-zone
