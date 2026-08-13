@@ -18,7 +18,7 @@ import { formatNumCompactShort, wrapTickLabel } from "/helpers/std.ojs";
 ```{ojs}
 // version stamp shown in the hero so reviewers always know which build
 // they are looking at. Bump NB_VERSION with every notebook version commit.
-NB_VERSION = "v2.4"
+NB_VERSION = "v2.5"
 ```
 
 ```{ojs}
@@ -87,7 +87,7 @@ html`<div class="ke-hero">
   .ke-panel-lbl { font-weight: 600; font-size: 0.9em; margin: 0 0 0.25rem; }
   .ke-stale { border-left: 4px solid #c0392b; background: #fbeeec; padding: 8px 14px; margin: 0.5rem 0; font-size: 0.9em; max-width: 62rem; }
   /* section-scoped sticky controls (V2-16): stick while their section scrolls */
-  .controls-row.ke-sticky-sec { position: sticky; top: 56px; z-index: 1018; background: #fff; padding: 0.4rem 0.25rem; border-bottom: 1px solid #e5e7eb; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+  .controls-row.ke-sticky-sec { position: sticky; top: 120px; z-index: 1018; background: #fff; padding: 0.4rem 0.25rem; border-bottom: 1px solid #e5e7eb; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
   @media print { .controls-row.ke-sticky-sec { position: static; box-shadow: none; } }
   /* ---- cycle-3 additions (climateRationale conventions) ---- */
   /* left-anchored floating TOC panel (Pete P4; helpers/toc.ojs defaults right) */
@@ -565,7 +565,7 @@ gesiRiskCard = {
   return html`<figure style="margin:0;max-width:980px">
     <div style="${gesiExpand ? "" : "max-height:520px;overflow:auto;"}border:1px solid #eee;border-radius:6px">
     <table style="border-collapse:collapse;width:100%">
-      <thead><tr style="position:sticky;top:0;background:white;border-bottom:2px solid #333;text-align:left;font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;color:#555">
+      <thead><tr style="position:sticky;top:${gesiExpand ? "120px" : "0"};background:white;border-bottom:2px solid #333;text-align:left;font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;color:#555">
         <th style="padding:6px 4px">Indicator</th><th style="padding:6px 8px;text-align:right">${county}</th>
         <th style="padding:6px 8px;text-align:right">Kenya</th><th style="padding:6px 8px;text-align:center">Rank</th>
         <th style="padding:6px 8px">All 47 counties</th>
@@ -619,6 +619,10 @@ viewof season = Inputs.select(
   ["Short rains (Oct–Dec)", "Long rains (Mar–May)", "Both seasons", "Full year"],
   { label: _lang(nbText.sections.controls.season), value: "Short rains (Oct–Dec)" },
 )
+```
+
+```{ojs}
+html`<div style="font-size:10.5px;color:#999;align-self:center;max-width:150px;line-height:1.3">also sets the season window for annex A1/A3</div>`
 ```
 
 ```{ojs}
@@ -703,11 +707,20 @@ rainPlotHost = loaderTarget("plotRain")
 ```{ojs}
 //| output: false
 {
-  // stuck-render fix (V2-07): every view change repaints via replaceChildren,
-  // so a slow/failed monthly render can never wedge the by-year view.
-  renderToDiv("plotRain", () => rainTimeRes.startsWith("Month")
-    ? rainMonthlyChart
-    : html`<div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;">${rainActiveSeasons.map((s) => rainPanel(s))}</div>`);
+  // stuck-render fix (V2-07): the by-year render depends ONLY on its own
+  // branch (never on the monthly chart), and vice versa — a slow/failed
+  // monthly build can no longer wedge the by-year view.
+  if (!rainTimeRes.startsWith("Month"))
+    renderToDiv("plotRain", () =>
+      html`<div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start;">${rainActiveSeasons.map((s) => rainPanel(s))}</div>`);
+}
+```
+
+```{ojs}
+//| output: false
+{
+  if (rainTimeRes.startsWith("Month"))
+    renderToDiv("plotRain", () => rainMonthlyChart);
 }
 ```
 
@@ -1024,7 +1037,7 @@ seasonStripChart = {
             title: (d) => `${d.county} · ${per} ${d.year}: ${Math.round(d.value)} mm (${d.anom >= 0 ? "+" : ""}${Math.round(d.anom)} vs normal)`}),
           Plot.text(last, {x: "t", y: "shown", text: "county", dx: 6, textAnchor: "start",
             fontSize: 10.5, fill: "county", stroke: "white", strokeWidth: 4, paintOrder: "stroke"}),
-          ...(isAnom ? [Plot.ruleY([0])] : [Plot.ruleY([0])]),
+          Plot.ruleY([0]),
         ],
       })}</div>`;
     });
@@ -1033,6 +1046,8 @@ seasonStripChart = {
       x: {type: "utc", label: null},
       y: {label: "SPEI-12"},
       marks: [
+        ...annotationMarks({x: "date", y1: d3.min(spei12Rows, (d) => d.v), y2: d3.max(spei12Rows, (d) => d.v),
+          driver: eventDriver, mode: annMode, from: d3.min(spei12Rows, (d) => d.t), to: d3.max(spei12Rows, (d) => d.t)}),
         Plot.areaY(spei12Rows, {x: "t", y1: 0, y2: (d) => Math.min(0, d.v), fill: PALETTE.outcome.drier, fillOpacity: 0.45}),
         Plot.lineY(spei12Rows, {x: "t", y: "v", stroke: "#555", strokeWidth: 1}),
         Plot.ruleY([-1, -2], {stroke: "#a6611a", strokeDasharray: "3"}),
@@ -1045,8 +1060,10 @@ seasonStripChart = {
   if (!bars.length) return html`<div style="color:#666;font-style:italic">${names[0]}: no rainfall record.</div>`;
   const ya = isAnom ? d3.max(bars, (d) => Math.abs(d.anom)) : d3.max(bars, (d) => d.value);
   const yDom = isAnom ? [-ya, ya] : [0, ya];
-  // bars shaded CONTINUOUSLY by anomaly magnitude (V2-14d)
-  const shade = d3.scaleDiverging([-ya, 0, ya], d3.interpolateBrBG);
+  // bars shaded CONTINUOUSLY by anomaly magnitude (V2-14d) — the shade
+  // domain is ALWAYS the anomaly range, whatever the y axis shows
+  const za = d3.max(bars, (d) => Math.abs(d.anom));
+  const shade = d3.scaleDiverging([-za, 0, za], d3.interpolateBrBG);
   const panels = [Plot.plot({
     height: 240, width: 900, marginLeft: 55, marginBottom: 8,
     x: {type: "utc", label: null},
@@ -1063,8 +1080,8 @@ seasonStripChart = {
     ],
   })];
   const shadeLegend = html`<div style="font-size:10.5px;color:#666;margin-left:55px">bar shade = departure from normal:
-    <span style="display:inline-block;width:120px;height:11px;vertical-align:middle;background:linear-gradient(to right, ${shade(-ya)}, ${shade(0)}, ${shade(ya)})"></span>
-    −${Math.round(ya)} mm → +${Math.round(ya)} mm</div>`;
+    <span style="display:inline-block;width:120px;height:11px;vertical-align:middle;background:linear-gradient(to right, ${shade(-za)}, ${shade(0)}, ${shade(za)})"></span>
+    −${Math.round(za)} mm → +${Math.round(za)} mm</div>`;
   const labelled = [html`<div>${panels[0]}${shadeLegend}</div>`];
   const drought = spei12Rows.length ? Plot.plot({
     height: 170, width: 900, marginLeft: 55, marginTop: 4,
@@ -1189,14 +1206,8 @@ ndviSwarmPanel = (season) => {
     .map(([year, ndvi]) => ({year, ndvi, z: zm.get(year) ?? null}))
     .filter((d) => d.ndvi != null && d.z != null);
   if (by.length < 5) return html`<div style="color:#666;font-style:italic">Too little NDVI data (${season}).</div>`;
-  const binOf = (z) => {
-    const a = Math.abs(z);
-    if (a >= Z_BANDS.strong) return `Strong ${z > 0 ? def.pos : def.neg}`;
-    if (a >= Z_BANDS.moderate) return `Moderate ${z > 0 ? def.pos : def.neg}`;
-    return "Neutral / weak";
-  };
   const bins = [`Strong ${def.pos}`, `Moderate ${def.pos}`, "Neutral / weak", `Moderate ${def.neg}`, `Strong ${def.neg}`];
-  const rows = by.map((d) => ({...d, bin: binOf(d.z)}));
+  const rows = by.map((d) => ({...d, bin: swarmBinOf(def, d.z)}));
   return Plot.plot({
     height: 330, width: 460, marginLeft: 55, marginBottom: 60, grid: true,
     x: {domain: bins.filter((b) => rows.some((r) => r.bin === b)),
@@ -1211,6 +1222,12 @@ ndviSwarmPanel = (season) => {
     ],
   });
 }
+swarmBinOf = (def, z) => {
+  const a = Math.abs(z);
+  if (a >= Z_BANDS.strong) return `Strong ${z > 0 ? def.pos : def.neg}`;
+  if (a >= Z_BANDS.moderate) return `Moderate ${z > 0 ? def.pos : def.neg}`;
+  return "Neutral / weak";
+}
 ndviSwarmRows = (season) => {
   const months = season === "OND" ? [10, 11, 12] : [3, 4, 5];
   const driver = season === "OND" ? "ENSO + IOD" : "Western-V (WNP)";
@@ -1220,7 +1237,7 @@ ndviSwarmRows = (season) => {
     (v) => d3.mean(v, (d) => d.ndvi_pct_normal), (d) => d.year)
     .map(([year, ndvi]) => ({season, driver, year, ndvi: ndvi == null ? null : +ndvi.toFixed(1),
       z: zm.get(year) == null ? null : +zm.get(year).toFixed(2),
-      bin: zm.get(year) == null ? "no index" : categoryOf(driver, zm.get(year))}))
+      bin: zm.get(year) == null ? "no index" : swarmBinOf(def, zm.get(year))}))
     .filter((d) => d.ndvi != null);
 }
 ndviSwarmExport = [...ndviSwarmRows("OND"), ...(showMamSwarm ? ndviSwarmRows("MAM") : [])]
@@ -1479,7 +1496,7 @@ prodEvtHost = loaderTarget("plotProdEvents")
 ```{ojs}
 //| output: false
 {
-  [county, prodEvtPick, prodEvtVar, eventDriver]; // data + background-driver deps
+  [county, prodEvtPick, prodEvtVar]; // data deps only — eventDriver re-renders via the view fns
   const div = document.getElementById("plotProdEvents");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -1869,7 +1886,7 @@ viewof driverTimeRes = Inputs.radio(["Seasonal (by year)", "Monthly"], {
 // bound clone of the Fig 2.1 season control (single shared state)
 Inputs.bind(Inputs.select(
   ["Short rains (Oct–Dec)", "Long rains (Mar–May)", "Both seasons", "Full year"],
-  {label: _lang(nbText.sections.controls.season)}), viewof season)
+  {label: "Season — shared with Fig 2.1"}), viewof season)
 ```
 
 :::
@@ -2097,7 +2114,7 @@ viewof cropSel = Inputs.select(cropList, {
 // bound clone of the Fig 2.1 season control (drives the season window here)
 Inputs.bind(Inputs.select(
   ["Short rains (Oct–Dec)", "Long rains (Mar–May)", "Both seasons", "Full year"],
-  {label: _lang(nbText.sections.controls.season)}), viewof season)
+  {label: "Season — shared with Fig 2.1"}), viewof season)
 ```
 
 :::
@@ -2156,7 +2173,7 @@ plotFooter(_lang(nbText.sections.annex.trendCaption), trendChart, {
 md`${_lang(nbText.sections.annex.a4Note)}`
 ```
 
-## `{ojs} title_a5` {#annex-gesi}
+## `{ojs} title_a5` {#annex-county-detail}
 
 
 
@@ -2637,35 +2654,40 @@ annotationMarks = ({x = "date", y1, y2, labelY = null, driver = "ENSO + IOD", mo
     // continuous gradient (V2-13): anchor each season's z at its centre month
     // and interpolate month-by-month, so the background blends smoothly
     // between seasons instead of reading as a barcode.
+    // each season holds its OWN z flat across its 3-month window; only the
+    // gaps between seasons are visually interpolated (and say so); nothing
+    // is painted beyond the last measured season (no invented 2026 states).
     const anchors = seasons.flatMap((sn) => {
       const zm = zSeries(driver, sn);
       return [...zm.entries()].map(([year, z]) => ({
+        s0: Date.UTC(year, sn === "OND" ? 9 : 2, 1),
+        s1: Date.UTC(year, sn === "OND" ? 12 : 5, 1),
         t: Date.UTC(year, sn === "OND" ? 10 : 3, 15), z, year, sn}));
     }).sort((a, b) => a.t - b.t);
     if (!anchors.length) return withSim([]);
-    const f = from ? from.getTime() : anchors[0].t;
-    const t = to ? to.getTime() : anchors[anchors.length - 1].t;
-    const zAt = (ms) => {
-      if (ms <= anchors[0].t) return anchors[0].z;
-      if (ms >= anchors[anchors.length - 1].t) return anchors[anchors.length - 1].z;
-      let i = 1;
-      while (anchors[i].t < ms) i++;
+    const f = Math.max(from ? from.getTime() : anchors[0].s0, anchors[0].s0);
+    const t = Math.min(to ? to.getTime() : anchors[anchors.length - 1].s1,
+                       anchors[anchors.length - 1].s1);
+    const stateAt = (ms) => {
+      const inSeason = anchors.find((a) => ms >= a.s0 && ms < a.s1);
+      if (inSeason) return {z: inSeason.z,
+        lbl: `${inSeason.sn} ${inSeason.year}: ${categoryOf(driver, inSeason.z)} — strength ${inSeason.z.toFixed(1)} sd`};
+      let i = 0;
+      while (i < anchors.length && anchors[i].t < ms) i++;
+      if (i === 0 || i === anchors.length) return null;
       const a = anchors[i - 1], b = anchors[i];
       const w = (ms - a.t) / (b.t - a.t);
-      return a.z + w * (b.z - a.z);
+      const z = a.z + w * (b.z - a.z);
+      return {z, lbl: `between ${a.sn} ${a.year} (${a.z.toFixed(1)} sd) and ${b.sn} ${b.year} (${b.z.toFixed(1)} sd) — shading interpolated, not measured`};
     };
-    const nearest = (ms) => anchors.reduce((best, a) =>
-      Math.abs(a.t - ms) < Math.abs(best.t - ms) ? a : best, anchors[0]);
     const months = [];
     const d0 = new Date(f);
     let cur = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), 1);
-    while (cur <= t) {
+    while (cur < t) {
       const nxt = new Date(cur);
       const nxt2 = Date.UTC(nxt.getUTCFullYear(), nxt.getUTCMonth() + 1, 1);
-      const mid = cur + (nxt2 - cur) / 2;
-      const near = nearest(mid);
-      months.push({x1: new Date(cur), x2: new Date(nxt2), z: zAt(mid),
-        lbl: `${near.sn} ${near.year}: ${categoryOf(driver, near.z)} — strength ${near.z == null ? "—" : near.z.toFixed(1)} sd`});
+      const st = stateAt(cur + (Math.min(nxt2, t) - cur) / 2);
+      if (st) months.push({x1: new Date(cur), x2: new Date(Math.min(nxt2, t)), z: st.z, lbl: st.lbl});
       cur = nxt2;
     }
     return withSim([Plot.rect(months, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
@@ -3068,7 +3090,8 @@ rainPanel = (s) => {
   const spreadK = spreadOpt.startsWith("±1") ? 1 : spreadOpt.startsWith("±2") ? 2 : 0;
   const spreadMarks = (spreadK > 0 && !varIsSpei)
     ? [Plot.ruleX(data.filter((d) => d.sd != null), {x: "year",
-        y1: (d) => d.y - spreadK * d.sd, y2: (d) => d.y + spreadK * d.sd, stroke: "#333", strokeWidth: 1,
+        y1: (d) => (!anomaly && !varIsTemp) ? Math.max(0, d.y - spreadK * d.sd) : d.y - spreadK * d.sd,
+        y2: (d) => d.y + spreadK * d.sd, stroke: "#333", strokeWidth: 1,
         title: (d) => `±${spreadK} sd across the county's pixels (sd = ${varIsTemp ? d.sd.toFixed(1) : Math.round(d.sd)} ${varDef.unit})`})]
     : [];
   const main = Plot.plot({
@@ -3803,19 +3826,22 @@ prodViewTree = () => {
     const byItem = d3.group(prodRows.filter((d) => d.group === g), (d) => d.item);
     const snapshot = [];
     for (const [, rows] of byItem) {
-      const valid = rows.filter((r) => r.year <= yEnd && r.value > 0).sort((a, b) => b.year - a.year);
+      const valid = rows.filter((r) => r.year <= yEnd && r.val > 0).sort((a, b) => b.year - a.year);
       if (valid.length) snapshot.push(valid[0]);
     }
     if (!snapshot.length) return html`<div></div>`;
     const items = snapshot.map((d) => d.item);
     const colorBy = new Map(items.map((it, i) => [it, paletteRange(items.length)[i]]));
-    const root = d3.hierarchy({children: snapshot}).sum((d) => d.value).sort((a, b) => b.value - a.value);
+    // treemap AREA is always the absolute value (share of the group total),
+    // whatever the Units toggle shows elsewhere — the tooltip carries the %
+    const root = d3.hierarchy({children: snapshot}).sum((d) => d.val).sort((a, b) => b.value - a.value);
     d3.treemap().size([cellW, 300]).paddingInner(2)(root);
+    const groupTotal = root.value || 1;
     const leafEls = root.leaves().map((leaf) => {
       const w = leaf.x1 - leaf.x0, h = leaf.y1 - leaf.y0;
       const fill = colorBy.get(leaf.data.item) || "#999";
-      const valueText = prodFmtVal(leaf.data.value) + (prodMode.startsWith("%") ? "" : " " + leaf.data.unit);
-      const tipText = `${leaf.data.item} (${leaf.data.year}): ${valueText}`;
+      const valueText = formatNumCompactShort()(leaf.data.val) + " " + leaf.data.unit;
+      const tipText = `${leaf.data.item} (${leaf.data.year}): ${valueText} · ${(100 * leaf.value / groupTotal).toFixed(1)}% of shown ${g.toLowerCase()}`;
       const textFill = treemapTextColor(fill);
       const halo = textFill === "#fff" ? "#000" : "#fff";
       const lay = treemapTextLayout(w, h, leaf.data.item.length, valueText.length, 14);
@@ -3954,13 +3980,14 @@ prodEvtBars = () => {
           Value: {value: (d) => `${formatNumCompactShort()(d.value)} ${d.unit}`, label: prodEvtVar.label},
           Rains: {value: (d) => `OND ${d.year - 1}: ${categoryOf(eventDriver, zPrevOnd.get(d.year - 1) ?? null)}`, label: "Preceding short rains"}},
         tip: {format: {x: false, y: false, fill: false, Crop: true, Year: true, Value: true, Rains: true}}}),
-      Plot.text(missing, {x: "year", y: 0, fy: "crop", text: () => "∅", dy: -7, fontSize: 13, fill: "#999",
-        title: () => "not reported by KNBS — not zero"}),
+      Plot.text(missing, {x: "year", frameAnchor: "top", fy: "crop", text: () => "∅", dy: 8, fontSize: 13, fill: "#999",
+        title: (d) => `${d.crop} ${d.year}: not reported by KNBS — not zero`}),
       Plot.ruleY([0]),
     ],
   });
   return html`<div>${chart}${cardLegend(eventDriver)}${prodEvtStrip()}
-    <div style="font-size:12px;color:#555">${md`${_lang(nbText.sections.b3.prodLegend)}`}</div></div>`;
+    <div style="font-size:12px;color:#555">${md`${_lang(nbText.sections.b3.prodLegend)}`}
+    <div style="font-size:11px;color:#999">the section's background/highlight toggles do not apply here — drivers are shown lag-correct in the strip</div></div></div>`;
 }
 
 prodEvtLines = () => {
