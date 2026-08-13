@@ -307,7 +307,14 @@ still live from it is re-registered here.
   **extent assertion** (must be 1500×1600). Verified from here: OND-2015 seasonal is now **5.66 MB**
   (== MAM 5.68 MB), was a tiny Kenya crop. Our seasonal read now returns real OND values (monthly-sum
   fallback no longer triggers); **keep the fallback as a permanent safety guard**. CLOSED.
-- **KE-26 · SPEI COGs · PUBLISHED (LIVE on S3) — notebook wiring OPEN.** hazards_prototype dispatch
+- **KE-26 · SPEI drought layer · DONE (wired + browser-verified 2026-08-13, v0.14, `f2b11d7`).**
+  Map-variable toggle (Rainfall PTOT / Drought SPEI-3) live in `dev_rainfall_maps.qmd`. SPEI-3 read at
+  season-end month (OND→Dec, MAM→May); diverging BrBG ramp (brown dry ↔ teal wet), domain ±2.5; anomaly
+  toggle disabled for SPEI (already a standardised anomaly); reader reuses window-read + `!isFinite`
+  clamp (safe for the 2 -Inf pixels); correlation engine + legends + card-mean + prose all
+  variable-aware. Headless verify (geotiff.js, not DuckDB → render trusted): 52/52 panels painted, 208
+  SPEI-03 range-reads, 0 console errors; OND IOD partial 0.69 / MAM ENSO partial 0.45. _Historic detail:_
+  dispatch
   #5 (b8aa155): **SPEI-03 + SPEI-12 monthly per-pixel COGs now LIVE**, Africa extent 1500×1600, CORS,
   544 each. Verified 206 from here. Prefix `…/processing=monthly/variable={SPEI-03|SPEI-12}/SPEI-03-YYYY-MM.tif`.
   SPEI-03 IS the seasonal drought signal (3-month accumulation) → **OND drought = SPEI-03 at Dec
