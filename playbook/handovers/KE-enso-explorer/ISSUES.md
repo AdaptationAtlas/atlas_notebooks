@@ -149,3 +149,93 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   series is short (weak for teleconnection) — SPEI (county, 1981+, in chirps_county) or CHIRPS seasonal
   anomaly is the long county-level rainfall-impact bridge; be honest about n. Options: crop-anomaly ×
   SPEI/driver per county; or bad-season shading on a production trend. Needs a design pass before build.
+
+---
+
+## V2 notebook tracker (opened 2026-08-13 — THE issue/feature tracker for notebook_v2)
+
+Feature requests & bugs from Pete's browser reviews + deferred build items. Status OPEN / HELD /
+DONE / INVESTIGATED. The cycle-3 checklist (V2_CYCLE3_CHECKLIST.md) is frozen as a record; anything
+still live from it is re-registered here.
+
+### From Pete's v2.3 browser review (2026-08-13)
+
+- **V2-01 · Fig 1.2 caption must respond to the selected View · OPEN (S).** Bars/Lines/Treemap/Table
+  each get a view-specific caption line (esp. Treemap: what the % means — share of the county total
+  for that commodity group, single year).
+- **V2-02 · Fig 1.2 Products display · OPEN (S).** (a) Do NOT include Products in the default Show
+  selection. (b) The "milk 0→8B" read is a DISPLAY artifact, not bad data (verified: Kajiado milk
+  value 2021 = 5.08B, 2022 = 8.26B KSh; value = qty × 90 KSh/kg exactly; products exist only
+  2021–2022): the Lines view draws ∅ not-reported markers AT y=0 for 2019/2020, which reads as a
+  zero-to-8B jump. Fix: never anchor ∅ markers at y=0 on Lines (place at axis edge with distinct
+  glyph), and don't render 1–2-point series as lines.
+- **V2-03 · absolute production → value conversion · OPEN (note/design).** Way to convert absolute
+  production to value of production (prices layer). Needs a price source per commodity (NAPR value
+  columns partially cover crops; unit_price_ksh covers products).
+- **V2-04 · processing facilities data scout · OPEN (data scout, follow-on).** Counties want info
+  on processing facilities for crops, livestock and feeds. Scout sources (KNBS directory? AFA
+  licensing? county CIDPs?) — later.
+- **V2-05 · Fig 1.4 GESI table UX · OPEN (M).** (a) Optional expand-to-all-rows / collapse control.
+  (b) Rank-chip colours unexplained — add caption/legend. (c) DIRECTIONALITY GUARD: many indicators
+  are neutral — never imply good/bad where direction is unclear (dangerous); some are clearly bad
+  (maternal mortality) — needs per-indicator direction metadata (extractor/pipeline task) before any
+  good/bad colouring. (d) Per-indicator tooltips: what the indicator means and how to read it —
+  content task, likely from the sheet definitions (deterministic source needed).
+- **V2-06 · Fig 2.1 spread options · OPEN (M + data gap).** sd whiskers hard to interpret — offer
+  IQR / 90% interval / min–max options and a box-plot view. DATA GAP: chirps_county serves
+  mean+sd only; IQR/percentiles/min-max need a D409 zonal re-run emitting percentiles (register
+  with the Wave-3 pipeline asks).
+- **V2-07 · BUG Fig 2.1 monthly climatology slow/stuck · OPEN (M, bug).** Monthly view takes
+  forever or never renders; switching back to "By year" leaves the plot stuck. Suspect the
+  rainCharts swap between rainMonthlyChart and the panels (loader/render interplay). Reproduce +
+  fix next cycle; check chirps_county_monthly query cost and whether the monthly chart cell blocks.
+- **V2-08 · Fig 2.2 crop calendar → annex · OPEN (S).**
+- **V2-09 · Season selector demote · OPEN (M).** Remove from sticky bar; place inline at the
+  figures it actually drives (Fig 2.1, annex A1/A3).
+- **V2-10 · Fig 2.3 band display · OPEN (M).** (a) Labels must show the actual z ranges (e.g.
+  "Strong +IOD (≥1.5 sd)"). (b) Rebin: neutral+weak vs moderate vs strong (Pete: current
+  weak/strong reads odd; coordinate rebin with the map session's Z_BANDS convention before
+  changing). (c) Don't silently hide small-n bands (min-4 filter) — show them greyed with counts,
+  or state "n<4 hidden" per panel.
+- **V2-11 · IOD short-rains distribution · INVESTIGATED (display artifact) → fold into V2-10.**
+  Verified against driver_indices (coalesced DMI, OND means, 1991–2020 z): 1991–2025 gives
+  Neutral 15 · Weak −IOD 7 · Strong +IOD 3 (1997/2019/2023) · Strong −IOD 3 (1996/1998/2025) ·
+  Moderate +IOD 3 · Moderate −IOD 2 · Weak +IOD 2. The Kajiado screenshot showed only
+  Neutral/Weak−IOD because every other band has n<4 and the min-4 filter hid them. Data is sound;
+  fix is V2-10c.
+- **V2-12 · Fig 3.1 timeline: IOD not visible · OPEN (S, investigate).** Pete reports no IOD on the
+  timeline. The 2019 positive-IOD event exists in events.json with a pale green band
+  (PALETTE.event.iodpos #cde8cf) — check whether it renders too faint / is mis-drawn, and consider
+  adding each event's driver states to the row labels/tooltips.
+- **V2-13 · Fig 3.2 background continuity · OPEN (M).** Smooth the season strength shading so
+  colour transitions read as continuous (gradient between season windows), not a barcode.
+- **V2-14 · Fig 3.2 view upgrades · OPEN (M/L).** (a) With multi-county selected, switch to a line
+  view (or offer bar/line toggle). (b) Uncertainty display option here and on similar plots.
+  (c) Anomaly/absolute control on this plot and similar. (d) Bars optionally shaded by anomaly
+  magnitude. (e) STANDARDIZE these controls across most plots (shared control kit).
+- **V2-15 · Fig 3.8 MAJOR redesign · OPEN (L, earmarked).** Pete: "plot is horrible" — needs a
+  serious rethink of production-vs-driver presentation. Core design problem = THE LAG: a 2022
+  production value sits visually next to background shading to its RIGHT (2022's own seasons),
+  while the driving conditions are the seasons BEFORE/OVERLAPPING the harvest (e.g. OND-2021 +
+  MAM-2022). Current strip is lag-shifted but the visual grammar still invites misreads. Applies
+  to every plot mixing annual outcomes with seasonal backgrounds. Added to auto-memory and the
+  adversarial review prompt so every future cycle checks it.
+- **V2-16 · §3 controls persistence · OPEN (M).** The section-3 driver/background/highlight
+  controls must repeat per plot or stick while scrolling the section.
+
+### Carried forward (deferred earlier, still live)
+
+- **V2-20 · MAM 2026 CHIRPS refresh** (checklist C6) — D409 extract re-pull; notebook picks it up
+  automatically (axis-to-data-end policy).
+- **V2-21 · Cross-border import/export price series** (checklist F1 / Fig 5.1 merge idea P29) —
+  scout FEWS XBT price data.
+- **V2-22 · GESI extractor label completion** — truncated labels fixed at the pipeline (feeds V2-05).
+- **V2-23 · Current-RONI serving** — enables nearest-neighbour analogue ranking (extend
+  enso_drivers_build.py or state_probs).
+- **V2-24 · Wave-3 data builds (green-lit D15.6):** admin2 CHIRPS zonal rerun (via D409 dispatch),
+  GHCN/GSOD station layer, KMD CAP snapshot, CHIRPS slim re-export (+ percentiles per V2-06),
+  served-data catalog, driver_indices→git-full consolidation.
+- **V2-25 · Outlook side-by-side layout** — Pete ratified "side by side"; v2 renders OND then MAM
+  stacked; confirm whether literal columns wanted.
+- **V2-26 · dev_rainfall_maps convention deviations** — coalesced DMI member, full-month guard,
+  RONI-z OND ENSO strength: coordinate adoption with the map session.

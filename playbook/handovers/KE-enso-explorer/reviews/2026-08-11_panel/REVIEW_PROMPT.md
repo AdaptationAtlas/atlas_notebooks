@@ -42,6 +42,13 @@ timeseries maps and weather-station data.
 - Atlas conventions: nbText `_lang({en,fr})`; parquet via per-plot DuckDBClient; download button
   per figure; ≤800×1000px; GAUL24 shared boundaries; question-form headings.
 
+**Standing checks every reviewer must run (added from Pete's reviews):**
+- LAG ALIGNMENT: on every figure that mixes annual outcomes (harvests, production, yearly counts)
+  with seasonal driver backgrounds/strips, verify the visual grammar makes the driving-season →
+  outcome lag explicit (adjacency implies causation; a caption note is not enough).
+- Small-n display thresholds must never silently hide categories (state "n<k hidden" or grey them).
+- ∅/not-reported markers must never sit at y=0 where they read as zero values.
+
 **Report style:** cite §N.M / figure / quoted text / qmd line for every finding. Severity:
 critical = defeats the remit for one audience; major = materially hurts comprehension, credibility
 or utility; minor = polish. Every problem gets a concrete, implementable, constraint-honoring
