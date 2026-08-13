@@ -283,8 +283,30 @@ still live from it is re-registered here.
   plus |r| bands + correlation≠causation. TODO: (a) auto-SET the driver dropdown to the strongest
   (OJS viewof can't reactively default without recreating the input — deferred); (b) promote the
   combination-method table into the main-notebook Methods/annex when this folds in.
-- **KE-24 · OND seasonal-COG all-zero (pipeline) · OPEN (dispatched 2026-08-13).** `PTOT_OND_*_sum.tif`
-  reads all-zero; notebook falls back to monthly-sum. Rebake + verify 12 seasons — pipeline dispatch.
+- **KE-24 · Seasonal-COG wrong extent for OND/DJF/JFM (pipeline) · ROOT-CAUSED + CODE-FIXED, rebake in flight.**
+  Reply dispatch `2026-08-13_reply-vars-and-ond-seasonal-bug.md`: not literally zero — the `5b --smoke`
+  run wrote **Kenya-cropped 170×210** COGs for **OND, DJF, JFM** into the published `seasonal/` dir
+  (skip-if-exists left them); correct files are 1500×1600 Africa. Our renderer computes the pixel
+  window on the full-Africa grid → for any KE county the window falls outside the 170×210 file → reads
+  zero → our all-zero→monthly-sum fallback fires (correct; **keep it**). **OND is the only affected
+  season we use** (MAM 1500×1600 OK; NDJ OK). Code fixed hazards_prototype develop @ a1eed51 (`--smoke`
+  → separate dir); cglabs rebaking the 3 windows with an extent hard-gate (must be 1500×1600, max>0)
+  + stale-key delete. Await "fixed" confirmation on the thread, then re-verify OND reads full extent.
+- **KE-26 · Publish SPEI-03 / SPEI-12 COGs · OPEN (small; pipeline).** SPEI computed by the obs
+  pipeline but NOT on S3 (published tiers are PTOT-only). Small tier-generalization (seasonal agg =
+  **mean** not sum, keyed off `agg_rule`). Own mini-dispatch when prioritised → then add a variable
+  toggle (PTOT/SPEI) to the map panel (same COG reader).
+- **KE-27 · Publish WRSI COGs · OPEN (medium; pipeline).** Prior art in `climate-toolkit` (root-zone
+  crop water-balance, CHC-aligned spec); today per-point/season, not gridded COG. Path = gridded run
+  + publish. Own dispatch.
+- **KE-28 · NPP / biomass raster · OPEN (large; net-new source; DECISION needed).** Not ingested.
+  Pipeline recommends **Copernicus NPP v2 300 m** (consistency/openness) OR **WaPOR NPP/biomass water
+  productivity** (water-productivity framing for rangeland). 300 m ≠ our 0.05° (reproject/aggregate).
+  Strongest pastoralist-story layer — pipeline suggests doing it FIRST of the net-new set. **Pete to
+  pick the framing (Copernicus vs WaPOR)** → then ingest dispatch (not this cycle).
+- **KE-29 · Riverine flood raster · OPEN (large; net-new; scope source).** Not ingested; scope a
+  source first — GloFAS (return-period, pipeline lean), JRC GFM, or Global Flood Database. Own dispatch.
+  Pipeline suggested sequence: OND fix → SPEI → WRSI → NPP → flood.
 - **KE-25 · Legend format consistency · DONE 2026-08-13.** Card-colour legend and map-cell rainfall
   legend now use the SAME inline format (`<label>: <low> [gradient] <high>`), stacked + left-aligned
   in `sectionLegend` (was: card inline vs cell stacked-3-line → mismatched).
