@@ -86,8 +86,9 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
 
 ## Standing gaps (from the v1 handover — still true, NOT NAPR)
 
-- County crop series is now **2019–2024** (was 2020–24) but Block 3 still uses **national FAOStat**
-  (short county series). Revisit when enough county years exist for a county-level teleconnection.
+- ~~County crop series too short for a county-level teleconnection~~ **CLOSED 2026-08-13 by
+  HarvestStat ingest (V2-27)**: county×season maize back to 1991 (annual to 1965). Block 3's
+  national-FAOStat fallback can now be revisited — design via KE-18/V2-15.
 - GESI county column: 47-way consensus gates the Kenya benchmark, not yet dual-engine on the county
   value. Don't count GESI as fully LLM-independent-gated.
 - Climate-conflict signal is exploratory (small n) — never a headline figure.
@@ -149,6 +150,9 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   series is short (weak for teleconnection) — SPEI (county, 1981+, in chirps_county) or CHIRPS seasonal
   anomaly is the long county-level rainfall-impact bridge; be honest about n. Options: crop-anomaly ×
   SPEI/driver per county; or bad-season shading on a production trend. Needs a design pass before build.
+  **UPDATE 2026-08-13: the "short county series" constraint is gone — V2-27 (HarvestStat) adds
+  county×season production back to 1991 (annual 1965). Design should now target HarvestStat as the
+  outcome series, NAPR for current levels only.**
 
 ---
 
@@ -239,6 +243,26 @@ still live from it is re-registered here.
   stacked; confirm whether literal columns wanted.
 - **V2-26 · dev_rainfall_maps convention deviations** — coalesced DMI member, full-month guard,
   RONI-z OND ENSO strength: coordinate adoption with the map session.
+
+### New data (2026-08-13)
+
+- **V2-27 · HarvestStat county×season crop series — incorporate into the notebook · OPEN (design
+  first, then M/L build).** Dataset INGESTED 2026-08-13: `harveststat_county_production.parquet`
+  (git-full via `_sources/harveststat_build.py`; DATA.md §14). 39 crops × 47 counties, harvest
+  years 1965–2024, **Long/Short season split** with the harvest lag explicit
+  (`planting_year`/`harvest_year` — Short plants Oct, harvests Mar next year). Provenance =
+  Kenya MoALD → FEWS NET FDW → HarvestStat (county-credible: it IS the ministry's own chain).
+  **This is the long county-level outcome series KE-18/V2-15 lacked** — county maize Long/Short
+  covers 1997/98 + 2015/16 + 2023 El Niños and the 2020–22 La Niña drought; enables county-level
+  production-anomaly × driver/SPEI analysis with honest n.
+  Caveats to respect in any figure: (a) **seasonal hole 2002–2014** (Annual only; Annual ends
+  2020) — never in-fill; (b) NAPR cross-check r=0.94 but per-county vintages differ up to ~2× —
+  never show HarvestStat and NAPR values side-by-side as interchangeable (HarvestStat = historical
+  time series, NAPR = current levels); (c) pre-2013 rows are HarvestStat's district→county remap
+  (1989 districts ≈1:1, 1982 needed 6 splits); (d) qc_flag 1/2 rows (~2%) — decide filter policy;
+  (e) the V2-15 lag grammar applies — Short-rains production must shade OND of the PLANTING year.
+  Sequencing: feed into the KE-18 design pass BEFORE building any figure. Detrend policy: reuse
+  the faostat_detrended approach for multi-decade series.
 
 ## Pete review 2026-08-13 (dev rainfall-map panel — `dev_rainfall_maps.qmd`, v0.10)
 - **KE-19b · Panel batch · DONE.** Fit-to-width facet grid (responsive canvas, `repeat(N,1fr)`,

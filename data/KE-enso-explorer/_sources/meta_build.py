@@ -224,6 +224,16 @@ D = {
    method="STATUS: SUPERSEDED by gesi_v2. Original label-keyed extraction fragmented one indicator into many near-duplicate labels (142 variants, only 9 reaching all 47 counties). Replaced by the code-keyed, Kenya-value-consistency-gated gesi_v2. Retained for provenance only.",
    coverage="Not served — see gesi_v2.",
    used_by="not served; superseded by gesi_v2"),
+ "harveststat_county_production": dict(
+   title="HarvestStat Africa — Kenya county crop production by season (Long/Short/Annual)",
+   source="HarvestStat Africa v1.2 (Lee et al. 2025) — FEWS NET Data Warehouse records originating from the Ministry of Agriculture & Livestock Development, Kenya",
+   url="https://github.com/HarvestStat/HarvestStat-Africa (public/hvstat_africa_data_v1.2.csv, tag v1.2)",
+   citation="Lee, D., et al. HarvestStat Africa — Harmonized Subnational Crop Statistics for Sub-Saharan Africa. Sci Data (2025). doi:10.1038/s41597-025-05001-z",
+   license="MIT (HarvestStat); underlying statistics Kenya MoALD via FEWS NET — public, cite both.",
+   fetched_on="2026-08-13",
+   method="Deterministic subset (_sources/harveststat_build.py): fetch the pinned v1.2 CSV from GitHub, filter Kenya, join gaul1_code via county_key (gate: 47/47 counties match), rename to repo conventions. No number touched. Upstream harmonization (HarvestStat): FDW boundary vintages KE1982A2(41)/KE1989A2(47)/KE2009A2(47) remapped onto KE2013A1 47 counties by production-based ratios; 1989 districts ~1:1 with counties. Cross-check vs knbs_napr_county_production maize 2019-24: r=0.94 levels, median ratio 0.92-1.04/yr, but per-county vintages differ up to ~2x — do NOT present the two as interchangeable numbers.",
+   coverage="39 crops, 47 counties, harvest years 1965-2024. Seasons: Annual 1974-2020; Long (plant Mar, harvest Aug) & Short (plant Oct, harvest Mar NEXT year — lag explicit via planting_year/harvest_year) 1991-2001 + 2015/16-2024. SEASONAL HOLE 2002-2014 (Annual only). qc_flag: 0=clean (98%), 1/2=flagged by HarvestStat QC.",
+   used_by="not yet served — registered for the production-vs-drivers design (ISSUES KE-18 / V2-15 / V2-27)"),
  "driver_indices": dict(
    title="Ocean-driver indices (Nino 3.4 / IOD / Western-V), monthly",
    source="NOAA (Nino 3.4), Met Office HadISST / NOAA PSL (DMI), derived Western-V (WNP/WEP)",

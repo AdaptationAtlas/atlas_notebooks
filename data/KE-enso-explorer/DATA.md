@@ -132,14 +132,36 @@ report series = one dataset). Build scripts live in [`_sources/`](./_sources/).
   (git-transform). **Licence:** JRC open data (Decision 2011/833/EU).
 - **Files:** `seasonal_calendar.parquet` (+`.meta.json`).
 
+### 14. HarvestStat Africa — county crop production by season (FDW / Kenya MoALD)
+- **Source:** HarvestStat Africa v1.2 (Lee et al. 2025, Sci Data 10.1038/s41597-025-05001-z) —
+  harmonized FEWS NET Data Warehouse records whose sole Kenya source is the **Ministry of
+  Agriculture & Livestock Development** (same reporting chain as the NAPR). Scan + provenance
+  verification: 2026-08-13.
+- **URL:** <https://github.com/HarvestStat/HarvestStat-Africa> (`public/hvstat_africa_data_v1.2.csv`,
+  pinned to tag `v1.2`).
+- **Acquire → build:** `_sources/harveststat_build.py` — self-fetching (downloads the pinned CSV,
+  filters Kenya, joins `gaul1_code` via `county_key`, gate = 47/47 counties match).
+- **Reproducibility:** **git-full** (no OneDrive input).
+- **Licence:** MIT (HarvestStat); underlying statistics Kenya MoALD via FEWS NET — cite both.
+- **Coverage:** 39 crops × 47 counties, harvest years 1965–2024. Seasons: Annual 1974–2020;
+  **Long** (plant Mar → harvest Aug) & **Short** (plant Oct → harvest Mar **next year**; lag explicit
+  via `planting_year`/`harvest_year`) 1991–2001 + 2015/16–2024. **Seasonal hole 2002–2014** (Annual
+  only). Pre-2013 rows are HarvestStat's district→county remap (1989 districts ≈ 1:1 with counties).
+- **Caveat:** maize cross-check vs NAPR 2019–24 = r 0.94, median ratio 0.92–1.04/yr, but per-county
+  vintages differ up to ~2× — never present HarvestStat and NAPR values as interchangeable.
+  HarvestStat = historical/seasonal time series; NAPR = current-level facts.
+- **Files:** `harveststat_county_production.parquet` (+`.meta.json`). Not yet served by the notebook —
+  registered for the production×climate design (ISSUES KE-18 / V2-15 / V2-27).
+
 ### (Reference) county ↔ GAUL24 lookup
 `county_key.parquet` — join key (FAO GAUL 2024); not a standalone dataset.
 
 ---
 
 ## State summary
-- **13 source-grouped datasets** (5 novel + 8 harmonized) from **26 parquet files** + 1 reference lookup.
-- Reproducible from git alone: **git-full** = the `enso_*` driver/outlook set (§4 self-fetch, §5 derived).
+- **14 source-grouped datasets** (5 novel + 9 harmonized) from **27 parquet files** + 1 reference lookup.
+- Reproducible from git alone: **git-full** = the `enso_*` driver/outlook set (§4 self-fetch, §5 derived)
+  + `harveststat_county_production` (§14 self-fetch).
   **git-transform** = NAPR, GESI, AFA-rice, NDVI, XBT, exposure, ASAP (script in repo, raw on OneDrive).
   **D409-only** = CHIRPS, FAOSTAT, IPC, market prices, ACLED, ReliefWeb, driver_indices.
 - `.meta.json` present for **all 26 parquet files** (written/refreshed 2026-08-07 by
