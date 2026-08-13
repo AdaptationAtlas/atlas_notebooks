@@ -123,3 +123,59 @@ in 3.8, whisker floor at 0 mm, CSV/chart bin parity, A5 title/anchor, season-sco
 hero must read **v2.5**. Then the V2 items still open by design: V2-15 full 3.8 redesign (phase-1
 mitigations only), V2-05d indicator definitions (sourcing), V2-06 percentile spread options (data
 build), V2-20..26.
+
+---
+
+## Addendum — cycle 6 (2026-08-13): Pete's v2.5 review → KE-18 design → v2.6
+
+Pete's v2.5 review registered as V2-40..V2-52; Pete then directed the harvests figure to become
+**A/B on two datasets** (V2-52) and green-lit the cycle ("go") with design-first sequencing for
+HarvestStat (V2-27/KE-18).
+
+**Design.** A 3-designer panel + synthesis produced `DESIGN_ke18_harveststat.md` (`57101ca`) —
+binding decisions: season-year = PLANTING year (lag-correct by construction); era-median
+"% of a usual year" (1991–2001 vs 2015–2024, never across the 2002–14 hole, ≥7 clean seasons per
+era); the hole is a first-class hatched band, never in-filled; qc_flag rows mark-and-exclude;
+bars never lines; four views (Season series / Wet vs dry seasons / Vs climate / Table);
+NAPR↔HarvestStat separation absolute ("two rulers" callout).
+
+**v2.6** (`1ad2045`) implemented V2-40/42/43/46/48/49/50 + V2-51/52 + KE-18:
+- **Restructure (V2-51):** §2 owns the driver story (event timeline → 2.3, driver beeswarm → 2.4,
+  eventDriver/eventShade sticky controls). §3 reframed "What Do Drier And Wetter Seasons Mean
+  Here?" — tercile-anchored to align with a KMD wetter/drier outlook. New sticky lens
+  (lensSeason/seasonLens → simYearSet) outlines matching past years on every §3 time series;
+  §4 intro carries the reverse handoff (KMD outlook → set the §3 lens).
+- **Tercile machinery:** tercByYear (county CHIRPS terciles from enso_outlook_base, planting-year
+  keyed), makeTercileStrip with per-lane lag offsets, tercStripLegend; 3.5 ToT dots + 3.6-A NAPR
+  bars now coloured by OND(year−1) tercile.
+- **Fig 3.6-B (HarvestStat, KE-18/V2-27/V2-52):** seasonal Long/Short series 1991–2024 planted on
+  planting year; tercile bar fills; hatched reporting hole (Long 2002–14, Short plantings
+  2001–14); era brackets; ∅ at top frame; era-median anomaly views; qc rows dashed + excluded;
+  Vs-climate rainfall-anomaly scatter (no fit line, by design); Table + CSV with per-row
+  provenance. Two-rulers callout between 3.6-A and 3.6-B.
+- Render pipeline followed the standing protocol (kill preview → render → decode compiled module →
+  verify version VALUE + new cell names). One post-commit fix: hsSeriesView's hole/era marks used
+  continuous x1/x2 on a band scale (would not draw) → Plot.cell per hole year + domain-anchored
+  era labels.
+
+**Adversarial pass (closed, `d0b71b1`):** 2 hostile reviewers (OJS mechanic executing every new
+cell in node/jsdom against the real parquets; science/reader recomputing era medians, terciles and
+lag offsets) → per-finding refuters. 14 serious findings confirmed, 0 refuted, 8 minors — all fixed.
+Headline: Area (ha) "% of a usual year" divided area by the PRODUCTION median (Machakos Long-1991
+displayed 422%; honest value 114%) — hsRows now computes per-variable era medians gated on each
+variable's own qc-clean rows. Also: real Short-1990 harvests were silently outside the band domain
+(hsYears now starts 1990 + coverage-bounded ∅ markers); the tercile-threshold callout printed
+1981–2025 thirds while every chart classifies by the producer's 1991–2020 terciles (now d3.quantile
+over 1991–2020, 45/45 agreement); the §2 eventShade/eventDriver sticky controls were dead code with
+a lying legend (deleted; 3.6-A "Vs driver" re-anchored as "Vs rainfall" on preceding-OND rainfall
+anomaly + tercile); QC-flagged and era-gated seasons vanished silently from the 3.6-B analytic views
+(now hollow red dots + explicit per-panel counts and placeholders); six §3 captions still described
+the removed event-band machinery (rewritten to the tercile grammar); Short-rains hole prose said
+2002–2014 vs the true planting-2001 start (per-season phrasing); no-data fills were perceptually
+identical to Near-normal, ΔE76 = 2.1 (white-with-border everywhere + legend swatch). Lag grammar,
+planting-year anchoring, OND offset −1 strip and tercile Wet/Dry orientation all VERIFIED clean.
+Raw findings: `reviews/2026-08-13_v26_adversarial/findings_raw.json`.
+
+**Pete next:** hard-refresh http://localhost:4333/notebooks/KE-enso-explorer/notebook_v2.html —
+hero must read **v2.6**. Review focus: §2/§3 restructure feel, the §3 lens controls, Fig 3.6-A/B
+and the two-rulers framing, 2.1 per-lane strips + IOD chips, 3.1 SPEI-only figure.

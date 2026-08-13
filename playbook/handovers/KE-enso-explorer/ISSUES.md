@@ -246,8 +246,8 @@ still live from it is re-registered here.
 
 ### New data (2026-08-13)
 
-- **V2-27 · HarvestStat county×season crop series — incorporate into the notebook · OPEN (design
-  first, then M/L build).** Dataset INGESTED 2026-08-13: `harveststat_county_production.parquet`
+- **V2-27 · HarvestStat county×season crop series — incorporate into the notebook · DONE v2.6
+  (design 57101ca → Fig 3.6-B, 1ad2045; caveats a–e enforced in the figure).** Dataset INGESTED 2026-08-13: `harveststat_county_production.parquet`
   (git-full via `_sources/harveststat_build.py`; DATA.md §14). 39 crops × 47 counties, harvest
   years 1965–2024, **Long/Short season split** with the harvest lag explicit
   (`planting_year`/`harvest_year` — Short plants Oct, harvests Mar next year). Provenance =
@@ -324,25 +324,25 @@ still live from it is re-registered here.
 
 ### From Pete's v2.5 browser review (2026-08-13, second pass)
 
-- **V2-40 · Fig 1.2 captions · OPEN (S).** "Blank means not reported — never zero" belongs in every
+- **V2-40 · Fig 1.2 captions · DONE v2.6 (1ad2045).** "Blank means not reported — never zero" belongs in every
   view's caption (currently in the intro/note only).
 - **V2-41 · KNBS-production→VoP conversion replaces MapSPAM · OPEN (design/data).** If V2-03's
   conversion works, drop the MapSPAM exposure data from Fig 1.3 entirely ("no-one trusts it") —
   VoP computed from KNBS production × prices becomes the stakes figure.
-- **V2-42 · Fig 2.1 polish set · OPEN (M).** (a) Stray event dots floating above the plot —
+- **V2-42 · Fig 2.1 polish set · DONE v2.6 (1ad2045; a–g incl. per-lane strip scaling, IOD chips, Temperature removed, anomaly toggle kept here).** (a) Stray event dots floating above the plot —
   restyle/remove the evYears markers. (b) Ocean strips don't visually cover the last bar — fix
   strip/bar domain alignment end-to-end. (c) "Ocean strips" unexplained for lay readers — plain
   gloss needed at the figure. (d) Strip colour scaling PER LANE: each driver lane scaled to its own
   min/max (ENSO and IOD independent), not the shared ±2 clamp. (e) Phase chips should ALSO show IOD
   (the main OND driver), not ENSO only. (f) Remove the Temperature option from the variable toggle
   (not requested). (g) Anomaly/absolute toggle stays HERE (see V2-46).
-- **V2-43 · Raw-vs-z display harmony with the map notebook · OPEN (M, INVESTIGATED).** Pete's
+- **V2-43 · Raw-vs-z display harmony with the map notebook · DONE v2.6 (tooltips show raw + strength).** Pete's
   2019/2020 IOD "discrepancy" verified NOT a data bug: both notebooks agree (OND-2019 raw DMI
   +0.68 = the 397 mm map card; OND-2020 raw +0.04 / z +0.11 = the neutral 2.1 cell). Real issue:
   dev_rainfall_maps cards print RAW index values, v2's strips print Z — same driver, two numbers.
   Harmonize: tooltips show raw AND strength (e.g. "DMI +0.68 · strong, +1.8 sd"), adopting the map
   session's raw-value-label convention.
-- **V2-44 · Fig 2.2 upgrades · OPEN (M).** (a) Align the OND/MAM panels (same row heights/width).
+- **V2-44 · Fig 2.2 upgrades · PARTIAL v2.6 (b About, d combine/disaggregate toggle, <5-season fade done; a panel alignment + c mosaic still open).** (a) Align the OND/MAM panels (same row heights/width).
   (b) Move sd band values into the caption, add the absolute counts/values there; if too long, use
   "About this plot". (c) Mosaic option: bar width scaled to n seasons; fade rows with <5 seasons.
   (d) Toggle to combine/disaggregate strong + moderate.
@@ -350,7 +350,7 @@ still live from it is re-registered here.
   driver state so backgrounds never interpolate — driver_indices IS monthly, so the strength
   background can be computed per month directly (rolling 3-month z per month) instead of
   interpolating between season centres. Design decision + implementation.
-- **V2-46 · Fig 3.2 restructure · OPEN (M).** Top panel duplicates Fig 2.1 → REMOVE the upper
+- **V2-46 · Fig 3.2 restructure · DONE v2.6 (now SPEI-only Fig 3.1; rainfall panel removed — multi-county line mode lives in Fig 2.1; anomaly toggle moved to 2.1).** Top panel duplicates Fig 2.1 → REMOVE the upper
   rainfall panel, keep the SPEI-12 drought panel (and the multi-county line mode moves where?
   decide); panels currently overlap and the bottom title is overlain by the plot (bug); full-width
   when year span is large; min/max year selector for the x-axis; thicker/darker bar outlines;
@@ -359,23 +359,23 @@ still live from it is re-registered here.
 - **V2-47 · BUG ToC sidebar empty · OPEN (M).** The floating atlasTOC panel renders nothing
   (screenshot). Investigate: OJS-inline headings vs toc.ojs timing, collapse state, or the
   `toc: false` front-matter interplay.
-- **V2-48 · Fig 3.8 polish · OPEN (M).** (a) Driver-strip cells misalign with the year columns;
+- **V2-48 · Fig 3.8 polish · DONE v2.6 (now Fig 3.6-A; strip = makeTercileStrip, aligned + labelled; controls one row; value-ordered filter + select-none).** (a) Driver-strip cells misalign with the year columns;
   (b) strip lane labels cut (marginLeft too small); (c) legend still says "Background — IOD phase &
   strength" but it is no longer a background — reword to "Strip —"; (d) the 3 controls on one line,
   wrapping on narrow screens; (e) commodity filter ordered by the selected variable's value;
   (f) add select-none/clear alongside select-all.
-- **V2-49 · Fig 3.9 · OPEN (S).** Remove the background shading entirely; align the driver grid to
+- **V2-49 · Fig 3.9 · DONE v2.6 (now Fig 3.7; background removed, tercile strip aligned).** Remove the background shading entirely; align the driver grid to
   the bars exactly (as 3.8); fix cut lane labels.
-- **V2-50 · Fig 4.2 context strength · OPEN (M).** Show how strong the CURRENT forecast state is
+- **V2-50 · Fig 4.2 context strength · DONE v2.6 (stateContextLine: current index vs historical distribution; IOD elevated for OND).** Show how strong the CURRENT forecast state is
   vs the historical record for that season (where does today's index sit in the distribution), and
   elevate the IOD as a considered/primary short-rains driver in the outlook (it carries more OND
   signal than ENSO) — within the KMD/CPC-state-only constraint.
-- **V2-51 · RESTRUCTURE: split section 3 · OPEN (L, next-cycle headline).** Create a clear
+- **V2-51 · RESTRUCTURE: split section 3 · DONE v2.6 (1ad2045).** §2 owns drivers (timeline→2.3, beeswarm→2.4, driver sticky controls); §3 = tercile-anchored "drier/wetter seasons" with sticky lens (lensSeason/seasonLens) outlining matching years on every §3 chart; §4 intro carries the reverse KMD→lens handoff. Original ask: Create a clear
   "impact of dry/wet seasons" section — rainfall-tercile-anchored so it aligns directly with a
   KMD wetter/drier-than-usual forecast, uncoupled from ENSO/IOD; the ENSO-centric figures of §3
   merge into §2. This is the KMD-alignment lens (F2/P30) becoming the organizing principle.
 
-- **V2-52 · Fig 3.8 becomes A/B on two datasets (Pete, 2026-08-13) · OPEN (design, with KE-18/V2-27).**
+- **V2-52 · Fig 3.8 becomes A/B on two datasets (Pete, 2026-08-13) · DONE v2.6 (Fig 3.6-A KNBS / 3.6-B HarvestStat; two-rulers callout; design per DESIGN_ke18_harveststat.md).**
   Split the harvests figure into two sub-sections: **3.8-A = KNBS NAPR** (current official levels,
   2019–2024, 31 crops — the "what is it now" facts) and **3.8-B = HarvestStat** (county×season
   series, maize to 1991 seasonal / 1965 annual — the "how does it move with climate" series that
