@@ -395,3 +395,44 @@ still live from it is re-registered here.
   sequential; anomaly uses diverging RdBu) and `Card palette` (PRGn/BrBG/RdBu/PuOr, diverging) via
   d3-chromatic interpolators. `pixelColor`/`cardColor` refactored to the selected interpolator; the
   legends sample them so they update automatically.
+
+### From Pete's v2.6 browser review (2026-08-13, third pass — LOGGED ONLY, implementation deferred on usage)
+
+Cross-cutting theme: Pete wants **driver-strength background shading BACK on the §3 figures**
+(v2.6's adversarial round deleted the then-dead background machinery, and the restructure moved
+driver controls to §2). Next cycle must resolve the design tension explicitly: per-plot
+driver-background toggle AND the tercile lens coexisting on §3 — not either/or.
+
+- **V2-54 · §3 controls: kill sticky, duplicate-but-LINKED per plot · OPEN (M/L).** Remove the §3
+  sticky control row; every §3 plot gets its own copy of the controls, but the copies are linked —
+  updating one updates all (shared viewof pattern / bound inputs).
+- **V2-55 · Fig 3.1 (SPEI): driver background missing + SPEI-3/6 options · OPEN (M).** (a) Restore
+  the driver-strength background colour on the SPEI figure. (b) Add SPEI-3 and SPEI-6 as selectable
+  indices alongside SPEI-12 — NO data build needed: chirps_county.parquet already serves
+  SPEI-01/03/06/12/24 (verified 2026-08-13); notebook-only change.
+- **V2-56 · Fig 3.2 (NDVI): strip misaligned → return to background stripes · OPEN (M).** The
+  tercile/ocean strip under the NDVI chart is misaligned with the plot's x axis (screenshot on
+  file: strip spans a different year range than the 2002+ chart). Replace with the
+  background-stripe system: on/off toggle, continuous vs discrete strength option — and use this
+  SAME system across the §3 figures.
+- **V2-57 · Fig 3.3 (IPC): background interplay + bars view · OPEN (M).** IPC phase colour
+  background may only show when the driver background is toggled OFF (mutually exclusive). Add a
+  view-type selector incl. a bars option (bars coloured by food-insecurity phase).
+- **V2-58 · Fig 3.4 (prices): driver background + market filter + summary bars · OPEN (M).**
+  (a) Driver-strength background. (b) Filter for which markets are shown. (c) View option
+  summarizing the series into bars (quarterly/yearly aggregation).
+- **V2-59 · Fig 3.5 (ToT): drop coloured dots → background shading + summary bars · OPEN (M).**
+  Tercile-coloured dots don't work visually; return to the coloured-background option like the
+  other §3 plots. Optional view: line summarized into bars (years/quarters).
+- **V2-60 · Fig 3.6-A: bar plot still awful — regroup + background toggle · OPEN (M/L).** Grouped
+  bars: x = years, crops = groups (side-by-side per year), background toggle = driver phase/
+  strength. The Lines view should also use the background shading instead of the ocean/tercile
+  strip.
+- **V2-61 · Fig 3.6-B: is the gapped record useful? Consider 2015–2024 default · OPEN (design).**
+  Pete: the 2002–14 hole makes the full series look of limited use — "unless we just use the
+  2015–2024 record?" Options to evaluate: default the figure to the 2015–2024 county era (full
+  record opt-in), or lead with the Wet-vs-dry / Vs-climate views where the hole matters less.
+  Decide with Pete before building.
+- **V2-62 · Fig 3.7 + strips: say MAM/OND, not long/short rains · OPEN (S).** Use MAM / OND to
+  describe the rains in labels/captions (strip lane labels currently lead with "short rains"/"long
+  rains"). Audit §3 wording for consistent MAM/OND-first naming.
