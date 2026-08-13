@@ -26,7 +26,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.13</b> · 2026-08-13 · rainfall-map panel</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.14</b> · 2026-08-13 · rainfall + SPEI-3 drought panel</span>`
 ```
 
 ```{ojs}
@@ -82,7 +82,12 @@ viewof yearTo = Inputs.range([1981, 2025], {step: 1, value: 2025, label: "To yea
 ```
 
 ```{ojs}
-viewof anomaly = Inputs.toggle({label: "Anomaly vs 1991–2020", value: false})
+viewof mapVar = Inputs.select(["Rainfall (PTOT)", "Drought (SPEI-3)"], {value: "Rainfall (PTOT)", label: "Map variable"})
+```
+
+```{ojs}
+// anomaly only applies to rainfall; SPEI is already a standardised anomaly index.
+viewof anomaly = Inputs.toggle({label: "Anomaly vs 1991–2020", value: false, disabled: isSpei})
 ```
 
 ```{ojs}
@@ -110,10 +115,10 @@ yearsSel = {
 ```
 
 ```{ojs}
-md`Per-pixel CHIRPS-v3 seasonal ${anomaly ? "rainfall **anomaly** (vs 1991–2020)" : "rainfall totals"}
+md`Per-pixel CHIRPS-v3 seasonal ${isSpei ? "**SPEI-3 drought index** (3-month, standardised: −ve drier, +ve wetter)" : (anomaly ? "rainfall **anomaly** (vs 1991–2020)" : "rainfall totals")}
 (~5 km) for **${county}**, admin-2 overlain. Each card = one year; shows the county-mean
-${anomaly ? "anomaly" : "rainfall"} (mm) and is tinted by its section driver's phase & strength.
-Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so years compare.`
+${isSpei ? "SPEI-3 (unitless)" : (anomaly ? "anomaly (mm)" : "rainfall (mm)")} and is tinted by its section driver's phase & strength.
+${isSpei ? "SPEI-3 is read at the season-end month (OND → December, MAM → May) — a 3-month accumulation already covers the season. " : ""}Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so years compare.`
 ```
 
 ### OND — short rains (Oct–Dec) · driven by ENSO + IOD
@@ -150,7 +155,7 @@ sectionLegend(ondDriver)
 
 ```{ojs}
 ondGrid = {
-  yield html`<div class="rain-loading">⏳ Loading OND maps — fetching CHIRPS seasonal rasters…</div>`;
+  yield html`<div class="rain-loading">⏳ Loading OND maps — fetching ${isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
   const cache = await ondCacheP.p;
   yield gridWrap(await buildPanels(cache, "OND", ondDriver, parseNum(ondMin), parseNum(ondMax)));
 }
@@ -188,7 +193,7 @@ sectionLegend(mamDriver)
 
 ```{ojs}
 mamGrid = {
-  yield html`<div class="rain-loading">⏳ Loading MAM maps — fetching CHIRPS seasonal rasters…</div>`;
+  yield html`<div class="rain-loading">⏳ Loading MAM maps — fetching ${isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
   const cache = await mamCacheP.p;
   yield gridWrap(await buildPanels(cache, "MAM", mamDriver, parseNum(mamMin), parseNum(mamMax)));
 }
@@ -197,17 +202,20 @@ mamGrid = {
 
 ```{ojs}
 md`### Notes
-- **Data:** per-year seasonal PTOT COGs (D409 obs pipeline, \`processing=seasonal\`,
+- **Rainfall data:** per-year seasonal PTOT COGs (D409 obs pipeline, \`processing=seasonal\`,
   \`PTOT_{SEASON}_{YYYY}_sum.tif\`), one fetch per panel; monthly-sum fallback if a
   year is missing. Anomaly subtracts the 1991–2020 climatology COG. 2026 excluded.
-- **Correlation:** Pearson r between the county-mean seasonal rainfall and each
-  driver's standardised index over the selected years (n shown). Higher |r| = that
-  driver explains more of this county's rainfall that season.
+- **Drought data (SPEI-3):** monthly per-pixel COGs (\`processing=monthly/variable=SPEI-03\`,
+  \`SPEI-03-{YYYY}-{MM}.tif\`), read at the season-end month (OND → Dec, MAM → May) — a
+  3-month accumulation already covers the season. SPEI is already a standardised anomaly
+  (−ve drier, +ve wetter), so the anomaly toggle is disabled for it.
+- **Correlation:** Pearson r between the county-mean seasonal value (rainfall *or* SPEI-3)
+  and each driver's standardised index over the selected years (n shown). Higher |r| = that
+  driver explains more of this county's outcome that season; +r → driver-high means wetter.
 - **Filter:** min/max on the section driver's value (raw index for single drivers,
   composite z for ENSO+IOD). Card colour + phase still standardised (z vs 1991–2020).
-- **Deferred:** multi-county maps (#3); extra variables — only PTOT is a per-pixel
-  raster today (SPEI/NPP/biomass/flood requested from the pipeline, see dispatch
-  2026-08-13).`
+- **Deferred:** multi-county maps (#3); NDVI (MOD13Q1, plan agreed — GEE-gated), NPP/biomass
+  (superseded by NDVI), WRSI, riverine flood — see dispatches 2026-08-13.`
 ```
 
 # Appendix — data + i18n {#appendix}
@@ -308,6 +316,12 @@ climDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observatio
 seasonMonthsFor = ({OND: [10, 11, 12], MAM: [3, 4, 5]})
 YEAR_LO = 1981
 YEAR_HI = 2025
+// SPEI-3 (3-month drought index) — monthly per-pixel COGs; read at the season-end
+// month (OND→Dec, MAM→May): the 3-month accumulation already spans the season.
+speiDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=monthly/variable=SPEI-03"
+speiURL = (y, m) => `${speiDir}/SPEI-03-${y}-${String(m).padStart(2, "0")}.tif`
+seasonEndMonth = ({OND: 12, MAM: 5})
+isSpei = mapVar.startsWith("Drought")
 ```
 
 ```{ojs}
@@ -397,19 +411,22 @@ seasonalYear = async (season, year, win) => {
   } catch (e) { /* fall through */ }
   return monthlySum(season, year, win); // degenerate/missing → monthly sum
 }
+// SPEI-3 for a season-year = a single monthly COG read at the season-end month.
+speiYear = (season, year, win) => readWindow(speiURL(year, seasonEndMonth[season]), win)
 ```
 
 ```{ojs}
 // fetch every year in range ONCE; used by both the panels and the correlation.
 seasonCache = async (season) => {
   const win = await gridWindow, mask = await countyMask;
-  const clim = anomaly ? await climFor(season, win) : null;
+  const useAnom = anomaly && !isSpei; // SPEI is already an anomaly index
+  const clim = useAnom ? await climFor(season, win) : null;
   const n = win.w * win.h;
   return Promise.all(yearsSel.map(async (year) => {
     let data;
-    try { data = await seasonalYear(season, year, win); }
+    try { data = isSpei ? await speiYear(season, year, win) : await seasonalYear(season, year, win); }
     catch (e) { return {year, data: null, meanmm: null}; }
-    if (anomaly && clim) {
+    if (useAnom && clim) {
       const o = new Float32Array(n);
       for (let i = 0; i < n; i++) o[i] = (Number.isNaN(data[i]) || Number.isNaN(clim[i])) ? NaN : data[i] - clim[i];
       data = o;
@@ -583,8 +600,9 @@ corrHeader = (season, cache, keys) => {
   // does combining beat the best single? compare adjusted multiple-R to best |partial-driver| bivariate r
   const bestSingleR = best ? Math.abs(best.r ?? 0) : 0;
   const combineHelps = s.adjR != null && s.adjR > bestSingleR + 0.05;
+  const outLbl = isSpei ? "drought (SPEI-3)" : "rainfall";
   return html`<div style="font-size:0.92em;margin:0.2rem 0 0.5rem">
-    <b>Driver ↔ rainfall correlation</b> (${county} · ${season} · n=${s.n} yrs) —
+    <b>Driver ↔ ${outLbl} correlation</b> (${county} · ${season} · n=${s.n} yrs) —
     ${s.per.map((p, i) => html`${i ? " · " : ""}${chip(p)}`)}
     <div style="font-size:0.92em;color:#444;margin-top:2px">
       Strongest independent driver: <b>${best ? best.name : "—"}</b>${best ? ` (partial ${f(best.partial)}, ${strength(best.partial)}; ${best.partial > 0 ? "↑ → wetter" : "↑ → drier"})` : ""}.
@@ -597,7 +615,7 @@ corrHeader = (season, cache, keys) => {
     </div>
     <details style="font-size:0.85em;color:#555;margin-top:3px"><summary style="cursor:pointer">Method &amp; how to read it</summary>
       <div style="margin-top:4px;max-width:62rem">
-        <b>r</b> = Pearson correlation of the county's seasonal rainfall with a driver's standardised index (over ${s.n} yrs). +: driver high → wetter; −: driver high → drier. |r|: &lt;0.2 negligible · 0.2–0.4 weak · 0.4–0.6 moderate · &gt;0.6 strong.<br>
+        <b>r</b> = Pearson correlation of the county's seasonal ${outLbl} with a driver's standardised index (over ${s.n} yrs). +: driver high → wetter; −: driver high → drier. |r|: &lt;0.2 negligible · 0.2–0.4 weak · 0.4–0.6 moderate · &gt;0.6 strong.<br>
         <b>partial r</b> = the same, but with the <i>other</i> drivers held constant — the driver's <b>independent</b> signal. This matters because the drivers are correlated (max ${s.collPair || "n/a"} r=${f(s.maxColl)}); raw r double-counts shared variance.<br>
         <b>Best linear combination R</b> = multiple regression of rainfall on all drivers (optimal weights) — the ceiling for a linear multi-driver index; <b>adj R</b> penalises extra predictors so a higher adj R is a genuine gain, not overfit (n is short, so treat as indicative).<br>
         Only science-standard measures are shown: single r, partial r, multiple-regression R. An A×B interaction term was removed (not a standard teleconnection method; nonlinear phase behaviour is better seen in the phase composites). Correlation ≠ causation.
@@ -636,10 +654,10 @@ rainCellLegend = () => {
     const c = pixelColor(v); ctx.fillStyle = c || "#fff"; ctx.fillRect(x, 0, 1, 14);
   }
   return html`<div style="font-size:0.78em;color:#555;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-    <span>Map cells — <b>${anomaly ? "anomaly" : "rainfall"}</b> (mm):</span>
-    <span>${rainDomain[0]}</span>
+    <span>Map cells — <b>${isSpei ? "SPEI-3 drought index" : (anomaly ? "anomaly" : "rainfall")}</b>${isSpei ? "" : " (mm)"}:</span>
+    <span>${rainDomain[0]}${isSpei ? " (dry)" : ""}</span>
     ${cv}
-    <span>${rainDomain[1]}</span>
+    <span>${rainDomain[1]}${isSpei ? " (wet)" : ""}</span>
   </div>`;
 }
 // both legends stacked, same inline format + left-aligned
@@ -685,9 +703,13 @@ parseNum = (s) => {
 // map-cell colours from a user-selected d3 palette (KE-21). Absolute rainfall =
 // sequential; anomaly = diverging RdBu (brown/red drier ↔ blue wetter, 0-centred).
 mapInterp = ({Blues: d3.interpolateBlues, YlGnBu: d3.interpolateYlGnBu, GnBu: d3.interpolateGnBu, Viridis: d3.interpolateViridis})[mapPalette]
-rainDomain = anomaly ? [-300, 300] : [0, 900]
+rainDomain = isSpei ? [-2.5, 2.5] : (anomaly ? [-300, 300] : [0, 900])
 pixelColor = (v) => {
   if (v == null || !isFinite(v) || v <= -9999) return null;
+  if (isSpei) {
+    const t = Math.max(0, Math.min(1, (v - rainDomain[0]) / (rainDomain[1] - rainDomain[0])));
+    return d3.interpolateBrBG(t); // 0 → brown (drought), 1 → teal/green (wet)
+  }
   if (anomaly) {
     const t = Math.max(0, Math.min(1, (v - rainDomain[0]) / (rainDomain[1] - rainDomain[0])));
     return d3.interpolateRdBu(t); // 0 → red/brown (drier), 1 → blue (wetter)
@@ -739,7 +761,9 @@ renderRainPanel = (spec, raster) => {
     <path d="${cntyPaths}" fill="none" stroke="#111" stroke-width="1.4"/></svg>`;
 
   const meanmm = spec.meanmm;
-  const meanTxt = meanmm == null ? "—" : `${anomaly && meanmm > 0 ? "+" : ""}${Math.round(meanmm)} mm`;
+  const meanTxt = meanmm == null ? "—"
+    : isSpei ? `${meanmm > 0 ? "+" : ""}${meanmm.toFixed(2)}`
+    : `${anomaly && meanmm > 0 ? "+" : ""}${Math.round(meanmm)} mm`;
   return html`<div class="rain-panel" style="background:${cardColor(spec.signal.z)}">
     <div class="rain-title"><strong>${spec.year}</strong>
       <span class="rain-mean">${meanTxt}</span>
