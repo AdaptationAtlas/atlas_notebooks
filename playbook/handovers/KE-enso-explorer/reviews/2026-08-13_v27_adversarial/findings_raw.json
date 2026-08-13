@@ -1,0 +1,397 @@
+{
+  "summary": "Cycle-7 focused adversarial review of KE-ENSO notebook_v2 v2.7 (per-plot linked controls + driver backgrounds)",
+  "agentCount": 9,
+  "logs": [
+    "confirmed serious: 7, refuted: 0, minors (unverified): 8"
+  ],
+  "result": {
+    "verdicts": [
+      {
+        "reviewer": "hostile-ojs-plot-mechanic (node+jsdom execution vs real parquets, Machakos+Marsabit)",
+        "verdict": "v2.7's new machinery is mechanically sound almost everywhere: every §3 chart body executed in node+jsdom with the real libraries and real data across all combos (3 bgModes x 6 drivers x date/year x, 3 speiIdx, both ipcView, 3x3 priceAgg/priceView, 3 totAgg, both hsEra, bars/lines 3.6-A) with zero crashes; quarterly/yearly bucket means reproduce exactly in python (0 mismatches over 181 buckets, UTC month edges correct for end-of-month period_dates); Inputs.bind clone rows propagate both ways and mint fresh nodes per call; the 3.6-A lag-shift is correct (OND(Y-1) wash + MAM(Y) band verified in rendered tooltips and geometry, no double-shift); fence checker PASS (474 cells); all 206 nbText refs exist with en/fr; no INT64->BigInt traps in the new query paths; loader dep arrays are data-only in both directions. BUT the new year-x figures (3.3 Yearly bars, 3.7) draw their bars with `interval: 1`, which bins to [Y, Y+1) while the new backgrounds and lens outlines are centred on Y — every bar sits half a slot right of its shading, visually attributing year-Y outcomes to MAM(Y+1), and the last bar overflows the plot frame (measured 899px vs 880px frame edge). That inverts the exact season-attribution grammar v2.7 was built to deliver and should block deploy until fixed. Secondary: 3.6-A exposes lens controls and a legend promising dashed outlines it never draws; 3.7 carries no control row despite its caption claiming one."
+      },
+      {
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)",
+        "verdict": "NOT READY — the headline lag grammar of 3.6-A is correct (verified numerically: harvest 2023 sits over OND2022 z=-1.03 / MAM2023 z=+1.80; no double shift, no unshifted leak), the new background system's interpolation honesty holds, and the fence check passes. But two critical defects remain: Fig 3.1 plots the NDJ and DJF rolling windows a full year late (the parquet labels them by END year, the centre map assumes start year — the chart shows a false drought dip in the middle of the 1997-98 and 2023-24 El Niño peaks), and the new linear-x yearly bars (3.3 Yearly, 3.7) sit on [Y, Y+1] instead of centered on tick Y, so every bar visually overlaps the WRONG season halves (OND(Y)+MAM(Y+1)) and the last bar overflows the frame — this silently breaks the exact season-position grammar the v2.7 backgrounds were built to convey. Three majors (a county-generic caption asserting a 2020-23 SPEI-12 deficit that is false for ~29 of 47 counties; Western-V shading offered on OND seasons against the notebook's own framing; Fig 3.7 claiming linked controls it does not carry) plus minors."
+      }
+    ],
+    "confirmed": [
+      {
+        "severity": "critical",
+        "title": "Year-x bars offset half a slot from their season backgrounds; last bar overflows the frame (3.3 Yearly bars, 3.7)",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1275 (ipcChart Yearly) and :1750 (rwChart); backgrounds :2887-2895 (bgMarks year-x), lens :2941 (simMarks year-x)",
+        "problem": "Plot.rectY(..., {x: \"year\", interval: 1}) bins x to [Y, Y+1) (floor-based), but the v2.7 year-x background half-slots are centred on Y (MAM at [Y-0.45, Y-0.05], OND at [Y+0.05, Y+0.45]) and simMarks lens outlines likewise. Every bar is drawn half a slot to the right of its year tick and its own background: the right half of a year-Y bar sits over the MAM(Y+1) background band, so a 2021 drought-report bar is visually underlaid by 2022's long-rains driver state — the exact season-misattribution the lag-grammar rules exist to prevent. The MAM lens outline for year Y never touches year Y's bar at all. Additionally the final bar's bin extends to yEnd+1 while the x domain ends at yEnd+0.5, and rects are not clipped, so the last bar paints into the right margin past the axis.",
+        "evidence": "Executed the exact rwChart spec in node+jsdom with @observablehq/plot 0.6.17: with x domain [2009.5, 2024.5], the 2020 bar renders at px 650-688.7 while the 2020 tick is at px 643 and the OND-2020 background half-rect at px 645.6-666.7 — the bar spans data-x [2020.13, 2020.87], overlapping MAM-2021's half-slot (starts px ~672). The 2024 bar renders at x=860.7 w=38.7 ending at 899.3px, past the 880px frame edge. ipcChart Yearly uses the identical construction (x: \"year\", interval: 1, insets) against the same centred bgMarks/simMarks.",
+        "fix": "Replace `x: \"year\", interval: 1` with explicit centred edges: `x1: (d) => d.year - 0.5, x2: (d) => d.year + 0.5` (keep the insets) in both Plot.rectY calls. Verified in node with the real Plot version: stacking (3.7's fill: \"cat\") still works with x1/x2 accessors (cumulative y offsets correct) and bars land centred on the tick, inside the frame, aligned with the bgMarks half-slots and simMarks outlines. Do NOT use `x: (d) => d.year - 0.5, interval: 1` — interval floors to integers and shifts the bar a half slot LEFT instead (also verified).",
+        "reviewer": "hostile-ojs-plot-mechanic (node+jsdom execution vs real parquets, Machakos+Marsabit)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "CONFIRMED by independent reproduction against the exact Plot version the notebook runs (Quarto's OJS stdlib pins @observablehq/plot 0.6.11 — verified at /Applications/quarto/share/formats/html/ojs/quarto-ojs-runtime.js:208 — and identical results on 0.6.17). Source at c145649 matches all cited lines: :1275 and :1750 use Plot.rectY(..., {x: \"year\", interval: 1}), :2891 bgMarks and :2941 simMarks use Y-centred half-slots. Executed the exact rwChart spec in node+jsdom: the 2020 bar renders at px [650.0, 688.7] spanning data-x [2020, 2021), while the 2020 tick sits at px 643.0, the OND-2020 background at px [645.6, 666.7], and MAM-2021's background starts at px 672.0 — so the bar's right portion overlays the NEXT year's long-rains band, and the MAM lens outline [Y-0.45, Y-0.05] never touches its own year's bar. Last bar: px [860.7, 899.3] vs frame edge 880 with clip-path=null — 19.3 px painted into the margin. All numbers match the finding verbatim. Fix verified: x1/x2 accessors centre the bar on the tick (centre px 643.0 = tick), eliminate the overflow (873 < 880), and keep fill:\"cat\" stacking contiguous; the warned-against `x: y-0.5, interval: 1` variant indeed floors and shifts half a slot left (first bar left edge at data-x 2009.02).",
+          "fix": "Apply the finding's fix as proposed — it is correct and I verified it on the pinned Plot 0.6.11. In notebooks/KE-enso-explorer/notebook_v2.qmd:\n\n1. Line 1275 (ipcChart Yearly): change\n   Plot.rectY(byYear, {x: \"year\", interval: 1, y: (d) => d.p, insetLeft: 6, insetRight: 6, ...})\n   to\n   Plot.rectY(byYear, {x1: (d) => d.year - 0.5, x2: (d) => d.year + 0.5, y: (d) => d.p, insetLeft: 6, insetRight: 6, ...})\n\n2. Line 1750 (rwChart): change\n   Plot.rectY(data, {x: \"year\", interval: 1, y: \"n\", fill: \"cat\", insetLeft: 7, insetRight: 7, tip: true})\n   to\n   Plot.rectY(data, {x1: (d) => d.year - 0.5, x2: (d) => d.year + 0.5, y: \"n\", fill: \"cat\", insetLeft: 7, insetRight: 7, tip: true})\n\nKeep all other options (insets, tip, fill, stroke) unchanged; do NOT use `x: (d) => d.year - 0.5, interval: 1` (interval floors to integers and shifts bars half a slot left — verified). Stacked fill: \"cat\" in 3.7 works correctly with x1/x2 accessors (contiguous cumulative offsets verified). After the change, bars are centred on their year tick, aligned with the bgMarks half-slots and simMarks lens outlines, and the final bar stays inside the frame (right edge 873 px vs frame 880 px). Also grep the notebook for any other `x: \"year\", interval: 1` rectY instances before committing (only these two exist at c145649)."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "3.6-A ignores the lens controls its own cloned row exposes, while its legend promises lens outlines",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1603 (bgControlsRow at 3.6-A), :4516-4537 (prodEvtBars marks — no simMarks), :4554-4565 (prodEvtLines — no simMarks), :2921 (bgLegend outline note)",
+        "problem": "The v2.7 contract says simMarks (lens outlines) are drawn on top everywhere, and 3.6-A's own bgControlsRow() clone exposes lensSeason + seasonLens. But prodEvtBars, prodEvtLines (and Vs-rainfall/Table) never draw simMarks and never reference simYearSet — changing the season lens in 3.6-A's own control row changes nothing in the figure (verified: neither function references any lens cell, so the OJS graph never re-runs them on lens change; nothing would differ if it did). Meanwhile bgLegend(), appended under both views whenever bgMode != Off, ends with 'dashed outlines = the lens seasons' — promising a visual that cannot appear in this figure.",
+        "evidence": "prodEvtBars mark list (lines 4516-4536) contains only the two bg rects, barY, the missing-∅ text and ruleY; prodEvtLines (4554-4564) only bgMarksHarvest, lineY, dot, ruleY. Grep confirms no simMarks call between lines 4494-4614. bgLegend (line 2921) unconditionally includes the outline note when bgMode != Off. Executed both functions across all modes: rendered output contains no dashed outline elements.",
+        "fix": "Either (a) add lag-aligned lens outlines to 3.6-A: for the OND lens map planting-year hits y in simYearSet to harvest-year slot y+1's left half ([y+1-0.45, y+1-0.05], matching bgMarksHarvest geometry) and MAM hits to year y's right half — keeping the harvest-lag grammar; or (b) drop the two lens controls from 3.6-A's control row (pass an options arg to bgControlsRow to render only driver+mode) and gate bgLegend's 'dashed outlines' note on simYearSet.size so no figure advertises outlines it doesn't draw.",
+        "reviewer": "hostile-ojs-plot-mechanic (node+jsdom execution vs real parquets, Machakos+Marsabit)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Verified mechanically at c145649 in notebooks/KE-enso-explorer/notebook_v2.qmd. (1) bgControlsRow() at line 1603 sits above 3.6-A (host line 1607, fig id line 1633) and its clone (2924-2928) binds viewof lensSeason (L2925) and viewof seasonLens (L2926). (2) Token scan of lines 4494-4614 (prodEvtBars/prodEvtLines/prodEvtVsDriver/prodEvtTable) plus transitive helpers bgMarksHarvest+bgLegend (2900-2921) found ZERO occurrences of simMarks, simYearSet, lensSeason, seasonLens, lensSeasonCode, or strokeDasharray — so OJS never re-runs any 3.6-A cell on lens change (deps = referenced names) and no outline mark exists to draw; simMarks (2931-2944, strokeDasharray \"4,2\") is the only lens-outline source in the file. (3) bgLegend line 2921 unconditionally emits \"· dashed outlines = the lens seasons\" whenever bgMode != Off (guard 2914), and is appended by prodEvtBars (4539) and prodEvtLines (4567). (4) 3.6-A is the sole bgControlsRow site without simMarks: 1183→1203, 1247→1274/1295, 1360→1439/1456, 1499→1524/1541, 1603→none. Refutation attempt via the lensChips text (line 1033, \"the harvest figures carry the same season colours directly\") fails: that exemption fits 3.6-B (line 3099 fills by tercColor), whereas 3.6-A's marks are crop-colored with terciles only in tooltips (4531) — 3.6-A neither draws outlines nor carries season colours, so the dead controls + false legend note are a real contract violation, not intended design.",
+          "fix": "Finding's fix is right in direction but needs two amendments. Option (a): the lag-aligned geometry (OND lens-year y → harvest slot [y+1−0.45, y+1−0.05]; MAM y → [y+0.05, y+0.45], matching bgMarksHarvest) is correct for prodEvtLines (numeric year x-axis), but does NOT transfer to prodEvtBars, which is faceted (fx: year, band x: crop) — numeric x1/x2 rects can't span facet halves there; instead add a dashed stroke (stroke:\"#111\", strokeDasharray:\"4,2\", fill:\"none\") to the existing fx-faceted bg-rect geometry (full-facet OND wash / thin MAM top band) for facets whose source season year is in simYearSet. Option (b) as proposed is incomplete: gating bgLegend's outline note globally on simYearSet.size still leaves 3.6-A's legend promising outlines whenever the §3 MASTER lens controls (lines 1058-1067) set a lens, even after the radios are dropped from 3.6-A's row. Parameterize per call site instead: bgControlsRow({lens:false}) at line 1603 to render only driver+mode binds, and bgLegend({outlines:false}) at the 3.6-A call sites (4539, 4567) to omit the note. Either amended option resolves the finding; (b) is smaller and keeps the documented harvest-figure design (season info via tooltips/tercile grammar)."
+        }
+      },
+      {
+        "severity": "critical",
+        "title": "Fig 3.1: NDJ and DJF SPEI windows plotted 12 months late",
+        "where": "notebook_v2.qmd lines 3752-3762 (speiRows centre map: NDJ: [12, 0], DJF: [1, 1])",
+        "problem": "chirps_county labels year-crossing rolling windows by the END year (NDJ 1998 = Nov 1997 - Jan 1998), but the centre map assumes start-year labelling, placing NDJ-Y at Dec Y and DJF-Y at Jan Y+1. Every Dec-15 and Jan-15 point on the Fig 3.1 strip therefore carries the PREVIOUS winter's SPEI value, for all three selectable windows.",
+        "evidence": "Marsabit SPEI-03: OND 1997 = +1.75 (El Nino peak) but NDJ 1997 = +0.08 and DJF 1997 = -0.92, while NDJ 1998 = +1.07, DJF 1998 = +2.10, JFM 1998 = +1.98 — only the end-year reading is physically coherent. Same pattern 2023-24 (OND 2023 = +1.69, DJF 2023 = -1.19, DJF 2024 = +1.06) and on SPEI-12. As coded, the chart dives from +1.69 to -1.19 in mid-January 2024, inside the wettest OND on record, and the hover mislabels the window the reader infers.",
+        "fix": "Change the centre map to NDJ: [12, -1] (centre Dec of year-1) and DJF: [1, 0] (centre Jan of year Y). Then re-verify visually that the 1997-98 and 2023-24 wet spikes are monotone through the turn of the year.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "CONFIRMED by direct recomputation from the served parquets. (1) Quoted code is accurate: notebook_v2.qmd lines 3752-3762 (speiRows) contain the centre map with `NDJ: [12, 0], DJF: [1, 1]` on lines 3753-3754, i.e. NDJ-Y plotted at Dec 15 of Y and DJF-Y at Jan 15 of Y+1 (start-year assumption; the cell comment at 3749-3751 even states \"DJF centres on Jan of the following year\"). (2) chirps_county is END-year labelled: decomposing every PTOT period against chirps_county_monthly across all 47 counties, 11 of 12 rolling periods match the end-year window EXACTLY (DJF: 2160/2160 rows, MAE=0.0000, DJF-Y = Dec(Y-1)+Jan(Y)+Feb(Y)), while the start-year hypothesis fails (Marsabit DJF MAE=61.8). (3) Fig 3.1 plots SPEI, and SPEI is also end-year labelled: SPEI-03 DJF-Y correlates r=+0.656 with Dec(Y-1)-Feb(Y) rainfall vs r=-0.150 with Dec(Y)-Feb(Y+1); SPEI-03 NDJ-Y r=+0.646 with Nov(Y-1)-Jan(Y) vs r=+0.106 with Nov(Y)-Jan(Y+1) (SON same-year sanity r=0.495). (4) Every SPEI-03 number quoted in the finding reproduces exactly (Marsabit: OND 1997=1.75, NDJ 1997=0.08, DJF 1997=-0.92, NDJ 1998=1.07, DJF 1998=2.10, JFM 1998=1.98; OND 2023=1.69, DJF 2023=-1.19, DJF 2024=1.06) — only end-year labelling is physically coherent through the 1997-98 and 2023-24 El Niño peaks. (5) The centre map is variable-independent, so the 12-month displacement affects all three selectable windows (speiIdxOpts = SPEI-03/06/12, line 2819). SIDE DISCOVERY (does not refute; separate upstream bug): the PTOT NDJ series in chirps_county.parquet is itself corrupt — lstsq decomposition over 2064 county-years gives NDJ-Y = Nov(Y) + Dec(Y-1) + Jan(Y) with R²=1.0 and max residual 4.5e-12, a NON-contiguous window (Nov taken from the wrong year). SPEI NDJ does not share this defect (its correlation profile matches the correct end-year window), and the notebook never queries PTOT NDJ (PTOT is only used with OND/MAM/annual), so Fig 3.1's diagnosis stands as stated.",
+          "fix": "The proposed fix is correct and sufficient for Fig 3.1: in notebook_v2.qmd line 3753-3754 change `NDJ: [12, 0]` to `NDJ: [12, -1]` (centre Dec of Y-1) and `DJF: [1, 1]` to `DJF: [1, 0]` (centre Jan of Y); all ten other entries are already correct under end-year labelling (their spans and centres never cross the year boundary). Two amendments: (a) also rewrite the misleading cell comment at lines 3749-3751 — replace \"(DJF centres on Jan of the following year)\" with a statement that chirps_county labels year-crossing windows by the END year (NDJ 1998 = Nov 1997-Jan 1998), verified by exact decomposition against chirps_county_monthly; (b) file a separate upstream/pipeline issue (D409 staging, not a notebook edit): the PTOT NDJ series in chirps_county.parquet is corrupt — exactly Nov(Y)+Dec(Y-1)+Jan(Y), a non-contiguous window — currently unconsumed by the notebook but a trap for any future use; SPEI NDJ is unaffected. After the edit, re-verify visually that the 1997-98 and 2023-24 wet spikes are monotone through the turn of the year, as the finding suggests."
+        }
+      },
+      {
+        "severity": "critical",
+        "title": "Yearly bars (3.3, 3.7) offset half a slot from the season backgrounds",
+        "where": "notebook_v2.qmd line 1275 (ipcChart Plot.rectY {x: \"year\", interval: 1}) and line 1750 (rwChart, same pattern); x domains at 1270 and 1743",
+        "problem": "Plot's interval: 1 maps a bar at year Y to [Y, Y+1], NOT centered on tick Y. The bgMarks year-x rects paint MAM(Y) at [Y-0.45, Y-0.05] and OND(Y) at [Y+0.05, Y+0.45], centered on the tick. So the year-Y impact bar visually sits over OND(Y) AND MAM(Y+1) — an annual outcome beside next year's long-rains shading, exactly the wrong-season adjacency the harvest-lag rule exists to prevent. The dashed simMarks lens outlines are likewise centered on ticks, so they outline the gap between bars. The last bar also extends to Y+1 while the domain ends at Y+0.5, so it is clipped by the SVG edge.",
+        "evidence": "Empirically verified with @observablehq/plot (0.6.17 local; Quarto pins 0.6.11, identical interval semantics): with x domain [2019.5, 2022.5] the 2020 bar renders x=229.3 w=250.7, i.e. spanning ticks 2020 to 2021 (tick 2020 at px 223.3), and the 2022 bar renders to px 1005 past the 880 range end.",
+        "fix": "Replace interval: 1 with an explicit centered rect: Plot.rect(byYear, {x1: d => d.year - 0.5, x2: d => d.year + 0.5, y1: 0, y2: d => d.p, inset...}) in ipcChart, and the equivalent stacked form in rwChart (or keep rectY but feed x: d => d.year - 0.5 is NOT safe — interval floors; use x1/x2). Re-check that bar Y now covers MAM(Y) left half and OND(Y) right half.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "CONFIRMED by executed reproduction against the exact Plot version Quarto ships. (1) Code quotes check out at c145649: notebook_v2.qmd:1275 (ipcChart) and :1750 (rwChart) both use Plot.rectY({x: \"year\", interval: 1}) over half-open x domains [Y0-0.5, Y1+0.5] (lines 1270, 1743); bgMarks' year-x branch (line 2891) paints MAM(Y) at [Y-0.45, Y-0.05] and OND(Y) at [Y+0.05, Y+0.45] tick-centered, simMarks (line 2941) likewise. (2) Quarto pins @observablehq/plot 0.6.11 (quarto-ojs-runtime.js:208); I ran the mirror of ipcChart's config under jsdom against BOTH 0.6.17 and a fetched 0.6.11 source tree — identical output. With domain [2018.5, 2022.5], width 900, marginLeft 92: tick 2020 = px 387.5, but the 2020 bar spans data-x [2020.03, 2020.97] (px 393.5–578.5), i.e. [Y, Y+1], not centered on Y. bg OND(2020) (px 397.3–476.2) and bg MAM(2021) (px 495.8–574.7) both fall INSIDE the 2020 bar — the annual outcome bar visually sits over OND(Y) and NEXT year's MAM shading, the exact wrong-season adjacency the harvest-lag rule forbids. (3) Last-bar clipping confirmed: the 2022 bar renders to px 972.5 with x-range end 880 and SVG width 900. rwChart stacked mirror reproduces the same: bars at [Y, Y+1], last bar to px 897.7 past range end 880. (4) The finding's side-claim is also correct: x: d => d.year - 0.5 with interval: 1 floors to [Y-1, Y] (verified), so an x-shift is not a safe fix.",
+          "fix": "Fix confirmed with one simplification. ipcChart (line 1275): the proposed centered rect works verbatim — Plot.rect(byYear, {x1: d => d.year - 0.5, x2: d => d.year + 0.5, y1: 0, y2: d => d.p, insetLeft: 6, insetRight: 6, fill/stroke/tip/title unchanged}); verified bars render centered on ticks ([Y∓0.47] after insets) and the last bar no longer overflows. rwChart (line 1750): simpler than the proposed explicit-stack form — keep Plot.rectY and just replace `x: \"year\", interval: 1` with `x1: d => d.year - 0.5, x2: d => d.year + 0.5` (keep y: \"n\", fill: \"cat\", insets, tip); verified on Plot 0.6.11 that the implicit stackY still groups per year and stacks categories correctly with explicit x1/x2 (2023's Drought+Flood stack y [0,4]+[4,6] inside one centered bar). Do NOT use x: d => d.year - 0.5 with interval: 1 — verified it floors to [Y-1, Y], off by half the other way. After the fix, bar Y covers bg MAM(Y) left half and OND(Y) right half, matching the tick-centered bgMarks/simMarks geometry."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Static caption asserts a 2020-23 SPEI-12 deficit that is false for half the counties",
+        "where": "nbText_v2.json line 498 (b3.seasonStripCaption), rendered at notebook_v2.qmd line 1152",
+        "problem": "\"The 2020-23 event shows as the long unbroken deficit on the 12-month window\" is a county-specific pattern claim in a caption shown identically for all 47 counties. It is false for the entire western belt.",
+        "evidence": "From chirps_county SPEI-12, Jun 2020 - Dec 2023: 29 of 48 admin units have a longest consecutive negative run under 12 months; Kakamega, Kisumu, Siaya, Vihiga, Nandi, Kericho, Kisii, Nyamira, Migori, Narok have ZERO negative months. Only Mandera reaches a 24+ month unbroken run.",
+        "fix": "Scope the sentence (e.g. \"In the arid north and east — Marsabit, Mandera, Turkana — the 2020-23 event shows as a long deficit on the 12-month window; humid western counties barely register it\"), or compute the deficit-run sentence live per county and drop it when the run is short.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Every element verified by execution. (1) Quoted line: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso/data/KE-enso-explorer/nbText_v2.json line 498 defines b3.seasonStripCaption whose en string contains verbatim \"The 2020–23 event shows as the long unbroken deficit on the 12-month window.\" — confirmed both by sed and by json.load, so it is the effective parsed value. (2) Render site: notebook_v2.qmd line 1152 renders it via plotFooter(_lang(nbText.sections.b3.seasonStripCaption), ...); _lang selects only by language, never by county, so all 47 counties get the identical sentence. (3) Data claim recomputed from chirps_county.parquet using the notebook's own centre-month mapping (qmd lines 3749-3762) for SPEI-12, window Jun 2020 - Dec 2023: 48 admin units; exactly 29 have a longest consecutive negative run under 12 months; all ten named western counties (Kakamega, Kisumu, Siaya, Vihiga, Nandi, Kericho, Kisii, Nyamira, Migori, Narok) have ZERO negative SPEI-12 months in the window (plus Bomet and Homa Bay, so 12 counties total at zero); only Mandera reaches a 24+ month run (26 months; next are Kiambu/Laikipia/West Pokot at 23). For roughly a quarter of counties the caption asserts a \"long unbroken deficit\" over a period in which the chart shows no deficit at all — a real, county-visible factual error, so [major] stands.",
+          "fix": "The proposed fix is directionally right but its example county list needs one amendment: Marsabit does NOT belong in the exemplar list (its longest SPEI-12 negative run in the window is under 15 months and it is not among the top runs; the data-supported exemplars are Mandera 26 mo, Kiambu/Laikipia/West Pokot 23 mo, Turkana 21 mo). Two acceptable fixes: (a) Static scoping in nbText_v2.json line 498 — replace the sentence with e.g. \"In the drier north and east — Mandera, Turkana, West Pokot — the 2020–23 drought shows as a long unbroken deficit on the 12-month window; the humid western highlands barely registered it.\" (b) Better, dynamic: speiRows is already in the OJS graph at the plotFooter call (qmd line 1152), so compute the longest negative run from speiRows and append the 2020–23 sentence only when speiIdx.v === 'SPEI-12' and the run within Jun 2020–Dec 2023 is >= 12 months; this also fixes the secondary problem that the static sentence claims a 12-month-window pattern even while the user is viewing SPEI-3 or SPEI-6."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Western-V background shades OND seasons, contradicting the notebook's own framing",
+        "where": "notebook_v2.qmd lines 2724 (phaseDefs Western-V), 2833-2896 (bgMarks paints both seasons for any bgDriver), 2902 (bgMarksHarvest zSeries(bgDriver, \"OND\")); contrast line 773 where contOndDriver deliberately excludes Western-V",
+        "problem": "bgDriver offers \"Western-V (WNP)\" and the background system unconditionally paints BOTH OND and MAM seasons with it, computing an OND-mean of wnp_std_mam (verified non-null in months 10-12). The notebook's framing rules state Western-V is a partly-independent MAM control, and Fig 2.2 enforces this by excluding it from the OND driver list. The v2.7 background now labels OND seasons \"Strong High Western-V\" — a driver relationship the notebook explicitly does not claim, and 3.6-A's OND(Y-1) wash inherits it.",
+        "evidence": "driver_indices.parquet: wnp_std_mam non-null for all 76 rows in each of months 10, 11, 12, so zSeries(\"Western-V (WNP)\", \"OND\") returns a full map and rects are painted; phaseDefs has no per-season gating.",
+        "fix": "In bgMarks/bgMarksHarvest (or in phaseDefs via a seasons: [\"MAM\"] field), skip OND rects when bgDriver is Western-V and add a legend note \"Western-V shades MAM only (it is a long-rains control)\"; in 3.6-A the OND(Y-1) wash should then be absent, not white-as-neutral.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "CONFIRMED by direct reproduction at c145649 in /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso/notebooks/KE-enso-explorer/notebook_v2.qmd. (1) Line 2724: phaseDefs entry `\"Western-V (WNP)\": {members: [\"wnp_std_mam\"], ...}` has no per-season field; line 1073 `viewof bgDriver = Inputs.select(driverOptionsX, ...)` offers it (driverOptionsX = Object.keys(phaseDefs), line 2728). (2) bgMarks (2833–2896) hardcodes `const seasons = [\"OND\", \"MAM\"]` (line 2835) and calls zSeries(bgDriver, sn) for both, in all three branches (Continuous, Discrete-date, year-x); no gating anywhere. (3) Data claim verified with python against data/KE-enso-explorer/driver_indices.parquet: wnp_std_mam is non-null for exactly 76 rows in each of months 10, 11, 12 (1950–2025), so zSeries(\"Western-V (WNP)\", \"OND\") returns a 76-entry map and OND rects paint. Reproducing zByYear+zSeries exactly: 18 OND years reach |z|≥1.5, e.g. 2023 (+1.81), 2024 (+2.28), 2025 (+2.08) — tooltips would read \"OND 2024: Strong High Western-V — strength 2.3 sd\" via categoryOf (2792–2798). Worse than the finding states: wnp_std_mam has 12 distinct values per year (a monthly series), so the OND rect is a genuine Oct–Dec mean of the WNP index differing from the same year's MAM value by up to 2.15 sd — a substantive, independent \"OND Western-V phase\" claim, not a carried-over MAM label. (4) 3.6-A inherits it twice: bgMarksHarvest line 2902 `zSeries(bgDriver, \"OND\")` (called at 4558) and the inline faceted variant at 4507 — both put a Western-V wash behind OND(Y−1). (5) The framing contradiction is the notebook's own: line 773 contOndDriver options exclude Western-V; lines 2199–2200 state verbatim \"// Western-V is a MAM control — offering it against OND rainfall would be a cross-season pairing (R2 fix), so the option list follows the season.\"; nbText.json (keys 241, 301) says rainfall is coloured \"by the phase of the driver that governs each season — ... the Western-V for MAM\"; CLAUDE.md framing rules mark Western-V as a partly-independent MAM control. The v2.7 background system violates the R2 fix it documents. All cited line numbers check out.",
+          "fix": "Proposed fix is sound; amend in three ways. (a) Implement via the phaseDefs route: add `seasons: [\"MAM\"]` to the Western-V entry (line 2724) and in bgMarks replace line 2835 with `const seasons = phaseDefs[bgDriver].seasons ?? [\"OND\", \"MAM\"]` — one change gates the Discrete-date, year-x AND Continuous anchor paths. (b) The proposed fix misses Continuous mode: with MAM-only anchors the month-by-month interpolation (lines 2848–2869) would still paint the intervening OND months with interpolated Western-V (\"between MAM 2023 and MAM 2024\"), re-introducing the same misleading wash. When `seasons.length === 1`, fall through to the Discrete branch (paint only measured MAM windows) instead of interpolating across the year. (c) 3.6-A needs the gate in BOTH places: bgMarksHarvest (line 2902) and the inline faceted copy at line 4507 — e.g. `const zOnd = (phaseDefs[bgDriver].seasons ?? [\"OND\",\"MAM\"]).includes(\"OND\") ? zSeries(bgDriver, \"OND\") : new Map()`; the existing `d.z != null` / `d.zo != null` filters (2908, 4519) then make the OND(Y−1) band absent-not-white automatically, as the finding intends. Add the legend note in bgLegend (2913+) keyed off the seasons field (\"Western-V shades MAM only — it is a long-rains control\"). One caution: driver_indices.parquet also carries a `wep_std_ond` column (a West-Pacific OND variant); do NOT silently substitute it to keep OND shaded — the MAM-only framing was earned via review (R2), so any OND West-Pacific layer needs a science decision first."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Fig 3.7 has no linked controls row but its caption (and b3.intro) claim every chart carries one",
+        "where": "notebook_v2.qmd lines 1728-1755 (rw section: no bgControlsRow() — clone rows exist only at 1183, 1247, 1360, 1499, 1603); nbText b3.rwCaption (json line 468) and b3.intro (json line ~372)",
+        "problem": "rwCaption ends \"Controls sit above each chart and are linked — changing one changes them all\", but Fig 3.7 renders a driver-shaded background with no controls anywhere in its section; a reader must scroll up five figures to Fig 3.6-A to change what they are looking at. b3.intro's \"Every chart carries the same linked controls\" is also false for Fig 3.6-B, which by design has neither background nor lens controls.",
+        "evidence": "grep confirms bgControlsRow() calls only before 3.2/3.3/3.4/3.5/3.6-A; masters at 3.1; nothing between title_rw (1728) and rwChart (1735).",
+        "fix": "Add a bgControlsRow() cell before rwChart (line ~1734); reword b3.intro to except 3.6-B (\"every driver-shaded chart\") — its rainfall-tercile bar colouring is a different grammar and the intro should say so in one clause.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced every element of the finding at HEAD c145649. (1) grep over /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso/notebooks/KE-enso-explorer/notebook_v2.qmd shows bgControlsRow() called at exactly lines 1183, 1247, 1360, 1499, 1603 (plus the definition at 2924, an Inputs.bind clone row per V2-54). Cross-referencing plotFooter fig ids (3.1@1153, 3.2@1221, 3.3@1307, 3.4@1468, 3.5@1554, 3.6-A@1633, 3.6-B@1715, 3.7@1760) confirms the clones precede only Figs 3.2–3.6-A; the master lens/background controls-row sits before Fig 3.1 (~lines 1053–1085). (2) The Fig 3.7 section (title_rw line 1728 → rwIntro md 1731 → rwChart 1735 → footer 1760) contains no controls row of any kind, yet rwChart consumes bgMarks(...) and simMarks(...) (lines 1748–1749), so it reacts to controls that live five figures up. (3) nbText_v2.json (the file notebook_v2 loads; the reviewer's \"json\" = data/KE-enso-explorer/nbText_v2.json) line 468 rwCaption ends verbatim: \"Controls sit above each chart and are linked — changing one changes them all.\" — false for the chart it captions. (4) b3.intro at json line 372 (b3 block spans 367–550) says \"Every chart carries the same linked controls: the season lens … and the driver background\" — also false for Fig 3.6-B: its section (qmd 1652–1685) carries only hsCrop/hsVar/hsView/hsEra controls, and its four views (hsSeriesView etc., qmd 3073–3260) use planting-season rainfall-tercile fill (tercColor/tercWord) with zero bgMarks/simMarks — a deliberately different grammar. hsCaption itself makes no linked-controls claim, so 3.6-B needs only the intro exception, not a caption change. No element of the finding was wrong or already fixed.",
+          "fix": "Proposed fix is correct; amend with placement and i18n specifics. (a) Insert a new ojs cell containing bgControlsRow() immediately after the rwIntro cell (after line 1732, before the rwChart cell that opens at 1734) in notebooks/KE-enso-explorer/notebook_v2.qmd — identical pattern to the five existing clone rows; once added, rwCaption becomes true as written and needs no edit. (b) In data/KE-enso-explorer/nbText_v2.json b3.intro (line ~372), change \"Every chart carries the same linked controls\" to \"Every driver-shaded chart carries the same linked controls\" and add one clause noting the exception, e.g. \"… (the seasonal-harvest chart instead colours each bar by its planting season's rainfall tercile — season and harvest line up by construction, so it needs no background)\". Update BOTH en and fr strings — both keys exist. (c) Do not touch hsCaption: it already describes the tercile grammar and makes no controls claim."
+        }
+      }
+    ],
+    "refuted": [],
+    "minors": [
+      {
+        "severity": "minor",
+        "title": "3.7 has no bgControlsRow but its caption claims 'Controls sit above each chart and are linked'",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1728-1735 (title_rw -> rwChart, no control row between them); nbText_v2.json sections.b3.rwCaption",
+        "problem": "Every other §3 figure that uses the background system carries a linked clone row (1183, 1247, 1360, 1499, 1603); 3.7 applies bgMarks/simMarks but offers no controls at the figure. A reader landing on 3.7 (e.g. via TOC) sees driver shading with no way to change or turn it off without scrolling to another figure, and the caption's claim that controls sit above each chart is false for this one.",
+        "evidence": "grep: bgControlsRow() appears exactly 5 times (lines 1183, 1247, 1360, 1499, 1603) — none between line 1728 (## title_rw) and rwChart at 1735. rwCaption (nbText_v2.json) reads 'Controls sit above each chart and are linked — changing one changes them all.'",
+        "fix": "Insert a ```{ojs} bgControlsRow() ``` cell between the rw intro (line 1732) and the rwChart cell (line 1734), matching the other figures; or amend rwCaption to point at the nearest control row.",
+        "reviewer": "hostile-ojs-plot-mechanic (node+jsdom execution vs real parquets, Machakos+Marsabit)"
+      },
+      {
+        "severity": "minor",
+        "title": "Trailing partial buckets in 3.4/3.5 bars render as full-period bars (yearly bar to next Jan 1 with data through May)",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1428 (pricesChart x2 computation), :1514 (totChart x2 computation)",
+        "problem": "Bucket x2 is always the start of the NEXT quarter/year, so the final bucket's bar spans the full period even when only part of it has data: with Marsabit maize ending 2026-05-31, the 2026 yearly bar spans Jan 1 2026 - Jan 1 2027, asserting seven months that don't exist; only the hover reveals the reduced n. The bar also stretches the x scale ~7 months past the background (bgMarks is clamped to the data extent), leaving a bar jutting into unshaded space.",
+        "evidence": "python cross-check output: last data month 2026-05-31; last yearly bar x2 = 2027-01-01T00:00:00Z; last quarterly bar x2 = 2026-07-01. Bucket means/n themselves verified exact (70 quarterly + 18 yearly price buckets, 74+19 ToT buckets, 0 mismatches).",
+        "fix": "Clamp the final bucket's x2 to the end of the last data month (e.g. x2: new Date(Math.min(+x2, +d3.utcMonth.offset(d3.max(rows, (d) => d._t), 1)))) or visually flag partial buckets (reduced fillOpacity + '(partial)' in the title when the bucket end exceeds the data end).",
+        "reviewer": "hostile-ojs-plot-mechanic (node+jsdom execution vs real parquets, Machakos+Marsabit)"
+      },
+      {
+        "severity": "minor",
+        "title": "Lens-outline legend gated on the wrong condition: outlines can render with no legend, and legend can promise outlines that don't exist",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2913-2922 (bgLegend), :2931-2945 (simMarks)",
+        "problem": "simMarks draws dashed lens outlines whenever simYearSet is non-empty, independent of bgMode; bgLegend returns an empty span whenever bgMode === 'Off'. So with background Off + an active lens (a natural reading mode: outlines only), every §3 chart shows dashed outlines with no legend anywhere explaining them. Conversely with a background on and lens at 'All years', the legend's '· dashed outlines = the lens seasons' describes marks that aren't drawn.",
+        "evidence": "bgLegend line 2914: `if (bgMode === \"Off\") return html`<span></span>`;` — while simMarks (line 2932) checks only `simYearSet.size`. Executed in harness: bgMode='Off' + seasonLens='Drier than usual' renders outline rects (11 for Machakos OND) with bgLegend returning the empty span.",
+        "fix": "Restructure bgLegend to compose two independent parts: the driver-gradient part shown when bgMode != 'Off', and the dashed-outline note shown when simYearSet.size > 0 — returning the empty span only when both are absent.",
+        "reviewer": "hostile-ojs-plot-mechanic (node+jsdom execution vs real parquets, Machakos+Marsabit)"
+      },
+      {
+        "severity": "minor",
+        "title": "bgLegend promises dashed lens outlines on figures that never draw them",
+        "where": "notebook_v2.qmd lines 2913-2921 (bgLegend text), appended at 4539 and 4567 (prodEvtBars/prodEvtLines, which contain no simMarks)",
+        "problem": "The legend line \"dashed outlines = the lens seasons\" renders under Fig 3.6-A in both Bars and Lines views, where no simMarks are drawn (reasonable, since the lens is unshifted and the chart is lag-shifted) — and under every figure even when seasonLens is \"All years\" and no outlines exist anywhere.",
+        "evidence": "prodEvtBars marks list (4516-4537) and prodEvtLines (4554-4565) contain bgMarksHarvest/facet rects only; bgLegend has no simYearSet condition.",
+        "fix": "Make the outlines clause conditional: append it only when simYearSet.size > 0, and pass a flag (or omit the clause) from the 3.6-A call sites; optionally state there \"lens seasons appear as bar colours in Fig 3.6-B, not outlines\".",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)"
+      },
+      {
+        "severity": "minor",
+        "title": "3.6-B era scope is silently applied to the wet-vs-dry counts, the k-of-n sentence and the CSV",
+        "where": "notebook_v2.qmd lines 3131-3178 (hsWetDryView counts/sentence from hsRowsShown), 1717 (plotFooter data: hsRowsShown), 3021 (hsEraOf)",
+        "problem": "With the default \"2015-2024 (county records)\" era, the wet-vs-dry panels, the \"k of n drier-than-usual short-rains plantings\" sentence and the downloaded CSV all cover only the recent decade, but none of them says so — the sentence reads like the full record, and hsAbout never states the download follows the Records toggle. The dot-shade legend (3177) still describes light district-era dots in the recent-only view where none can appear. (Era medians themselves are safe — computed from unfiltered hsRows; and hsEraOf's mislabelling of planting years 2002-2014 into the county era is currently latent only, since the parquet has zero Long/Short rows in that range.)",
+        "evidence": "Verified in harveststat_county_production.parquet: no rows with planting_year 2002-2014 (only Long 2001, correctly district-era); the sentence template (3173-3174) contains no era text; hsAbout (nbText) mentions only anchoring/medians.",
+        "fix": "Append the shown-era span to the sentence and panel labels (\"in the 2015-2024 records\" / \"in the full 1990-2024 record\"), add one line to hsAbout: \"the download reflects the Records selection\", and drop the district-era legend entry when !hsEraFull. Also tighten hsEraOf to return a third label (or throw) for 2002-2014 so a future data revision cannot silently contaminate the county-era median across the hole.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)"
+      },
+      {
+        "severity": "minor",
+        "title": "Quarterly/Yearly price and ToT bars paint the final partial bucket as a full period",
+        "where": "notebook_v2.qmd lines 1421-1430 (pricesChart bucket/x2) and 1507-1516 (totChart)",
+        "problem": "The last bucket's x2 is always the start of the next quarter/year, so a year with one observed month renders as a full-width bar overrunning the driver background (which stops at the data extent) and reading as a full-year mean; only the hover reveals n. Same for the first bucket. UTC bucketing itself is correct (getUTC*, year-wrap via Date.UTC month overflow).",
+        "evidence": "bucket() at 1421-1423 floors to period start; x2 = period start + step regardless of d3.max(rows, d => d._t); bgMarks from/to are the data extent (1417), so the bar visibly extends past the shading.",
+        "fix": "Clamp the last bucket's x2 to the month after the last observation (min(x2, offset(to))) or render partial buckets with reduced opacity plus an \"n of 12 months\" tag in the title, mirroring the mean-of-n honesty already in the tooltip.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)"
+      },
+      {
+        "severity": "minor",
+        "title": "Weak-band (0.5-1 sd) shading grammar conflicts with Fig 2.2's binning",
+        "where": "notebook_v2.qmd lines 2830-2831 (bgDiscColor classes at 0.5/1.0/1.5, tooltip via categoryOf line 2792) vs lines 815-818 (contingency: <1 sd = \"Neutral / weak\")",
+        "problem": "A season at z = 0.8 is tinted and labelled \"Weak El Nino\" in every §3 background hover, but the same season counts as \"Neutral / weak (<1 sd)\" in Fig 2.2's evidence panels. A reader chasing a weakly-tinted season from a §3 chart into the evidence figure finds it filed under neutral. Both are internally labelled, but the cross-figure category boundary differs (0.5 vs 1.0).",
+        "evidence": "bgDiscColor maps |z| in [0.5, 1) to a visible tint (cardColor(0.75)); contRows' groupOf returns \"Neutral / weak (<1 sd)\" for the same z in both split and unsplit modes.",
+        "fix": "Either render |z| < 1 as the neutral near-white class in Discrete mode (aligning with Fig 2.2 and keeping Continuous mode for gradation), or add \"weak (0.5-1 sd) counts as neutral in Fig 2.2\" to bgLegend.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)"
+      },
+      {
+        "severity": "minor",
+        "title": "First-reader wording nits: lensChips points the wrong way; season label leads differ across sections",
+        "where": "notebook_v2.qmd line 1033 (lensChips empty state \"Pick a season type above\") vs masters at 1052-1091 below it; line 618-621 (Fig 2.1 \"Short rains (Oct-Dec)\") and 2192 (annex A2 \"Short rains (OND)\") vs §3's \"OND (short rains)\"",
+        "problem": "On first load the lens chips hint says \"above\" but the master controls sit below the hint (at Fig 3.1). And the notebook now uses three different label leads for the same season across §2, §3 and the annex — a first-time reader has to re-derive that \"Short rains (Oct-Dec)\", \"Short rains (OND)\" and \"OND (short rains)\" are one thing. tercThresholdLine itself is correct under the renamed labels (startsWith(\"OND\") matches, seasonWord supplies the plain phrase).",
+        "evidence": "lensChips cell at 1032-1039 renders before the ## title_seasonStrip controls-row; grep shows the two remaining \"Short rains (\" leads at 618 and 2192.",
+        "fix": "Change the hint to \"below\" (or move lensChips under the Fig 3.1 controls row), and pick one label pattern — \"OND (short rains)\" — for Fig 2.1's season select and annex A2's radio, keeping the seasonCode derivations in sync.",
+        "reviewer": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)"
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:mechanic",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a7e0c554569426a13",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786639472471,
+      "queuedAt": 1786639467545,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "hostile-ojs-plot-mechanic (node+jsdom execution vs real par…",
+      "promptPreview": "REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso\nTARGET: notebooks/KE-enso-explorer/notebook_v2.qmd (v2.7, commit c145649)\nPROSE: data/KE-enso-explorer/nbText_v2.json\nDATA: data/KE-enso-explorer/*.parquet (chirps_county serves SPEI-01/03/06/12/24 + PTOT under 'variable', rolling 3-month 'period' codes JFM..DJF; harveststat_county_production; enso_outlook_base; driver_indices...)\nTOOLS: …",
+      "lastProgressAt": 1786641147566,
+      "tokens": 206426,
+      "toolCalls": 60,
+      "durationMs": 1675095,
+      "resultPreview": "{\"reviewer\":\"hostile-ojs-plot-mechanic (node+jsdom execution vs real parquets, Machakos+Marsabit)\",\"verdict\":\"v2.7's new machinery is mechanically sound almost everywhere: every §3 chart body executed in node+jsdom with the real libraries and real data across all combos (3 bgModes x 6 drivers x date/year x, 3 speiIdx, both ipcView, 3x3 priceAgg/priceView, 3 totAgg, both hsEra, bars/lines 3.6-A) wi…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "review:science",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a944f707c5b927988",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786639471960,
+      "queuedAt": 1786639467546,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "adversarial-v2.7-cycle7 (hostile climate-science/ag-stats +…",
+      "promptPreview": "REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso\nTARGET: notebooks/KE-enso-explorer/notebook_v2.qmd (v2.7, commit c145649)\nPROSE: data/KE-enso-explorer/nbText_v2.json\nDATA: data/KE-enso-explorer/*.parquet (chirps_county serves SPEI-01/03/06/12/24 + PTOT under 'variable', rolling 3-month 'period' codes JFM..DJF; harveststat_county_production; enso_outlook_base; driver_indices...)\nTOOLS: …",
+      "lastProgressAt": 1786640498483,
+      "tokens": 173114,
+      "toolCalls": 38,
+      "durationMs": 1026521,
+      "resultPreview": "{\"reviewer\":\"adversarial-v2.7-cycle7 (hostile climate-science/ag-stats + first-time reader)\",\"verdict\":\"NOT READY — the headline lag grammar of 3.6-A is correct (verified numerically: harvest 2023 sits over OND2022 z=-1.03 / MAM2023 z=+1.80; no double shift, no unshifted leak), the new background system's interpolation honesty holds, and the fence check passes. But two critical defects remain: Fig…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "verify:Fig 3.1: NDJ and DJF SPEI windows plotte",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a37aeee164ebf5a84",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786640504988,
+      "queuedAt": 1786640501655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMED by direct recomputation from the served parquets.…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about the KE-ENSO notebook v2.7 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, target notebooks/KE-enso-explorer/notebook_v2.qmd @ c145649).\nFinding: [critical] Fig 3.1: NDJ and DJF SPEI windows plotted 12 months late\nWhere: notebook_v2.qmd lines 3752-3762 (speiRows centre map: NDJ: [12, 0], DJF: [1, 1])\nProblem:…",
+      "lastProgressAt": 1786640781422,
+      "tokens": 53924,
+      "toolCalls": 17,
+      "durationMs": 276434,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"CONFIRMED by direct recomputation from the served parquets. (1) Quoted code is accurate: notebook_v2.qmd lines 3752-3762 (speiRows) contain the centre map with `NDJ: [12, 0], DJF: [1, 1]` on lines 3753-3754, i.e. NDJ-Y plotted at Dec 15 of Y and DJF-Y at Jan 15 of Y+1 (start-year assumption; the cell comment at 3749-3751 even states \\\"DJF centres on Jan of the follow…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "verify:Yearly bars (3.3, 3.7) offset half a slo",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a637b9a464751779d",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786640505781,
+      "queuedAt": 1786640501655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMED by executed reproduction against the exact Plot v…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about the KE-ENSO notebook v2.7 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, target notebooks/KE-enso-explorer/notebook_v2.qmd @ c145649).\nFinding: [critical] Yearly bars (3.3, 3.7) offset half a slot from the season backgrounds\nWhere: notebook_v2.qmd line 1275 (ipcChart Plot.rectY {x: \"year\", interval: 1}) and…",
+      "lastProgressAt": 1786640786389,
+      "tokens": 53963,
+      "toolCalls": 17,
+      "durationMs": 280608,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"CONFIRMED by executed reproduction against the exact Plot version Quarto ships. (1) Code quotes check out at c145649: notebook_v2.qmd:1275 (ipcChart) and :1750 (rwChart) both use Plot.rectY({x: \\\"year\\\", interval: 1}) over half-open x domains [Y0-0.5, Y1+0.5] (lines 1270, 1743); bgMarks' year-x branch (line 2891) paints MAM(Y) at [Y-0.45, Y-0.05] and OND(Y) at [Y+0.0…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "verify:Static caption asserts a 2020-23 SPEI-12",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a814ceba7bcbd588a",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786640506649,
+      "queuedAt": 1786640501655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Every element verified by execution. (1) Quoted line: /User…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about the KE-ENSO notebook v2.7 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, target notebooks/KE-enso-explorer/notebook_v2.qmd @ c145649).\nFinding: [major] Static caption asserts a 2020-23 SPEI-12 deficit that is false for half the counties\nWhere: nbText_v2.json line 498 (b3.seasonStripCaption), rendered at not…",
+      "lastProgressAt": 1786640619559,
+      "tokens": 31051,
+      "toolCalls": 11,
+      "durationMs": 112909,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Every element verified by execution. (1) Quoted line: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso/data/KE-enso-explorer/nbText_v2.json line 498 defines b3.seasonStripCaption whose en string contains verbatim \\\"The 2020–23 event shows as the long unbroken deficit on the 12-month window.\\\" — confirmed both by sed and by json.load, so it is the effective parse…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "verify:Western-V background shades OND seasons,",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a1f9ce6215b13df9e",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786640505234,
+      "queuedAt": 1786640501655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMED by direct reproduction at c145649 in /Users/pstew…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about the KE-ENSO notebook v2.7 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, target notebooks/KE-enso-explorer/notebook_v2.qmd @ c145649).\nFinding: [major] Western-V background shades OND seasons, contradicting the notebook's own framing\nWhere: notebook_v2.qmd lines 2724 (phaseDefs Western-V), 2833-2896 (bgMark…",
+      "lastProgressAt": 1786640670556,
+      "tokens": 52225,
+      "toolCalls": 11,
+      "durationMs": 165322,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"CONFIRMED by direct reproduction at c145649 in /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso/notebooks/KE-enso-explorer/notebook_v2.qmd. (1) Line 2724: phaseDefs entry `\\\"Western-V (WNP)\\\": {members: [\\\"wnp_std_mam\\\"], ...}` has no per-season field; line 1073 `viewof bgDriver = Inputs.select(driverOptionsX, ...)` offers it (driverOptionsX = Object.keys(phaseD…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "verify:Fig 3.7 has no linked controls row but i",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a8fdb7cbae14d0fc5",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786640505398,
+      "queuedAt": 1786640501655,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced every element of the finding at HEAD c145649. (1…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about the KE-ENSO notebook v2.7 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, target notebooks/KE-enso-explorer/notebook_v2.qmd @ c145649).\nFinding: [major] Fig 3.7 has no linked controls row but its caption (and b3.intro) claim every chart carries one\nWhere: notebook_v2.qmd lines 1728-1755 (rw section: no bgCon…",
+      "lastProgressAt": 1786640669047,
+      "tokens": 49531,
+      "toolCalls": 18,
+      "durationMs": 163649,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced every element of the finding at HEAD c145649. (1) grep over /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso/notebooks/KE-enso-explorer/notebook_v2.qmd shows bgControlsRow() called at exactly lines 1183, 1247, 1360, 1499, 1603 (plus the definition at 2924, an Inputs.bind clone row per V2-54). Cross-referencing plotFooter fig ids (3.1@1153, 3.2@1221, 3…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "verify:Year-x bars offset half a slot from thei",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a181b370628aa3292",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786641161354,
+      "queuedAt": 1786641153202,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMED by independent reproduction against the exact Plo…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about the KE-ENSO notebook v2.7 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, target notebooks/KE-enso-explorer/notebook_v2.qmd @ c145649).\nFinding: [critical] Year-x bars offset half a slot from their season backgrounds; last bar overflows the frame (3.3 Yearly bars, 3.7)\nWhere: notebooks/KE-enso-explorer/noteb…",
+      "lastProgressAt": 1786641515528,
+      "tokens": 60559,
+      "toolCalls": 24,
+      "durationMs": 354174,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"CONFIRMED by independent reproduction against the exact Plot version the notebook runs (Quarto's OJS stdlib pins @observablehq/plot 0.6.11 — verified at /Applications/quarto/share/formats/html/ojs/quarto-ojs-runtime.js:208 — and identical results on 0.6.17). Source at c145649 matches all cited lines: :1275 and :1750 use Plot.rectY(..., {x: \\\"year\\\", interval: 1}), :2…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "verify:3.6-A ignores the lens controls its own",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a5d34f9c4076c18ea",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786641159339,
+      "queuedAt": 1786641153203,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Verified mechanically at c145649 in notebooks/KE-enso-explo…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about the KE-ENSO notebook v2.7 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, target notebooks/KE-enso-explorer/notebook_v2.qmd @ c145649).\nFinding: [major] 3.6-A ignores the lens controls its own cloned row exposes, while its legend promises lens outlines\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:1603 (…",
+      "lastProgressAt": 1786641350452,
+      "tokens": 53457,
+      "toolCalls": 10,
+      "durationMs": 191112,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Verified mechanically at c145649 in notebooks/KE-enso-explorer/notebook_v2.qmd. (1) bgControlsRow() at line 1603 sits above 3.6-A (host line 1607, fig id line 1633) and its clone (2924-2928) binds viewof lensSeason (L2925) and viewof seasonLens (L2926). (2) Token scan of lines 4494-4614 (prodEvtBars/prodEvtLines/prodEvtVsDriver/prodEvtTable) plus transitive helpers b…"
+    }
+  ],
+  "totalTokens": 734250,
+  "totalToolCalls": 206
+}

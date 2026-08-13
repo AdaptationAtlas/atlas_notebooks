@@ -616,8 +616,8 @@ md`${_lang(nbText.sections.b2.intro)}`
 ```{ojs}
 // Plain-language season labels; internal codes derived via seasonCode.
 viewof season = Inputs.select(
-  ["Short rains (Oct–Dec)", "Long rains (Mar–May)", "Both seasons", "Full year"],
-  { label: _lang(nbText.sections.controls.season), value: "Short rains (Oct–Dec)" },
+  ["OND (short rains, Oct–Dec)", "MAM (long rains, Mar–May)", "Both seasons", "Full year"],
+  { label: _lang(nbText.sections.controls.season), value: "OND (short rains, Oct–Dec)" },
 )
 ```
 
@@ -874,8 +874,8 @@ contingencyPanel = (season, driver) => {
 
 ```{ojs}
 contingencyChart = html`<div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start">
-  <div><div class="ke-panel-lbl">Short rains (OND) — ${contOndDriver}</div>${contingencyPanel("OND", contOndDriver)}</div>
-  <div><div class="ke-panel-lbl">Long rains (MAM) — ${contMamDriver}</div>${contingencyPanel("MAM", contMamDriver)}</div>
+  <div><div class="ke-panel-lbl">OND (short rains) — ${contOndDriver}</div>${contingencyPanel("OND", contOndDriver)}</div>
+  <div><div class="ke-panel-lbl">MAM (long rains) — ${contMamDriver}</div>${contingencyPanel("MAM", contMamDriver)}</div>
 </div>`
 ```
 
@@ -997,8 +997,8 @@ ndviSwarmRows = (season) => {
 }
 ndviSwarmExport = [...ndviSwarmRows("OND"), ...(showMamSwarm ? ndviSwarmRows("MAM") : [])]
 ndviPhaseChart = html`<div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start">
-  <div><div class="ke-panel-lbl">Short rains (OND)</div>${ndviSwarmPanel("OND")}</div>
-  ${showMamSwarm ? html`<div><div class="ke-panel-lbl">Long rains (MAM)</div>${ndviSwarmPanel("MAM")}</div>` : ""}
+  <div><div class="ke-panel-lbl">OND (short rains)</div>${ndviSwarmPanel("OND")}</div>
+  ${showMamSwarm ? html`<div><div class="ke-panel-lbl">MAM (long rains)</div>${ndviSwarmPanel("MAM")}</div>` : ""}
 </div>`
 ```
 
@@ -1030,7 +1030,7 @@ md`${_lang(nbText.sections.b3.intro)}`
 ```{ojs}
 // the lens years as chips, tagged with named events — the bridge to §2
 lensChips = {
-  if (!simYearSet.size) return html`<div style="font-size:11px;color:#888;margin:0.2rem 0 0.6rem">Pick a season type above to outline matching seasons on the time-series charts below — the harvest figures carry the same season colours directly.</div>`;
+  if (!simYearSet.size) return html`<div style="font-size:11px;color:#888;margin:0.2rem 0 0.6rem">Pick a season type at any chart's controls (they are linked) to outline matching seasons on the time-series charts — the harvest figures carry the same season colours directly.</div>`;
   const chips = [...simYearSet].sort().map((y) => {
     const evt = namedEvents.find((e) => e.seasons.includes(`${lensSeasonCode}-${y}`));
     return html`<span style="display:inline-block;padding:1px 8px;margin:2px;border:1px solid #ddd;border-radius:11px;font-size:12px" title="${evt ? evt.blurb.en : ""}">${y}${evt ? html`<span style="color:#777"> · ${evt.label.en.split(" ").slice(1).join(" ")}</span>` : ""}</span>`;
@@ -1272,7 +1272,7 @@ ipcChart = {
       marks: [
         ...bgMarks({x: "year", y1: 0, y2: 5.5, from: y0, to: y1}),
         ...simMarks({x: "year", y1: 0, y2: 5.5, from: y0, to: y1}),
-        Plot.rectY(byYear, {x: "year", interval: 1, y: (d) => d.p, insetLeft: 6, insetRight: 6,
+        Plot.rectY(byYear, {x1: (d) => d.year - 0.5, x2: (d) => d.year + 0.5, y: (d) => d.p, insetLeft: 6, insetRight: 6,
           fill: (d) => phases[d.p - 1].c, stroke: "#666", strokeWidth: 0.5, tip: true,
           title: (d) => `${d.year}: worst classification ${phases[d.p - 1].name}`}),
         Plot.ruleY([3], {stroke: "#999", strokeDasharray: "3"}),
@@ -1422,10 +1422,13 @@ pricesChart = {
       ? Date.UTC(d._t.getUTCFullYear(), 0, 1)
       : Date.UTC(d._t.getUTCFullYear(), Math.floor(d._t.getUTCMonth() / 3) * 3, 1);
     const step = priceAgg === "Yearly bars" ? [1, 0] : [0, 3];
+    const dataEnd = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() + 1, 1));
     const agg = [...d3.rollup(rows, (v) => ({v: d3.mean(v, (d) => d.v), n: v.length}), bucket)]
       .map(([t0, o]) => {
         const d0 = new Date(t0);
-        return {x1: d0, x2: new Date(Date.UTC(d0.getUTCFullYear() + step[0], d0.getUTCMonth() + step[1], 1)),
+        const xEnd = new Date(Date.UTC(d0.getUTCFullYear() + step[0], d0.getUTCMonth() + step[1], 1));
+        // a bucket never claims months beyond the last observation
+        return {x1: d0, x2: xEnd > dataEnd ? dataEnd : xEnd, partial: xEnd > dataEnd,
           v: o.v, n: o.n};
       }).sort((a, b) => a.x1 - b.x1);
     const ys = d3.extent(agg, (d) => d.v);
@@ -1438,8 +1441,8 @@ pricesChart = {
         ...bgMarks({x: "date", y1: yLo, y2: yHi, from, to}),
         ...simMarks({x: "date", y1: yLo, y2: yHi, from, to}),
         Plot.rect(agg, {x1: "x1", x2: "x2", y1: () => 0, y2: "v", inset: 1,
-          fill: "#5b7fa6", stroke: "#3f5a78", strokeWidth: 0.5, tip: true,
-          title: (d) => `${d.x1.toISOString().slice(0, 7)}: ${d.v.toFixed(1)} (mean of ${d.n} market-months)`}),
+          fill: "#5b7fa6", fillOpacity: (d) => d.partial ? 0.55 : 1, stroke: "#3f5a78", strokeWidth: 0.5, tip: true,
+          title: (d) => `${d.x1.toISOString().slice(0, 7)}: ${d.v.toFixed(1)} (mean of ${d.n} market-months${d.partial ? " — period still incomplete" : ""})`}),
         Plot.ruleY([ref ?? 0], {stroke: "#555", strokeDasharray: ref != null ? "3" : null}),
       ],
     });
@@ -1508,10 +1511,12 @@ totChart = {
       ? Date.UTC(d.year, 0, 1)
       : Date.UTC(d.year, Math.floor((d.month - 1) / 3) * 3, 1);
     const step = totAgg === "Yearly bars" ? [1, 0] : [0, 3];
+    const dataEnd = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() + 1, 1));
     const agg = [...d3.rollup(totRows, (v) => ({v: d3.mean(v, (d) => d.tot), n: v.length}), bucket)]
       .map(([t0, o]) => {
         const d0 = new Date(t0);
-        return {x1: d0, x2: new Date(Date.UTC(d0.getUTCFullYear() + step[0], d0.getUTCMonth() + step[1], 1)),
+        const xEnd = new Date(Date.UTC(d0.getUTCFullYear() + step[0], d0.getUTCMonth() + step[1], 1));
+        return {x1: d0, x2: xEnd > dataEnd ? dataEnd : xEnd, partial: xEnd > dataEnd,
           v: o.v, n: o.n};
       }).sort((a, b) => a.x1 - b.x1);
     const yHi = d3.max(agg, (d) => d.v);
@@ -1523,8 +1528,8 @@ totChart = {
         ...bgMarks({x: "date", y1: 0, y2: yHi, from, to}),
         ...simMarks({x: "date", y1: 0, y2: yHi, from, to}),
         Plot.rect(agg, {x1: "x1", x2: "x2", y1: () => 0, y2: "v", inset: 1,
-          fill: "#7b3294", fillOpacity: 0.75, stroke: "#5a2270", strokeWidth: 0.5, tip: true,
-          title: (d) => `${d.x1.toISOString().slice(0, 7)}: one goat ≈ ${d.v.toFixed(0)} kg maize (mean of ${d.n} months)`}),
+          fill: "#7b3294", fillOpacity: (d) => d.partial ? 0.45 : 0.75, stroke: "#5a2270", strokeWidth: 0.5, tip: true,
+          title: (d) => `${d.x1.toISOString().slice(0, 7)}: one goat ≈ ${d.v.toFixed(0)} kg maize (mean of ${d.n} months${d.partial ? " — period still incomplete" : ""})`}),
         Plot.ruleY([totMedian], {stroke: "#555", strokeDasharray: "3"}),
         Plot.ruleY([0]),
       ],
@@ -1600,7 +1605,8 @@ viewof prodEvtPick = {
 :::
 
 ```{ojs}
-bgControlsRow()
+// background only — the lens has no honest visual on this lag-shifted figure
+bgControlsRow({lens: false})
 ```
 
 ```{ojs}
@@ -1732,6 +1738,10 @@ md`${_lang(nbText.sections.b3.rwIntro)}`
 ```
 
 ```{ojs}
+bgControlsRow()
+```
+
+```{ojs}
 rwChart = {
   const data = rwByYear.filter((d) => d.year >= 2010);
   const yEnd = d3.max(data, (d) => d.year) ?? 2026;
@@ -1747,7 +1757,7 @@ rwChart = {
     marks: [
       ...bgMarks({x: "year", y1: 0, y2: ymax, from: 2010, to: yEnd}),
       ...simMarks({x: "year", y1: 0, y2: ymax, from: 2010, to: yEnd}),
-      Plot.rectY(data, {x: "year", interval: 1, y: "n", fill: "cat", insetLeft: 7, insetRight: 7, tip: true}),
+      Plot.rectY(data, {x1: (d) => d.year - 0.5, x2: (d) => d.year + 0.5, y: "n", fill: "cat", insetLeft: 7, insetRight: 7, tip: true}),
       Plot.ruleY([0]),
     ],
   });
@@ -2084,7 +2094,7 @@ viewof driverTimeRes = Inputs.radio(["Seasonal (by year)", "Monthly"], {
 ```{ojs}
 // bound clone of the Fig 2.1 season control (single shared state)
 Inputs.bind(Inputs.select(
-  ["Short rains (Oct–Dec)", "Long rains (Mar–May)", "Both seasons", "Full year"],
+  ["OND (short rains, Oct–Dec)", "MAM (long rains, Mar–May)", "Both seasons", "Full year"],
   {label: "Season — shared with Fig 2.1"}), viewof season)
 ```
 
@@ -2189,9 +2199,9 @@ md`${_lang(nbText.sections.annex.a2Intro)}`
 ::: {.controls-row}
 
 ```{ojs}
-viewof corrSeasonPick = Inputs.radio(["Short rains (OND)", "Long rains (MAM)"], {
+viewof corrSeasonPick = Inputs.radio(["OND (short rains)", "MAM (long rains)"], {
   label: _lang(nbText.sections.controls.corrSeason),
-  value: "Short rains (OND)",
+  value: "OND (short rains)",
 })
 ```
 
@@ -2312,7 +2322,7 @@ viewof cropSel = Inputs.select(cropList, {
 ```{ojs}
 // bound clone of the Fig 2.1 season control (drives the season window here)
 Inputs.bind(Inputs.select(
-  ["Short rains (Oct–Dec)", "Long rains (Mar–May)", "Both seasons", "Full year"],
+  ["OND (short rains, Oct–Dec)", "MAM (long rains, Mar–May)", "Both seasons", "Full year"],
   {label: "Season — shared with Fig 2.1"}), viewof season)
 ```
 
@@ -2721,7 +2731,7 @@ phaseDefs = ({
   "ENSO + IOD":       {members: ["nino34_anom_noaa", "dmi"], pos: "El Niño/+IOD", neg: "La Niña/−IOD"},
   "ENSO (Niño 3.4)":  {members: ["nino34_anom_noaa"], pos: "El Niño", neg: "La Niña"},
   "IOD (DMI)":        {members: ["dmi"],      pos: "+IOD",    neg: "−IOD"},
-  "Western-V (WNP)":  {members: ["wnp_std_mam"],      pos: "High Western-V", neg: "Low Western-V"},
+  "Western-V (WNP)":  {members: ["wnp_std_mam"],      pos: "High Western-V", neg: "Low Western-V", seasons: ["MAM"]},
   "Season rainfall (county)":      {members: ["__rain__"], pos: "Wet season", neg: "Dry season"},
   "Drought index SPEI-3 (county)": {members: ["__spei__"], pos: "Wet (SPEI+)", neg: "Dry (SPEI−)"},
 })
@@ -2827,13 +2837,20 @@ speiIdxOpts = [
 // Continuous = the season windows hold their own measured shade and the
 // gaps between them are interpolated month-by-month (labelled as such);
 // nothing is ever painted beyond the last measured season.
+// class boundaries match Fig 2.2's evidence bins: <1 sd reads as neutral
+// (a 0.8 sd season must not be tinted here and filed under neutral there)
 bgDiscColor = (z) => z == null ? "#fff"
-  : cardColor(Math.sign(z) * (Math.abs(z) < 0.5 ? 0 : Math.abs(z) < 1 ? 0.75 : Math.abs(z) < 1.5 ? 1.25 : 1.75))
+  : cardColor(Math.sign(z) * (Math.abs(z) < 1 ? 0 : Math.abs(z) < 1.5 ? 1.25 : 1.75))
 bgFill = (z) => bgMode === "Continuous" ? cardColor(z) : bgDiscColor(z)
 bgMarks = ({x = "date", y1, y2, from = null, to = null}) => {
   if (bgMode === "Off") return [];
-  const seasons = ["OND", "MAM"];
-  if (x === "date" && bgMode === "Continuous") {
+  // a driver can be gated to the season(s) it actually controls
+  // (Western-V is a MAM control — R2 framing rule; painting OND with it
+  // would claim a relationship the notebook explicitly does not make)
+  const seasons = phaseDefs[bgDriver].seasons ?? ["OND", "MAM"];
+  // with a single-season driver, Continuous interpolation across the year
+  // would re-introduce the misleading wash — fall through to Discrete
+  if (x === "date" && bgMode === "Continuous" && seasons.length === 2) {
     const anchors = seasons.flatMap((sn) => {
       const zm = zSeries(bgDriver, sn);
       return [...zm.entries()].map(([year, z]) => ({
@@ -2899,7 +2916,9 @@ bgMarks = ({x = "date", y1, y2, from = null, to = null}) => {
 // never year Y's own short rains (harvest-lag rule).
 bgMarksHarvest = ({y1, y2, years}) => {
   if (bgMode === "Off") return [];
-  const zOnd = zSeries(bgDriver, "OND"), zMam = zSeries(bgDriver, "MAM");
+  const sns = phaseDefs[bgDriver].seasons ?? ["OND", "MAM"];
+  const zOnd = sns.includes("OND") ? zSeries(bgDriver, "OND") : new Map();
+  const zMam = sns.includes("MAM") ? zSeries(bgDriver, "MAM") : new Map();
   const rects = years.flatMap((y) => [
     {x1: y - 0.45, x2: y - 0.05, z: zOnd.get(y - 1) ?? null,
      lbl: (z) => `OND ${y - 1} (the short rains BEFORE the ${y} harvest): ${categoryOf(bgDriver, z)} — ${z.toFixed(1)} sd`},
@@ -2909,21 +2928,32 @@ bgMarksHarvest = ({y1, y2, years}) => {
   return [Plot.rect(rects, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
     fill: (d) => bgFill(d.z), fillOpacity: 0.85, title: (d) => d.lbl(d.z)})];
 }
-// background legend — one fresh node per figure (a DOM node lives in one place)
-bgLegend = () => {
-  if (bgMode === "Off") return html`<span></span>`;
-  const def = phaseDefs[bgDriver];
-  return html`<div style="font-size:0.78em;color:#555;margin:0.1rem 0 0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-    <span>Background — <b>${bgDriver.replace(/ \(.*\)$/, "")}</b> phase &amp; strength (${bgMode.toLowerCase()}):</span>
-    <span>${def.neg}</span>
-    <span style="display:inline-block;width:130px;height:14px;background:linear-gradient(to right, ${cardColor(-2)}, ${cardColor(0)}, ${cardColor(2)})"></span>
-    <span>${def.pos}</span>
-    <span style="color:#888">· dashed outlines = the lens seasons</span></div>`;
+// background legend — one fresh node per figure (a DOM node lives in one
+// place). Two independent parts: the driver gradient (only when a background
+// is on) and the dashed-outline note (only when the lens is actually
+// outlining something AND this figure draws outlines).
+bgLegend = ({outlines = true} = {}) => {
+  const parts = [];
+  if (bgMode !== "Off") {
+    const def = phaseDefs[bgDriver];
+    parts.push(html`<span>Background — <b>${bgDriver.replace(/ \(.*\)$/, "")}</b> phase &amp; strength (${bgMode.toLowerCase()}${def.seasons ? `, ${def.seasons.join("/")} only — a ${def.seasons[0] === "MAM" ? "long-rains" : "short-rains"} control` : ""}):</span>
+      <span>${def.neg}</span>
+      <span style="display:inline-block;width:130px;height:14px;background:linear-gradient(to right, ${cardColor(-2)}, ${cardColor(0)}, ${cardColor(2)})"></span>
+      <span>${def.pos}</span>`);
+  }
+  if (outlines && simYearSet.size) {
+    parts.push(html`<span style="color:#888">${bgMode !== "Off" ? "· " : ""}dashed outlines = the ${seasonLens.toLowerCase().split(" (")[0]} ${lensSeasonCode} seasons</span>`);
+  }
+  if (!parts.length) return html`<span></span>`;
+  return html`<div style="font-size:0.78em;color:#555;margin:0.1rem 0 0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">${parts}</div>`;
 }
-// linked clone of the §3 master controls — one fresh row per figure (V2-54)
-bgControlsRow = () => html`<div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end;margin:0.2rem 0 0.4rem">
-  ${Inputs.bind(Inputs.radio(["OND (short rains)", "MAM (long rains)"], {label: _lang(nbText.sections.controls.lensSeason)}), viewof lensSeason)}
-  ${Inputs.bind(Inputs.radio(["All years", "Drier than usual (lowest third)", "Near-normal (middle third)", "Wetter than usual (upper third)"], {label: _lang(nbText.sections.controls.seasonLens)}), viewof seasonLens)}
+// linked clone of the §3 master controls — one fresh row per figure (V2-54).
+// lens:false renders only the background pair, for figures where the lens
+// deliberately has no visual (3.6-A is lag-shifted; lens outlines would sit
+// at the wrong slots)
+bgControlsRow = ({lens = true} = {}) => html`<div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end;margin:0.2rem 0 0.4rem">
+  ${lens ? Inputs.bind(Inputs.radio(["OND (short rains)", "MAM (long rains)"], {label: _lang(nbText.sections.controls.lensSeason)}), viewof lensSeason) : ""}
+  ${lens ? Inputs.bind(Inputs.radio(["All years", "Drier than usual (lowest third)", "Near-normal (middle third)", "Wetter than usual (upper third)"], {label: _lang(nbText.sections.controls.seasonLens)}), viewof seasonLens) : ""}
   ${Inputs.bind(Inputs.select(driverOptionsX, {label: _lang(nbText.sections.controls.driver)}), viewof bgDriver)}
   ${Inputs.bind(Inputs.radio(["Off", "Discrete", "Continuous"], {label: _lang(nbText.sections.controls.background)}), viewof bgMode)}
 </div>`
@@ -3018,7 +3048,8 @@ hsSeasonalAll = dbHarvest.query(`
   FROM hs
   WHERE ${normExpr("county")} = '${countyNorm(county)}' AND season IN ('Long', 'Short')
   ORDER BY crop, season, py`)
-hsEraOf = (py) => py <= 2001 ? "1990–2001 (district-era records)" : "2015–2024 (county records)"
+hsEraOf = (py) => py <= 2001 ? "1990–2001 (district-era records)"
+  : py <= 2014 ? "2002–2014 (reporting gap)" : "2015–2024 (county records)"
 // crop options with honest n in the label
 hsCropOpts = {
   const counts = d3.rollup(hsSeasonalAll, (v) => ({
@@ -3171,10 +3202,10 @@ hsWetDryView = () => {
   const dryShort = short.filter((d) => d.terc === "Dry");
   const kBelow = dryShort.filter((d) => d.anomPct < 100).length;
   const sentence = dryShort.length >= 3
-    ? html`<div style="font-size:13px;color:#333;margin-top:6px">In ${county}, <b>${kBelow} of ${dryShort.length}</b> drier-than-usual short-rains plantings came in below a usual year's ${hsCrop.crop.toLowerCase()} ${hsVar.id === "yield_t_ha" ? "yield" : "harvest"}.</div>`
+    ? html`<div style="font-size:13px;color:#333;margin-top:6px">In ${county}, <b>${kBelow} of ${dryShort.length}</b> drier-than-usual short-rains plantings came in below a usual year's ${hsCrop.crop.toLowerCase()} ${hsVar.id === "yield_t_ha" ? "yield" : "harvest"} <span style="color:#777">(${hsEraFull ? "full 1990–2024 record" : "2015–2024 records"})</span>.</div>`
     : "";
   return html`<div><div style="display:flex;gap:1.5rem;flex-wrap:wrap">${panels}</div>
-    <div style="font-size:11px;color:#777">dot shade: light = district-era records (1990–2001), dark = county records (2015–24) · hollow red = QC-flagged upstream, excluded from medians · black tick = median (shown from 3 seasons)</div>
+    <div style="font-size:11px;color:#777">${hsEraFull ? "dot shade: light = district-era records (1990–2001), dark = county records (2015–24) · " : "2015–2024 records only (see the Records control) · "}hollow red = QC-flagged upstream, excluded from medians · black tick = median (shown from 3 seasons)</div>
     ${sentence}</div>`;
 }
 
@@ -3431,7 +3462,7 @@ title_a7 = `A7 · ${_lang(nbText.sections.annex.a6Title)}`
 
 ```{ojs}
 // ---- season plumbing: plain labels in the UI, codes internally ----
-seasonCode = ({"Short rains (Oct–Dec)": "OND", "Long rains (Mar–May)": "MAM",
+seasonCode = ({"OND (short rains, Oct–Dec)": "OND", "MAM (long rains, Mar–May)": "MAM",
   "Both seasons": "OND+MAM", "Full year": "annual"})[season]
 seasonPeriods = ({OND: ["OND"], MAM: ["MAM"], "OND+MAM": ["OND", "MAM"], annual: ["annual"]})[seasonCode]
 seasonMonths = ({OND: [10, 11, 12], MAM: [3, 4, 5], "OND+MAM": [3, 4, 5, 10, 11, 12],
@@ -3702,15 +3733,15 @@ rainMonthlyClim = dbChirpsMonthly.query(`
 rainMonthlyChart = {
   if (!rainMonthlyClim.length) return noDataPlaceholder(`No monthly rainfall record for ${county}.`);
   const mn = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const seasonOf = {3: "Long rains (MAM)", 4: "Long rains (MAM)", 5: "Long rains (MAM)",
-    10: "Short rains (OND)", 11: "Short rains (OND)", 12: "Short rains (OND)"};
+  const seasonOf = {3: "MAM (long rains)", 4: "MAM (long rains)", 5: "MAM (long rains)",
+    10: "OND (short rains)", 11: "OND (short rains)", 12: "OND (short rains)"};
   const data = rainMonthlyClim.map((d) => ({month: mn[d.month], mm: d.mm,
     season: seasonOf[d.month] ?? "other months"}));
   return Plot.plot({
     height: 340, width: 760, marginLeft: 55,
     x: {domain: mn.slice(1), label: null},
     y: {label: "mean rainfall (mm)", grid: true},
-    color: {domain: ["Long rains (MAM)", "Short rains (OND)", "other months"],
+    color: {domain: ["MAM (long rains)", "OND (short rains)", "other months"],
       range: ["#1b9e77", "#d95f0e", "#cccccc"], legend: true},
     marks: [
       Plot.barY(data, {x: "month", y: "mm", fill: "season",
@@ -3746,12 +3777,14 @@ chirpsYearlyAll = dbChirps.query(`
 ```
 
 ```{ojs}
-// SPEI-12 quasi-monthly strip: chirps_county stores 12 rolling 3-month
-// periods per year; map each period to its centre month to form a
-// near-monthly series (DJF centres on Jan of the following year).
+// SPEI quasi-monthly strip: chirps_county stores 12 rolling 3-month
+// periods per year, labelled by their END year (NDJ 1998 = Nov 1997 – Jan
+// 1998 — verified by exact decomposition against chirps_county_monthly).
+// Map each period to its centre month: NDJ-Y centres on Dec of Y−1,
+// DJF-Y on Jan of Y; the other ten periods never cross the year boundary.
 speiRows = {
   const centre = {JFM: [2, 0], FMA: [3, 0], MAM: [4, 0], AMJ: [5, 0], MJJ: [6, 0],
-    JJA: [7, 0], JAS: [8, 0], ASO: [9, 0], SON: [10, 0], OND: [11, 0], NDJ: [12, 0], DJF: [1, 1]};
+    JJA: [7, 0], JAS: [8, 0], ASO: [9, 0], SON: [10, 0], OND: [11, 0], NDJ: [12, -1], DJF: [1, 0]};
   const rows = await dbChirps.query(`
     SELECT period, year, value_mean AS v FROM chirps_county
     WHERE ${normExpr("admin1_name")} = '${countyNorm(county)}'
@@ -4504,7 +4537,9 @@ prodEvtBars = () => {
   // each year. The background carries the LAG-SHIFTED driving seasons —
   // behind year Y sit OND(Y−1), left, and MAM(Y), right — never Y's own
   // short rains (harvest-lag rule). Hover any band for its source season.
-  const zOnd = zSeries(bgDriver, "OND"), zMam = zSeries(bgDriver, "MAM");
+  const bgSns = phaseDefs[bgDriver].seasons ?? ["OND", "MAM"];
+  const zOnd = bgSns.includes("OND") ? zSeries(bgDriver, "OND") : new Map();
+  const zMam = bgSns.includes("MAM") ? zSeries(bgDriver, "MAM") : new Map();
   const bgRows = bgMode === "Off" ? [] : prodEvtYears.map((y) => ({
     year: y, zo: zOnd.get(y - 1) ?? null, zm: zMam.get(y) ?? null}));
   const chart = Plot.plot({
@@ -4536,7 +4571,7 @@ prodEvtBars = () => {
       Plot.ruleY([0]),
     ],
   });
-  return html`<div>${chart}${bgLegend()}
+  return html`<div>${chart}${bgLegend({outlines: false})}
     <div style="font-size:12px;color:#555">${md`${_lang(nbText.sections.b3.prodLegend)}`}</div></div>`;
 }
 
@@ -4564,7 +4599,7 @@ prodEvtLines = () => {
       Plot.ruleY([0]),
     ],
   });
-  return html`<div>${chart}${bgLegend()}</div>`;
+  return html`<div>${chart}${bgLegend({outlines: false})}</div>`;
 }
 
 // "Vs rainfall" (V2-15 phase 1): harvest value against the PRECEDING short
