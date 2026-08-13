@@ -350,3 +350,11 @@ still live from it is re-registered here.
   2002–14 hole, never present HarvestStat and NAPR values side-by-side as interchangeable
   (vintages differ up to ~2×), remap provenance shown, qc_flag policy applied, lag grammar per the
   harvest-lag memory. Sequence: KE-18 design pass first, then build.
+- **KE-20 · Loading indicator · DONE 2026-08-13 (v0.13).** OND/MAM grids are generator cells that
+  `yield` a `.rain-loading` message, then `yield` the grid once the COG fetches resolve. Caches are
+  promise-wrapped (`ondCacheP`/`mamCacheP`) so the loader shows DURING the fetch (a plain await cell
+  would block silently). Verified: 2 loaders visible at 8s, replaced by grids.
+- **KE-21 · Palette selectors · DONE 2026-08-13 (v0.13).** `Map palette` (Blues/YlGnBu/GnBu/Viridis,
+  sequential; anomaly uses diverging RdBu) and `Card palette` (PRGn/BrBG/RdBu/PuOr, diverging) via
+  d3-chromatic interpolators. `pixelColor`/`cardColor` refactored to the selected interpolator; the
+  legends sample them so they update automatically.

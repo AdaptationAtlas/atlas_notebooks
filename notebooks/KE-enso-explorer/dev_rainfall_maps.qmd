@@ -26,7 +26,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.12</b> · 2026-08-13 · rainfall-map panel</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.13</b> · 2026-08-13 · rainfall-map panel</span>`
 ```
 
 ```{ojs}
@@ -89,6 +89,14 @@ viewof anomaly = Inputs.toggle({label: "Anomaly vs 1991–2020", value: false})
 viewof facetCols = Inputs.range([1, 8], {step: 1, value: 6, label: "Facet columns"})
 ```
 
+```{ojs}
+viewof mapPalette = Inputs.select(["Blues", "YlGnBu", "GnBu", "Viridis"], {value: "Blues", label: "Map palette"})
+```
+
+```{ojs}
+viewof cardPalette = Inputs.select(["PRGn", "BrBG", "RdBu", "PuOr"], {value: "PRGn", label: "Card palette"})
+```
+
 :::
 
 ```{ojs}
@@ -141,7 +149,11 @@ sectionLegend(ondDriver)
 ```
 
 ```{ojs}
-ondGrid = gridWrap(await buildPanels(ondCache, "OND", ondDriver, parseNum(ondMin), parseNum(ondMax)))
+ondGrid = {
+  yield html`<div class="rain-loading">⏳ Loading OND maps — fetching CHIRPS seasonal rasters…</div>`;
+  const cache = await ondCacheP.p;
+  yield gridWrap(await buildPanels(cache, "OND", ondDriver, parseNum(ondMin), parseNum(ondMax)));
+}
 ```
 
 ### MAM — long rains (Mar–May) · Western-V control
@@ -175,7 +187,11 @@ sectionLegend(mamDriver)
 ```
 
 ```{ojs}
-mamGrid = gridWrap(await buildPanels(mamCache, "MAM", mamDriver, parseNum(mamMin), parseNum(mamMax)))
+mamGrid = {
+  yield html`<div class="rain-loading">⏳ Loading MAM maps — fetching CHIRPS seasonal rasters…</div>`;
+  const cache = await mamCacheP.p;
+  yield gridWrap(await buildPanels(cache, "MAM", mamDriver, parseNum(mamMin), parseNum(mamMax)));
+}
 ```
 
 
@@ -403,8 +419,13 @@ seasonCache = async (season) => {
     return {year, data, meanmm: cnt ? sum / cnt : null};
   }));
 }
-ondCache = seasonCache("OND")
-mamCache = seasonCache("MAM")
+// promise-wrapped so the grid cells can show a loader WHILE the COGs fetch
+// (a plain `await` cell would block until done, showing nothing). The awaited
+// aliases feed the correlation header (text — fine to wait).
+ondCacheP = ({p: seasonCache("OND")})
+mamCacheP = ({p: seasonCache("MAM")})
+ondCache = await ondCacheP.p
+mamCache = await mamCacheP.p
 ```
 
 ```{ojs}
@@ -586,14 +607,14 @@ corrHeader = (season, cache, keys) => {
 ```
 
 ```{ojs}
+// card background from a user-selected diverging d3 palette (KE-21), z in [-2,2],
+// lightened 45% toward white so it reads as a subtle tint behind the map.
+cardInterp = ({PRGn: d3.interpolatePRGn, BrBG: d3.interpolateBrBG, RdBu: d3.interpolateRdBu, PuOr: d3.interpolatePuOr})[cardPalette]
 cardColor = (z) => {
   if (z == null || Number.isNaN(z)) return "#ffffff";
-  const n = Math.max(-1, Math.min(1, z / 2));
-  const white = [247, 247, 247];
-  const end = n < 0 ? [118, 42, 131] : [27, 120, 55];
-  const t = Math.abs(n);
-  const mix = white.map((w, k) => w + t * (end[k] - w));
-  const soft = mix.map((c) => Math.round(c + 0.45 * (255 - c)));
+  const t = Math.max(0, Math.min(1, (z / 2 + 1) / 2)); // z∈[-2,2] → [0,1], 0=neg phase
+  const c = d3.color(cardInterp(t)).rgb();
+  const soft = [c.r, c.g, c.b].map((v) => Math.round(v + 0.45 * (255 - v)));
   return `rgb(${soft.join(",")})`;
 }
 cardLegend = (driver) => {
@@ -661,32 +682,18 @@ parseNum = (s) => {
 ```
 
 ```{ojs}
-rainStopsAbs = [
-  {at: 0, rgb: [255, 255, 255]}, {at: 50, rgb: [224, 236, 244]},
-  {at: 150, rgb: [158, 202, 225]}, {at: 300, rgb: [66, 146, 198]},
-  {at: 500, rgb: [33, 102, 172]}, {at: 700, rgb: [8, 69, 148]},
-  {at: 900, rgb: [8, 48, 107]},
-]
-rainStopsAnom = [
-  {at: -300, rgb: [140, 81, 10]}, {at: -150, rgb: [191, 129, 45]}, {at: -40, rgb: [223, 194, 125]},
-  {at: 0, rgb: [245, 245, 245]},
-  {at: 40, rgb: [146, 197, 222]}, {at: 150, rgb: [67, 147, 195]}, {at: 300, rgb: [33, 102, 172]},
-]
+// map-cell colours from a user-selected d3 palette (KE-21). Absolute rainfall =
+// sequential; anomaly = diverging RdBu (brown/red drier ↔ blue wetter, 0-centred).
+mapInterp = ({Blues: d3.interpolateBlues, YlGnBu: d3.interpolateYlGnBu, GnBu: d3.interpolateGnBu, Viridis: d3.interpolateViridis})[mapPalette]
 rainDomain = anomaly ? [-300, 300] : [0, 900]
-activeStops = anomaly ? rainStopsAnom : rainStopsAbs
 pixelColor = (v) => {
   if (v == null || !isFinite(v) || v <= -9999) return null;
-  const s = activeStops;
-  if (v <= s[0].at) return `rgb(${s[0].rgb.join(",")})`;
-  if (v >= s[s.length - 1].at) return `rgb(${s[s.length - 1].rgb.join(",")})`;
-  for (let i = 1; i < s.length; i++) {
-    if (v <= s[i].at) {
-      const t = (v - s[i - 1].at) / (s[i].at - s[i - 1].at);
-      const c = s[i - 1].rgb.map((a, k) => Math.round(a + t * (s[i].rgb[k] - a)));
-      return `rgb(${c.join(",")})`;
-    }
+  if (anomaly) {
+    const t = Math.max(0, Math.min(1, (v - rainDomain[0]) / (rainDomain[1] - rainDomain[0])));
+    return d3.interpolateRdBu(t); // 0 → red/brown (drier), 1 → blue (wetter)
   }
-  return null;
+  const t = Math.max(0, Math.min(1, v / rainDomain[1]));
+  return mapInterp(t);
 }
 ```
 
@@ -755,6 +762,8 @@ renderRainPanel = (spec, raster) => {
     border:1px solid rgba(0,0,0,0.08); background:#fff; }
   .rain-stack svg { position:absolute; left:0; top:0; width:100%; height:100%; }
   .rain-panel-err { color:#b45309; font-size:0.8em; padding:0.6rem; border:1px dashed #e0b466; border-radius:6px; }
+  .rain-loading { color:#3a5a44; font-size:0.9em; padding:0.9rem 1rem; background:#eef4ef;
+    border:1px solid #cfd8d3; border-radius:6px; margin:0.4rem 0 1.2rem; }
 </style>
 ```
 
