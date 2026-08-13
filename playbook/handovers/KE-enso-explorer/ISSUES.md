@@ -288,3 +288,56 @@ still live from it is re-registered here.
 - **KE-25 · Legend format consistency · DONE 2026-08-13.** Card-colour legend and map-cell rainfall
   legend now use the SAME inline format (`<label>: <low> [gradient] <high>`), stacked + left-aligned
   in `sectionLegend` (was: card inline vs cell stacked-3-line → mismatched).
+
+### From Pete's v2.5 browser review (2026-08-13, second pass)
+
+- **V2-27 · Fig 1.2 captions · OPEN (S).** "Blank means not reported — never zero" belongs in every
+  view's caption (currently in the intro/note only).
+- **V2-28 · KNBS-production→VoP conversion replaces MapSPAM · OPEN (design/data).** If V2-03's
+  conversion works, drop the MapSPAM exposure data from Fig 1.3 entirely ("no-one trusts it") —
+  VoP computed from KNBS production × prices becomes the stakes figure.
+- **V2-29 · Fig 2.1 polish set · OPEN (M).** (a) Stray event dots floating above the plot —
+  restyle/remove the evYears markers. (b) Ocean strips don't visually cover the last bar — fix
+  strip/bar domain alignment end-to-end. (c) "Ocean strips" unexplained for lay readers — plain
+  gloss needed at the figure. (d) Strip colour scaling PER LANE: each driver lane scaled to its own
+  min/max (ENSO and IOD independent), not the shared ±2 clamp. (e) Phase chips should ALSO show IOD
+  (the main OND driver), not ENSO only. (f) Remove the Temperature option from the variable toggle
+  (not requested). (g) Anomaly/absolute toggle stays HERE (see V2-33).
+- **V2-30 · Raw-vs-z display harmony with the map notebook · OPEN (M, INVESTIGATED).** Pete's
+  2019/2020 IOD "discrepancy" verified NOT a data bug: both notebooks agree (OND-2019 raw DMI
+  +0.68 = the 397 mm map card; OND-2020 raw +0.04 / z +0.11 = the neutral 2.1 cell). Real issue:
+  dev_rainfall_maps cards print RAW index values, v2's strips print Z — same driver, two numbers.
+  Harmonize: tooltips show raw AND strength (e.g. "DMI +0.68 · strong, +1.8 sd"), adopting the map
+  session's raw-value-label convention.
+- **V2-31 · Fig 2.2 upgrades · OPEN (M).** (a) Align the OND/MAM panels (same row heights/width).
+  (b) Move sd band values into the caption, add the absolute counts/values there; if too long, use
+  "About this plot". (c) Mosaic option: bar width scaled to n seasons; fade rows with <5 seasons.
+  (d) Toggle to combine/disaggregate strong + moderate.
+- **V2-32 · §3 background without interpolation · OPEN (data/design).** Obtain/derive monthly
+  driver state so backgrounds never interpolate — driver_indices IS monthly, so the strength
+  background can be computed per month directly (rolling 3-month z per month) instead of
+  interpolating between season centres. Design decision + implementation.
+- **V2-33 · Fig 3.2 restructure · OPEN (M).** Top panel duplicates Fig 2.1 → REMOVE the upper
+  rainfall panel, keep the SPEI-12 drought panel (and the multi-county line mode moves where?
+  decide); panels currently overlap and the bottom title is overlain by the plot (bug); full-width
+  when year span is large; min/max year selector for the x-axis; thicker/darker bar outlines;
+  caption must explain the background (rule: EVERY figure with the driver background explains it);
+  anomaly/absolute toggle moves to Fig 2.1 (V2-29g).
+- **V2-34 · BUG ToC sidebar empty · OPEN (M).** The floating atlasTOC panel renders nothing
+  (screenshot). Investigate: OJS-inline headings vs toc.ojs timing, collapse state, or the
+  `toc: false` front-matter interplay.
+- **V2-35 · Fig 3.8 polish · OPEN (M).** (a) Driver-strip cells misalign with the year columns;
+  (b) strip lane labels cut (marginLeft too small); (c) legend still says "Background — IOD phase &
+  strength" but it is no longer a background — reword to "Strip —"; (d) the 3 controls on one line,
+  wrapping on narrow screens; (e) commodity filter ordered by the selected variable's value;
+  (f) add select-none/clear alongside select-all.
+- **V2-36 · Fig 3.9 · OPEN (S).** Remove the background shading entirely; align the driver grid to
+  the bars exactly (as 3.8); fix cut lane labels.
+- **V2-37 · Fig 4.2 context strength · OPEN (M).** Show how strong the CURRENT forecast state is
+  vs the historical record for that season (where does today's index sit in the distribution), and
+  elevate the IOD as a considered/primary short-rains driver in the outlook (it carries more OND
+  signal than ENSO) — within the KMD/CPC-state-only constraint.
+- **V2-38 · RESTRUCTURE: split section 3 · OPEN (L, next-cycle headline).** Create a clear
+  "impact of dry/wet seasons" section — rainfall-tercile-anchored so it aligns directly with a
+  KMD wetter/drier-than-usual forecast, uncoupled from ENSO/IOD; the ENSO-centric figures of §3
+  merge into §2. This is the KMD-alignment lens (F2/P30) becoming the organizing principle.
