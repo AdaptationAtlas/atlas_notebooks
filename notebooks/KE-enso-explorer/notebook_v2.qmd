@@ -18,7 +18,7 @@ import { formatNumCompactShort, wrapTickLabel } from "/helpers/std.ojs";
 ```{ojs}
 // version stamp shown in the hero so reviewers always know which build
 // they are looking at. Bump NB_VERSION with every notebook version commit.
-NB_VERSION = "v2.6"
+NB_VERSION = "v2.7"
 ```
 
 ```{ojs}
@@ -1027,25 +1027,6 @@ md`${_lang(nbText.sections.b2.annexPointer)}`
 md`${_lang(nbText.sections.b3.intro)}`
 ```
 
-::: {.controls-row .ke-sticky-sec}
-
-```{ojs}
-// THE SEASON LENS (V2-51): pick the season and the kind of season — the
-// exact categories of a KMD above/near/below-normal outlook.
-viewof lensSeason = Inputs.radio(["Short rains (OND)", "Long rains (MAM)"], {
-  label: _lang(nbText.sections.controls.lensSeason), value: "Short rains (OND)",
-})
-```
-
-```{ojs}
-viewof seasonLens = Inputs.radio(
-  ["All years", "Drier than usual (lowest third)", "Near-normal (middle third)", "Wetter than usual (upper third)"],
-  {label: _lang(nbText.sections.controls.seasonLens), value: "All years"},
-)
-```
-
-:::
-
 ```{ojs}
 // the lens years as chips, tagged with named events — the bridge to §2
 lensChips = {
@@ -1067,6 +1048,47 @@ lensChips = {
 ```{ojs}
 md`${_lang(nbText.sections.b3.seasonStripIntro)}`
 ```
+
+::: {.controls-row}
+
+```{ojs}
+// THE SEASON LENS (V2-51): master controls live HERE; every other §3 figure
+// carries a LINKED clone (Inputs.bind) so updating any copy updates all
+// (V2-54 — Pete: no sticky row, duplicate-but-linked controls per plot).
+viewof lensSeason = Inputs.radio(["OND (short rains)", "MAM (long rains)"], {
+  label: _lang(nbText.sections.controls.lensSeason), value: "OND (short rains)",
+})
+```
+
+```{ojs}
+viewof seasonLens = Inputs.radio(
+  ["All years", "Drier than usual (lowest third)", "Near-normal (middle third)", "Wetter than usual (upper third)"],
+  {label: _lang(nbText.sections.controls.seasonLens), value: "All years"},
+)
+```
+
+```{ojs}
+// which driver shades the chart backgrounds (V2-56 — backgrounds are back,
+// per-plot, coexisting with the lens outlines drawn on top)
+viewof bgDriver = Inputs.select(driverOptionsX, {
+  label: _lang(nbText.sections.controls.driver), value: "ENSO + IOD",
+})
+```
+
+```{ojs}
+viewof bgMode = Inputs.radio(["Off", "Discrete", "Continuous"], {
+  label: _lang(nbText.sections.controls.background), value: "Continuous",
+})
+```
+
+```{ojs}
+viewof speiIdx = Inputs.select(speiIdxOpts, {
+  label: _lang(nbText.sections.controls.speiIndex), format: (d) => d.label,
+  value: speiIdxOpts[2],
+})
+```
+
+:::
 
 ```{ojs}
 // what counts as a dry/wet season HERE: the county's tercile cutoffs (mm)
@@ -1105,22 +1127,24 @@ chirpsYearlyCmp = {
 
 ```{ojs}
 seasonStripChart = {
-  if (!spei12Rows.length) return noDataPlaceholder(`No SPEI record for ${county}.`);
-  const y1v = d3.min(spei12Rows, (d) => d.v), y2v = d3.max(spei12Rows, (d) => d.v);
-  return Plot.plot({
+  if (!speiRows.length) return noDataPlaceholder(`No SPEI record for ${county}.`);
+  const y1v = d3.min(speiRows, (d) => d.v), y2v = d3.max(speiRows, (d) => d.v);
+  const from = d3.min(speiRows, (d) => d.t), to = d3.max(speiRows, (d) => d.t);
+  const chart = Plot.plot({
     height: 240, width: 900, marginLeft: 55, marginRight: 20,
     x: {type: "utc", label: null},
-    y: {label: "12-month drought index (SPEI-12)"},
+    y: {label: speiIdx.label},
     marks: [
-      ...simMarks({x: "date", y1: y1v, y2: y2v,
-        from: d3.min(spei12Rows, (d) => d.t), to: d3.max(spei12Rows, (d) => d.t)}),
-      Plot.areaY(spei12Rows, {x: "t", y1: 0, y2: (d) => Math.min(0, d.v), fill: PALETTE.outcome.drier, fillOpacity: 0.45}),
-      Plot.lineY(spei12Rows, {x: "t", y: "v", stroke: "#555", strokeWidth: 1.1, tip: true,
-        title: (d) => `${d.period} ${d.year}: SPEI-12 ${d.v.toFixed(2)}`}),
+      ...bgMarks({x: "date", y1: y1v, y2: y2v, from, to}),
+      ...simMarks({x: "date", y1: y1v, y2: y2v, from, to}),
+      Plot.areaY(speiRows, {x: "t", y1: 0, y2: (d) => Math.min(0, d.v), fill: PALETTE.outcome.drier, fillOpacity: 0.45}),
+      Plot.lineY(speiRows, {x: "t", y: "v", stroke: "#555", strokeWidth: 1.1, tip: true,
+        title: (d) => `${d.period} ${d.year}: ${speiIdx.v} ${d.v.toFixed(2)}`}),
       Plot.ruleY([-1, -2], {stroke: "#a6611a", strokeDasharray: "3"}),
       Plot.ruleY([0]),
     ],
   });
+  return html`<div>${chart}${bgLegend()}</div>`;
 }
 ```
 
@@ -1128,7 +1152,7 @@ seasonStripChart = {
 plotFooter(_lang(nbText.sections.b3.seasonStripCaption), seasonStripChart, {
   fig: "3.1",
   filename: `seasons_and_drought_index`,
-  data: spei12Rows.map((d) => ({county, series: "SPEI-12", period: d.period, year: d.year, value: +d.v.toFixed(2)})),
+  data: speiRows.map((d) => ({county, series: speiIdx.v, period: d.period, year: d.year, value: +d.v.toFixed(2)})),
   meta: {Source: "SPEI (UCSB CHC via Atlas hub)", County: county},
 })
 ```
@@ -1156,6 +1180,10 @@ viewof ndviCounties = enhancedMultiSelect(
 :::
 
 ```{ojs}
+bgControlsRow()
+```
+
+```{ojs}
 ndviChart = {
   const names = ndviCounties.length ? ndviCounties : [county];
   const from = d3.min(ndviMulti, (d) => d.t), to = d3.max(ndviMulti, (d) => d.t);
@@ -1171,6 +1199,7 @@ ndviChart = {
       color: {domain: ["Below normal", "Above normal"], range: [PALETTE.impact.bad, PALETTE.impact.good],
         legend: nm === names[0]},
       marks: [
+        ...bgMarks({x: "date", y1: dom[0], y2: dom[1], from, to}),
         ...simMarks({x: "date", y1: dom[0], y2: dom[1], from, to}),
         Plot.areaY(rows, {x: "t", y1: 100, y2: (d) => Math.min(100, d.ndvi_pct_normal),
           fill: () => "Below normal", fillOpacity: 0.65}),
@@ -1183,10 +1212,7 @@ ndviChart = {
     });
     return html`<div>${names.length > 1 ? html`<div class="ke-panel-lbl">${nm}</div>` : ""}${plot}</div>`;
   });
-  const years = d3.range(new Date(from).getUTCFullYear(), new Date(to).getUTCFullYear() + 1);
-  const strip = makeTercileStrip(years, [
-    {label: "short rains", season: "OND"}, {label: "long rains", season: "MAM"}], 900, 50, 20);
-  return html`<div>${panels}<div style="font-size:11px;color:#777;margin-left:50px">${county} — season outcomes:</div>${strip}${tercStripLegend()}</div>`;
+  return html`<div>${panels}${bgLegend()}</div>`;
 }
 ```
 
@@ -1207,27 +1233,72 @@ plotFooter(_lang(nbText.sections.b3.ndviCaption), ndviChart, {
 md`${_lang(nbText.sections.b3.ipcIntro)}`
 ```
 
+::: {.controls-row}
+
+```{ojs}
+viewof ipcView = Inputs.radio(["Steps", "Yearly bars"], {
+  label: _lang(nbText.sections.controls.prodViewType), value: "Steps",
+})
+```
+
+:::
+
+```{ojs}
+bgControlsRow()
+```
+
+```{ojs}
+ipcPhases = [
+  {p: 1, name: "1 Minimal", c: "#CDFACD"}, {p: 2, name: "2 Stressed", c: "#FAE61E"},
+  {p: 3, name: "3 Crisis", c: "#E67800"}, {p: 4, name: "4 Emergency", c: "#C80000"},
+  {p: 5, name: "5 Famine", c: "#640000"}]
+```
+
 ```{ojs}
 ipcChart = {
   const rows = ipcCty.map((d) => ({...d, t: new Date(d.reporting_date)}));
   if (!rows.length) return html`<div style="color:#666;font-style:italic">No IPC record for ${county}.</div>`;
-  const phases = [
-    {p: 1, name: "1 Minimal", c: "#CDFACD"}, {p: 2, name: "2 Stressed", c: "#FAE61E"},
-    {p: 3, name: "3 Crisis", c: "#E67800"}, {p: 4, name: "4 Emergency", c: "#C80000"},
-    {p: 5, name: "5 Famine", c: "#640000"}];
-  return Plot.plot({
+  const phases = ipcPhases;
+  if (ipcView === "Yearly bars") {
+    // one bar per year = the WORST phase classified that year, IPC-coloured;
+    // driver background sits behind (linear year x so the rects can overlay)
+    const byYear = [...d3.rollup(rows, (v) => d3.max(v, (d) => d.max_phase), (d) => d.t.getUTCFullYear())]
+      .map(([year, p]) => ({year, p: Math.round(p)})).sort((a, b) => a.year - b.year);
+    const y0 = byYear[0].year, y1 = byYear[byYear.length - 1].year;
+    const chart = Plot.plot({
+      height: 300, width: 900, marginLeft: 92,
+      x: {domain: [y0 - 0.5, y1 + 0.5], tickFormat: "d", label: null},
+      y: {domain: [0, 5.5], ticks: [1, 2, 3, 4, 5], tickFormat: (p) => phases[p - 1].name, label: null},
+      marks: [
+        ...bgMarks({x: "year", y1: 0, y2: 5.5, from: y0, to: y1}),
+        ...simMarks({x: "year", y1: 0, y2: 5.5, from: y0, to: y1}),
+        Plot.rectY(byYear, {x: "year", interval: 1, y: (d) => d.p, insetLeft: 6, insetRight: 6,
+          fill: (d) => phases[d.p - 1].c, stroke: "#666", strokeWidth: 0.5, tip: true,
+          title: (d) => `${d.year}: worst classification ${phases[d.p - 1].name}`}),
+        Plot.ruleY([3], {stroke: "#999", strokeDasharray: "3"}),
+        Plot.ruleY([0]),
+      ],
+    });
+    return html`<div>${chart}${bgLegend()}</div>`;
+  }
+  // Steps view: IPC phase colour bands show ONLY when the driver background
+  // is off — the two shadings are mutually exclusive (V2-57)
+  const chart = Plot.plot({
     height: 320, width: 900, marginLeft: 92,
     x: {type: "utc", label: null},
     y: {domain: [0.5, 5.5], ticks: [1, 2, 3, 4, 5], tickFormat: (p) => phases[p - 1].name, label: null},
     marks: [
-      ...phases.map((ph) => Plot.rect([ph], {x1: () => rows[0].t, x2: () => rows[rows.length - 1].t,
-        y1: () => ph.p - 0.5, y2: () => ph.p + 0.5, fill: () => ph.c, fillOpacity: 0.16})),
+      ...(bgMode === "Off"
+        ? phases.map((ph) => Plot.rect([ph], {x1: () => rows[0].t, x2: () => rows[rows.length - 1].t,
+            y1: () => ph.p - 0.5, y2: () => ph.p + 0.5, fill: () => ph.c, fillOpacity: 0.16}))
+        : bgMarks({x: "date", y1: 0.5, y2: 5.5, from: rows[0].t, to: rows[rows.length - 1].t})),
       ...simMarks({x: "date", y1: 0.5, y2: 5.5, from: rows[0].t, to: rows[rows.length - 1].t}),
       Plot.lineY(rows, {x: "t", y: "max_phase", curve: "step-after", stroke: "#7b241c", strokeWidth: 1.8, tip: true,
         title: (d) => `${d.reporting_date}: worst area ${phases[Math.round(d.max_phase) - 1]?.name ?? d.max_phase}`}),
       Plot.ruleY([3], {stroke: "#999", strokeDasharray: "3"}),
     ],
   });
+  return html`<div>${chart}${bgLegend()}</div>`;
 }
 ```
 
@@ -1266,7 +1337,28 @@ viewof priceView = Inputs.radio(["Raw price", "Change vs year earlier", "Seasona
 })
 ```
 
+```{ojs}
+viewof priceMarkets = {
+  const mkts = [...new Set(pricesCty.map((d) => d.market))].sort();
+  const input = Inputs.select(mkts.length ? mkts : ["(no data)"], {
+    label: _lang(nbText.sections.controls.markets), multiple: true, value: mkts,
+  });
+  enhancedMultiSelect(input, {requireAtLeastOne: true, enableSelectAll: true});
+  return input;
+}
+```
+
+```{ojs}
+viewof priceAgg = Inputs.radio(["Monthly lines", "Quarterly bars", "Yearly bars"], {
+  label: _lang(nbText.sections.controls.aggregate), value: "Monthly lines",
+})
+```
+
 :::
+
+```{ojs}
+bgControlsRow()
+```
 
 ```{ojs}
 pricesCty.length ? html`` : md`${_lang(nbText.sections.b3.pricesNoData)}`
@@ -1276,7 +1368,8 @@ pricesCty.length ? html`` : md`${_lang(nbText.sections.b3.pricesNoData)}`
 // gap-segmented series (per market), then the selected transform.
 pricesSeg = {
   const GAP_DAYS = 100;
-  const byMkt = d3.group(pricesCty, (d) => d.market);
+  const sel = new Set(priceMarkets);
+  const byMkt = d3.group(pricesCty.filter((d) => sel.has(d.market)), (d) => d.market);
   const out = [];
   for (const [mkt, rows] of byMkt) {
     const sorted = rows.map((d) => ({...d, _t: new Date(d.period_date)})).sort((a, b) => a._t - b._t);
@@ -1321,20 +1414,52 @@ pricesView = {
 pricesChart = {
   const {rows, label, ref} = pricesView;
   if (!rows.length) return html`<div style="color:#666;font-style:italic">No price series for this view.</div>`;
+  const from = d3.min(rows, (d) => d._t), to = d3.max(rows, (d) => d._t);
+  if (priceAgg !== "Monthly lines") {
+    // summary bars: mean of the selected transform across the chosen
+    // markets, per quarter/year (V2-58c)
+    const bucket = (d) => priceAgg === "Yearly bars"
+      ? Date.UTC(d._t.getUTCFullYear(), 0, 1)
+      : Date.UTC(d._t.getUTCFullYear(), Math.floor(d._t.getUTCMonth() / 3) * 3, 1);
+    const step = priceAgg === "Yearly bars" ? [1, 0] : [0, 3];
+    const agg = [...d3.rollup(rows, (v) => ({v: d3.mean(v, (d) => d.v), n: v.length}), bucket)]
+      .map(([t0, o]) => {
+        const d0 = new Date(t0);
+        return {x1: d0, x2: new Date(Date.UTC(d0.getUTCFullYear() + step[0], d0.getUTCMonth() + step[1], 1)),
+          v: o.v, n: o.n};
+      }).sort((a, b) => a.x1 - b.x1);
+    const ys = d3.extent(agg, (d) => d.v);
+    const yLo = Math.min(0, ys[0]), yHi = Math.max(0, ys[1]);
+    const chart = Plot.plot({
+      height: 380, width: 900, marginLeft: 60,
+      x: {label: null, type: "utc"},
+      y: {label: `${label} — mean per ${priceAgg === "Yearly bars" ? "year" : "quarter"} across ${priceMarkets.length} market(s)`},
+      marks: [
+        ...bgMarks({x: "date", y1: yLo, y2: yHi, from, to}),
+        ...simMarks({x: "date", y1: yLo, y2: yHi, from, to}),
+        Plot.rect(agg, {x1: "x1", x2: "x2", y1: () => 0, y2: "v", inset: 1,
+          fill: "#5b7fa6", stroke: "#3f5a78", strokeWidth: 0.5, tip: true,
+          title: (d) => `${d.x1.toISOString().slice(0, 7)}: ${d.v.toFixed(1)} (mean of ${d.n} market-months)`}),
+        Plot.ruleY([ref ?? 0], {stroke: "#555", strokeDasharray: ref != null ? "3" : null}),
+      ],
+    });
+    return html`<div>${chart}${bgLegend()}</div>`;
+  }
   const ys = d3.extent(rows, (d) => d.v);
-  return Plot.plot({
+  const chart = Plot.plot({
     height: 380, width: 900, marginLeft: 60,
     color: {legend: true},
     x: {label: null, type: "utc"},
     y: {label},
     marks: [
-      ...simMarks({x: "date", y1: Math.min(ys[0], ref ?? ys[0]), y2: ys[1],
-        from: d3.min(rows, (d) => d._t), to: d3.max(rows, (d) => d._t)}),
+      ...bgMarks({x: "date", y1: Math.min(ys[0], ref ?? ys[0]), y2: ys[1], from, to}),
+      ...simMarks({x: "date", y1: Math.min(ys[0], ref ?? ys[0]), y2: ys[1], from, to}),
       Plot.lineY(rows, {x: "_t", y: "v", stroke: "market", z: "seg"}),
       Plot.dot(rows, {x: "_t", y: "v", fill: "market", r: 2, tip: true}),
       ...(ref != null ? [Plot.ruleY([ref], {stroke: "#555", strokeDasharray: "3"})] : [Plot.ruleY([0])]),
     ],
   });
+  return html`<div>${chart}${bgLegend()}</div>`;
 }
 ```
 
@@ -1360,31 +1485,67 @@ plotFooter(_lang(nbText.sections.b3.pricesCaption), pricesChart, {
 md`${_lang(nbText.sections.b3.totIntro)}`
 ```
 
+::: {.controls-row}
+
+```{ojs}
+viewof totAgg = Inputs.radio(["Monthly line", "Quarterly bars", "Yearly bars"], {
+  label: _lang(nbText.sections.controls.aggregate), value: "Monthly line",
+})
+```
+
+:::
+
+```{ojs}
+bgControlsRow()
+```
+
 ```{ojs}
 totChart = {
   if (!totRows.length) return md`${_lang(nbText.sections.b3.totNoData)}`;
+  const from = d3.min(totRows, (d) => d.t), to = d3.max(totRows, (d) => d.t);
+  if (totAgg !== "Monthly line") {
+    const bucket = (d) => totAgg === "Yearly bars"
+      ? Date.UTC(d.year, 0, 1)
+      : Date.UTC(d.year, Math.floor((d.month - 1) / 3) * 3, 1);
+    const step = totAgg === "Yearly bars" ? [1, 0] : [0, 3];
+    const agg = [...d3.rollup(totRows, (v) => ({v: d3.mean(v, (d) => d.tot), n: v.length}), bucket)]
+      .map(([t0, o]) => {
+        const d0 = new Date(t0);
+        return {x1: d0, x2: new Date(Date.UTC(d0.getUTCFullYear() + step[0], d0.getUTCMonth() + step[1], 1)),
+          v: o.v, n: o.n};
+      }).sort((a, b) => a.x1 - b.x1);
+    const yHi = d3.max(agg, (d) => d.v);
+    const chart = Plot.plot({
+      height: 340, width: 900, marginLeft: 55,
+      x: {type: "utc", label: null},
+      y: {label: `kg of maize one goat buys — mean per ${totAgg === "Yearly bars" ? "year" : "quarter"}`, grid: true},
+      marks: [
+        ...bgMarks({x: "date", y1: 0, y2: yHi, from, to}),
+        ...simMarks({x: "date", y1: 0, y2: yHi, from, to}),
+        Plot.rect(agg, {x1: "x1", x2: "x2", y1: () => 0, y2: "v", inset: 1,
+          fill: "#7b3294", fillOpacity: 0.75, stroke: "#5a2270", strokeWidth: 0.5, tip: true,
+          title: (d) => `${d.x1.toISOString().slice(0, 7)}: one goat ≈ ${d.v.toFixed(0)} kg maize (mean of ${d.n} months)`}),
+        Plot.ruleY([totMedian], {stroke: "#555", strokeDasharray: "3"}),
+        Plot.ruleY([0]),
+      ],
+    });
+    return html`<div>${chart}${bgLegend()}</div>`;
+  }
   const ys = d3.extent(totRows, (d) => d.tot);
   const chart = Plot.plot({
     height: 340, width: 900, marginLeft: 55,
     x: {type: "utc", label: null},
     y: {label: "kg of maize one goat buys", grid: true},
     marks: [
-      ...simMarks({x: "date", y1: 0, y2: ys[1],
-        from: d3.min(totRows, (d) => d.t), to: d3.max(totRows, (d) => d.t)}),
-      Plot.lineY(totRows, {x: "t", y: "tot", stroke: "#7b3294", strokeWidth: 1.6, z: "seg"}),
-      Plot.dot(totRows, {x: "t", y: "tot",
-        fill: (d) => {
-          const sn = d.month >= 10 ? "OND" : d.month >= 3 && d.month <= 5 ? "MAM" : null;
-          const t = sn ? tercByYear(sn).get(d.year) : null;
-          return t ? tercColor[t] : "white";
-        }, stroke: "#666", strokeWidth: 0.4, r: 2.6, tip: true,
+      ...bgMarks({x: "date", y1: 0, y2: ys[1], from, to}),
+      ...simMarks({x: "date", y1: 0, y2: ys[1], from, to}),
+      Plot.lineY(totRows, {x: "t", y: "tot", stroke: "#7b3294", strokeWidth: 1.6, z: "seg", tip: true,
         title: (d) => `${String(d.ym)}: one goat ≈ ${d.tot.toFixed(0)} kg maize`}),
       Plot.ruleY([totMedian], {stroke: "#555", strokeDasharray: "3"}),
       Plot.ruleY([0]),
     ],
   });
-  return html`<div>${chart}${tercStripLegend()}
-    <div style="font-size:10.5px;color:#666;margin-left:55px">dot colour = the rainfall tercile of the season the month falls in (Oct–Dec = short rains, Mar–May = long rains); white dots fall outside either season</div></div>`;
+  return html`<div>${chart}${bgLegend()}</div>`;
 }
 ```
 
@@ -1437,6 +1598,10 @@ viewof prodEvtPick = {
 ```
 
 :::
+
+```{ojs}
+bgControlsRow()
+```
 
 ```{ojs}
 prodEvtHost = loaderTarget("plotProdEvents")
@@ -1509,6 +1674,15 @@ viewof hsView = Inputs.select(["Season series", "Wet vs dry seasons", "Vs climat
 })
 ```
 
+```{ojs}
+// V2-61: the 2002–14 reporting hole makes the full series hard to read, so
+// the recent county era leads by default; the full record stays one click
+// away (era medians are unaffected — they are always computed per era)
+viewof hsEra = Inputs.radio(["2015–2024 (county records)", "Full record 1990–2024"], {
+  label: _lang(nbText.sections.controls.era), value: "2015–2024 (county records)",
+})
+```
+
 :::
 
 ```{ojs}
@@ -1540,7 +1714,7 @@ hsHost = loaderTarget("plotHarvestStat")
 plotFooter(_lang(nbText.sections.b3.hsCaption), hsHost, {
   fig: "3.6-B",
   filename: `${county}_${String(hsCrop.crop).toLowerCase()}_harveststat_series`,
-  data: hsRows.map((d) => ({crop: d.crop, season: d.season, planting_year: d.py,
+  data: hsRowsShown.map((d) => ({crop: d.crop, season: d.season, planting_year: d.py,
     planted: `${d.pm}/${d.py}`, harvested: `${d.hm}/${d.hy}`,
     value: d.value, unit: hsVar.unit, pct_of_usual: d.anomPct == null ? null : Math.round(d.anomPct),
     planting_season_tercile: d.terc ? tercWord[d.terc] : null, era: d.era, qc_flag: d.qc})),
@@ -1561,22 +1735,23 @@ md`${_lang(nbText.sections.b3.rwIntro)}`
 rwChart = {
   const data = rwByYear.filter((d) => d.year >= 2010);
   const yEnd = d3.max(data, (d) => d.year) ?? 2026;
-  const years = d3.range(2010, yEnd + 1);
-  // no background here (V2-49) — the strip below carries the driver context,
-  // on the SAME band domain/margins as the bars so cells align exactly
+  // stacked yearly totals per year (linear x so the driver background can
+  // overlay — V2-56's shared system replaces the old tercile strip here)
+  const ymax = d3.max([...d3.rollup(data, (v) => d3.sum(v, (d) => d.n), (d) => d.year)].map(([, n]) => n)) ?? 1;
   const chart = Plot.plot({
-    height: 300, width: 900, marginLeft: 90, marginRight: 20, marginBottom: 4,
-    x: {domain: years, axis: null},
+    height: 300, width: 900, marginLeft: 90, marginRight: 20,
+    x: {domain: [2009.5, yEnd + 0.5], tickFormat: "d", label: null},
     y: {label: "reports"},
     color: {domain: ["Drought", "Flood", "Epidemic", "Other"],
       range: ["#d95f0e", "#4575b4", "#7b3294", "#bbbbbb"], legend: true},
     marks: [
-      Plot.barY(data, {x: "year", y: "n", fill: "cat", tip: true}),
+      ...bgMarks({x: "year", y1: 0, y2: ymax, from: 2010, to: yEnd}),
+      ...simMarks({x: "year", y1: 0, y2: ymax, from: 2010, to: yEnd}),
+      Plot.rectY(data, {x: "year", interval: 1, y: "n", fill: "cat", insetLeft: 7, insetRight: 7, tip: true}),
       Plot.ruleY([0]),
     ],
   });
-  return html`<div>${chart}${makeTercileStrip(years, [
-    {label: "short rains", season: "OND"}, {label: "long rains", season: "MAM"}], 900, 90, 20)}${tercStripLegend()}</div>`;
+  return html`<div>${chart}${bgLegend()}</div>`;
 }
 ```
 
@@ -2634,13 +2809,124 @@ cardColor = (z) => {
 // the SEASON LENS (V2-51): county-specific terciles of the chosen season —
 // the exact language of a KMD above/near/below-normal outlook, uncoupled
 // from ENSO/IOD. Drives the outline highlights on every §3 time series.
-lensSeasonCode = lensSeason.startsWith("Short") ? "OND" : "MAM"
+lensSeasonCode = lensSeason.startsWith("OND") ? "OND" : "MAM"
 simYearSet = {
   if (seasonLens === "All years") return new Set();
   const tm = tercByYear(lensSeasonCode);
   const want = seasonLens.startsWith("Drier") ? "Dry" : seasonLens.startsWith("Wetter") ? "Wet" : "Near";
   return new Set([...tm.entries()].filter(([, t]) => t === want).map(([y]) => y));
 }
+speiIdxOpts = [
+  {v: "SPEI-03", label: "SPEI-3 (3-month window)"},
+  {v: "SPEI-06", label: "SPEI-6 (6-month window)"},
+  {v: "SPEI-12", label: "SPEI-12 (12-month window)"},
+]
+// ---- per-plot chart backgrounds (V2-56, cycle 7) ----
+// Every §3 chart shades OND/MAM seasons by the chosen driver's strength.
+// Discrete = only the 3-month season windows, coloured by intensity class;
+// Continuous = the season windows hold their own measured shade and the
+// gaps between them are interpolated month-by-month (labelled as such);
+// nothing is ever painted beyond the last measured season.
+bgDiscColor = (z) => z == null ? "#fff"
+  : cardColor(Math.sign(z) * (Math.abs(z) < 0.5 ? 0 : Math.abs(z) < 1 ? 0.75 : Math.abs(z) < 1.5 ? 1.25 : 1.75))
+bgFill = (z) => bgMode === "Continuous" ? cardColor(z) : bgDiscColor(z)
+bgMarks = ({x = "date", y1, y2, from = null, to = null}) => {
+  if (bgMode === "Off") return [];
+  const seasons = ["OND", "MAM"];
+  if (x === "date" && bgMode === "Continuous") {
+    const anchors = seasons.flatMap((sn) => {
+      const zm = zSeries(bgDriver, sn);
+      return [...zm.entries()].map(([year, z]) => ({
+        s0: Date.UTC(year, sn === "OND" ? 9 : 2, 1),
+        s1: Date.UTC(year, sn === "OND" ? 12 : 5, 1),
+        t: Date.UTC(year, sn === "OND" ? 10 : 3, 15), z, year, sn}));
+    }).sort((a, b) => a.t - b.t);
+    if (!anchors.length) return [];
+    const f = Math.max(from ? from.getTime() : anchors[0].s0, anchors[0].s0);
+    const t = Math.min(to ? to.getTime() : anchors[anchors.length - 1].s1,
+                       anchors[anchors.length - 1].s1);
+    const stateAt = (ms) => {
+      const inSeason = anchors.find((a) => ms >= a.s0 && ms < a.s1);
+      if (inSeason) return {z: inSeason.z,
+        lbl: `${inSeason.sn} ${inSeason.year}: ${categoryOf(bgDriver, inSeason.z)} — strength ${inSeason.z.toFixed(1)} sd`};
+      let i = 0;
+      while (i < anchors.length && anchors[i].t < ms) i++;
+      if (i === 0 || i === anchors.length) return null;
+      const a = anchors[i - 1], b = anchors[i];
+      const w = (ms - a.t) / (b.t - a.t);
+      const z = a.z + w * (b.z - a.z);
+      return {z, lbl: `between ${a.sn} ${a.year} (${a.z.toFixed(1)} sd) and ${b.sn} ${b.year} (${b.z.toFixed(1)} sd) — shading interpolated, not measured`};
+    };
+    const months = [];
+    const d0 = new Date(f);
+    let cur = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), 1);
+    while (cur < t) {
+      const nxt = new Date(cur);
+      const nxt2 = Date.UTC(nxt.getUTCFullYear(), nxt.getUTCMonth() + 1, 1);
+      const st = stateAt(cur + (Math.min(nxt2, t) - cur) / 2);
+      if (st) months.push({x1: new Date(cur), x2: new Date(Math.min(nxt2, t)), z: st.z, lbl: st.lbl});
+      cur = nxt2;
+    }
+    return [Plot.rect(months, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
+      fill: (d) => cardColor(d.z), fillOpacity: 0.85, title: (d) => d.lbl})];
+  }
+  if (x === "date") {
+    // Discrete: paint ONLY the measured 3-month season windows
+    const f = from ? from.getTime() : -Infinity, t = to ? to.getTime() : Infinity;
+    const rects = seasons.flatMap((sn) => {
+      const zm = zSeries(bgDriver, sn);
+      return [...zm.entries()].map(([year, z]) => ({
+        x1: new Date(Date.UTC(year, sn === "OND" ? 9 : 2, 1)),
+        x2: new Date(Date.UTC(year, sn === "OND" ? 12 : 5, 1)), z, year, sn}));
+    }).filter((d) => d.x2.getTime() >= f && d.x1.getTime() <= t);
+    return [Plot.rect(rects, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
+      fill: (d) => bgDiscColor(d.z), fillOpacity: 0.85,
+      title: (d) => `${d.sn} ${d.year}: ${categoryOf(bgDriver, d.z)} — strength ${d.z.toFixed(1)} sd`})];
+  }
+  // year-x: MAM on the left half of the year slot, OND on the right
+  const rects = seasons.flatMap((sn) => {
+    const zm = zSeries(bgDriver, sn);
+    return [...zm.entries()]
+      .filter(([year]) => (from == null || year >= from) && (to == null || year <= to))
+      .map(([year, z]) => ({x1: year + (sn === "OND" ? 0.05 : -0.45), x2: year + (sn === "OND" ? 0.45 : -0.05), z, year, sn}));
+  });
+  return [Plot.rect(rects, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
+    fill: (d) => bgFill(d.z), fillOpacity: 0.85,
+    title: (d) => `${d.sn} ${d.year}: ${categoryOf(bgDriver, d.z)} — strength ${d.z.toFixed(1)} sd`})];
+}
+// lag-shifted year-x background for HARVEST-year charts (3.6-A): behind the
+// year-Y bar sit the seasons that GREW it — OND(Y−1) left, MAM(Y) right —
+// never year Y's own short rains (harvest-lag rule).
+bgMarksHarvest = ({y1, y2, years}) => {
+  if (bgMode === "Off") return [];
+  const zOnd = zSeries(bgDriver, "OND"), zMam = zSeries(bgDriver, "MAM");
+  const rects = years.flatMap((y) => [
+    {x1: y - 0.45, x2: y - 0.05, z: zOnd.get(y - 1) ?? null,
+     lbl: (z) => `OND ${y - 1} (the short rains BEFORE the ${y} harvest): ${categoryOf(bgDriver, z)} — ${z.toFixed(1)} sd`},
+    {x1: y + 0.05, x2: y + 0.45, z: zMam.get(y) ?? null,
+     lbl: (z) => `MAM ${y} (the harvest year's long rains): ${categoryOf(bgDriver, z)} — ${z.toFixed(1)} sd`},
+  ]).filter((d) => d.z != null);
+  return [Plot.rect(rects, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
+    fill: (d) => bgFill(d.z), fillOpacity: 0.85, title: (d) => d.lbl(d.z)})];
+}
+// background legend — one fresh node per figure (a DOM node lives in one place)
+bgLegend = () => {
+  if (bgMode === "Off") return html`<span></span>`;
+  const def = phaseDefs[bgDriver];
+  return html`<div style="font-size:0.78em;color:#555;margin:0.1rem 0 0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+    <span>Background — <b>${bgDriver.replace(/ \(.*\)$/, "")}</b> phase &amp; strength (${bgMode.toLowerCase()}):</span>
+    <span>${def.neg}</span>
+    <span style="display:inline-block;width:130px;height:14px;background:linear-gradient(to right, ${cardColor(-2)}, ${cardColor(0)}, ${cardColor(2)})"></span>
+    <span>${def.pos}</span>
+    <span style="color:#888">· dashed outlines = the lens seasons</span></div>`;
+}
+// linked clone of the §3 master controls — one fresh row per figure (V2-54)
+bgControlsRow = () => html`<div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end;margin:0.2rem 0 0.4rem">
+  ${Inputs.bind(Inputs.radio(["OND (short rains)", "MAM (long rains)"], {label: _lang(nbText.sections.controls.lensSeason)}), viewof lensSeason)}
+  ${Inputs.bind(Inputs.radio(["All years", "Drier than usual (lowest third)", "Near-normal (middle third)", "Wetter than usual (upper third)"], {label: _lang(nbText.sections.controls.seasonLens)}), viewof seasonLens)}
+  ${Inputs.bind(Inputs.select(driverOptionsX, {label: _lang(nbText.sections.controls.driver)}), viewof bgDriver)}
+  ${Inputs.bind(Inputs.radio(["Off", "Discrete", "Continuous"], {label: _lang(nbText.sections.controls.background)}), viewof bgMode)}
+</div>`
 // outline marks for the highlighted seasons (drawn on top of any background)
 simMarks = ({x = "date", y1, y2, from = null, to = null}) => {
   if (!simYearSet.size) return [];
@@ -2767,6 +3053,9 @@ hsRows = {
   }).filter((d) => d.value != null);
 }
 hsYears = d3.range(1990, 2025)
+hsEraFull = hsEra.startsWith("Full")
+hsYearsShown = hsEraFull ? hsYears : d3.range(2015, 2025)
+hsRowsShown = hsEraFull ? hsRows : hsRows.filter((d) => d.py >= 2015)
 // dataset-wide season coverage (planting years) — HarvestStat v1.2 bounds
 hsCoverage = {
   const r = await dbHarvest.query(`SELECT season, CAST(MIN(planting_year) AS INT) AS lo,
@@ -2782,29 +3071,29 @@ hsRainAnomPct = (seasonName) => {
 }
 
 hsSeriesView = () => {
-  if (!hsRows.length) return noDataPlaceholder(`No seasonal HarvestStat record for ${hsCrop.crop} in ${county}.`);
+  if (!hsRowsShown.length) return noDataPlaceholder(`No ${hsEraFull ? "seasonal" : "2015–2024 seasonal"} HarvestStat record for ${hsCrop.crop} in ${county}${hsEraFull ? "" : " — switch to the full record"}.`);
   const seasons = ["Long", "Short"];
   const eraBrackets = [
     {x: 1996, lbl: "1990–2001 · district-era records remapped to today's counties"},
     {x: 2019, lbl: "2015–2024 · county records"},
   ];
   const panels = seasons.map((sn, i) => {
-    const rows = hsRows.filter((d) => d.season === sn);
+    const rows = hsRowsShown.filter((d) => d.season === sn);
     if (!rows.length) return html``;
     const hole = hsHoleYears[sn];
     const cov = hsCoverage.get(sn);
-    const missing = hsYears.filter((y) =>
+    const missing = hsYearsShown.filter((y) =>
       (y < hole[0] || y > hole[1]) && (!cov || (y >= cov.lo && y <= cov.hi)) && !rows.some((r) => r.py === y));
     const ymax = d3.max(rows, (d) => d.value);
     const plot = Plot.plot({
       height: 250, width: 900, marginLeft: 62, marginRight: 20, marginTop: 26, marginBottom: 4,
-      x: {domain: hsYears, axis: null},
+      x: {domain: hsYearsShown, axis: null},
       y: {label: `${hsVar.unit}`, grid: true, tickFormat: formatNumCompactShort()},
       marks: [
-        Plot.cell(d3.range(hole[0], hole[1] + 1).map((y) => ({y})), {x: "y",
+        ...(hsEraFull ? [Plot.cell(d3.range(hole[0], hole[1] + 1).map((y) => ({y})), {x: "y",
           fill: `url(#ke-hatch-hs-${sn})`, fillOpacity: 0.7,
-          title: () => `no seasonal county reporting for planting years ${hole[0]}–${hole[1]} — a national statistics-system gap, not zero harvests`}),
-        ...eraBrackets.map((b) => Plot.text([b], {x: "x", frameAnchor: "top",
+          title: () => `no seasonal county reporting for planting years ${hole[0]}–${hole[1]} — a national statistics-system gap, not zero harvests`})] : []),
+        ...(hsEraFull ? eraBrackets : []).map((b) => Plot.text([b], {x: "x", frameAnchor: "top",
           text: (d) => d.lbl, dy: -18, fontSize: 9.5, fill: "#888"})),
         Plot.barY(rows, {x: "py", y: "value",
           fill: (d) => d.terc ? tercColor[d.terc] : "white",
@@ -2832,24 +3121,24 @@ hsSeriesView = () => {
     }
     return wrap;
   });
-  const strip = makeTercileStrip(hsYears, [
-    {label: "long rains (MAM)", season: "MAM"}, {label: "short rains (OND)", season: "OND"}], 900, 62, 20);
+  const strip = makeTercileStrip(hsYearsShown, [
+    {label: "MAM (long rains)", season: "MAM"}, {label: "OND (short rains)", season: "OND"}], 900, 62, 20);
   return html`<div>${panels}
     <div style="font-size:11px;color:#777;margin-left:62px">planting-season outcomes (x = planting year — bars sit over the season that grew them):</div>
     ${strip}${tercStripLegend()}</div>`;
 }
 
 hsWetDryView = () => {
-  const rows = hsRows.filter((d) => d.anomPct != null && d.terc != null && d.qc === 0);
-  const flaggedAll = hsRows.filter((d) => d.qc > 0 && d.anomPct != null && d.terc != null);
+  const rows = hsRowsShown.filter((d) => d.anomPct != null && d.terc != null && d.qc === 0);
+  const flaggedAll = hsRowsShown.filter((d) => d.qc > 0 && d.anomPct != null && d.terc != null);
   if (rows.length < 6) return noDataPlaceholder("Too few qc-clean seasons with an era baseline for this view — see the Season series view for absolute values.");
   const bins = ["Dry", "Near", "Wet"];
   const binLbl = {Dry: "Drier than usual", Near: "Near-normal", Wet: "Wetter than usual"};
   const panels = ["Long", "Short"].map((sn) => {
     const sub = rows.filter((d) => d.season === sn);
     const flaggedSub = flaggedAll.filter((d) => d.season === sn);
-    const gatedN = hsRows.filter((d) => d.season === sn && d.anomPct == null).length;
-    const anyN = hsRows.filter((d) => d.season === sn).length;
+    const gatedN = hsRowsShown.filter((d) => d.season === sn && d.anomPct == null).length;
+    const anyN = hsRowsShown.filter((d) => d.season === sn).length;
     if (sub.length < 4) {
       return anyN
         ? noDataPlaceholder(`${sn} rains: ${anyN} seasons on record but no % baseline — each era has fewer than 7 qc-clean seasons. Their absolute values are in the Season series view.`)
@@ -2890,8 +3179,8 @@ hsWetDryView = () => {
 }
 
 hsVsClimateView = () => {
-  const rows = hsRows.filter((d) => d.anomPct != null && d.qc === 0);
-  const flaggedAll = hsRows.filter((d) => d.qc > 0 && d.anomPct != null);
+  const rows = hsRowsShown.filter((d) => d.anomPct != null && d.qc === 0);
+  const flaggedAll = hsRowsShown.filter((d) => d.qc > 0 && d.anomPct != null);
   if (rows.length < 6) return noDataPlaceholder("Too few qc-clean seasons with an era baseline for this view — see the Season series view for absolute values.");
   const rainL = hsRainAnomPct("MAM"), rainS = hsRainAnomPct("OND");
   const joinX = (d) => (d.season === "Short" ? rainS : rainL).get(d.py) ?? null;
@@ -2901,8 +3190,8 @@ hsVsClimateView = () => {
   const panels = ["Long", "Short"].map((sn) => {
     const sub = pts.filter((d) => d.season === sn);
     const flaggedSub = flaggedPts.filter((d) => d.season === sn);
-    const gatedN = hsRows.filter((d) => d.season === sn && d.anomPct == null).length;
-    const anyN = hsRows.filter((d) => d.season === sn).length;
+    const gatedN = hsRowsShown.filter((d) => d.season === sn && d.anomPct == null).length;
+    const anyN = hsRowsShown.filter((d) => d.season === sn).length;
     if (sub.length < 4) {
       return anyN
         ? noDataPlaceholder(`${sn} rains: ${anyN} seasons on record but no % baseline — each era has fewer than 7 qc-clean seasons. Their absolute values are in the Season series view.`)
@@ -2934,8 +3223,8 @@ hsVsClimateView = () => {
 }
 
 hsTableView = () => {
-  if (!hsRows.length) return noDataPlaceholder(`No seasonal HarvestStat record for ${hsCrop.crop} in ${county}.`);
-  const t = hsRows.map((d) => ({Season: d.season, "Planting year": d.py,
+  if (!hsRowsShown.length) return noDataPlaceholder(`No seasonal HarvestStat record for ${hsCrop.crop} in ${county}.`);
+  const t = hsRowsShown.map((d) => ({Season: d.season, "Planting year": d.py,
     Planted: `${String(d.pm).padStart(2, "0")}/${d.py}`, Harvested: `${String(d.hm).padStart(2, "0")}/${d.hy}`,
     [hsVar.label]: d.value == null ? null : +d.value.toFixed(hsVar.id === "yield_t_ha" ? 2 : 0),
     "% of usual year": d.anomPct == null ? "—" : Math.round(d.anomPct),
@@ -3460,13 +3749,13 @@ chirpsYearlyAll = dbChirps.query(`
 // SPEI-12 quasi-monthly strip: chirps_county stores 12 rolling 3-month
 // periods per year; map each period to its centre month to form a
 // near-monthly series (DJF centres on Jan of the following year).
-spei12Rows = {
+speiRows = {
   const centre = {JFM: [2, 0], FMA: [3, 0], MAM: [4, 0], AMJ: [5, 0], MJJ: [6, 0],
     JJA: [7, 0], JAS: [8, 0], ASO: [9, 0], SON: [10, 0], OND: [11, 0], NDJ: [12, 0], DJF: [1, 1]};
   const rows = await dbChirps.query(`
     SELECT period, year, value_mean AS v FROM chirps_county
     WHERE ${normExpr("admin1_name")} = '${countyNorm(county)}'
-      AND variable = 'SPEI-12' AND period != 'annual'`);
+      AND variable = '${speiIdx.v}' AND period != 'annual'`);
   return rows.filter((d) => d.v != null && centre[d.period])
     .map((d) => ({t: new Date(Date.UTC(d.year + centre[d.period][1], centre[d.period][0] - 1, 15)), v: d.v,
       period: d.period, year: d.year}))
@@ -4202,42 +4491,52 @@ prodEvtRowsAll = {
     .map((d) => ({crop: d.crop, year: d.year, value: d[col], unit: prodEvtVar.unit}));
 }
 prodEvtYears = d3.range(2019, 2025)
-prodEvtStrip = () => makeTercileStrip(prodEvtYears, [
-  {label: "OND (yr before)", season: "OND", offset: -1},
-  {label: "MAM (harvest yr)", season: "MAM"},
-], 860, 62, 8)
-
 prodEvtBars = () => {
   const rows = prodEvtRowsAll;
   if (!rows.length) return noDataPlaceholder(`No ${prodEvtVar.label} series for ${county}.`);
   const crops = [...new Set(rows.map((d) => d.crop))];
+  const colors = paletteRange(crops.length);
+  const ymax = d3.max(rows, (d) => d.value);
   const missing = crops.flatMap((c) => prodEvtYears
     .filter((y) => !rows.some((r) => r.crop === c && r.year === y))
     .map((y) => ({crop: c, year: y})));
+  // grouped bars (V2-60): x axis = harvest years, crops side-by-side within
+  // each year. The background carries the LAG-SHIFTED driving seasons —
+  // behind year Y sit OND(Y−1), left, and MAM(Y), right — never Y's own
+  // short rains (harvest-lag rule). Hover any band for its source season.
+  const zOnd = zSeries(bgDriver, "OND"), zMam = zSeries(bgDriver, "MAM");
+  const bgRows = bgMode === "Off" ? [] : prodEvtYears.map((y) => ({
+    year: y, zo: zOnd.get(y - 1) ?? null, zm: zMam.get(y) ?? null}));
   const chart = Plot.plot({
-    height: 100 + crops.length * 82, width: 860, marginLeft: 62, marginRight: 8,
-    x: {domain: prodEvtYears, tickFormat: "d", label: null},
-    fy: {domain: crops, label: null},
+    height: 380, width: 860, marginLeft: 62, marginRight: 8,
+    fx: {domain: prodEvtYears, tickFormat: "d", label: null},
+    x: {domain: crops, axis: null},
     y: {label: prodEvtVar.unit, grid: true, nice: true, tickFormat: formatNumCompactShort()},
+    color: {domain: crops, range: colors, legend: true},
     marks: [
-      Plot.barY(rows, {x: "year", y: "value", fy: "crop",
-        fill: (d) => {
-          const t = tercByYear("OND").get(d.year - 1);
-          return t ? tercColor[t] : "white";
-        }, stroke: "#999", strokeWidth: 0.5,
+      // full-facet wash = OND(Y−1), the season that grew most of year Y's crop
+      Plot.rect(bgRows.filter((d) => d.zo != null), {fx: "year", y1: () => 0, y2: () => ymax,
+        fill: (d) => bgFill(d.zo), fillOpacity: 0.55,
+        title: (d) => `OND ${d.year - 1} (the short rains BEFORE the ${d.year} harvest): ${categoryOf(bgDriver, d.zo)} — ${d.zo.toFixed(1)} sd`}),
+      // thin top band = MAM(Y), the harvest year's own long rains
+      Plot.rect(bgRows.filter((d) => d.zm != null), {fx: "year", y1: () => ymax * 0.93, y2: () => ymax,
+        fill: (d) => bgFill(d.zm), fillOpacity: 0.9,
+        title: (d) => `MAM ${d.year} (the harvest year's long rains): ${categoryOf(bgDriver, d.zm)} — ${d.zm.toFixed(1)} sd`}),
+      Plot.barY(rows, {fx: "year", x: "crop", y: "value", fill: "crop",
+        stroke: "#777", strokeWidth: 0.4,
         channels: {Crop: "crop", Year: {value: (d) => String(d.year), label: "Harvest year"},
           Value: {value: (d) => `${formatNumCompactShort()(d.value)} ${d.unit}`, label: prodEvtVar.label},
           Rains: {value: (d) => {
             const t = tercByYear("OND").get(d.year - 1);
-            return `OND ${d.year - 1}: ${t ? tercWord[t] : "no data"}`;
+            return `OND ${d.year - 1}: ${t ? tercWord[t] : "no data"} (county rainfall tercile)`;
           }, label: "Preceding short rains"}},
-        tip: {format: {x: false, y: false, fill: false, Crop: true, Year: true, Value: true, Rains: true}}}),
-      Plot.text(missing, {x: "year", frameAnchor: "top", fy: "crop", text: () => "∅", dy: 8, fontSize: 13, fill: "#999",
+        tip: {format: {fx: false, x: false, y: false, fill: false, Crop: true, Year: true, Value: true, Rains: true}}}),
+      Plot.text(missing, {fx: "year", x: "crop", frameAnchor: "top", text: () => "∅", dy: 8, fontSize: 11, fill: "#888",
         title: (d) => `${d.crop} ${d.year}: not reported by KNBS — not zero`}),
       Plot.ruleY([0]),
     ],
   });
-  return html`<div>${chart}${prodEvtStrip()}${tercStripLegend()}
+  return html`<div>${chart}${bgLegend()}
     <div style="font-size:12px;color:#555">${md`${_lang(nbText.sections.b3.prodLegend)}`}</div></div>`;
 }
 
@@ -4253,8 +4552,10 @@ prodEvtLines = () => {
     y: {label: prodEvtVar.unit, grid: true, tickFormat: formatNumCompactShort()},
     color: {domain: crops, range: colors, legend: true},
     marks: [
-      // NO same-year season background here — it implies the wrong causation
-      // (harvest-lag rule); the lag-correct strip below carries the drivers.
+      // the background is LAG-SHIFTED (bgMarksHarvest): behind year Y sit
+      // OND(Y−1) and MAM(Y) — the seasons that grew the harvest, never Y's
+      // own short rains (harvest-lag rule)
+      ...bgMarksHarvest({y1: 0, y2: ymax, years: prodEvtYears}),
       Plot.lineY(rows, {x: "year", y: "value", stroke: "crop", strokeWidth: 1.8}),
       Plot.dot(rows, {x: "year", y: "value", fill: "crop", r: 3.5, stroke: "white", strokeWidth: 0.6,
         channels: {Crop: "crop", Year: {value: (d) => String(d.year), label: "Year"},
@@ -4263,7 +4564,7 @@ prodEvtLines = () => {
       Plot.ruleY([0]),
     ],
   });
-  return html`<div>${chart}${prodEvtStrip()}${tercStripLegend()}</div>`;
+  return html`<div>${chart}${bgLegend()}</div>`;
 }
 
 // "Vs rainfall" (V2-15 phase 1): harvest value against the PRECEDING short
