@@ -1,0 +1,642 @@
+{
+  "summary": "Cycle-6 focused adversarial review of KE-ENSO notebook_v2 v2.6 (tercile lens + HarvestStat 3.6-B)",
+  "agentCount": 16,
+  "logs": [
+    "confirmed serious: 14, refuted: 0, minors (unverified): 8"
+  ],
+  "result": {
+    "verdicts": [
+      {
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)",
+        "verdict": "The v2.6 machinery is mechanically sound — all four hsView functions, tercByYear, makeTercileStrip, simYearSet/simMarks execute clean in node/jsdom against the real parquets for Machakos and Marsabit (0 throws, all DOM nodes; fence checker PASS; all 202 nbText refs resolve; band-scale fix verified) — but execution exposed one wrong-numbers bug (Area anomaly = area divided by the production median, e.g. \"422% of a usual year\"), silent dropping of real 1990 bars in five counties, a tercile-threshold callout whose mm cutoffs don't match the classification actually used, and orphaned §2 shading controls whose legend describes bands no chart draws."
+      },
+      {
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verdict": "The v2.6 lag grammar itself is sound where it matters — planting-year anchoring, the OND offset −1 strip under 3.6-A (no double shift), and the 1991–2020 county terciles all verified against the parquets — but one anomaly-math bug is critical and the section restructure left a trail of dead controls and stale prose that actively misleads a first-time reader."
+      }
+    ],
+    "confirmed": [
+      {
+        "severity": "critical",
+        "title": "Area (ha) anomaly is computed against the PRODUCTION median — wrong numbers displayed",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2889-2901 (hsRows), surfacing at 2944 (series tooltip), 2983/2986 (wet-dry y axis), 3019/3023 (vs-climate y), 3040 (table \"% of usual year\"), 1565 (CSV pct_of_usual)",
+        "problem": "hsRows maps varKey = hsVar.id === \"yield_t_ha\" ? \"yield\" : \"prod\", so when hsVar = Area (ha) the value d.area_ha is divided by the era median of production_t. Every \"% of a usual year\" figure under the Area variable — tooltips, both analytic views' y axes, the table column, and the CSV export — is a physically meaningless ratio presented as a percentage to policymakers.",
+        "evidence": "Executed hsRows verbatim in node against the real parquet: Machakos Maize Long-1991 area = 82,200 ha renders anomPct = 422%; Long-1992 61,255 ha → 315%; Long-1993 66,000 ha → 339%. The med map (2891-2892) only ever stores |yield and |prod keys; no |area median exists. DESIGN_ke18_harveststat.md §2 defines the anomaly per variable-with-a-baseline; area was never given one.",
+        "fix": "Either (a) add med.set(k + \"|area\", v.length >= 7 ? d3.median(v, (d) => d.area_ha) : null) and map varKey area_ha→\"area\", or (b) set anomPct = null when hsVar.id === \"area_ha\" so Area falls back to absolute-only (the contract's greyed anomaly-view behaviour) — wet-dry and vs-climate then show their honest no-baseline placeholder instead of fabricated percentages.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "CONFIRMED by code read and executed reproduction. notebook_v2.qmd:2894 maps every non-yield variable to varKey \"prod\", but the hsVar selector (line 1521) includes {id:\"area_ha\"}; the med map (2891-2892) stores only |yield and |prod keys, so with Area (ha) selected, line 2901 computes d.area_ha / era-median(production_t) * 100. Reproduced against the real parquet (data/KE-enso-explorer/harveststat_county_production.parquet) with python: Machakos Maize Long era 1991–2001 has 10 qc-clean years, median production 19,457.55 t; Long-1991 area 82,200 ha → 422%, 1992 → 315%, 1993 → 339% — matching the finding exactly (honest area-vs-area figure would be 113%). All cited surfacing points verified in the file: tooltip 2944, wet-dry y 2971/2986, vs-climate y 3007/3023, table 3040, CSV 1565; the views' anomPct!=null gates do not filter out the fabricated values. DESIGN_ke18_harveststat.md (playbook/handovers/KE-enso-explorer/, line 15) confirms the contract's absolute-only/greyed fallback exists and that area was never given an anomaly baseline.",
+          "fix": "Prefer option (a), amended: in hsRows (notebook_v2.qmd ~2890-2894) add an area era-median and route area_ha to it — inside the eras loop add `med.set(k + \"|area\", v.filter((d) => d.area_ha != null).length >= 7 ? d3.median(v, (d) => d.area_ha) : null);` and change line 2894 to `const varKey = hsVar.id === \"yield_t_ha\" ? \"yield\" : hsVar.id === \"area_ha\" ? \"area\" : \"prod\";`. The amendment matters because the eras grouping filters rows on yield_t_ha != null, so the raw v.length>=7 gate counts yield-clean rows, not area-non-null rows; d3.median already skips nulls. This keeps all three variables symmetric with well-defined era baselines (e.g. Machakos Long 1991 becomes an honest 113% of usual). Option (b) (anomPct = null when hsVar.id === \"area_ha\", falling back to the contract's absolute-only behaviour) is also acceptable but strictly less informative, since area medians are computable under the same >=7-year gate."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Real Short-rains 1990 harvests silently dropped by the hard-coded hsYears band domain",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2905 (hsYears = d3.range(1991, 2025)), 2930 (x domain), 2925-2926 (missing markers span hsYears only)",
+        "problem": "The parquet contains Maize Short planting_year=1990 rows with real values in Embu, Kiambu, Kitui, Meru and Murang'a (e.g. Kitui 21,396 t; Murang'a 26,185 t). py=1990 is outside the band domain, so Plot silently drops the bar in the default Season-series view — no bar, no ∅ marker — while the same row IS counted in the crop-select label (2880), included in the era-A medians (2887), plotted in Wet-vs-dry and Vs-climate, and listed in the Table/CSV. The views disagree about whether 1990 exists, and hsEraOf(1990) labels its provenance \"1991–2001\". Violates the standing check: small-n never silently hidden.",
+        "evidence": "duckdb: SELECT ... WHERE season IN ('Long','Short') AND planting_year < 1991 → 5 county rows, all Maize Short 1990, qc=0, four with production/yield values. Node harness OUT-OF-DOMAIN probe confirms these rows survive into hsRows for those counties while the Plot band domain excludes x=1990.",
+        "fix": "Set hsYears = d3.range(1990, 2025) (and extend the era-bracket text/hsEraOf boundary wording to 1990–2001), or derive the domain from d3.min/max of the data unioned with [1991, 2024]. Keep the hole cells as-is — 1990 is pre-hole so the missing-marker logic already handles the Long panel's empty 1990 honestly.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced end-to-end. (1) duckdb on data/KE-enso-explorer/harveststat_county_production.parquet returns 5 Maize Short planting_year=1990 rows (Embu area-only; Kiambu 3,450 t; Kitui 21,395.7 t; Meru 15,318.9 t; Murang'a 26,184.69 t), all qc_flag=0; Short-season min py is 1990. (2) notebook_v2.qmd defines hsYears = d3.range(1991, 2025), uses x: {domain: hsYears} in the Season-series panels, and computes the ∅ missing markers only over hsYears, so 1990 gets neither bar nor marker; hsRows applies no py filter so the rows survive. (3) An executed jsdom+@observablehq/plot harness with the real domain rendered 2 of 3 bars and showed plot.scale(\"x\").apply(1990) === undefined and missing.includes(1990) === false — the band scale silently drops the out-of-domain bar. (4) Cross-view disagreement confirmed: hsTableView lists the 1990 rows; hsCropOpts counts them in the crop label; era-A qc-clean Short Maize counts (Kiambu 11, Kitui 10, Murang'a 9, Embu 8) pass the >=7 median gate so the 1990 rows carry non-null anomPct into Wet-vs-dry and Vs-climate as visible dots; and hsEraOf(1990) returns the mislabeled provenance string \"1991–2001 (district-era records)\". Real data silently hidden in one view while present in four others — the finding stands as a major defect.",
+          "fix": "Proposed fix is correct as written. Set hsYears = d3.range(1990, 2025) (or derive: d3.range(Math.min(1991, d3.min(hsSeasonalAll, d => d.py) ?? 1991), 2025)). Since hsEraOf uses py <= 2001 the era logic already buckets 1990 correctly — only label strings need updating: the hsEraOf return string, the eraBrackets label (\"1991–2001 · district-era records remapped to today's counties\" → \"1990–2001 …\"), and the Wet-vs-dry footer \"district-era records (1991–2001)\". No change needed for the hole cells: 1990 is pre-hole, so the Long panel's 1990 correctly shows an ∅ \"not reported — not zero\" marker under the existing missing-marker logic."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Tercile-threshold callout displays mm cutoffs from the wrong baseline — contradicts the classification every strip/bar/lens actually uses",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1099-1107 (tercThresholdLine) vs 2822-2829 (tercByYear/enso_outlook_base) and 2853 (tercStripLegend)",
+        "problem": "tercThresholdLine computes lo/hi as sorted-index thirds of ALL chirps years and captions them \"the bottom and top thirds of 1981–2025 — the same categories as a KMD ... outlook\". But the terciles that drive simYearSet, every tercile strip, 3.5 dot fills, 3.6-A/B bar fills come from enso_outlook_base, which was baked with 1991–2020 interpolated tercile cutoffs. The reader is told drier-than-usual means \"under 303 mm\" in Machakos while the charts classify 279–303 mm years as Near — the notebook's own definition sentence disagrees with its own visuals. The strip legend (2853) correctly says 1991–2020, so the notebook states two different baselines for \"the same categories\".",
+        "evidence": "Recomputed from the parquets: Machakos OND stored terciles match 1991–2020 interpolated percentiles 45/45 (cutoffs 278.6/343.9 mm) but the callout's all-years sorted-index method gives 302.8/356.8 mm and matches only 37/45; Marsabit: 100.8/167.0 true vs 95.5/155.2 displayed (44-45/45 vs stored for 1991-2020 methods, 37/45 for the displayed one).",
+        "fix": "In tercThresholdLine, filter rows to year >= 1991 && year <= 2020 and use d3.quantile(sortedValues, 1/3) / d3.quantile(sortedValues, 2/3) (linear interpolation, matching the producer), and change the caption to \"the bottom and top thirds of 1991–2020\". Better: read the cutoffs from enso_outlook_base (clim fields) so notebook and producer can never drift.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced end-to-end. (1) Code: tercThresholdLine (notebook_v2.qmd:1099-1107) sorts ALL chirpsYearlyAll years (query at 3552 has no year filter; 45 years 1981-2025) and takes sorted-index thirds rows[floor(n/3)]/rows[floor(2n/3)], captioned \"bottom and top thirds of 1981–2025\". (2) The classification everywhere else comes from enso_outlook_base.parquet via tercByYear (2822-2829) → simYearSet (2755-2760), strip cells (2845), 3.5 dots (1400, 2895), 3.6 bars (4348-4354). (3) Producer _sources/enso_outlook_build.py lines 27/52-59: CLIM0,CLIM1=1991,2020; np.percentile(clim,[100/3,200/3]) linear interpolation; meta.json confirms. (4) Recomputed from the parquets: Machakos OND stored terciles match the 1991-2020 percentile method 45/45 (cutoffs 278.6/343.9 mm) while the callout's method displays 302.8/356.7 mm and matches only 36/45 — e.g. 1985 (282.9 mm), 1991 (289.9), 1993 (299.9), 2025 (288.4) are charted Near but fall under the callout's 303 mm \"drier\" cutoff; 2024 (356.7 mm) is charted Wet but below the callout's 357 mm \"wetter\" cutoff. Marsabit: true 100.8/167.0 vs displayed 95.6/155.2 (41/45). Strip legend at 2853 says \"1991–2020 thirds\", so the notebook states two conflicting baselines. The finding's numbers were trivially off (37/45 vs 36/45, 356.8 vs 356.7, 95.5 vs 95.6) but the defect is exactly as described.",
+          "fix": "In tercThresholdLine (notebook_v2.qmd:1099-1107): filter to the producer's baseline and use interpolated terciles — const vals = chirpsYearlyAll.filter((d) => d.period === lensSeasonCode && d.value != null && d.year >= 1991 && d.year <= 2020).map((d) => d.value).sort((a, b) => a - b); then lo = d3.quantile(vals, 1/3), hi = d3.quantile(vals, 2/3) (d3.quantile's linear interpolation is the same R-7 method as the producer's np.percentile default — verified to reproduce the stored terciles 45/45 for Machakos and Marsabit OND). Change the caption from \"1981–2025\" to \"the bottom and top thirds of 1991–2020\" (matching tercStripLegend). AMENDMENT to the finding's \"better\" option: the cutoffs canNOT currently be read from enso_outlook_base — its clim_mean/clim_sd fields are the normal's mean/sd, not the tercile cutoffs; to source them from the parquet the producer (_sources/enso_outlook_build.py) would need to emit new terc_lo/terc_hi columns (t1/t2 are already computed at line 56) and the parquet rebaked. The d3.quantile recompute is the correct notebook-side fix today. Cosmetic: producer classifies Dry as v <= t1, so \"under X mm\" is strictly \"at or under X mm\"."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "§2 eventShade/eventDriver controls drive no chart background — annotationMarks and its whole event-band stack are dead code, and the legend describes shading that doesn't exist",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:612-637 (sticky controls + eventShadeLegend), 2665-2750 (annotationMarks/annMode), 2781-2797 (makeYearStrip), 3756-3775 (eventBandMarks/eventBandMarksYear)",
+        "problem": "After the v2.6 restructure, annotationMarks has ZERO callers; eventBandMarks/eventBandMarksYear/makeYearStrip are reachable only through it or not at all. §2's charts use hard-coded or local drivers (ndviSwarmPanel fixes driver per season; contingency uses contOndDriver/contMamDriver). So the sticky eventShade radio's only living consumer is eventShadeLegend — a legend that tells the user \"Shaded bands mark the named events ... hover any band for its one-line story\" over charts that draw no bands, and toggling \"Driver strength\" changes nothing but the legend itself. The cell comment \"applies to every chart background in this section (Pete P19)\" is now false.",
+        "evidence": "grep 'annotationMarks(' → only the definition (2665) and its internal withSim calls; grep eventBandMarks/eventBandMarksYear/makeYearStrip callers → none; grep of §2 body (640-1050) for annMode/eventShade/eventBandMarks/eventDriver in chart marks → zero hits (only the legend cell at 631-637). Fig 2.1 rainCmpLinePanels marks = line/text/ruleY only.",
+        "fix": "Decide one way: (a) wire annotationMarks({mode: annMode, driver: eventDriver, ...}) back into the §2 time-series charts the controls claim to govern, or (b) delete eventShade + eventShadeLegend + annotationMarks + eventBandMarks(Year) + makeYearStrip (~150 lines) and keep eventDriver only where it is consumed. Either way the legend must describe only encodings actually rendered.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced every element of the finding by grep + reading the cited code in /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso/notebooks/KE-enso-explorer/notebook_v2.qmd. (1) annotationMarks (2665) has zero callers anywhere in the repo (checked *.qmd/*.ojs/*.js across notebooks/, helpers/, components/). (2) eventBandMarks (3756) is called only inside annotationMarks (2672); eventBandMarksYear (3769) and makeYearStrip (2781) have zero callers at all — the strip actually used everywhere is the separate makeTercileStrip (1209, 1598, 2963, 4328). (3) annMode (2750) is consumed only by eventShadeLegend (631), so the eventShade radio (622) changes nothing but the legend itself. (4) Every §2 chart verified individually: Fig 2.1 rainCmpLinePanels (3050) = lineY/text/ruleY; rainPanel (3396) = barY/ruleX/ruleY + tercile strip; Fig 2.2 contingency uses local contOndDriver/contMamDriver (905-906); Fig 2.3 eventTimeline (940) is a static swimlane; NDVI swarm hard-codes driver per season (984). None reads eventShade/eventDriver/annotationMarks — the comment at 615 \"applies to every chart background in this section (Pete P19)\" is false. (5) eventDriver's only living chart consumers are §3's prodEvtVsDriver (4398) and prodEvtTable (4424) via prodEvtView (1477-1482), not §2, and never as a background; the \"Driver strength\" legend (cardLegend, 2654) claims \"Background — phase & strength\" shading that no chart renders. One minor overstatement in the finding: the \"Named events\" legend colors do match Fig 2.3's event-timeline bars (same PALETTE.event fills, hover one-line story at 950), so they describe *something* in the section — but the legend is framed as \"legend for the shading in force\" (630) above Figs 2.1/2.2 which draw no bands, and the toggle is a no-op beyond the legend, so the defect is real and major.",
+          "fix": "The proposed either/or is right; sharpen option (b) with the exact live/dead boundary: (a) wire annotationMarks({mode: annMode, driver: eventDriver, ...}) into the §2 time-series charts (Fig 2.1 rainCmpLinePanels/rainPanel at 3050/3396) the controls claim to govern; or (b) delete viewof eventShade (622-625), eventShadeLegend (629-638), annMode (2750), annotationMarks (2665-2748), eventBandMarks (3756-3767), eventBandMarksYear (3769-3775), and makeYearStrip (2781-2799), and MOVE viewof eventDriver out of §2's sticky bar into §3's Fig 3.6-A controls-row (next to prodEvtView at ~1431), since its only chart consumers are prodEvtVsDriver (4398) and prodEvtTable (4424). Under (b), cardLegend (2654) also loses its sole caller — delete it or repurpose it beside the §3 chart; KEEP cardColor (live at 1001, 2793, 3485), simMarks (live, e.g. 1247), and makeTercileStrip (live at 1209/1598/2963/4328). Note eventBandMarksYear and makeYearStrip are dead under BOTH options unless deliberately rewired. Either way, fix the false comments at 615 (\"applies to every chart background in this section\") and 630 (\"legend for the shading in force\"), and if any legend remains it must describe only encodings actually rendered (Fig 2.3's event swimlane already self-describes via its own colors/tooltips)."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Fig 3.6-A \"Vs driver\" and \"Table\" views are silently driven by the §2 sticky eventDriver, a full section away",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:4398/4405/4412 (prodEvtVsDriver), 4424/4427 (prodEvtTable); control at 616 inside §2's sticky bar",
+        "problem": "After the restructure, §3 owns the lensSeason/seasonLens sticky bar; §2's sticky (with eventDriver) unsticks at the §2 boundary. A user at Fig 3.6-A choosing \"Vs driver\" gets an x axis and \"Preceding short rains\" tooltips/table column keyed to whatever eventDriver was last set to in §2 — with no visible control to change it and no indication where it lives. The binding design contract (DESIGN_ke18_harveststat.md §7) sanctions eventDriver reuse \"here only\" for 3.6-B's Vs-climate view — which does not use it — while 3.6-A retains this out-of-scope coupling.",
+        "evidence": "grep eventDriver → consumers are eventShadeLegend (631), prodEvtVsDriver (4398), prodEvtTable (4424) only. The loader-dep comment at 1468 acknowledges the coupling (\"eventDriver re-renders via the view fns\"). .ke-sticky-sec is position:sticky within its parent section, so the §2 bar is off-screen throughout §3.",
+        "fix": "Add a local driver Inputs.select to the 3.6-A controls-row (defaulting to eventDriver's value or to \"ENSO + IOD\") and use it in prodEvtVsDriver/prodEvtTable; or re-anchor those views on the §3 tercile lens (tercByYear) instead of driver z, matching the section's KMD grammar.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "confirmed",
+          "fix": "Prefer the finding's second option, amended: re-anchor 3.6-A's \"Vs driver\" and \"Table\" views on §3's tercile/rainfall grammar rather than adding a driver select. Concretely: in prodEvtVsDriver (4395) replace zSeries(eventDriver,\"OND\") with the preceding-OND county rainfall signal (anomaly % or z, same CHIRPS base as tercByYear — matching hsVsClimateView's grammar), retitle the view e.g. \"Vs season rainfall\", and label x \"preceding short rains (% vs normal)\"; in prodEvtTable (4421) key the \"Preceding short rains\" column on tercByYear(\"OND\")/tercWord (exactly what the Bars tooltip at 4348–4356 already does). Also update the stale copy in nbText_v2.json — b3.prodAbout's \"Switch the driver above the section — including season rainfall or the SPEI drought index\" sentence and b3.prodVsDriverNote's \"the chosen driver\" — which the finding's proposed fix omits. The finding's first option (a local driver Inputs.select in the 3.6-A controls-row) also removes the invisible coupling and is acceptable as an analyst affordance, but it re-imports driver vocabulary into the section the binding design deliberately uncoupled from ENSO/IOD, so it is the weaker choice; if taken, default it to a rainfall/SPEI driver and keep loader deps data-only per the house rule."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "QC-flagged seasons silently hidden in Wet-vs-dry and Vs-climate views — contract mandates mark-and-exclude, not drop",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2971 (hsWetDryView filter d.qc === 0), 3007 (hsVsClimateView filter d.qc === 0)",
+        "problem": "DESIGN_ke18_harveststat.md §3 (binding): \"Flagged points visible (hollow glyph, 'QC-flagged upstream'), excluded from medians/counts; captions print both counts.\" The Season-series view complies (red dashed stroke, provenance note), but Wet-vs-dry and Vs-climate filter flagged rows out entirely — invisible, uncounted, no caption count of flagged vs clean anywhere. 279 rows carry qc_flag 1/2 in the parquet; in a small-n view a vanished dot is indistinguishable from a season that never existed, the exact silent-hiding the contract forbids.",
+        "evidence": "Both view functions begin with hsRows.filter((d) => ... d.qc === 0); no second mark for qc>0 rows exists in either mark list; nbText hsAbout/hsCaption contain no flagged/clean counts. duckdb: qc_flag 1 → 50 rows, qc_flag 2 → 229 rows.",
+        "fix": "Plot qc>0 rows as a separate hollow-dot mark (fill \"none\", same x/y, tooltip \"QC-flagged upstream — excluded from medians\") in both views, keep them out of counts/medians/sentence as now, and append \"(n clean, m QC-flagged)\" to each panel label or the view footer.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced concretely. (1) Contract: DESIGN_ke18_harveststat.md lines 17-18 mandate mark-and-exclude (\"Flagged points visible (hollow glyph, 'QC-flagged upstream'), excluded from medians/counts; captions print both counts\") and line 34 explicitly requires \"qc hollow\" dots in the Wet-vs-dry view. (2) Code: notebook_v2.qmd:2971 (hsWetDryView) and :3007 (hsVsClimateView) both filter d.qc === 0; no mark in either view consumes qc>0 rows; bin labels/panel n count clean rows only; nbText.json has no flagged/clean counts. Season-series (2940-2946) marks flagged rows, so the drop is view-specific as claimed. (3) Not vacuous: hsRows (2896-2903) computes anomPct for flagged rows (era median built from clean rows, applied to all), so flagged rows arrive plottable and the view filter deletes them. Recomputed via DuckDB: parquet has 279 flagged rows (qc=1:50, qc=2:229) but only 6 pass the >=7-clean-years era gate with non-null anomaly (Mombasa/Makueni/Kilifi/Kitui Maize-Long; Busia/Tana River Maize-Short, all era B) — the finding's \"279 rows\" overstates live impact, but 6 silently vanished dots in ~10-season era-B panels, with no ∅ glyph in these views, is exactly the silent hiding the binding contract forbids. Confirmed with magnitude correction.",
+          "fix": "Proposed fix is right in substance; two amendments. In both hsWetDryView and hsVsClimateView keep the existing clean-row set (filters, <6 guard, medians, bin counts, count sentence unchanged) and add a flagged set: const flagged = hsRows.filter(d => d.qc > 0 && d.anomPct != null && d.terc != null) for Wet-vs-dry (terc needed for the x bin) and ... && d.qc > 0 && d.anomPct != null (plus non-null rainfall x after the hsRainAnomPct join) for Vs-climate. Plot it as a hollow mark in each panel: Plot.dot(flaggedSub, {x, y as clean mark, fill: \"none\", stroke: \"#c0392b\" (or era hue), strokeWidth: 1.4, r: 5, tip: true, title: d => `planted ${d.py}: ${Math.round(d.anomPct)}% of usual — QC-flagged upstream (HarvestStat), excluded from medians`}). Append \"(n clean, m QC-flagged)\" to each panel footer/label per contract line 18. Note: flagged rows in eras failing the >=7-clean-years gate have anomPct null and still cannot appear in these anomaly views — that residual invisibility is contract-consistent (§2 absolute-only gating); the printed counts are the honest channel for them, so compute m from flagged rows for the crop/season, not only the plottable ones, if full disclosure is wanted."
+        }
+      },
+      {
+        "severity": "critical",
+        "title": "Area (ha) anomaly divides area by the PRODUCTION median — bogus \"% of a usual year\" everywhere",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2894 (varKey), 2889-2901 (med/anomPct)",
+        "problem": "hsRows maps hsVar.id to varKey via `hsVar.id === \"yield_t_ha\" ? \"yield\" : \"prod\"`, so selecting \"Area (ha)\" (offered at line 1521) computes anomPct = area_ha / median(production_t) × 100. That fabricated percentage is presented as a statistic in the Season-series tooltip, drives the whole \"Wet vs dry seasons\" and \"Vs climate\" views (dots, medians, the k-of-n sentence), the Table's \"% of usual year\" column, and the CSV download's pct_of_usual field.",
+        "evidence": "Recomputed from harveststat_county_production.parquet: Nakuru Maize Long 2024 with Area selected → area_ha 64,189 ÷ era-B production median 163,174 t = \"39% of a usual year\" for a perfectly normal planted area. (Era medians themselves verified: Nakuru Long A/B med yield 2.25/2.29, Machakos Short A/B 0.72/0.54, ≥7-gate and qc-exclusion reproduce exactly.)",
+        "fix": "Add an \"area\" median: med.set(k+\"|area\", ...) computed over rows where area_ha != null, and map varKey = ({yield_t_ha:\"yield\", production_t:\"prod\", area_ha:\"area\"})[hsVar.id]. While there, gate/median each variable on ITS OWN non-null rows (the current group filters on yield_t_ha != null for all medians — no mismatch in today's data, but it breaks silently on a refresh).",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Confirmed by direct code reading and independent recomputation. (1) notebooks/KE-enso-explorer/notebook_v2.qmd:2894 reads `const varKey = hsVar.id === \"yield_t_ha\" ? \"yield\" : \"prod\";` while the hsVar selector (line 1521) offers `area_ha`, and only `|yield` and `|prod` medians are ever set (2891-2892) — so Area selected divides area_ha by the production median at 2897/2901. (2) Recomputed from data/KE-enso-explorer/harveststat_county_production.parquet with the exact hsRows logic (qc==0, yield non-null, era B = py>=2015, gate >=7): Nakuru Maize Long era-B median production = 163,173.935 t; 2024 area_ha = 64,189 → anomPct = 39.34%, matching the finding's \"39% of a usual year\", vs an honest area-based 82.5% (era-B area median 77,775.5 ha). Era medians in the finding also reproduce (Nakuru A/B yield 2.25/2.29). (3) The bogus anomPct provably reaches every claimed consumer: Season-series tooltip (line 2944), Wet-vs-dry dots/medians/k-of-n sentence (2986/2991/2997), Vs-climate view (3023-3026), Table \"% of usual year\" (3040), CSV pct_of_usual (1565). (4) The fix's secondary gating point is slightly understated: 30 qc-clean seasonal rows already have area_ha non-null with yield_t_ha null, so the yield-based group filter (2887) mis-gates area today, not only \"on a refresh\".",
+          "fix": "Proposed fix is correct; amend the second half from precautionary to necessary. In hsRows (notebook_v2.qmd ~2885-2903): (a) add an area median and map all three variables, e.g. `const varKey = ({yield_t_ha: \"yield\", production_t: \"prod\", area_ha: \"area\"})[hsVar.id];`; (b) compute each variable's median and its >=7-row gate over rows where THAT variable is non-null (keep qc === 0), instead of grouping once on `yield_t_ha != null` — this is required now, not just future-proofing: 30 qc-clean seasonal rows have area_ha non-null but yield_t_ha null, so an area median gated/pooled on yield-non-null rows would silently exclude real area observations from the \"usual year\" baseline while still plotting them. Simplest shape: group rows per season|era with qc===0 only, then per variable v in {yield_t_ha, production_t, area_ha} take vv = rows where d[v] != null and set med(k+\"|\"+key, vv.length >= 7 ? d3.median(vv, d => d[v]) : null)."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "§2 sticky \"Ocean driver\"/\"Chart background\" controls are dead: annotationMarks has zero call sites",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:612-638 (controls+legend), 2665 (annotationMarks, never called), 2750 (annMode), 4398/4424 (only live eventDriver consumers)",
+        "problem": "After the restructure moved lens outlines into §3, nothing calls annotationMarks: eventShade now toggles only its own legend text, and that legend tells readers \"Shaded bands mark the named events … hover any band for its one-line story\" when no §2 chart draws any band (2.1 uses its own phase strips, 2.2/2.4 fixed drivers, 2.3 IS the events). eventDriver's only live consumers are fig 3.6-A's \"Vs driver\" view and table — in §3, where the §2 sticky control is no longer visible, and 3.6-A's prodAbout tells readers to \"switch the driver above the section\".",
+        "evidence": "grep: annotationMarks defined at 2665, referenced nowhere else; annMode used only by eventShadeLegend (631); eventDriver used only at 631/4398/4405/4412/4424/4427. Comment at 615 still claims \"applies to every chart background in this section (Pete P19)\".",
+        "fix": "Either (a) delete the eventShade radio + eventShadeLegend + annotationMarks/annMode dead code and move the eventDriver select into 3.6-A's controls-row (its only consumer), or (b) re-attach annotationMarks({mode: annMode, driver: eventDriver}) to the §2 date-x charts it used to shade. Update the line-615 comment and prodAbout either way.",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Every factual claim reproduces against notebooks/KE-enso-explorer/notebook_v2.qmd. (1) `annotationMarks` is defined at line 2665 and grep over the whole file shows zero other occurrences — no chart calls it; its only internal consumer chain (eventBandMarks at 3756, called at 2672) is therefore dead too, and `eventBandMarksYear` (3769) has no callers at all. (2) `annMode` (2750, derived from the `eventShade` radio at 622) is consumed only by `eventShadeLegend` (631), so the sticky \"Chart background\" radio toggles nothing but legend text. (3) That legend (633-637) literally says \"Shaded bands mark the named events … hover any band for its one-line story\", yet no §2 chart draws bands: §2.2 contingency uses its own local selects `contOndDriver`/`contMamDriver` (801-808, panels at 905-906), §2.4 NDVI hard-codes the driver per season (`driver = season === \"OND\" ? \"ENSO + IOD\" : \"Western-V (WNP)\"`), and the only shading helpers actually invoked in the body (`simMarks` at 1137/1196/1247/1353/1394) are the §3 season-lens outlines, driven by §3's own sticky controls (lensSeason/seasonLens at 1056-1073), not by eventShade/eventDriver. (4) `eventDriver`'s only live consumers are `prodEvtVsDriver` (4398/4405/4412) and `prodEvtTable` (4424/4427), which render fig 3.6-A (plotFooter fig: \"3.6-A\" at 1488) inside §3 — a different section from the §2 sticky bar hosting the select, and per-section sticky (`position: sticky` inside the section container, line 90) means it has scrolled away by then. (5) The stale comment is verbatim at line 615: \"applies to every chart background in this section (Pete P19)\". (6) nbText_v2.json b3.prodAbout indeed says \"Switch the driver above the section\" — pointing at a control that lives above a different section. The defect is concrete: two prominent sticky controls where one is fully inert-but-lying (its legend describes bands that don't exist) and the other acts only on a chart two sections away.",
+          "fix": "Proposed fix (a) is the right one; (b) would fight the V2 restructure in which §3's season lens (simMarks, lensSeason/seasonLens) deliberately replaced driver shading and §2 charts grew their own local driver selects. Amended fix: (1) delete the `viewof eventShade` radio (622-625), `eventShadeLegend` (629-638), `annMode` (2750), `annotationMarks` (2663-2749), and the now-orphaned helpers `eventBandMarks` (3756-…), `eventBandMarksYear` (3769-…, already dead today) and `cardLegend` (2654-2662; only caller is the deleted legend) — keep `cardColor` (live at 1001/2793/3485) and `simMarks` (live §3 lens); (2) move `viewof eventDriver` (614-618) out of the §2 sticky controls-row into fig 3.6-A's controls-row (1429-1459) next to prodEvtView/prodEvtVar — keeping it OUT of the loader dep array at 1468 per the existing comment (loader deps = data-changing inputs only); (3) delete the stale line-615 comment (\"applies to every chart background in this section\") and reword nbText_v2.json b3.prodAbout from \"Switch the driver above the section\" to \"Switch the driver beside the chart\" (and mirror in fr); (4) if the §2 sticky controls-row is left empty, remove the `::: {.controls-row .ke-sticky-sec}` wrapper (612-627) entirely. Also drive the \"Vs driver\"/Table views' re-render check in a real browser, since eventShade removal changes the §2 DOM around the legend cell."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Six §3 caption strings describe the removed event-band/driver-background machinery",
+        "where": "nbText_v2.json sections.b3 {seasonStripCaption, ndviCaption, ipcCaption, totCaption, rwCaption, prodAbout}, rendered at qmd:1150, 1216, 1257, 1412, 1604, 1491",
+        "problem": "ndviCaption/ipcCaption/totCaption/rwCaption all end \"Event bands as above\" and seasonStripCaption explains \"Background per the section's driver/highlight controls: each season holds its own measured shade, the gaps blend visually…\" — but no §3 chart draws event bands or driver-strength backgrounds any more (they use simMarks outlines + tercile strips/dot fills). prodAbout says \"the strip below shows both seasons' driver state, using … 0.5/1.0/1.5 standard deviations\" when the strip under 3.6-A is now a rainfall-TERCILE strip. Meanwhile the NEW encodings (ToT dot colour = concurrent-season tercile; NDVI/ReliefWeb tercile strips) are captioned nowhere.",
+        "evidence": "seasonStripChart (1129-1146), ndviChart (1181), ipcChart (1233), totChart (1386), rwChart (1581 — comment \"no background here (V2-49)\") contain no eventBandMarks/annotationMarks; prodEvtStrip (4328) is makeTercileStrip. timelineCaption (now fig 2.3) also still promises \"the same shading appears on every chart below\".",
+        "fix": "Rewrite the six strings to describe what is drawn: dashed lens outlines (per the §3 lens), tercile strips \"vs the county's 1991–2020 thirds\", ToT dot colour = tercile of the season the month falls in (and say Jan–Feb/Jun–Sep dots are outside either season), and change prodAbout's strip sentence to rainfall terciles.",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced every element from the actual files. (1) nbText_v2.json sections.b3: ndviCaption/ipcCaption/totCaption/rwCaption all contain the literal sentence \"Event bands as above.\"; seasonStripCaption describes \"Background per the section's driver/highlight controls… each season holds its own measured shade, the gaps blend visually…\"; prodAbout says \"the strip below shows both seasons' driver state, using … weak/moderate/strong at 0.5/1.0/1.5 standard deviations\". (2) notebook_v2.qmd: none of the captioned §3 charts draw event bands or driver backgrounds — seasonStripChart (~1129), ndviChart (~1181), ipcChart (~1233), totChart (~1386) use only simMarks (verified at 2762: fill:\"none\", dashed stroke outlines, drawn only when a season lens is active); rwChart (~1581) carries the literal comment \"// no background here (V2-49)\". annotationMarks (2665) has zero call sites; eventBandMarks (3756) is only referenced inside dead annotationMarks — the machinery is dead code. (3) The strips are rainfall-tercile strips: makeTercileStrip (2833) fills by tercByYear season-outcome tercile, legend \"vs the county's 1991–2020 thirds\"; prodEvtStrip (~4330) is makeTercileStrip with lanes \"OND (yr before)\"/\"MAM (harvest yr)\" — not SD-class driver state. (4) Additionally (beyond the finding), prodEvtBars colours bars by tercByYear(\"OND\").get(d.year-1), so prodAbout's bar-colour sentence (\"strength … standard deviations\") is also wrong, not just its strip sentence. (5) totChart dot fill confirmed: month>=10→OND, 3–5→MAM, else grey #e8e8e4 (Jan–Feb/Jun–Sep outside either season). (6) timelineCaption (plotFooter at 958) still promises \"the same shading appears on every chart below\" — nothing below shades events. Caption locations match: plotFooter calls at ~1150, ~1216, ~1257, ~1412, ~1604, and prodAbout via about: at ~1491. The finding is accurate on every checkable claim.",
+          "fix": "Rewrite the seven stale strings in data/KE-enso-explorer/nbText_v2.json (sections.b3) to describe what is actually drawn: (a) seasonStripCaption — drop the \"Background per the section's driver/highlight controls…\" sentences; instead say that when a season lens other than \"All years\" is selected, matching seasons are outlined with dashed boxes (the outlines are lens-conditional — do not describe them as always present). (b) ndviCaption and rwCaption — replace \"Event bands as above.\" with a sentence describing the tercile strip beneath the chart: each cell is the county's season rainfall outcome (drier / near-normal / wetter vs the county's 1991–2020 thirds); grey = no data. (c) ipcCaption — replace \"Event bands as above.\" with a note that the horizontal colour bands are the IPC phase scale and dashed lens outlines appear when a season lens is active. (d) totCaption — replace \"Event bands as above.\" with: dot colour = the rainfall tercile of the season the month falls in (Oct–Dec = short rains, Mar–May = long rains); Jan–Feb and Jun–Sep dots are grey because they fall outside either season. (e) prodAbout — fix BOTH sentences, not just the strip one: bars are coloured by the rainfall TERCILE of the preceding short rains (OND of year−1), and the strip below shows each season's rainfall tercile with the harvest lag built in (\"OND (yr before)\" lane is offset −1; \"MAM (harvest yr)\" is the same year) — delete the \"weak/moderate/strong at 0.5/1.0/1.5 standard deviations\" driver-state description entirely. (f) timelineCaption — drop \"the same shading appears on every chart below\"; the timeline is a standalone swimlane reference (hover for the story). Optionally delete the now-unused annotationMarks/eventBandMarks/eventBandMarksYear definitions (qmd 2665, 3756, 3769) since annotationMarks has no call sites."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Short-rains hole is planting 2001–2014 in code and data, but all prose says 2002–2014",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2906 (hsHoleYears) + uncommitted hatch tooltip (2933-2935) vs nbText b3.hsIntro/hsCaption/hsAbout (qmd:1505, 1560, 1567)",
+        "problem": "hsIntro, hsCaption and hsAbout all state \"no seasonal county reporting 2002–2014\" / \"Hatched band = the 2002–2014 reporting gap\", but the Short panel's hatch (correctly, per the data) starts at planting year 2001. A reader comparing the caption with the chart sees the hatch begin a year \"early\" and has no way to reconcile it.",
+        "evidence": "Parquet distinct Short planting years: …1999, 2000 → 2015 (2001–2014 absent); Long: …2001 → 2015 (2002–2014 absent). hsHoleYears = {Long:[2002,2014], Short:[2001,2014]} matches the data; the per-season tooltip now prints the right years, the captions don't.",
+        "fix": "Amend the three strings to anchor the gap honestly, e.g. \"no seasonal county reporting for harvests 2002–2014 — planting years 2002–2014 (long rains) and 2001–2014 (short rains, harvested the following March)\".",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced end-to-end. (1) qmd:2906 reads hsHoleYears = ({Long: [2002, 2014], Short: [2001, 2014]}); the uncommitted diff replaces the old hard-coded \"2002–2014\" tooltip with a per-season one (`planting years ${hole[0]}–${hole[1]}`), and the hatch is Plot.cell over d3.range(hole[0], hole[1]+1) — so the Short panel hatches 2001–2014 and its tooltip says 2001–2014. (2) Recomputed from harveststat_county_production.parquet: distinct Short planting years run 1990–2000 then jump to 2015 (2001–2014 absent; 2024 also absent as the latest short season is unharvested/unreported); Long runs …2001 then 2015 (2002–2014 absent). hsHoleYears therefore matches the data, i.e. the hatch is correct and the prose is wrong. (3) The three strings — nbText.sections.b3.hsIntro, hsCaption, hsAbout, stored in data/KE-enso-explorer/nbText_v2.json and rendered at qmd 1505/1559/1567 — all say \"no seasonal county reporting 2002–2014\" / \"Hatched band = the 2002–2014 reporting gap\". A reader of the Short panel sees the hatch start a year before the caption's stated gap with no explanation. Minor citation nit that does not refute: the strings physically live in nbText_v2.json (b3 block, ~line 522 ff), not in the qmd; the qmd lines are the reference sites.",
+          "fix": "Right direction, but amend the wording and the target file. Edit data/KE-enso-explorer/nbText_v2.json (sections.b3), not the qmd. Avoid the proposed \"no seasonal county reporting for harvests 2002–2014\" — that is also inaccurate, since the short-rains crop planted Oct 2014 is harvested ~Mar 2015, so in harvest-year terms the gap's tail is 2015. Anchor on planting years, matching the chart's own stated anchoring (bars sit on planting year): hsIntro — \"…no seasonal county reporting for planting years 2002–2014 (long rains) and 2001–2014 (short rains — its Oct-2001 crop was harvested inside the gap) …\"; hsCaption — \"Hatched band = the reporting gap: planting years 2002–2014 (long rains) / 2001–2014 (short rains) (not zero harvests)\"; hsAbout — replace \"no seasonal county reporting 2002–2014\" with the same per-season planting-year phrasing. No code change needed: hsHoleYears and the per-season tooltip already match the data."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Lens scope overclaim: \"every chart in this section\" — but 3.6-A, 3.6-B and 3.7 never show the outlines",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1078 (lensChips text) and nbText b3.intro (qmd:1053)",
+        "problem": "b3.intro promises \"every chart in this section outlines the matching past years\" and the empty-state chip line says \"outline matching seasons on every chart below\", but simMarks is only wired into 3.1–3.5; the two Harvests figures and 3.7 ReliefWeb show nothing when the reader picks \"Drier than usual\". A reader testing the lens on the harvest figures — the section's payoff — concludes it is broken.",
+        "evidence": "grep simMarks call sites: 1137, 1196, 1247, 1353, 1394, 2667 only; hsSeriesView/hsWetDryView/hsVsClimateView/rwChart contain none.",
+        "fix": "Either extend the lens to the band charts (outline/emphasize matching planting-year bars in 3.6-B and matching strip cells in 3.6-A/3.7 via simYearSet), or scope the prose honestly (\"outlines the matching past years on the time-series charts (3.1–3.5); on the harvest figures the same categories appear as bar colours\").",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced concretely. (1) nbText_v2.json sections.b3.intro.en contains verbatim \"every chart in this section outlines the matching past years\" (rendered at notebook_v2.qmd:1053) and qmd:1078 contains \"outline matching seasons on every chart below.\" (2) simMarks call sites are exactly 1137, 1196, 1247, 1353, 1394 (figs 3.1–3.5) plus helper/definition at 2667/2762 — none in 3.6/3.7. (3) Grep for seasonLens|lensSeasonCode|simYear over lines 1421–1650 (3.6-A, 3.6-B, 3.7 bodies; fig ids confirmed in plotFooter calls) and inside hsSeriesView/hsWetDryView/hsVsClimateView (qmd:2914–3040) and rwChart (qmd:1581–1601) returns zero hits; render deps for 3.6-B are [county, hsCrop, hsVar] and for 3.6-A [county, prodEvtPick, prodEvtVar], so selecting \"Drier than usual\" changes nothing on those figures. The prose overclaim is real and the failure scenario (reader tests the lens on the harvest figures and sees no response) is exactly what happens. The fix's factual premise also verifies: tercile categories already appear statically on all three figures (3.6-B bars filled by tercColor[d.terc]; 3.6-A bars by prior-OND tercile; all three append makeTercileStrip lanes).",
+          "fix": "Either option in the proposed fix is valid; amended recommendation: (a) Cheapest honest fix — reword both strings: b3.intro to \"…every time-series chart in this section (3.1–3.5) outlines the matching past years; on the harvest and disaster figures (3.6–3.7) the same drier/near/wetter categories appear as the bar colours and the season strip\", and the qmd:1078 chip line to \"…outline matching seasons on the time-series charts below\". (b) If extending the lens instead, do it once in the shared makeTercileStrip helper (qmd:2833) — outline strip cells whose srcYear is in simYearSet for the lane matching lensSeasonCode — rather than wiring each view separately (3.6-A colours by OND terciles only, so per-bar emphasis there is only valid when the lens is on OND; the strip has both lanes and is shared by all three figures). In either extension, keep lens inputs OUT of the loader-cell dep arrays (presentation-only toggle; loader/render-race rule) — emphasis must flow through the view functions' reactive reads."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "The mm-threshold callout defines terciles differently from the lens it introduces (1981–2025 thirds vs 1991–2020-ranked)",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1099-1107 (tercThresholdLine) vs 2822-2828 (tercByYear) and 2853/hsAbout (\"1991–2020 thirds\")",
+        "problem": "The box prints \"drier-than-usual means under X mm … (the bottom and top thirds of 1981–2025)\" computed by index-picking the sorted full record, while simYearSet/strips/bar fills use enso_outlook_base terciles ranked within 1991–2020. Same section, two definitions: a year can sit under the printed threshold yet be chip-tagged Near-normal.",
+        "evidence": "Verified enso_outlook_base is county-specific, planting-year-keyed, 1991–2020-ranked (Nakuru OND: 45/45 agreement with recomputed 1991–2020 cutoffs lo=207.0/hi=260.6 mm, Wet/Dry not inverted); classifying with full-record 1981–2025 thirds instead flips 3 of 45 Nakuru years (93% agreement).",
+        "fix": "Compute lo/hi in tercThresholdLine from the 1991–2020 subset with the same quantile convention as the pipeline (or read clim thresholds off enso_outlook_base directly), and change the text to \"the driest and wettest thirds of 1991–2020, the baseline used throughout this section\".",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced end-to-end. (1) The callout at notebook_v2.qmd:1099-1107 (tercThresholdLine) computes lo/hi by index-picking the sorted FULL chirpsYearlyAll record — chirpsYearlyAll (line 3552) has no year filter and spans 1981–2025 (45 Nakuru OND years) — and the text literally says \"the bottom and top thirds of 1981–2025\". (2) The chips/strips/section highlights use a different definition: simYearSet (line 2755) and makeTercileStrip (2833) classify via tercByYear → outlookBase.tercile from enso_outlook_base.parquet, whose baseline I verified is 1991–2020: the parquet's clim_mean (250.63) equals the recomputed 1991–2020 mean of ptot exactly (250.632, vs 253.65 full-record), and the served tercile column agrees 45/45 with recomputed 1991–2020 linear-quantile cutoffs lo=207.0/hi=260.6 mm (matching the finding's numbers; Wet/Dry not inverted). The legend at line 2853 even says \"vs the county's 1991–2020 thirds\" on the same page as the \"1981–2025\" box. (3) Concrete contradiction: the callout's full-record cutoffs are lo=203.5/hi=275.1 mm; classifying with them flips 4 of 45 Nakuru OND years vs the served terciles (1992, 1999, 2012, 2025) — the finding said 3/45, so it slightly UNDERstated the defect. Reader-visible example: the box prints \"wetter than usual means over 275 mm\", yet 1992 (266.1 mm) and 2025 (266.1 mm) — both ~9 mm below the printed cutoff — are tagged Wet in the strips and chips. Same section, two tercile definitions; finding stands.",
+          "fix": "The proposed fix is correct in substance; amend one detail. In tercThresholdLine (notebook_v2.qmd:1099-1103), filter to the pipeline baseline and use a proper quantile, not index-picking: `const vals = chirpsYearlyAll.filter((d) => d.period === lensSeasonCode && d.value != null && d.year >= 1991 && d.year <= 2020).map((d) => d.value).sort((a, b) => a - b);` then `const lo = d3.quantile(vals, 1/3), hi = d3.quantile(vals, 2/3);` — d3.quantile uses R-7 linear interpolation, which reproduced the served enso_outlook_base terciles 45/45 for Nakuru OND (lo=207.0/hi=260.6), whereas index-picking the 30-year subset (the \"lower\" convention) only agrees 44/45. Keep the `< 12` (or make it `< 30`) length guard on the baseline subset. Update the text to \"the driest and wettest thirds of 1991–2020 — the climate-normal baseline used for every season category in this section (and the same categories as a KMD depressed/enhanced rainfall outlook)\". Alternative (equally valid): read the boundary directly off outlookBase by adding ptot to the outlookBase SELECT (line 3598-3603) and taking max(ptot|tercile=Dry)/min(ptot|tercile=Wet) for the county-season — guarantees zero drift from the pipeline — but the d3.quantile route is simpler and demonstrated exact."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Era-gated seasons vanish silently from \"Wet vs dry seasons\" and \"Vs climate\"",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2971 (hsWetDryView filter), 3007 (hsVsClimateView filter)",
+        "problem": "Both views filter to anomPct != null, so every season in an era that failed the ≥7-clean-seasons gate disappears with no trace — the per-bin \"n of N\" counts then look complete when they are not. The design contract (KE-18 decision 2) requires gated eras to appear \"absolute-only (greyed in anomaly views)\", i.e. visibly excluded, not absent.",
+        "evidence": "Recomputed gates: Garissa Maize Long era-B has 6 clean seasons → gated → the view shows only 1990s district-era dots, silently discarding all six 2015–24 county seasons; Nakuru Maize Short (era A n=4, era B n=5) → the Short panel silently renders as an empty html`` with no explanation while the Season-series view shows 9 Short bars.",
+        "fix": "Per panel, count gated-out seasons and render an explicit note (\"6 seasons from 2015–2024 shown without a % baseline — era has <7 clean seasons\") and/or draw them as grey open marks on a side rug; when a whole season-panel is dropped, emit a noDataPlaceholder naming the reason instead of html``.",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Mechanism, data, and contract all verified. (1) Code: hsRows (notebook_v2.qmd ~2884-2903) nulls anomPct for every season in an era with <7 qc-clean seasons; hsWetDryView line 2971 filters `d.anomPct != null && d.terc != null && d.qc === 0` and hsVsClimateView line 3007 filters `d.anomPct != null && d.qc === 0`, so gated-era seasons disappear with no trace; bin labels print counts over the filtered subset only, and a fully gated season panel hits `if (sub.length < 4) return html``` — an empty node, no message — while the legend still says \"dark = county records (2015–24)\". (2) Data recomputed from harveststat_county_production.parquet via duckdb: Garissa Maize Long era B = 6 clean seasons (gated; era A = 8 passes) → Long panels show only 1990s dots, all six 2015–24 county seasons silently dropped. Nakuru Maize Short era A = 4, era B = 5 clean → both gated → Short panel renders as empty html`` while hsSeriesView shows all 9 (4+5) Short bars. Both worked examples in the finding are numerically exact. (3) Contract: DESIGN_ke18_harveststat.md line 15 (decision 2): \"Gate: era needs ≥7 qc-clean years for a median; else absolute-only (greyed in anomaly views)\" — requires visible exclusion, not absence. Not already fixed; line numbers correct.",
+          "fix": "Per panel in hsWetDryView and hsVsClimateView, compute the gated-out set as `hsRows.filter(d => d.season === sn && d.value != null && d.anomPct == null)` (optionally split by era via d.era) and render an explicit per-panel note, e.g. \"6 seasons from 2015–2024 (county records) shown without a % baseline — era has <7 qc-clean seasons; see the Season-series view for their absolute values\". When a whole season panel is dropped (sub.length < 4 or 0), return noDataPlaceholder naming the reason (\"All 9 Short seasons lack an era baseline: both eras have <7 qc-clean seasons\") instead of bare html``. Amendment to the proposed fix: do NOT draw the gated seasons as grey marks positioned on the % y-scale — they have no anomPct by construction, and inventing a y-position would fabricate the baseline the gate refuses; a count note plus (optionally) an unscaled side rug or marginal tick strip keyed only to year is the honest rendering. Also update the \"dark = county records\" legend line to reflect when an era is absent-by-gate."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "\"No tercile data\" grey (#e8e8e4) is visually identical to the Near-normal fill (#e2e2de)",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2939 (hs bars), 1401 (ToT dots), 4349 (NAPR bars) vs 2830 (tercColor.Near = PALETTE.outcome.nearPale)",
+        "problem": "Bars/dots with no tercile fall back to #e8e8e4 while Near-normal is nearPale #e2e2de — indistinguishable at chart size. On the ToT chart every out-of-season month (Jan–Feb, Jun–Sep) gets the fallback grey, so most dots read as \"near-normal season\" when they mean \"no season\". This is the blank-reads-as-a-value failure mode the notebook's own rules forbid, and neither the fallback grey nor the out-of-season rule appears in any legend.",
+        "evidence": "tercColor = {Near: PALETTE.outcome.nearPale (#e2e2de)}; fallbacks hard-code #e8e8e4 at 2939/1401/4349; tercStripLegend (2850) lists only drier/near/wetter.",
+        "fix": "Use a clearly distinct no-data treatment (e.g. white fill + grey diagonal stroke, or hollow dots on ToT) and add it to tercStripLegend; for ToT, caption the rule that only OND/MAM months carry a season colour.",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced from notebooks/KE-enso-explorer/notebook_v2.qmd. (1) tercColor.Near = PALETTE.outcome.nearPale = #e2e2de (lines 2491, 2830); fallback \"#e8e8e4\" hard-coded at 1401 (ToT dots), 2939 (hs bars), 4349 (NAPR bars) — all cited lines exact. (2) Recomputed CIELAB ΔE76(#e8e8e4, #e2e2de) = 2.11, below the ~2.3 JND threshold — perceptually indistinguishable, especially on r=2.6px dots and thin bars. (3) ToT month rule (1398–1400): month>=10→OND, 3–5→MAM, else null → 6 of 12 months (Jan–Feb, Jun–Sep) get the fallback grey; dot title (1403) shows only the value, so no disambiguation. Worse than claimed: the ToT plotFooter (1412) doesn't include tercStripLegend at all. (4) tercStripLegend (2850–2853) lists only drier/near-normal/wetter — no fallback entry. Partial mitigation exists on the bars (hover tooltips say \"planting-season rains: no data\" at 2945/4355) but is hover-only; the visual channel still reads as near-normal, violating the notebook's own \"blank ≠ zero / blank must not read as a value\" rule. Also noted: the tercile strip itself uses a different fallback grey (#f0f0ec, line 2845), inconsistent with the mark fallback.",
+          "fix": "Proposed fix is right in direction; amend as follows. (a) Bars (2939, 4349): reuse the notebook's existing no-data visual grammar — the #ke-hatch diagonal pattern already defined at line 2958 for the HarvestStat reporting hole — i.e. white fill + grey hatch (or white fill + grey stroke where the pattern def isn't in that SVG), instead of inventing a new treatment. (b) ToT dots (1401): hollow dots (fill \"white\"/none, grey stroke) since hatching is illegible at r=2.6. (c) Add a \"no tercile data\" swatch to tercStripLegend (2850) and also unify the strip's own fallback #f0f0ec (2845) to the same treatment. (d) ToT semantics differ: out-of-season months are a structural rule, not missing data — state in the totCaption/meta Note that only OND (Oct–Dec) and MAM (Mar–May) months carry a season colour; and attach tercStripLegend to the ToT footer, which currently has no legend at all."
+        }
+      }
+    ],
+    "refuted": [],
+    "minors": [
+      {
+        "severity": "minor",
+        "title": "Lens chip text promises outlines \"on every chart below\" — false for 3.6-A, 3.6-B and 3.7",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1078 (lensChips placeholder text); simMarks absent from prodEvt* (4333-4419), hsSeriesView (2928-2952), rwChart (1587-1599)",
+        "problem": "\"Pick a season type above to outline matching seasons on every chart below\" — simMarks outlines appear on 3.1–3.5 only. Selecting \"Drier than usual\" visibly changes nothing on the three harvest/reports figures, so the section's flagship interaction appears broken exactly where the outcome data lives. (The design contract only requires outlines on time-series, so this is a copy bug, not a wiring bug.)",
+        "evidence": "grep simMarks call sites: seasonStripChart 1137, ndviChart 1196, ipcChart 1247, pricesChart 1353, totChart 1394 — none in prodEvtBars/Lines/VsDriver, hsSeriesView, or rwChart.",
+        "fix": "Change the lensChips copy to \"...to outline matching seasons on the time-series charts below (bar charts carry the season colours directly)\", or add year-band simMarks emphasis (e.g. dashed outline on matching planting-year bars) to 3.6-B/3.7.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)"
+      },
+      {
+        "severity": "minor",
+        "title": "Duplicate SVG pattern id \"ke-hatch\" — three instances in one document",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2958 (one per hsSeriesView panel, ×2) and 1750 (outlookMapOND, Fig 4.2)",
+        "problem": "When Fig 3.6-B's series view and the Fig 4.2 map are both mounted, up to three elements share id ke-hatch; url(#ke-hatch) resolves to the first in document order (the 3.6-B Long panel), so 4.2's hatching and the Short panel's hole cells depend on a pattern in a different figure that disappears whenever the user switches hsView. Today all three patterns are byte-identical so nothing visibly breaks, but any future edit to one silently restyles the others, and duplicate ids are invalid HTML.",
+        "evidence": "Node harness: one hsSeriesView render yields document.querySelectorAll('#ke-hatch').length === 2 with 2 cells referencing url(#ke-hatch); outlookMapOND appends a third id at 1750.",
+        "fix": "Give each figure its own id (e.g. `ke-hatch-hs-${sn}` in hsSeriesView, ke-hatch-map in outlookMapOND) and reference the matching url(#...) in the same SVG; the per-panel defs-prepend already exists, so it is a two-string change per site.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)"
+      },
+      {
+        "severity": "minor",
+        "title": "hsAnnualAll: dead 13.5k-row query re-run on every county change; contract's opt-in Annual view unimplemented",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2868-2872",
+        "problem": "hsAnnualAll is defined and never referenced anywhere else. It re-queries 13,532 Annual rows through DuckDB-WASM on every county switch for nothing. DESIGN_ke18_harveststat.md §5 specifies an opt-in Annual view (1965–2022, 39 crops) that this query was presumably staged for but which does not exist in hsView's options.",
+        "evidence": "grep hsAnnualAll → single hit (the definition). hsView options at 1527: [\"Season series\", \"Wet vs dry seasons\", \"Vs climate\", \"Table\"]. duckdb: season='Annual' → 13,532 rows.",
+        "fix": "Delete the hsAnnualAll cell until the Annual view is built (it is a one-cell re-add), or implement the contracted opt-in Annual view that consumes it.",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)"
+      },
+      {
+        "severity": "minor",
+        "title": "3.6-B loader deps deviate from the binding contract, and crop-select \"honest n\" counts undrawable rows",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1541 (deps [county, hsCrop, hsVar]) vs DESIGN_ke18_harveststat.md §7 (\"loader deps [county, hsCrop] only\"); 2875-2882 (hsCropOpts counts)",
+        "problem": "Two contract-hygiene nits: (1) hsVar was added to the loader deps — it does gate hsRows data (so no spinner race; verified the render path sits deeper in the dependency graph than the loader cell), but it deviates from the binding spec and flashes a 420px spinner for a synchronous unit change; (2) the crop label counts every hsSeasonalAll row including qc-flagged rows and rows whose selected variable is null (30 seasonal rows have null yield/production), so \"Maize — 20 Long / 16 Short seasons\" can overstate what the yield view draws.",
+        "evidence": "Line 1541 comment itself says \"data deps only\"; duckdb: 20 Long + 10 Short seasonal rows with yield_t_ha IS NULL (e.g. Embu Maize Short-1990 has area only). Contract §5 example label matches the current format but intends drawable seasons.",
+        "fix": "Drop hsVar from the loader array (unit changes re-render synchronously via the render cell's own dependency on hsRows), or amend the contract; count label n from rows with the crop's yield/production non-null (or state \"records\" instead of \"seasons\").",
+        "reviewer": "hostile-ojs-mechanic (node + real-parquet execution)"
+      },
+      {
+        "severity": "minor",
+        "title": "Short-rains 1990 seasons: in medians, table and download, but silently absent from the chart that claims 1991–2024",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2861-2867 (hsSeasonalAll query, no year floor), 2905 (hsYears = range(1991,2025))",
+        "problem": "Five counties have Short planting_year 1990 rows. They enter hsCropOpts counts, era-A medians (labelled \"1991–2001\"), the Table view and the CSV — but the band domain starts at 1991 so Plot silently drops the 1990 bar. Chart, label and download disagree. Relatedly, Short has no 2024 planting anywhere in v1.2, so the Short panel's 2024 ∅ (\"not reported — not zero\") really marks the dataset's end, and hsBTitle's \"1991–2024\" only holds for Long.",
+        "evidence": "Parquet: Short planting years span 1990–2023 (5 counties at 1990); Long 1991–2024. hsEraOf(1990) → \"1991–2001 (district-era records)\".",
+        "fix": "Add `AND planting_year >= 1991` to the seasonal query (keeping label = median basis = chart domain consistent), or extend hsYears to 1990; cap the Short ∅ markers at the season's last available planting year (2023) or annotate 2024 as \"beyond dataset coverage (HarvestStat v1.2)\".",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)"
+      },
+      {
+        "severity": "minor",
+        "title": "hsIntro promises district-era records are \"shaded lighter\" — the default view never does that",
+        "where": "nbText b3.hsIntro (rendered qmd:1505) vs hsSeriesView bar fill (qmd:2938-2941)",
+        "problem": "In the Season-series view, era A bars are filled by tercile exactly like era B (provenance is only a top-margin text label and a tooltip field); the light/dark era hue exists only in the Wet-vs-dry and Vs-climate dot views. A reader told to look for lighter bars will misread the pale Near-normal bars as \"district-era\".",
+        "evidence": "fill: (d) => d.terc ? tercColor[d.terc] : \"#e8e8e4\" — no era term; era encoded via eraBrackets text (2917-2919) and the Provenance tooltip channel.",
+        "fix": "Reword hsIntro (\"…remapped to today's counties — the era labels above the chart and each bar's tooltip say which ruler applies; in the dot views, lighter dots are district-era\"), or actually add an era encoding to the bars (reduced fillOpacity for era A) and legend it.",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)"
+      },
+      {
+        "severity": "minor",
+        "title": "3.6-B loader deps include hsVar, violating the binding design contract's \"[county, hsCrop] only\"",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:1541",
+        "problem": "DESIGN_ke18_harveststat.md decision 7 fixes the loader deps at [county, hsCrop]. hsVar is a synchronous client-side column switch (no new query), so putting it in the loader deps flashes the spinner needlessly on every variable toggle and contradicts the binding contract; hsView is correctly excluded.",
+        "evidence": "Line 1541: `[county, hsCrop, hsVar]; // data deps only` vs contract line \"one host, loader deps [county, hsCrop] only\".",
+        "fix": "Drop hsVar from the dep array (the render cell already re-runs via hsRows → hsVar), or if the spinner is genuinely wanted, amend the design contract explicitly rather than deviating silently.",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)"
+      },
+      {
+        "severity": "minor",
+        "title": "§3's subsection titles and can/cannot box still speak the old event-anchored frame",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:3220-3225 (title_seasonStrip/title_ndvi/title_prodEvents) and nbText b3.canCannot (qmd:1643)",
+        "problem": "§3 was reframed \"what do drier or wetter seasons mean\" (tercile-anchored, KMD language), yet 3.1/3.2/3.6 are titled \"…through the events\" and canCannot.can says the section tells you \"how the named ocean events played out\" — the frame the restructure deliberately moved to §2. First-time readers get whiplash between the intro's KMD-lens promise and event-named headings; also the design's new #impacts anchor was never added (b4's #events link works, but the contract's alias is unimplemented).",
+        "evidence": "seasonStripTitle \"the rains and the drought index through the events\"; ndviTitle \"pasture and vegetation through the events\"; prodTitle \"county harvests through the events\"; canCannot.can as printed above; grep \"#impacts\" → only methods.impacts (unrelated).",
+        "fix": "Retitle to the tercile frame (\"the rains and the drought index, season by season\", \"…through wet and dry seasons\"), rewrite canCannot.can around drier/wetter seasons, and add the #impacts anchor alias promised in the design doc.",
+        "reviewer": "hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)"
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:mechanic",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "aed339c6d63498e4a",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786620877374,
+      "queuedAt": 1786620873787,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "hostile-ojs-mechanic (node + real-parquet execution)",
+      "promptPreview": "REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso\nTARGET: notebooks/KE-enso-explorer/notebook_v2.qmd (v2.6, commit 1ad2045 + one uncommitted band-scale fix in hsSeriesView)\nPROSE: data/KE-enso-explorer/nbText_v2.json\nDATA: data/KE-enso-explorer/*.parquet — esp. harveststat_county_production.parquet (schema: crop, county, gaul1_code, season Annual|Long|Short, planting_year/month, harvest_…",
+      "lastProgressAt": 1786621856340,
+      "tokens": 144162,
+      "toolCalls": 48,
+      "durationMs": 978965,
+      "resultPreview": "{\"reviewer\":\"hostile-ojs-mechanic (node + real-parquet execution)\",\"verdict\":\"The v2.6 machinery is mechanically sound — all four hsView functions, tercByYear, makeTercileStrip, simYearSet/simMarks execute clean in node/jsdom against the real parquets for Machakos and Marsabit (0 throws, all DOM nodes; fence checker PASS; all 202 nbText refs resolve; band-scale fix verified) — but execution expose…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "review:science",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a35e1153ae0693e6c",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786620877442,
+      "queuedAt": 1786620873787,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "hostile-agstats-climate-reviewer + confused-first-reader (v…",
+      "promptPreview": "REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso\nTARGET: notebooks/KE-enso-explorer/notebook_v2.qmd (v2.6, commit 1ad2045 + one uncommitted band-scale fix in hsSeriesView)\nPROSE: data/KE-enso-explorer/nbText_v2.json\nDATA: data/KE-enso-explorer/*.parquet — esp. harveststat_county_production.parquet (schema: crop, county, gaul1_code, season Annual|Long|Short, planting_year/month, harvest_…",
+      "lastProgressAt": 1786621664477,
+      "tokens": 130283,
+      "toolCalls": 29,
+      "durationMs": 787035,
+      "resultPreview": "{\"reviewer\":\"hostile-agstats-climate-reviewer + confused-first-reader (v2.6 review, commit 1ad2045 + uncommitted band-scale fix)\",\"verdict\":\"The v2.6 lag grammar itself is sound where it matters — planting-year anchoring, the OND offset −1 strip under 3.6-A (no double shift), and the 1991–2020 county terciles all verified against the parquets — but one anomaly-math bug is critical and the section …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "verify:Area (ha) anomaly divides area by the PR",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "ae4d4a5b627ffac05",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621671605,
+      "queuedAt": 1786621668034,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Confirmed by direct code reading and independent recomputat…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [critical] Area (ha) anomaly divides area by the PRODUCTION median — bogus \"% of a usual year\" everywhere\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:2894 (varKey), 2889-2901 (med/anomPct)\nProblem: hsRows maps hsVar.id to varKey via `hsVar.id ===…",
+      "lastProgressAt": 1786621758419,
+      "tokens": 36787,
+      "toolCalls": 7,
+      "durationMs": 86814,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Confirmed by direct code reading and independent recomputation. (1) notebooks/KE-enso-explorer/notebook_v2.qmd:2894 reads `const varKey = hsVar.id === \\\"yield_t_ha\\\" ? \\\"yield\\\" : \\\"prod\\\";` while the hsVar selector (line 1521) offers `area_ha`, and only `|yield` and `|prod` medians are ever set (2891-2892) — so Area selected divides area_ha by the production median …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "verify:§2 sticky \"Ocean driver\"/\"Chart backgrou",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "af3accb2d16e5b088",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621673360,
+      "queuedAt": 1786621668035,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Every factual claim reproduces against notebooks/KE-enso-ex…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] §2 sticky \"Ocean driver\"/\"Chart background\" controls are dead: annotationMarks has zero call sites\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:612-638 (controls+legend), 2665 (annotationMarks, never called), 2750 (annMode), 4398/4424 (onl…",
+      "lastProgressAt": 1786621834722,
+      "tokens": 49844,
+      "toolCalls": 15,
+      "durationMs": 161361,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Every factual claim reproduces against notebooks/KE-enso-explorer/notebook_v2.qmd. (1) `annotationMarks` is defined at line 2665 and grep over the whole file shows zero other occurrences — no chart calls it; its only internal consumer chain (eventBandMarks at 3756, called at 2672) is therefore dead too, and `eventBandMarksYear` (3769) has no callers at all. (2) `annM…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "verify:Six §3 caption strings describe the remo",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a689b32b358d1ed3f",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621672549,
+      "queuedAt": 1786621668035,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced every element from the actual files. (1) nbText_…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] Six §3 caption strings describe the removed event-band/driver-background machinery\nWhere: nbText_v2.json sections.b3 {seasonStripCaption, ndviCaption, ipcCaption, totCaption, rwCaption, prodAbout}, rendered at qmd:1150, 1216, 1257, 1412, 1604, …",
+      "lastProgressAt": 1786621831514,
+      "tokens": 43276,
+      "toolCalls": 14,
+      "durationMs": 158965,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced every element from the actual files. (1) nbText_v2.json sections.b3: ndviCaption/ipcCaption/totCaption/rwCaption all contain the literal sentence \\\"Event bands as above.\\\"; seasonStripCaption describes \\\"Background per the section's driver/highlight controls… each season holds its own measured shade, the gaps blend visually…\\\"; prodAbout says \\\"the strip b…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "verify:Short-rains hole is planting 2001–2014 i",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a5bbfb427fa50d3b5",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621673129,
+      "queuedAt": 1786621668035,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced end-to-end. (1) qmd:2906 reads hsHoleYears = ({L…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] Short-rains hole is planting 2001–2014 in code and data, but all prose says 2002–2014\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:2906 (hsHoleYears) + uncommitted hatch tooltip (2933-2935) vs nbText b3.hsIntro/hsCaption/hsAbout (qmd:1505,…",
+      "lastProgressAt": 1786621804091,
+      "tokens": 32159,
+      "toolCalls": 11,
+      "durationMs": 130962,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced end-to-end. (1) qmd:2906 reads hsHoleYears = ({Long: [2002, 2014], Short: [2001, 2014]}); the uncommitted diff replaces the old hard-coded \\\"2002–2014\\\" tooltip with a per-season one (`planting years ${hole[0]}–${hole[1]}`), and the hatch is Plot.cell over d3.range(hole[0], hole[1]+1) — so the Short panel hatches 2001–2014 and its tooltip says 2001–2014. (…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "verify:Lens scope overclaim: \"every chart in th",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a84eeee588473e5a3",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621671903,
+      "queuedAt": 1786621668035,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced concretely. (1) nbText_v2.json sections.b3.intro…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] Lens scope overclaim: \"every chart in this section\" — but 3.6-A, 3.6-B and 3.7 never show the outlines\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:1078 (lensChips text) and nbText b3.intro (qmd:1053)\nProblem: b3.intro promises \"every char…",
+      "lastProgressAt": 1786621819542,
+      "tokens": 41002,
+      "toolCalls": 13,
+      "durationMs": 147639,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced concretely. (1) nbText_v2.json sections.b3.intro.en contains verbatim \\\"every chart in this section outlines the matching past years\\\" (rendered at notebook_v2.qmd:1053) and qmd:1078 contains \\\"outline matching seasons on every chart below.\\\" (2) simMarks call sites are exactly 1137, 1196, 1247, 1353, 1394 (figs 3.1–3.5) plus helper/definition at 2667/2762…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "verify:The mm-threshold callout defines tercile",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "af4e93c9b05478ad4",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621672066,
+      "queuedAt": 1786621668035,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced end-to-end. (1) The callout at notebook_v2.qmd:1…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] The mm-threshold callout defines terciles differently from the lens it introduces (1981–2025 thirds vs 1991–2020-ranked)\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:1099-1107 (tercThresholdLine) vs 2822-2828 (tercByYear) and 2853/hsAbout …",
+      "lastProgressAt": 1786621784350,
+      "tokens": 42507,
+      "toolCalls": 8,
+      "durationMs": 112284,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced end-to-end. (1) The callout at notebook_v2.qmd:1099-1107 (tercThresholdLine) computes lo/hi by index-picking the sorted FULL chirpsYearlyAll record — chirpsYearlyAll (line 3552) has no year filter and spans 1981–2025 (45 Nakuru OND years) — and the text literally says \\\"the bottom and top thirds of 1981–2025\\\". (2) The chips/strips/section highlights use a…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "verify:Era-gated seasons vanish silently from \"",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a53cc9a3b0a132a3b",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621672866,
+      "queuedAt": 1786621668035,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Mechanism, data, and contract all verified. (1) Code: hsRow…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] Era-gated seasons vanish silently from \"Wet vs dry seasons\" and \"Vs climate\"\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:2971 (hsWetDryView filter), 3007 (hsVsClimateView filter)\nProblem: Both views filter to anomPct != null, so every sea…",
+      "lastProgressAt": 1786621763715,
+      "tokens": 35398,
+      "toolCalls": 7,
+      "durationMs": 90849,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Mechanism, data, and contract all verified. (1) Code: hsRows (notebook_v2.qmd ~2884-2903) nulls anomPct for every season in an era with <7 qc-clean seasons; hsWetDryView line 2971 filters `d.anomPct != null && d.terc != null && d.qc === 0` and hsVsClimateView line 3007 filters `d.anomPct != null && d.qc === 0`, so gated-era seasons disappear with no trace; bin labels…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 10,
+      "label": "verify:\"No tercile data\" grey (#e8e8e4) is visu",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a15986ec21f462047",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621672540,
+      "queuedAt": 1786621668035,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced from notebooks/KE-enso-explorer/notebook_v2.qmd.…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] \"No tercile data\" grey (#e8e8e4) is visually identical to the Near-normal fill (#e2e2de)\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:2939 (hs bars), 1401 (ToT dots), 4349 (NAPR bars) vs 2830 (tercColor.Near = PALETTE.outcome.nearPale)\nPro…",
+      "lastProgressAt": 1786621755438,
+      "tokens": 38994,
+      "toolCalls": 7,
+      "durationMs": 82898,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced from notebooks/KE-enso-explorer/notebook_v2.qmd. (1) tercColor.Near = PALETTE.outcome.nearPale = #e2e2de (lines 2491, 2830); fallback \\\"#e8e8e4\\\" hard-coded at 1401 (ToT dots), 2939 (hs bars), 4349 (NAPR bars) — all cited lines exact. (2) Recomputed CIELAB ΔE76(#e8e8e4, #e2e2de) = 2.11, below the ~2.3 JND threshold — perceptually indistinguishable, especia…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 11,
+      "label": "verify:Area (ha) anomaly is computed against th",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a41e220c39d22ffb9",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621863855,
+      "queuedAt": 1786621859888,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "CONFIRMED by code read and executed reproduction. notebook_…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [critical] Area (ha) anomaly is computed against the PRODUCTION median — wrong numbers displayed\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:2889-2901 (hsRows), surfacing at 2944 (series tooltip), 2983/2986 (wet-dry y axis), 3019/3023 (vs-climate…",
+      "lastProgressAt": 1786621968157,
+      "tokens": 42075,
+      "toolCalls": 9,
+      "durationMs": 104302,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"CONFIRMED by code read and executed reproduction. notebook_v2.qmd:2894 maps every non-yield variable to varKey \\\"prod\\\", but the hsVar selector (line 1521) includes {id:\\\"area_ha\\\"}; the med map (2891-2892) stores only |yield and |prod keys, so with Area (ha) selected, line 2901 computes d.area_ha / era-median(production_t) * 100. Reproduced against the real parquet …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 12,
+      "label": "verify:Real Short-rains 1990 harvests silently",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "ac687b8267cebeade",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621863956,
+      "queuedAt": 1786621859889,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced end-to-end. (1) duckdb on data/KE-enso-explorer/…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] Real Short-rains 1990 harvests silently dropped by the hard-coded hsYears band domain\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:2905 (hsYears = d3.range(1991, 2025)), 2930 (x domain), 2925-2926 (missing markers span hsYears only)\nProble…",
+      "lastProgressAt": 1786622012729,
+      "tokens": 34708,
+      "toolCalls": 11,
+      "durationMs": 148773,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced end-to-end. (1) duckdb on data/KE-enso-explorer/harveststat_county_production.parquet returns 5 Maize Short planting_year=1990 rows (Embu area-only; Kiambu 3,450 t; Kitui 21,395.7 t; Meru 15,318.9 t; Murang'a 26,184.69 t), all qc_flag=0; Short-season min py is 1990. (2) notebook_v2.qmd defines hsYears = d3.range(1991, 2025), uses x: {domain: hsYears} in th…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 13,
+      "label": "verify:Tercile-threshold callout displays mm cu",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "aeba508d1664f4897",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621863964,
+      "queuedAt": 1786621859889,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced end-to-end. (1) Code: tercThresholdLine (noteboo…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] Tercile-threshold callout displays mm cutoffs from the wrong baseline — contradicts the classification every strip/bar/lens actually uses\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:1099-1107 (tercThresholdLine) vs 2822-2829 (tercByYear/e…",
+      "lastProgressAt": 1786621982600,
+      "tokens": 40773,
+      "toolCalls": 10,
+      "durationMs": 118636,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced end-to-end. (1) Code: tercThresholdLine (notebook_v2.qmd:1099-1107) sorts ALL chirpsYearlyAll years (query at 3552 has no year filter; 45 years 1981-2025) and takes sorted-index thirds rows[floor(n/3)]/rows[floor(2n/3)], captioned \\\"bottom and top thirds of 1981–2025\\\". (2) The classification everywhere else comes from enso_outlook_base.parquet via tercByY…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 14,
+      "label": "verify:§2 eventShade/eventDriver controls drive",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a0a6e7dcb0c9f7658",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621864100,
+      "queuedAt": 1786621859889,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced every element of the finding by grep + reading t…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] §2 eventShade/eventDriver controls drive no chart background — annotationMarks and its whole event-band stack are dead code, and the legend describes shading that doesn't exist\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:612-637 (sticky c…",
+      "lastProgressAt": 1786622117380,
+      "tokens": 57933,
+      "toolCalls": 20,
+      "durationMs": 253280,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced every element of the finding by grep + reading the cited code in /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso/notebooks/KE-enso-explorer/notebook_v2.qmd. (1) annotationMarks (2665) has zero callers anywhere in the repo (checked *.qmd/*.ojs/*.js across notebooks/, helpers/, components/). (2) eventBandMarks (3756) is called only inside annotationMar…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 15,
+      "label": "verify:Fig 3.6-A \"Vs driver\" and \"Table\" views",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a2eb3b3e9720180c4",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621863877,
+      "queuedAt": 1786621859889,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "confirmed",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] Fig 3.6-A \"Vs driver\" and \"Table\" views are silently driven by the §2 sticky eventDriver, a full section away\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:4398/4405/4412 (prodEvtVsDriver), 4424/4427 (prodEvtTable); control at 616 inside §2…",
+      "lastProgressAt": 1786622113591,
+      "tokens": 60815,
+      "toolCalls": 24,
+      "durationMs": 249714,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"confirmed\",\"fix\":\"Prefer the finding's second option, amended: re-anchor 3.6-A's \\\"Vs driver\\\" and \\\"Table\\\" views on §3's tercile/rainfall grammar rather than adding a driver select. Concretely: in prodEvtVsDriver (4395) replace zSeries(eventDriver,\\\"OND\\\") with the preceding-OND county rainfall signal (anomaly % or z, same CHIRPS base as tercByYear — matching hsVsC…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 16,
+      "label": "verify:QC-flagged seasons silently hidden in We",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "ae52adc99f6443400",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786621864009,
+      "queuedAt": 1786621859889,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced concretely. (1) Contract: DESIGN_ke18_harveststa…",
+      "promptPreview": "You are an adversarial VERIFIER. Try to REFUTE this code-review finding about REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso.\nFinding: [major] QC-flagged seasons silently hidden in Wet-vs-dry and Vs-climate views — contract mandates mark-and-exclude, not drop\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:2971 (hsWetDryView filter d.qc === 0), 3007 (hsVsClimateView filter d.qc === …",
+      "lastProgressAt": 1786622003519,
+      "tokens": 46042,
+      "toolCalls": 12,
+      "durationMs": 139510,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced concretely. (1) Contract: DESIGN_ke18_harveststat.md lines 17-18 mandate mark-and-exclude (\\\"Flagged points visible (hollow glyph, 'QC-flagged upstream'), excluded from medians/counts; captions print both counts\\\") and line 34 explicitly requires \\\"qc hollow\\\" dots in the Wet-vs-dry view. (2) Code: notebook_v2.qmd:2971 (hsWetDryView) and :3007 (hsVsClimate…"
+    }
+  ],
+  "totalTokens": 876758,
+  "totalToolCalls": 245
+}

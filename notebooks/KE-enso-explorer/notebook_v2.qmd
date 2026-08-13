@@ -609,34 +609,6 @@ insightB1 = {
 md`${_lang(nbText.sections.b2.intro)}`
 ```
 
-::: {.controls-row .ke-sticky-sec}
-
-```{ojs}
-// applies to every chart background in this section (Pete P19)
-viewof eventDriver = Inputs.select(driverOptionsX, {
-  label: _lang(nbText.sections.controls.driver), value: "ENSO + IOD",
-})
-```
-
-```{ojs}
-viewof eventShade = Inputs.radio(["Named events", "Driver strength"], {
-  label: _lang(nbText.sections.controls.eventShade), value: "Named events",
-})
-```
-
-:::
-
-```{ojs}
-// legend for the shading in force (Pete P18)
-eventShadeLegend = annMode === "strength"
-  ? cardLegend(eventDriver)
-  : html`<div style="font-size:0.78em;color:#555;margin:0.1rem 0 0.5rem">Shaded bands mark the named events:
-      <span style="background:${PALETTE.event.elnino};padding:1px 7px;border-radius:3px;margin-left:6px">El Niño</span>
-      <span style="background:${PALETTE.event.lanina};padding:1px 7px;border-radius:3px;margin-left:4px">La Niña</span>
-      <span style="background:${PALETTE.event.iodpos};padding:1px 7px;border-radius:3px;margin-left:4px">positive IOD</span>
-      — hover any band for its one-line story.</div>`
-```
-
 ## `{ojs} title_rain`
 
 ::: {.controls-row}
@@ -1047,6 +1019,8 @@ honestBox(nbText.sections.b2.canCannot)
 md`${_lang(nbText.sections.b2.annexPointer)}`
 ```
 
+<div id="impacts"></div>
+
 # `{ojs} heading_b3` {#events}
 
 ```{ojs}
@@ -1075,7 +1049,7 @@ viewof seasonLens = Inputs.radio(
 ```{ojs}
 // the lens years as chips, tagged with named events — the bridge to §2
 lensChips = {
-  if (!simYearSet.size) return html`<div style="font-size:11px;color:#888;margin:0.2rem 0 0.6rem">Pick a season type above to outline matching seasons on every chart below.</div>`;
+  if (!simYearSet.size) return html`<div style="font-size:11px;color:#888;margin:0.2rem 0 0.6rem">Pick a season type above to outline matching seasons on the time-series charts below — the harvest figures carry the same season colours directly.</div>`;
   const chips = [...simYearSet].sort().map((y) => {
     const evt = namedEvents.find((e) => e.seasons.includes(`${lensSeasonCode}-${y}`));
     return html`<span style="display:inline-block;padding:1px 8px;margin:2px;border:1px solid #ddd;border-radius:11px;font-size:12px" title="${evt ? evt.blurb.en : ""}">${y}${evt ? html`<span style="color:#777"> · ${evt.label.en.split(" ").slice(1).join(" ")}</span>` : ""}</span>`;
@@ -1097,14 +1071,18 @@ md`${_lang(nbText.sections.b3.seasonStripIntro)}`
 ```{ojs}
 // what counts as a dry/wet season HERE: the county's tercile cutoffs (mm)
 tercThresholdLine = {
-  const rows = chirpsYearlyAll.filter((d) => d.period === lensSeasonCode && d.value != null)
+  // MUST match the producer: enso_outlook_base terciles = np.percentile(1991–2020, [33.3, 66.7])
+  // (linear interpolation — d3.quantile is the same R-7 method; verified 45/45 agreement)
+  const vals = chirpsYearlyAll.filter((d) => d.period === lensSeasonCode && d.value != null
+      && d.year >= 1991 && d.year <= 2020)
     .map((d) => d.value).sort((a, b) => a - b);
-  if (rows.length < 12) return html``;
-  const lo = rows[Math.floor(rows.length / 3)], hi = rows[Math.floor(2 * rows.length / 3)];
+  if (vals.length < 25) return html``;
+  const lo = d3.quantile(vals, 1 / 3), hi = d3.quantile(vals, 2 / 3);
   return html`<div style="font-size:13px;color:#444;border-left:4px solid #94a89a;background:#f5f8f5;padding:8px 12px;margin:0 0 0.6rem;max-width:62rem">
-    In <b>${county}</b>, a <b>drier-than-usual</b> ${seasonWord(lensSeasonCode).toLowerCase()} season means under
-    <b>${Math.round(lo)} mm</b>; <b>wetter than usual</b> means over <b>${Math.round(hi)} mm</b>
-    (the bottom and top thirds of 1981–2025 — the same categories as a KMD “depressed / enhanced rainfall” outlook).</div>`;
+    In <b>${county}</b>, a <b>drier-than-usual</b> ${seasonWord(lensSeasonCode).toLowerCase()} season means
+    <b>${Math.round(lo)} mm</b> or less; <b>wetter than usual</b> means more than <b>${Math.round(hi)} mm</b>
+    (the driest and wettest thirds of 1991–2020 — the baseline behind every season category in this
+    section, and the same categories as a KMD “depressed / enhanced rainfall” outlook).</div>`;
 }
 ```
 
@@ -1208,7 +1186,7 @@ ndviChart = {
   const years = d3.range(new Date(from).getUTCFullYear(), new Date(to).getUTCFullYear() + 1);
   const strip = makeTercileStrip(years, [
     {label: "short rains", season: "OND"}, {label: "long rains", season: "MAM"}], 900, 50, 20);
-  return html`<div>${panels}<div style="font-size:11px;color:#777;margin-left:50px">${county} — season outcomes:</div>${strip}${tercStripLegend}</div>`;
+  return html`<div>${panels}<div style="font-size:11px;color:#777;margin-left:50px">${county} — season outcomes:</div>${strip}${tercStripLegend()}</div>`;
 }
 ```
 
@@ -1386,7 +1364,7 @@ md`${_lang(nbText.sections.b3.totIntro)}`
 totChart = {
   if (!totRows.length) return md`${_lang(nbText.sections.b3.totNoData)}`;
   const ys = d3.extent(totRows, (d) => d.tot);
-  return Plot.plot({
+  const chart = Plot.plot({
     height: 340, width: 900, marginLeft: 55,
     x: {type: "utc", label: null},
     y: {label: "kg of maize one goat buys", grid: true},
@@ -1398,13 +1376,15 @@ totChart = {
         fill: (d) => {
           const sn = d.month >= 10 ? "OND" : d.month >= 3 && d.month <= 5 ? "MAM" : null;
           const t = sn ? tercByYear(sn).get(d.year) : null;
-          return t ? tercColor[t] : "#e8e8e4";
+          return t ? tercColor[t] : "white";
         }, stroke: "#666", strokeWidth: 0.4, r: 2.6, tip: true,
         title: (d) => `${String(d.ym)}: one goat ≈ ${d.tot.toFixed(0)} kg maize`}),
       Plot.ruleY([totMedian], {stroke: "#555", strokeDasharray: "3"}),
       Plot.ruleY([0]),
     ],
   });
+  return html`<div>${chart}${tercStripLegend()}
+    <div style="font-size:10.5px;color:#666;margin-left:55px">dot colour = the rainfall tercile of the season the month falls in (Oct–Dec = short rains, Mar–May = long rains); white dots fall outside either season</div></div>`;
 }
 ```
 
@@ -1429,7 +1409,7 @@ md`${_lang(nbText.sections.b3.prodIntro)}`
 ::: {.controls-row}
 
 ```{ojs}
-viewof prodEvtView = Inputs.select(["Bars", "Lines", "Vs driver", "Table"], {
+viewof prodEvtView = Inputs.select(["Bars", "Lines", "Vs rainfall", "Table"], {
   label: _lang(nbText.sections.controls.prodViewType), value: "Bars",
 })
 ```
@@ -1465,7 +1445,7 @@ prodEvtHost = loaderTarget("plotProdEvents")
 ```{ojs}
 //| output: false
 {
-  [county, prodEvtPick, prodEvtVar]; // data deps only — eventDriver re-renders via the view fns
+  [county, prodEvtPick, prodEvtVar]; // data deps only — view/lens changes re-render via the view fns
   const div = document.getElementById("plotProdEvents");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -1477,7 +1457,7 @@ prodEvtHost = loaderTarget("plotProdEvents")
   renderToDiv("plotProdEvents", () => {
     if (prodEvtView === "Table") return prodEvtTable();
     if (prodEvtView === "Lines") return prodEvtLines();
-    if (prodEvtView === "Vs driver") return prodEvtVsDriver();
+    if (prodEvtView === "Vs rainfall") return prodEvtVsDriver();
     return prodEvtBars();
   });
 }
@@ -1538,7 +1518,7 @@ hsHost = loaderTarget("plotHarvestStat")
 ```{ojs}
 //| output: false
 {
-  [county, hsCrop, hsVar]; // data deps only — view re-renders synchronously
+  [county, hsCrop]; // data deps only (contract §7) — hsVar/hsView re-render synchronously
   const div = document.getElementById("plotHarvestStat");
   if (div) div.replaceChildren(loaderContent());
 }
@@ -1596,7 +1576,7 @@ rwChart = {
     ],
   });
   return html`<div>${chart}${makeTercileStrip(years, [
-    {label: "short rains", season: "OND"}, {label: "long rains", season: "MAM"}], 900, 90, 20)}${tercStripLegend}</div>`;
+    {label: "short rains", season: "OND"}, {label: "long rains", season: "MAM"}], 900, 90, 20)}${tercStripLegend()}</div>`;
 }
 ```
 
@@ -2651,103 +2631,6 @@ cardColor = (z) => {
   const soft = mix.map((c) => Math.round(c + 0.45 * (255 - c)));
   return `rgb(${soft.join(",")})`;
 }
-cardLegend = (driver, word = "Background") => {
-  const def = phaseDefs[driver];
-  return html`<div style="font-size:0.78em;color:#555;margin:0.1rem 0 0.5rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-    <span>${word} — <b>${driver.replace(/ \(.*\)$/, "")}</b> phase &amp; strength:</span>
-    <span>${def.neg}</span>
-    <span style="display:inline-block;width:130px;height:14px;background:linear-gradient(to right, ${cardColor(-2)}, ${cardColor(0)}, ${cardColor(2)})"></span>
-    <span>${def.pos}</span>
-  </div>`;
-}
-// shared annotation layer: named-event bands OR per-season driver-strength
-// shading, for date-x charts ({x:'date'}) and year-x charts ({x:'year'}).
-annotationMarks = ({x = "date", y1, y2, labelY = null, driver = "ENSO + IOD", mode = "events",
-                    from = null, to = null}) => {
-  const withSim = (marks) => [...marks, ...simMarks({x, y1, y2, from, to})];
-  // from/to clamp the annotation layer to the chart's own data window so a
-  // 1982 event band can never stretch a 2002+ series' x axis.
-  if (mode === "events") {
-    if (x === "date") {
-      if (from == null && to == null) return withSim(eventBandMarks({y1, y2, labelY}));
-      const f = from ?? new Date(Date.UTC(1900, 0, 1)), t = to ?? new Date(Date.UTC(2100, 0, 1));
-      const rows = namedEvents
-        .map((e) => ({...e, x1: parseYm(e.start), x2: parseYm(e.end)}))
-        .filter((e) => e.x2 >= f && e.x1 <= t)
-        .map((e) => ({...e, x1: e.x1 < f ? f : e.x1, x2: e.x2 > t ? t : e.x2}));
-      const out = [Plot.rect(rows, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
-        fill: (d) => PALETTE.event[d.phase], fillOpacity: 0.35,
-        title: (d) => `${d.label.en}\n${d.blurb.en}`})];
-      if (labelY != null) out.push(Plot.text(rows, {
-        x: (d) => new Date((d.x1.getTime() + d.x2.getTime()) / 2), y: () => labelY,
-        text: (d) => d.label.en.split(" ").slice(0, 2).join(" "),
-        dy: -4, fontSize: 9, fill: "#777", frameAnchor: "top"}));
-      return withSim(out);
-    }
-    const f = from ?? 1900, t = to ?? 2100;
-    const rows = namedEvents
-      .map((e) => ({...e, x1: +e.start.split("-")[0] - 0.45, x2: +e.end.split("-")[0] + 0.45}))
-      .filter((e) => e.x2 >= f - 0.5 && e.x1 <= t + 0.5)
-      .map((e) => ({...e, x1: Math.max(e.x1, f - 0.45), x2: Math.min(e.x2, t + 0.45)}));
-    return withSim([Plot.rect(rows, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
-      fill: (d) => PALETTE.event[d.phase], fillOpacity: 0.35,
-      title: (d) => `${d.label.en}\n${d.blurb.en}`})]);
-  }
-  const seasons = ["OND", "MAM"];
-  if (x === "date") {
-    // continuous gradient (V2-13): anchor each season's z at its centre month
-    // and interpolate month-by-month, so the background blends smoothly
-    // between seasons instead of reading as a barcode.
-    // each season holds its OWN z flat across its 3-month window; only the
-    // gaps between seasons are visually interpolated (and say so); nothing
-    // is painted beyond the last measured season (no invented 2026 states).
-    const anchors = seasons.flatMap((sn) => {
-      const zm = zSeries(driver, sn);
-      return [...zm.entries()].map(([year, z]) => ({
-        s0: Date.UTC(year, sn === "OND" ? 9 : 2, 1),
-        s1: Date.UTC(year, sn === "OND" ? 12 : 5, 1),
-        t: Date.UTC(year, sn === "OND" ? 10 : 3, 15), z, year, sn}));
-    }).sort((a, b) => a.t - b.t);
-    if (!anchors.length) return withSim([]);
-    const f = Math.max(from ? from.getTime() : anchors[0].s0, anchors[0].s0);
-    const t = Math.min(to ? to.getTime() : anchors[anchors.length - 1].s1,
-                       anchors[anchors.length - 1].s1);
-    const stateAt = (ms) => {
-      const inSeason = anchors.find((a) => ms >= a.s0 && ms < a.s1);
-      if (inSeason) return {z: inSeason.z,
-        lbl: `${inSeason.sn} ${inSeason.year}: ${categoryOf(driver, inSeason.z)} — strength ${inSeason.z.toFixed(1)} sd`};
-      let i = 0;
-      while (i < anchors.length && anchors[i].t < ms) i++;
-      if (i === 0 || i === anchors.length) return null;
-      const a = anchors[i - 1], b = anchors[i];
-      const w = (ms - a.t) / (b.t - a.t);
-      const z = a.z + w * (b.z - a.z);
-      return {z, lbl: `between ${a.sn} ${a.year} (${a.z.toFixed(1)} sd) and ${b.sn} ${b.year} (${b.z.toFixed(1)} sd) — shading interpolated, not measured`};
-    };
-    const months = [];
-    const d0 = new Date(f);
-    let cur = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), 1);
-    while (cur < t) {
-      const nxt = new Date(cur);
-      const nxt2 = Date.UTC(nxt.getUTCFullYear(), nxt.getUTCMonth() + 1, 1);
-      const st = stateAt(cur + (Math.min(nxt2, t) - cur) / 2);
-      if (st) months.push({x1: new Date(cur), x2: new Date(Math.min(nxt2, t)), z: st.z, lbl: st.lbl});
-      cur = nxt2;
-    }
-    return withSim([Plot.rect(months, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
-      fill: (d) => cardColor(d.z), fillOpacity: 0.85, title: (d) => d.lbl})]);
-  }
-  const rects = seasons.flatMap((sn) => {
-    const zm = zSeries(driver, sn);
-    return [...zm.entries()]
-      .filter(([year]) => (from == null || year >= from) && (to == null || year <= to))
-      .map(([year, z]) => ({x1: year + (sn === "OND" ? 0.05 : -0.45), x2: year + (sn === "OND" ? 0.45 : -0.05), z, year, sn}));
-  });
-  return withSim([Plot.rect(rects, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
-    fill: (d) => cardColor(d.z), fillOpacity: 0.85,
-    title: (d) => `${d.sn} ${d.year}: ${categoryOf(driver, d.z)} — strength ${d.z.toFixed(1)} sd`})]);
-}
-annMode = eventShade.startsWith("Driver") ? "strength" : "events";
 // the SEASON LENS (V2-51): county-specific terciles of the chosen season —
 // the exact language of a KMD above/near/below-normal outlook, uncoupled
 // from ENSO/IOD. Drives the outline highlights on every §3 time series.
@@ -2775,26 +2658,6 @@ simMarks = ({x = "date", y1, y2, from = null, to = null}) => {
     title: (d) => `${lensSeasonCode} ${d.y}: ${seasonLens.toLowerCase()} season for ${county}`})];
 }
 
-// reusable strength strip (year axis carrier): lanes = [{label, season, offset}]
-// offset shifts the season lookup (e.g. -1 = the season BEFORE that year, for
-// harvest-lag alignment) so the cell under a bar matches the bar's own claim.
-makeYearStrip = (years, lanes, driver, W = 900, marginLeft = 55, marginRight = 20) => {
-  const rows = lanes.flatMap((l) => {
-    const zm = zSeries(driver, l.season);
-    const off = l.offset ?? 0;
-    return years.map((y) => ({year: y, lane: l.label, z: zm.get(y + off) ?? null, srcYear: y + off}));
-  });
-  return Plot.plot({
-    height: 30 + lanes.length * 16, width: W, marginLeft, marginRight, marginTop: 0, marginBottom: 22,
-    x: {domain: years, tickFormat: (d) => "'" + String(d).slice(-2), label: null,
-        ticks: years.filter((y) => y % 5 === 0)},
-    y: {domain: lanes.map((l) => l.label), label: null, tickSize: 0},
-    marks: [
-      Plot.cell(rows, {x: "year", y: "lane", fill: (d) => cardColor(d.z), inset: 0.5,
-        tip: true, title: (d) => `${d.lane} (${d.srcYear}): ${d.z == null ? "no data" : categoryOf(driver, d.z) + " — strength " + d.z.toFixed(1) + " sd"}`}),
-    ],
-  });
-}
 // raw per-year season means for strip tooltips (V2-43)
 iodRawOnd = new Map(d3.rollups(driversCoal.filter((d) => [10, 11, 12].includes(d.month) && d.dmi != null),
   (v) => v.length === 3 ? d3.mean(v, (d) => d.dmi) : null, (d) => d.year).filter(([, v]) => v != null))
@@ -2829,7 +2692,7 @@ tercByYear = (seasonName) => {
 }
 tercColor = ({Wet: PALETTE.outcome.wetter, Near: PALETTE.outcome.nearPale, Dry: PALETTE.outcome.drier})
 tercWord = ({Wet: "wetter than usual", Near: "near-normal", Dry: "drier than usual"})
-// tercile strip: same geometry as makeYearStrip, cells = SEASON OUTCOME
+// tercile strip (year axis carrier): cells = SEASON OUTCOME
 makeTercileStrip = (years, lanes, W = 900, marginLeft = 55, marginRight = 20) => {
   const rows = lanes.flatMap((l) => {
     const tm = tercByYear(l.season);
@@ -2842,15 +2705,19 @@ makeTercileStrip = (years, lanes, W = 900, marginLeft = 55, marginRight = 20) =>
         ticks: years.filter((y) => y % 5 === 0)},
     y: {domain: lanes.map((l) => l.label), label: null, tickSize: 0},
     marks: [
-      Plot.cell(rows, {x: "year", y: "lane", fill: (d) => d.t ? tercColor[d.t] : "#f0f0ec", inset: 0.5,
+      Plot.cell(rows, {x: "year", y: "lane", fill: (d) => d.t ? tercColor[d.t] : "white",
+        stroke: "#e0e0e0", strokeWidth: 0.4, inset: 0.5,
         tip: true, title: (d) => `${d.lane} (${d.srcYear}): ${d.t ? tercWord[d.t] : "no data"}`}),
     ],
   });
 }
-tercStripLegend = html`<div style="font-size:10.5px;color:#666;margin-left:55px">season outcome:
+// function, not a node: the same legend appears under several figures at once,
+// and a single DOM node can only live in one place
+tercStripLegend = () => html`<div style="font-size:10.5px;color:#666;margin-left:55px">season outcome:
   <span style="display:inline-block;width:9px;height:9px;background:${PALETTE.outcome.drier};border-radius:2px"></span> drier
   <span style="display:inline-block;width:9px;height:9px;background:${PALETTE.outcome.nearPale};border-radius:2px;margin-left:8px"></span> near-normal
-  <span style="display:inline-block;width:9px;height:9px;background:${PALETTE.outcome.wetter};border-radius:2px;margin-left:8px"></span> wetter (vs the county's 1991–2020 thirds)</div>`
+  <span style="display:inline-block;width:9px;height:9px;background:${PALETTE.outcome.wetter};border-radius:2px;margin-left:8px"></span> wetter
+  <span style="display:inline-block;width:9px;height:9px;background:white;border:1px solid #ccc;border-radius:2px;margin-left:8px"></span> no data (vs the county's 1991–2020 thirds)</div>`
 ```
 
 ```{ojs}
@@ -2865,12 +2732,7 @@ hsSeasonalAll = dbHarvest.query(`
   FROM hs
   WHERE ${normExpr("county")} = '${countyNorm(county)}' AND season IN ('Long', 'Short')
   ORDER BY crop, season, py`)
-hsAnnualAll = dbHarvest.query(`
-  SELECT crop, CAST(harvest_year AS INT) AS year, production_t, yield_t_ha, area_ha, CAST(qc_flag AS INT) AS qc
-  FROM hs
-  WHERE ${normExpr("county")} = '${countyNorm(county)}' AND season = 'Annual'
-  ORDER BY crop, year`)
-hsEraOf = (py) => py <= 2001 ? "1991–2001 (district-era records)" : "2015–2024 (county records)"
+hsEraOf = (py) => py <= 2001 ? "1990–2001 (district-era records)" : "2015–2024 (county records)"
 // crop options with honest n in the label
 hsCropOpts = {
   const counts = d3.rollup(hsSeasonalAll, (v) => ({
@@ -2879,19 +2741,21 @@ hsCropOpts = {
   return [...counts.entries()]
     .filter(([, c]) => c.L + c.S >= 8)
     .sort((a, b) => (b[1].L + b[1].S) - (a[1].L + a[1].S))
-    .map(([crop, c]) => ({crop, label: `${crop} — ${c.L} Long / ${c.S} Short seasons`}));
+    .map(([crop, c]) => ({crop, label: `${crop} — ${c.L} Long / ${c.S} Short seasons on record`}));
 }
 // era-median anomaly (% of a usual year), qc-clean rows only, gate >=7 yrs
 hsRows = {
   const rows = hsSeasonalAll.filter((d) => d.crop === hsCrop.crop);
-  const eras = d3.group(rows.filter((d) => d.qc === 0 && d.yield_t_ha != null),
-    (d) => d.season + "|" + hsEraOf(d.py));
+  // each variable gets its own era median, gated on ITS OWN qc-clean non-null rows
+  const eras = d3.group(rows.filter((d) => d.qc === 0), (d) => d.season + "|" + hsEraOf(d.py));
   const med = new Map();
   for (const [k, v] of eras) {
-    med.set(k + "|yield", v.length >= 7 ? d3.median(v, (d) => d.yield_t_ha) : null);
-    med.set(k + "|prod", v.length >= 7 ? d3.median(v, (d) => d.production_t) : null);
+    for (const col of ["yield_t_ha", "production_t", "area_ha"]) {
+      const vv = v.filter((d) => d[col] != null);
+      med.set(k + "|" + col, vv.length >= 7 ? d3.median(vv, (d) => d[col]) : null);
+    }
   }
-  const varKey = hsVar.id === "yield_t_ha" ? "yield" : "prod";
+  const varKey = hsVar.id;
   const tOnd = tercByYear("OND"), tMam = tercByYear("MAM");
   return rows.map((d) => {
     const m = med.get(d.season + "|" + hsEraOf(d.py) + "|" + varKey);
@@ -2902,7 +2766,13 @@ hsRows = {
       terc: (d.season === "Short" ? tOnd : tMam).get(d.py) ?? null};
   }).filter((d) => d.value != null);
 }
-hsYears = d3.range(1991, 2025)
+hsYears = d3.range(1990, 2025)
+// dataset-wide season coverage (planting years) — HarvestStat v1.2 bounds
+hsCoverage = {
+  const r = await dbHarvest.query(`SELECT season, CAST(MIN(planting_year) AS INT) AS lo,
+    CAST(MAX(planting_year) AS INT) AS hi FROM hs WHERE season IN ('Long', 'Short') GROUP BY season`);
+  return new Map([...r].map((d) => [d.season, d]));
+}
 hsHoleYears = ({Long: [2002, 2014], Short: [2001, 2014]})
 // county season rainfall anomaly % per planting year (for the Vs-climate x)
 hsRainAnomPct = (seasonName) => {
@@ -2915,28 +2785,29 @@ hsSeriesView = () => {
   if (!hsRows.length) return noDataPlaceholder(`No seasonal HarvestStat record for ${hsCrop.crop} in ${county}.`);
   const seasons = ["Long", "Short"];
   const eraBrackets = [
-    {x1: 1990.55, x2: 2001.45, lbl: "1991–2001 · district-era records remapped to today's counties"},
-    {x1: 2014.55, x2: 2024.45, lbl: "2015–2024 · county records"},
+    {x: 1996, lbl: "1990–2001 · district-era records remapped to today's counties"},
+    {x: 2019, lbl: "2015–2024 · county records"},
   ];
   const panels = seasons.map((sn, i) => {
     const rows = hsRows.filter((d) => d.season === sn);
     if (!rows.length) return html``;
     const hole = hsHoleYears[sn];
+    const cov = hsCoverage.get(sn);
     const missing = hsYears.filter((y) =>
-      (y < hole[0] || y > hole[1]) && !rows.some((r) => r.py === y));
+      (y < hole[0] || y > hole[1]) && (!cov || (y >= cov.lo && y <= cov.hi)) && !rows.some((r) => r.py === y));
     const ymax = d3.max(rows, (d) => d.value);
     const plot = Plot.plot({
       height: 250, width: 900, marginLeft: 62, marginRight: 20, marginTop: 26, marginBottom: 4,
       x: {domain: hsYears, axis: null},
       y: {label: `${hsVar.unit}`, grid: true, tickFormat: formatNumCompactShort()},
       marks: [
-        Plot.rect([{x1: hole[0] - 0.45, x2: hole[1] + 0.45}], {x1: "x1", x2: "x2",
-          fill: "url(#ke-hatch)", fillOpacity: 0.7,
-          title: () => "no seasonal county reporting 2002–2014 — a national statistics-system gap, not zero harvests"}),
-        ...eraBrackets.map((b) => Plot.text([b], {x: (d) => (d.x1 + d.x2) / 2, frameAnchor: "top",
+        Plot.cell(d3.range(hole[0], hole[1] + 1).map((y) => ({y})), {x: "y",
+          fill: `url(#ke-hatch-hs-${sn})`, fillOpacity: 0.7,
+          title: () => `no seasonal county reporting for planting years ${hole[0]}–${hole[1]} — a national statistics-system gap, not zero harvests`}),
+        ...eraBrackets.map((b) => Plot.text([b], {x: "x", frameAnchor: "top",
           text: (d) => d.lbl, dy: -18, fontSize: 9.5, fill: "#888"})),
         Plot.barY(rows, {x: "py", y: "value",
-          fill: (d) => d.terc ? tercColor[d.terc] : "#e8e8e4",
+          fill: (d) => d.terc ? tercColor[d.terc] : "white",
           stroke: (d) => d.qc > 0 ? "#c0392b" : "#777", strokeWidth: (d) => d.qc > 0 ? 1.4 : 0.4,
           strokeDasharray: (d) => d.qc > 0 ? "3,2" : null,
           channels: {Crop: () => hsCrop.crop,
@@ -2951,11 +2822,12 @@ hsSeriesView = () => {
       ],
     });
     // hatch pattern host (defs) — one per panel, cheap
-    const wrap = html`<div><div class="ke-panel-lbl">${sn === "Long" ? "Long rains crop (planted ~Mar, harvested mid-year)" : "Short rains crop (planted ~Oct, harvested ~Mar next year)"}</div>${plot}</div>`;
+    const covNote = cov ? ` · record ${cov.lo}–${cov.hi}` : "";
+    const wrap = html`<div><div class="ke-panel-lbl">${sn === "Long" ? "Long rains crop (planted ~Mar, harvested mid-year)" : "Short rains crop (planted ~Oct, harvested ~Mar next year)"}${covNote}</div>${plot}</div>`;
     const svgEl = wrap.querySelector("svg");
     if (svgEl) {
       const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-      defs.innerHTML = `<pattern id="ke-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#d5d5d0"></rect></pattern>`;
+      defs.innerHTML = `<pattern id="ke-hatch-hs-${sn}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#d5d5d0"></rect></pattern>`;
       svgEl.prepend(defs);
     }
     return wrap;
@@ -2964,33 +2836,47 @@ hsSeriesView = () => {
     {label: "long rains (MAM)", season: "MAM"}, {label: "short rains (OND)", season: "OND"}], 900, 62, 20);
   return html`<div>${panels}
     <div style="font-size:11px;color:#777;margin-left:62px">planting-season outcomes (x = planting year — bars sit over the season that grew them):</div>
-    ${strip}${tercStripLegend}</div>`;
+    ${strip}${tercStripLegend()}</div>`;
 }
 
 hsWetDryView = () => {
   const rows = hsRows.filter((d) => d.anomPct != null && d.terc != null && d.qc === 0);
-  if (rows.length < 6) return noDataPlaceholder("Too few qc-clean seasons with an era baseline for this view.");
+  const flaggedAll = hsRows.filter((d) => d.qc > 0 && d.anomPct != null && d.terc != null);
+  if (rows.length < 6) return noDataPlaceholder("Too few qc-clean seasons with an era baseline for this view — see the Season series view for absolute values.");
   const bins = ["Dry", "Near", "Wet"];
   const binLbl = {Dry: "Drier than usual", Near: "Near-normal", Wet: "Wetter than usual"};
   const panels = ["Long", "Short"].map((sn) => {
     const sub = rows.filter((d) => d.season === sn);
-    if (sub.length < 4) return html``;
+    const flaggedSub = flaggedAll.filter((d) => d.season === sn);
+    const gatedN = hsRows.filter((d) => d.season === sn && d.anomPct == null).length;
+    const anyN = hsRows.filter((d) => d.season === sn).length;
+    if (sub.length < 4) {
+      return anyN
+        ? noDataPlaceholder(`${sn} rains: ${anyN} seasons on record but no % baseline — each era has fewer than 7 qc-clean seasons. Their absolute values are in the Season series view.`)
+        : html``;
+    }
     const counts = new Map(bins.map((b) => [b, sub.filter((d) => d.terc === b).length]));
     const medOK = (b) => (counts.get(b) ?? 0) >= 3;
-    return html`<div><div class="ke-panel-lbl">${sn} rains crop</div>${Plot.plot({
+    const note = gatedN
+      ? html`<div style="font-size:11px;color:#996515">${gatedN} season${gatedN > 1 ? "s" : ""} shown only in the Season series — no % baseline (era has &lt;7 qc-clean seasons)</div>`
+      : "";
+    return html`<div><div class="ke-panel-lbl">${sn} rains crop (${sub.length} clean${flaggedSub.length ? `, ${flaggedSub.length} QC-flagged` : ""})</div>${Plot.plot({
       height: 330, width: 440, marginLeft: 58, marginBottom: 50, grid: true,
       x: {domain: bins, tickFormat: (b) => `${binLbl[b]} (${counts.get(b) ?? 0} of ${sub.length})`, label: "planting-season rains", tickRotate: 0},
       y: {label: "% of a usual year"},
       marks: [
         Plot.ruleY([100], {stroke: "#555", strokeDasharray: "3"}),
         Plot.dot(sub, {x: "terc", y: "anomPct",
-          fill: (d) => d.era.startsWith("1991") ? "#9ecae1" : "#2c7fb8",
+          fill: (d) => d.era.startsWith("1990") ? "#9ecae1" : "#2c7fb8",
           stroke: "#555", strokeWidth: 0.5, r: 5, tip: true,
           title: (d) => `planted ${d.py} (${d.era}): ${Math.round(d.anomPct)}% of usual`}),
+        Plot.dot(flaggedSub, {x: "terc", y: "anomPct", fill: "none",
+          stroke: "#c0392b", strokeWidth: 1.4, r: 5, tip: true,
+          title: (d) => `planted ${d.py}: ${Math.round(d.anomPct)}% of usual — QC-flagged upstream (HarvestStat), excluded from medians and counts`}),
         Plot.text(sub, {x: "terc", y: "anomPct", text: (d) => String(d.py), dx: 15, fontSize: 9, fill: "#555"}),
         Plot.tickY(sub.filter((d) => medOK(d.terc)), Plot.groupX({y: "median"}, {x: "terc", y: "anomPct", stroke: "#111", strokeWidth: 2.5})),
       ],
-    })}</div>`;
+    })}${note}</div>`;
   });
   const short = rows.filter((d) => d.season === "Short");
   const dryShort = short.filter((d) => d.terc === "Dry");
@@ -2999,21 +2885,33 @@ hsWetDryView = () => {
     ? html`<div style="font-size:13px;color:#333;margin-top:6px">In ${county}, <b>${kBelow} of ${dryShort.length}</b> drier-than-usual short-rains plantings came in below a usual year's ${hsCrop.crop.toLowerCase()} ${hsVar.id === "yield_t_ha" ? "yield" : "harvest"}.</div>`
     : "";
   return html`<div><div style="display:flex;gap:1.5rem;flex-wrap:wrap">${panels}</div>
-    <div style="font-size:11px;color:#777">dot shade: light = district-era records (1991–2001), dark = county records (2015–24) · black tick = median (shown from 3 seasons)</div>
+    <div style="font-size:11px;color:#777">dot shade: light = district-era records (1990–2001), dark = county records (2015–24) · hollow red = QC-flagged upstream, excluded from medians · black tick = median (shown from 3 seasons)</div>
     ${sentence}</div>`;
 }
 
 hsVsClimateView = () => {
   const rows = hsRows.filter((d) => d.anomPct != null && d.qc === 0);
-  if (rows.length < 6) return noDataPlaceholder("Too few qc-clean seasons with an era baseline for this view.");
+  const flaggedAll = hsRows.filter((d) => d.qc > 0 && d.anomPct != null);
+  if (rows.length < 6) return noDataPlaceholder("Too few qc-clean seasons with an era baseline for this view — see the Season series view for absolute values.");
   const rainL = hsRainAnomPct("MAM"), rainS = hsRainAnomPct("OND");
-  const pts = rows.map((d) => ({...d,
-    x: (d.season === "Short" ? rainS : rainL).get(d.py) ?? null})).filter((d) => d.x != null);
+  const joinX = (d) => (d.season === "Short" ? rainS : rainL).get(d.py) ?? null;
+  const pts = rows.map((d) => ({...d, x: joinX(d)})).filter((d) => d.x != null);
+  const flaggedPts = flaggedAll.map((d) => ({...d, x: joinX(d)})).filter((d) => d.x != null);
   if (!pts.length) return noDataPlaceholder("No overlapping rainfall record.");
   const panels = ["Long", "Short"].map((sn) => {
     const sub = pts.filter((d) => d.season === sn);
-    if (sub.length < 4) return html``;
-    return html`<div><div class="ke-panel-lbl">${sn} rains crop (n=${sub.length})</div>${Plot.plot({
+    const flaggedSub = flaggedPts.filter((d) => d.season === sn);
+    const gatedN = hsRows.filter((d) => d.season === sn && d.anomPct == null).length;
+    const anyN = hsRows.filter((d) => d.season === sn).length;
+    if (sub.length < 4) {
+      return anyN
+        ? noDataPlaceholder(`${sn} rains: ${anyN} seasons on record but no % baseline — each era has fewer than 7 qc-clean seasons. Their absolute values are in the Season series view.`)
+        : html``;
+    }
+    const note = gatedN
+      ? html`<div style="font-size:11px;color:#996515">${gatedN} season${gatedN > 1 ? "s" : ""} shown only in the Season series — no % baseline (era has &lt;7 qc-clean seasons)</div>`
+      : "";
+    return html`<div><div class="ke-panel-lbl">${sn} rains crop (${sub.length} clean${flaggedSub.length ? `, ${flaggedSub.length} QC-flagged` : ""})</div>${Plot.plot({
       height: 330, width: 440, marginLeft: 58, grid: true,
       x: {label: "planting-season rainfall (% vs normal)"},
       y: {label: "% of a usual year"},
@@ -3021,15 +2919,18 @@ hsVsClimateView = () => {
         Plot.ruleY([100], {stroke: "#999", strokeDasharray: "3"}),
         Plot.ruleX([0], {stroke: "#999", strokeDasharray: "3"}),
         Plot.dot(sub, {x: "x", y: "anomPct",
-          fill: (d) => d.era.startsWith("1991") ? "#9ecae1" : "#2c7fb8",
+          fill: (d) => d.era.startsWith("1990") ? "#9ecae1" : "#2c7fb8",
           stroke: "#555", strokeWidth: 0.5, r: 5.5, tip: true,
           title: (d) => `planted ${d.py}: rains ${d.x >= 0 ? "+" : ""}${Math.round(d.x)}% · ${hsCrop.crop} ${Math.round(d.anomPct)}% of usual (${d.era})`}),
+        Plot.dot(flaggedSub, {x: "x", y: "anomPct", fill: "none",
+          stroke: "#c0392b", strokeWidth: 1.4, r: 5.5, tip: true,
+          title: (d) => `planted ${d.py}: ${Math.round(d.anomPct)}% of usual — QC-flagged upstream (HarvestStat), excluded from summaries`}),
         Plot.text(sub, {x: "x", y: "anomPct", text: (d) => String(d.py), dy: -11, fontSize: 9, fill: "#555"}),
       ],
-    })}</div>`;
+    })}${note}</div>`;
   });
   return html`<div><div style="display:flex;gap:1.5rem;flex-wrap:wrap">${panels}</div>
-    <div style="font-size:11px;color:#777">no fitted line by design — with these sample sizes this is a pattern check, not a statistic; the fitted version lives in the technical annex backlog</div></div>`;
+    <div style="font-size:11px;color:#777">hollow red = QC-flagged upstream · no fitted line by design — with these sample sizes this is a pattern check, not a statistic; the fitted version lives in the technical annex backlog</div></div>`;
 }
 
 hsTableView = () => {
@@ -3752,30 +3653,6 @@ countyContingency = {
 ```
 
 ```{ojs}
-// ---- event annotation helpers (shared bands, date-x and year-x variants) ----
-eventBandMarks = ({y1, y2, labelY}) => {
-  const rows = namedEvents.map((e) => ({...e, x1: parseYm(e.start), x2: parseYm(e.end)}));
-  const marks = [
-    Plot.rect(rows, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
-      fill: (d) => PALETTE.event[d.phase], fillOpacity: 0.35,
-      title: (d) => `${d.label.en}\n${d.blurb.en}`}),
-  ];
-  if (labelY != null) marks.push(Plot.text(rows, {
-    x: (d) => new Date((d.x1.getTime() + d.x2.getTime()) / 2), y: () => labelY,
-    text: (d) => d.label.en.split(" ").slice(0, 2).join(" "),
-    dy: -4, fontSize: 9, fill: "#777", frameAnchor: "top"}));
-  return marks;
-}
-eventBandMarksYear = ({y1, y2}) => {
-  const rows = namedEvents.map((e) => ({...e,
-    x1: +e.start.split("-")[0] - 0.45, x2: +e.end.split("-")[0] + 0.45}));
-  return [Plot.rect(rows, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
-    fill: (d) => PALETTE.event[d.phase], fillOpacity: 0.35,
-    title: (d) => `${d.label.en}\n${d.blurb.en}`})];
-}
-```
-
-```{ojs}
 // ---- NDVI ----
 dbNdvi = DuckDBClient.of({
   ndvi_county: FileAttachment("/data/KE-enso-explorer/ndvi_county.parquet"),
@@ -4346,7 +4223,7 @@ prodEvtBars = () => {
       Plot.barY(rows, {x: "year", y: "value", fy: "crop",
         fill: (d) => {
           const t = tercByYear("OND").get(d.year - 1);
-          return t ? tercColor[t] : "#e8e8e4";
+          return t ? tercColor[t] : "white";
         }, stroke: "#999", strokeWidth: 0.5,
         channels: {Crop: "crop", Year: {value: (d) => String(d.year), label: "Harvest year"},
           Value: {value: (d) => `${formatNumCompactShort()(d.value)} ${d.unit}`, label: prodEvtVar.label},
@@ -4360,7 +4237,7 @@ prodEvtBars = () => {
       Plot.ruleY([0]),
     ],
   });
-  return html`<div>${chart}${prodEvtStrip()}${tercStripLegend}
+  return html`<div>${chart}${prodEvtStrip()}${tercStripLegend()}
     <div style="font-size:12px;color:#555">${md`${_lang(nbText.sections.b3.prodLegend)}`}</div></div>`;
 }
 
@@ -4386,33 +4263,35 @@ prodEvtLines = () => {
       Plot.ruleY([0]),
     ],
   });
-  return html`<div>${chart}${prodEvtStrip()}${tercStripLegend}</div>`;
+  return html`<div>${chart}${prodEvtStrip()}${tercStripLegend()}</div>`;
 }
 
-// "Vs driver" (V2-15 phase 1): harvest value against the PRECEDING short
-// rains' driver state — the direct production-vs-variable read, lag-correct
-// by construction. Six labelled dots per crop; a pattern check, never a fit.
+// "Vs rainfall" (V2-15 phase 1): harvest value against the PRECEDING short
+// rains — the county's own rainfall, the section's tercile grammar,
+// lag-correct by construction. Labelled dots; a pattern check, never a fit.
 prodEvtVsDriver = () => {
   const rows = prodEvtRowsAll;
   if (!rows.length) return noDataPlaceholder(`No ${prodEvtVar.label} series for ${county}.`);
-  const zPrevOnd = zSeries(eventDriver, "OND");
-  const pts = rows.map((d) => ({...d, z: zPrevOnd.get(d.year - 1) ?? null})).filter((d) => d.z != null);
-  if (!pts.length) return noDataPlaceholder("No driver values for the preceding seasons.");
+  const rainOnd = hsRainAnomPct("OND");
+  const tOnd = tercByYear("OND");
+  const pts = rows.map((d) => ({...d, x: rainOnd.get(d.year - 1) ?? null,
+    t: tOnd.get(d.year - 1) ?? null})).filter((d) => d.x != null);
+  if (!pts.length) return noDataPlaceholder("No rainfall record for the preceding seasons.");
   const crops = [...new Set(pts.map((d) => d.crop))];
   const colors = paletteRange(crops.length);
   const chart = Plot.plot({
     height: 400, width: 760, marginLeft: 70, marginRight: 130, grid: true,
-    x: {label: `${eventDriver} — preceding short rains (sd)`},
+    x: {label: "preceding short rains — OND of the year before (% vs 1991–2020 normal)"},
     y: {label: prodEvtVar.unit, tickFormat: formatNumCompactShort()},
     color: {domain: crops, range: colors, legend: true},
     marks: [
       Plot.ruleX([0], {stroke: "#bbb"}),
-      Plot.dot(pts, {x: "z", y: "value", fill: "crop", r: 6, stroke: "white", strokeWidth: 0.7,
+      Plot.dot(pts, {x: "x", y: "value", fill: "crop", r: 6, stroke: "white", strokeWidth: 0.7,
         channels: {Crop: "crop", Harvest: {value: (d) => String(d.year), label: "Harvest year"},
-          Driver: {value: (d) => `OND ${d.year - 1}: ${categoryOf(eventDriver, d.z)}`, label: "Preceding short rains"},
+          Rains: {value: (d) => `OND ${d.year - 1}: ${d.x >= 0 ? "+" : ""}${Math.round(d.x)}% vs normal${d.t ? ` · ${tercWord[d.t]}` : ""}`, label: "Preceding short rains"},
           Value: {value: (d) => `${formatNumCompactShort()(d.value)} ${d.unit}`, label: prodEvtVar.label}},
-        tip: {format: {x: false, y: false, fill: false, Crop: true, Harvest: true, Driver: true, Value: true}}}),
-      Plot.text(pts, {x: "z", y: "value", text: (d) => String(d.year), dy: -11, fontSize: 9.5, fill: "#555"}),
+        tip: {format: {x: false, y: false, fill: false, Crop: true, Harvest: true, Rains: true, Value: true}}}),
+      Plot.text(pts, {x: "x", y: "value", text: (d) => String(d.year), dy: -11, fontSize: 9.5, fill: "#555"}),
     ],
   });
   return html`<div>${chart}<div style="font-size:12px;color:#555">${md`${_lang(nbText.sections.b3.prodVsDriverNote)}`}</div></div>`;
@@ -4421,10 +4300,14 @@ prodEvtVsDriver = () => {
 prodEvtTable = () => {
   const rows = prodEvtRowsAll;
   if (!rows.length) return noDataPlaceholder(`No ${prodEvtVar.label} series for ${county}.`);
-  const zPrevOnd = zSeries(eventDriver, "OND");
+  const rainOnd = hsRainAnomPct("OND");
+  const tOnd = tercByYear("OND");
   const t = rows.map((d) => ({Crop: d.crop, "Harvest year": d.year,
     [prodEvtVar.label]: Math.round(d.value),
-    "Preceding short rains": categoryOf(eventDriver, zPrevOnd.get(d.year - 1) ?? null)}));
+    "Preceding short rains (OND of yr before)": (() => {
+      const tc = tOnd.get(d.year - 1), r = rainOnd.get(d.year - 1);
+      return tc ? `${tercWord[tc]}${r != null ? ` (${r >= 0 ? "+" : ""}${Math.round(r)}% vs normal)` : ""}` : "no data";
+    })()}));
   return html`<div>${dataTable(t, {rows: 16})}
     <div class="plot-footer-row">${downloadCsvBtn(t, `${county}_production_events_table`)}</div></div>`;
 }
