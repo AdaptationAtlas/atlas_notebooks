@@ -356,9 +356,13 @@ still live from it is re-registered here.
   when year span is large; min/max year selector for the x-axis; thicker/darker bar outlines;
   caption must explain the background (rule: EVERY figure with the driver background explains it);
   anomaly/absolute toggle moves to Fig 2.1 (V2-42g).
-- **V2-47 · BUG ToC sidebar empty · OPEN (M).** The floating atlasTOC panel renders nothing
-  (screenshot). Investigate: OJS-inline headings vs toc.ojs timing, collapse state, or the
-  `toc: false` front-matter interplay.
+- **V2-47 · BUG ToC sidebar empty · DONE 2026-08-13.** Root cause: helpers/toc.ojs's
+  MutationObserver refresh early-returned when the heading ELEMENTS were unchanged — but
+  OJS-inline headings (`# \`{ojs} title\``) mount as empty spans and only fill in when the OJS
+  graph resolves (same elements, new text), so the TOC froze on the empty boot state. Fix: the
+  no-change signature now includes each heading's rendered label text (jsdom-verified:
+  boot ["","",""] → re-render with labels on text fill). Shared-helper fix — benefits every
+  notebook using atlasTOC.
 - **V2-48 · Fig 3.8 polish · DONE v2.6 (now Fig 3.6-A; strip = makeTercileStrip, aligned + labelled; controls one row; value-ordered filter + select-none).** (a) Driver-strip cells misalign with the year columns;
   (b) strip lane labels cut (marginLeft too small); (c) legend still says "Background — IOD phase &
   strength" but it is no longer a background — reword to "Strip —"; (d) the 3 controls on one line,
