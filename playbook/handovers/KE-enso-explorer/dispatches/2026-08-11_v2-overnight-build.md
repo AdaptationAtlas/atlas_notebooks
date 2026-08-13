@@ -101,3 +101,25 @@ cell now unused (harmless); eventDriver deliberately does not steer Fig 3.4 (sta
 **MUST DO — Pete, real browser** (`notebook_v2.html`): Fig 1.4 GESI + Fig 3.8 flagship (the two
 that were dead in v2.2), the left TOC panel + toggle after scrolling at ~1100px width, the produce
 multiselect/table views, 2.3 driver panels, §3 driver/highlight controls, 3.2 multi-county panels.
+
+---
+
+## Addendum — cycle 5 (2026-08-13): Pete's v2.3 review → v2.4 → adversarial → v2.5
+
+Pete's 16-point v2.3 browser review registered as tracker items V2-01..V2-16 in ISSUES.md
+(+ V2-20..26 carried). Two data flags resolved by direct query: the "milk 0→8B" was the ∅-at-zero
+display artifact (Kajiado milk 5.08B→8.26B KSh, qty×price exact); the "missing IOD bands" was the
+min-4 display filter (all seven bands exist in the record). **v2.4** (`1454006`) implemented
+V2-01..16. The focused adversarial pass (2 reviewers, 21 findings) caught its own review surface:
+the long-running `quarto preview --no-watch-inputs` had been silently reverting `_site` to v2.3 on
+every request, so v2.4 was never truly render-verified (now a standing memory + the artifact check
+matches version VALUES in the decoded module, not variable names). **v2.5** (`3c22af2`) fixed all
+21: gradient honesty (in-season flat, gaps labelled "interpolated, not measured", nothing painted
+past the last measured season), 3.2 shade-scale/legend anomaly-range bug, sticky-stack offsets,
+render-path decoupling for the monthly view, treemap %-of-group tooltip + caption, ∅-at-zero purge
+in 3.8, whisker floor at 0 mm, CSV/chart bin parity, A5 title/anchor, season-scope labels.
+
+**Pete next:** hard-refresh http://localhost:4333/notebooks/KE-enso-explorer/notebook_v2.html —
+hero must read **v2.5**. Then the V2 items still open by design: V2-15 full 3.8 redesign (phase-1
+mitigations only), V2-05d indicator definitions (sourcing), V2-06 percentile spread options (data
+build), V2-20..26.
