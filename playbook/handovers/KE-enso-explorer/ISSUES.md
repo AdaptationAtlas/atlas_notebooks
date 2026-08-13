@@ -261,3 +261,6 @@ still live from it is re-registered here.
   combination-method table into the main-notebook Methods/annex when this folds in.
 - **KE-24 · OND seasonal-COG all-zero (pipeline) · OPEN (dispatched 2026-08-13).** `PTOT_OND_*_sum.tif`
   reads all-zero; notebook falls back to monthly-sum. Rebake + verify 12 seasons — pipeline dispatch.
+- **KE-25 · Legend format consistency · DONE 2026-08-13.** Card-colour legend and map-cell rainfall
+  legend now use the SAME inline format (`<label>: <low> [gradient] <high>`), stacked + left-aligned
+  in `sectionLegend` (was: card inline vs cell stacked-3-line → mismatched).
