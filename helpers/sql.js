@@ -30,9 +30,12 @@ const ADMIN_FIELD = ["admin0_name", "admin1_name", "admin2_name"];
 // A row states its own admin level through NULLs: a country row holds a NULL
 // admin1_name, a region row holds an admin1_name but a NULL admin2_name. Both
 // exported queries pick a level that way; `offset` is all that separates them.
-function adminWhere({ admin0 = [], admin1 = [], admin2 = [] } = {}, bind, options, offset) {
-  const { maxLevel = 2, iso3 } = options ?? {};
-
+function adminWhere(
+  { admin0 = [], admin1 = [], admin2 = [] } = {},
+  bind,
+  { maxLevel = 2, iso3 } = {},
+  offset,
+) {
   if (!bind || typeof bind.list !== "function") {
     throw new TypeError("admin filtering requires bindings from createSqlBindings()");
   }
