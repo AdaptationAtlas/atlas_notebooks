@@ -27,21 +27,14 @@ export function createSqlBindings() {
 
 const ADMIN_FIELD = ["admin0_name", "admin1_name", "admin2_name"];
 
-/**
- * Select rows at the implied admin level, capped to the table's maxLevel.
- *
- * Drill-down (the default) reports one level below the selection, so picking a
- * country lists its regions. `exact: true` reports the selection itself instead
- * — the aggregate row for whatever is selected. That row has no admin0_name of
- * its own when nothing is selected, so name it with `aggregate`.
- */
-export function sqlAdminWhere(
-  { admin0 = [], admin1 = [], admin2 = [] } = {},
-  bind,
-  { maxLevel = 2, iso3, exact = false, aggregate } = {},
-) {
+// A row states its own admin level through NULLs: a country row holds a NULL
+// admin1_name, a region row holds an admin1_name but a NULL admin2_name. Both
+// exported queries pick a level that way; `offset` is all that separates them.
+function adminWhere({ admin0 = [], admin1 = [], admin2 = [] } = {}, bind, options, offset) {
+  const { maxLevel = 2, iso3 } = options ?? {};
+
   if (!bind || typeof bind.list !== "function") {
-    throw new TypeError("sqlAdminWhere() requires bindings from createSqlBindings()");
+    throw new TypeError("admin filtering requires bindings from createSqlBindings()");
   }
 
   const names = (values) => (Array.isArray(values) ? values.filter(Boolean) : []);
@@ -52,21 +45,32 @@ export function sqlAdminWhere(
   const depth = gap === -1 ? selected.length : gap;
 
   // Deeper selections become highlights when the table stops at a higher level.
-  const level = Math.min(exact ? Math.max(depth - 1, 0) : depth, maxLevel);
+  const level = Math.min(Math.max(depth + offset, 0), maxLevel);
 
-  // Scope by name, then select one level via nullability. Drill-down scopes by
-  // the levels above the one it draws; `exact` also scopes by the one it draws.
-  // Never past `level`, or a capped table gets asked for a name it holds NULL.
+  // Scope by every name at or above the level drawn, then pick that level by
+  // nullability. Never scope past `level`, or a table that stops higher would be
+  // asked for a name in a column it holds NULL.
   const conditions = [];
   if (iso3) conditions.push(`iso3 IN (${bind.list([...iso3])})`);
-  for (const [index, values] of selected
-    .slice(0, Math.min(depth, exact ? level + 1 : level))
-    .entries()) {
+  for (const [index, values] of selected.slice(0, Math.min(depth, level - offset)).entries()) {
     conditions.push(`${ADMIN_FIELD[index]} IN (${bind.list(values)})`);
   }
-  if (exact && depth === 0) conditions.push(`admin0_name = ${bind.value(aggregate)}`);
   conditions.push(level >= 1 ? "admin1_name IS NOT NULL" : "admin1_name IS NULL");
   conditions.push(level >= 2 ? "admin2_name IS NOT NULL" : "admin2_name IS NULL");
 
   return conditions.join(" AND ");
+}
+
+/** Select the rows inside the selection: pick a country, list its regions. */
+export function sqlAdminWhere(selection, bind, options) {
+  return adminWhere(selection, bind, options, 0);
+}
+
+/**
+ * Select the row for the selection itself: pick a country, get that country's
+ * own row. A dataset holding a whole-area row says so through the selection —
+ * `{ admin0: ["SSA"] }` — rather than through an option here.
+ */
+export function sqlAdminAt(selection, bind, options) {
+  return adminWhere(selection, bind, options, -1);
 }
