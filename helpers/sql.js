@@ -25,27 +25,46 @@ export function createSqlBindings() {
   };
 }
 
-/** Select rows at the implied admin level, capped to the table's maxLevel. */
+const ADMIN_FIELD = ["admin0_name", "admin1_name", "admin2_name"];
+
+/**
+ * Select rows at the implied admin level, capped to the table's maxLevel.
+ *
+ * Drill-down (the default) reports one level below the selection, so picking a
+ * country lists its regions. `exact: true` reports the selection itself instead
+ * — the aggregate row for whatever is selected. That row has no admin0_name of
+ * its own when nothing is selected, so name it with `aggregate`.
+ */
 export function sqlAdminWhere(
-  { admin0 = [], admin1 = [] } = {},
+  { admin0 = [], admin1 = [], admin2 = [] } = {},
   bind,
-  { maxLevel = 2, iso3 } = {},
+  { maxLevel = 2, iso3, exact = false, aggregate } = {},
 ) {
   if (!bind || typeof bind.list !== "function") {
     throw new TypeError("sqlAdminWhere() requires bindings from createSqlBindings()");
   }
 
   const names = (values) => (Array.isArray(values) ? values.filter(Boolean) : []);
-  const [a0, a1] = [names(admin0), names(admin1)];
+  const selected = [names(admin0), names(admin1), names(admin2)];
+
+  // Levels chosen from the top, stopping at the first gap.
+  const gap = selected.findIndex((level) => level.length === 0);
+  const depth = gap === -1 ? selected.length : gap;
 
   // Deeper selections become highlights when the table stops at a higher level.
-  const level = Math.min(a0.length === 0 ? 0 : a1.length === 0 ? 1 : 2, maxLevel);
+  const level = Math.min(exact ? Math.max(depth - 1, 0) : depth, maxLevel);
 
-  // Scope by parent names, then select one level via nullability.
+  // Scope by name, then select one level via nullability. Drill-down scopes by
+  // the levels above the one it draws; `exact` also scopes by the one it draws.
+  // Never past `level`, or a capped table gets asked for a name it holds NULL.
   const conditions = [];
   if (iso3) conditions.push(`iso3 IN (${bind.list([...iso3])})`);
-  if (level >= 1) conditions.push(`admin0_name IN (${bind.list(a0)})`);
-  if (level >= 2) conditions.push(`admin1_name IN (${bind.list(a1)})`);
+  for (const [index, values] of selected
+    .slice(0, Math.min(depth, exact ? level + 1 : level))
+    .entries()) {
+    conditions.push(`${ADMIN_FIELD[index]} IN (${bind.list(values)})`);
+  }
+  if (exact && depth === 0) conditions.push(`admin0_name = ${bind.value(aggregate)}`);
   conditions.push(level >= 1 ? "admin1_name IS NOT NULL" : "admin1_name IS NULL");
   conditions.push(level >= 2 ? "admin2_name IS NOT NULL" : "admin2_name IS NULL");
 
