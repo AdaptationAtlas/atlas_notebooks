@@ -2764,12 +2764,12 @@ roniZOnd = {
 // county-series z maps (rainfall / SPEI-3 as "drivers" for impact figures —
 // KMD forecasts speak in rainfall terms, so this is the similar-seasons lens)
 countyZ = (kind, season) => {
-  const rows = chirpsYearlyAll.filter((d) => d.period === season && d.value != null);
-  if (kind === "__spei__") {
-    // seasonal SPEI-3 is already standardised
-    const sp = speiSeasonAll.filter((d) => d.period === season && d.value != null);
-    return new Map(sp.map((d) => [d.year, d.value]));
-  }
+  // county-mean SPEI is variance-compressed by spatial averaging (per-window
+  // sd 0.56–0.89, not ~1), so BOTH kinds are re-standardized against their
+  // own 1991–2020 record — backgrounds then share one strength scale.
+  const rows = (kind === "__spei__"
+    ? speiSeasonAll.filter((d) => d.period === season && d.value != null)
+    : chirpsYearlyAll.filter((d) => d.period === season && d.value != null));
   const ref = rows.filter((d) => d.year >= 1991 && d.year <= 2020).map((d) => d.value);
   const m = d3.mean(ref), sd = d3.deviation(ref) || 1;
   return new Map(rows.map((d) => [d.year, (d.value - m) / sd]));
@@ -2799,17 +2799,17 @@ zMonthly = (driver) => {
   if (def.members[0] === "__spei__" || def.members[0] === "__rain__") {
     const wantVar = def.members[0] === "__spei__" ? "SPEI-03" : "PTOT";
     const rows = countyRollingAll.filter((d) => d.variable === wantVar && d.value != null && rollCentre[d.period]);
-    if (wantVar === "SPEI-03") {
-      // already standardized
-      out = new Map(rows.map((d) => [mk(d.year + rollCentre[d.period][1], rollCentre[d.period][0]), d.value]));
-    } else {
-      // standardize each rolling window against its own 1991–2020 record
-      out = new Map();
-      for (const [period, v] of d3.group(rows, (d) => d.period)) {
-        const ref = v.filter((d) => d.year >= 1991 && d.year <= 2020).map((d) => d.value);
-        const m0 = d3.mean(ref), sd = d3.deviation(ref) || 1;
-        for (const d of v) out.set(mk(d.year + rollCentre[period][1], rollCentre[period][0]), (d.value - m0) / sd);
-      }
+    // BOTH variables are re-standardized per rolling window over 1991–2020.
+    // County-mean SPEI is NOT ~N(0,1): spatial averaging compresses its
+    // variance (measured per-window sd 0.56–0.89), so serving it "as-is"
+    // would systematically under-warn on the shared ±2 colour ramp.
+    // (All remaining periods have year offset 0, so label year = centre
+    // year and the 1991–2020 ref covers the centre months exactly.)
+    out = new Map();
+    for (const [period, v] of d3.group(rows, (d) => d.period)) {
+      const ref = v.filter((d) => d.year >= 1991 && d.year <= 2020).map((d) => d.value);
+      const m0 = d3.mean(ref), sd = d3.deviation(ref) || 1;
+      for (const d of v) out.set(mk(d.year + rollCentre[period][1], rollCentre[period][0]), (d.value - m0) / sd);
     }
     zMonthlyCache.set(key, out);
     return out;
@@ -2861,8 +2861,8 @@ zSeries = (driver, season) => {
   const key = driver + "|" + season + "|" + county;
   if (zSeriesCache.has(key)) return zSeriesCache.get(key);
   const def = phaseDefs[driver], mons = seasonMonthsFor[season];
-  // SPEI is already standardised — serve it untouched (no re-standardising);
-  // county rainfall z is its own no-op under re-standardisation, same path.
+  // county members are re-standardized inside countyZ (county-mean SPEI is
+  // variance-compressed — see countyZ) — both take the same path.
   if (def.members[0] === "__spei__" || def.members[0] === "__rain__") {
     const out0 = countyZ(def.members[0], season);
     zSeriesCache.set(key, out0);
@@ -2913,12 +2913,13 @@ speiIdxOpts = [
   {v: "SPEI-06", label: "SPEI-6 (6-month window)"},
   {v: "SPEI-12", label: "SPEI-12 (12-month window)"},
 ]
-// ---- per-plot chart backgrounds (V2-56, cycle 7) ----
-// Every §3 chart shades OND/MAM seasons by the chosen driver's strength.
-// Discrete = only the 3-month season windows, coloured by intensity class;
-// Continuous = the season windows hold their own measured shade and the
-// gaps between them are interpolated month-by-month (labelled as such);
-// nothing is ever painted beyond the last measured season.
+// ---- per-plot chart backgrounds (V2-56 cycle 7; V2-45 cycle 8) ----
+// Every §3 chart shades by the chosen driver's strength.
+// Discrete = the OND/MAM season windows, coloured by intensity class;
+// Continuous = every month painted with its own MEASURED rolling 3-month
+// window (zMonthly) — no interpolation, no extrapolation, nothing painted
+// where a window is missing or beyond the last measured month.
+// Single-season drivers (Western-V, MAM-only) always show season blocks.
 // class boundaries match Fig 2.2's evidence bins: <1 sd reads as neutral
 // (a 0.8 sd season must not be tinted here and filed under neutral there)
 bgDiscColor = (z) => z == null ? "#fff"
@@ -2944,7 +2945,12 @@ bgMarks = ({x = "date", y1, y2, from = null, to = null}) => {
       const x1 = new Date(Date.UTC(y, m - 1, 1)), x2 = new Date(Date.UTC(y, m, 1));
       return {x1, x2, z,
         lbl: `${fmt(new Date(Date.UTC(y, m - 1, 15)))}: ${categoryOf(bgDriver, z)} — ${z.toFixed(1)} sd (measured, 3-month window centred here)`};
-    }).filter((d) => d.x2.getTime() > f && d.x1.getTime() < t);
+    }).filter((d) => d.x2.getTime() > f && d.x1.getTime() < t)
+      // clamp edge rects to the chart's own data window (v2.7 contract) so
+      // month blocks never bleed past the frame or inflate an inferred domain
+      .map((d) => ({...d,
+        x1: d.x1.getTime() < f ? new Date(f) : d.x1,
+        x2: d.x2.getTime() > t ? new Date(t) : d.x2}));
     return [Plot.rect(months, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
       fill: (d) => cardColor(d.z), fillOpacity: 0.85, title: (d) => d.lbl})];
   }
@@ -2997,7 +3003,8 @@ bgLegend = ({outlines = true} = {}) => {
   const parts = [];
   if (bgMode !== "Off") {
     const def = phaseDefs[bgDriver];
-    parts.push(html`<span>Background — <b>${bgDriver.replace(/ \(.*\)$/, "")}</b> phase &amp; strength (${bgMode.toLowerCase()}${def.seasons ? `, ${def.seasons.join("/")} only — a ${def.seasons[0] === "MAM" ? "long-rains" : "short-rains"} control` : ""}):</span>
+    const single = def.seasons && def.seasons.length === 1;
+    parts.push(html`<span>Background — <b>${bgDriver.replace(/ \(.*\)$/, "")}</b> phase &amp; strength (${single && bgMode === "Continuous" ? "discrete season blocks — single-season driver" : bgMode.toLowerCase()}${def.seasons ? `, ${def.seasons.join("/")} only — a ${def.seasons[0] === "MAM" ? "long-rains" : "short-rains"} control` : ""}):</span>
       <span>${def.neg}</span>
       <span style="display:inline-block;width:130px;height:14px;background:linear-gradient(to right, ${cardColor(-2)}, ${cardColor(0)}, ${cardColor(2)})"></span>
       <span>${def.pos}</span>`);
@@ -3838,14 +3845,19 @@ chirpsYearlyAll = dbChirps.query(`
 ```
 
 ```{ojs}
-// chirps_county stores 12 rolling 3-month periods per year, labelled by
-// their END year (NDJ 1998 = Nov 1997 – Jan 1998 — verified by exact
-// decomposition against chirps_county_monthly). rollCentre maps each period
-// to its centre month: NDJ-Y centres on Dec of Y−1, DJF-Y on Jan of Y; the
-// other ten periods never cross the year boundary. Shared by the SPEI strip
-// (Fig 3.1) and the monthly county backgrounds (zMonthly).
+// chirps_county stores 12 rolling 3-month periods per year. ELEVEN are
+// END-year labelled (DJF 1998 = Dec 1997 – Feb 1998 — verified by exact
+// decomposition against chirps_county_monthly, 44/44 county-years).
+// NDJ is QUARANTINED: the producer stores Nov(Y) + Dec(Y−1) + Jan(Y) — a
+// year-label shift applied only to December, mixing two different rainy
+// seasons (decomposition match 44/44 in Turkana/Nakuru/Mandera; SPEI-03
+// NDJ shows the same variance-deflation fingerprint). December therefore
+// renders as an honest measured gap until the producer parquet is fixed
+// (tracker V2-63 — pipeline fix = shift year labels for months >= 11).
+// rollCentre maps each served period to its centre month; shared by the
+// SPEI strip (Fig 3.1) and the monthly county backgrounds (zMonthly).
 rollCentre = ({JFM: [2, 0], FMA: [3, 0], MAM: [4, 0], AMJ: [5, 0], MJJ: [6, 0],
-  JJA: [7, 0], JAS: [8, 0], ASO: [9, 0], SON: [10, 0], OND: [11, 0], NDJ: [12, -1], DJF: [1, 0]})
+  JJA: [7, 0], JAS: [8, 0], ASO: [9, 0], SON: [10, 0], OND: [11, 0], DJF: [1, 0]})
 speiRows = {
   const centre = rollCentre;
   const rows = await dbChirps.query(`

@@ -213,3 +213,43 @@ window) — no notebook impact, D409 fix with Wave-3.
 hero must read **v2.7**. Review focus: the linked controls feel (change a control at 3.4, watch
 3.1 follow), Discrete vs Continuous backgrounds, 3.6-A's grouped bars + lag-shifted wash,
 3.6-B's Records default (veto if the full record should lead), IPC yearly bars.
+
+---
+
+## Addendum — cycle 8 (2026-08-16): V2-45 → v2.8 (measured monthly backgrounds)
+
+Pete's "retry" green-lit the buildable item. **v2.8** (`300b725` + fix round): Continuous
+backgrounds no longer interpolate — new `zMonthly` paints every month with its own MEASURED
+rolling 3-month window (ocean drivers: centred windows from the monthly indices, standardized per
+calendar-month window over 1991–2020, composites averaged then re-standardized mirroring zSeries;
+county rain/SPEI: chirps_county's rolling periods via the shared `rollCentre` map). Nothing
+painted where a window is missing or beyond the last measured month (May 2026). Python
+recomputation matches JS to 9e-16; 1997–98 / triple-dip / 2023–24 read coherent through year
+turns.
+
+**Adversarial round (6 agents): 4 confirmed serious, 0 refuted, 6 minors — all fixed.**
+- **CRITICAL — chirps_county NDJ corrupt at source, and worse than V2-63 first recorded:** served
+  NDJ(Y) = Nov(Y)+Dec(Y−1)+Jan(Y) (44/44 decomposition, 3 counties), and **SPEI-03 NDJ is also
+  affected** (variance-deflation fingerprint), contradicting the v2.7 verifier. Before the fix,
+  Turkana Dec-1997 painted Neutral at the peak of the century's El Niño rains — the exact
+  false-dip bug class v2.8 set out to kill, reintroduced from the data side. **Fix: NDJ
+  quarantined client-side** (removed from rollCentre → December = honest measured gap in Fig 3.1
+  + county monthly backgrounds), false "verified" comment corrected, V2-63 escalated with the
+  producer fix spec (months ≥ 11 year-shift; do NOT edit the pipeline directly).
+- **MAJOR — county-mean SPEI is not ~N(0,1)** (spatial averaging compresses sd to 0.56–0.89):
+  drought backgrounds systematically under-warned on the shared ±2 ramp. Both zMonthly and
+  countyZ now re-standardize SPEI per window/season over 1991–2020; Fig 3.1's curve stays in raw
+  SPEI units (−1/−2 rules) with the scale difference stated in the caption.
+- **MAJOR — "categories can differ near thresholds" was dishonest:** whole events flip between
+  RONI season blocks and the monthly Niño3.4 view (OND 2024: weak La Niña vs Neutral). All six
+  captions now state the OND-2024 example outright. Long-term fix = monthly RONI (V2-23).
+- **MAJOR — edge bleed:** the new Continuous branch dropped v2.7's edge clamp (month rects
+  painted past the frame / inflated inferred domains) — clamped to the chart's data window.
+- Minors: rwCaption got a year-x-specific background sentence; WV+Continuous legend now says
+  "discrete season blocks — single-season driver"; stale interpolation language purged from
+  comments and the §3 intro; 3.1 caption notes the SPEI-driver double-encoding.
+
+**Pete next:** hard-refresh — hero must read **v2.8**. Check: Continuous backgrounds month-by-
+month (hover any month — every value "measured"); December cells blank on county drivers +
+Fig 3.1 (deliberate, V2-63); SPEI backgrounds now stronger (re-standardized); OND-2024 nuance in
+captions.

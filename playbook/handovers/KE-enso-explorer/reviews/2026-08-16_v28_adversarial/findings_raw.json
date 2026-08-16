@@ -1,0 +1,266 @@
+{
+  "summary": "Cycle-8 focused adversarial review of KE-ENSO notebook_v2 v2.8 (zMonthly measured monthly backgrounds)",
+  "agentCount": 6,
+  "logs": [
+    "confirmed serious: 3, refuted: 1, minors: 5"
+  ],
+  "result": {
+    "verdicts": [
+      {
+        "reviewer": "hostile-ojs-mechanic (Fable 5)",
+        "verdict": "v2.8 core machinery is sound: zMonthly executed for Machakos and Marsabit across all 6 drivers with zero NaN z's, correct key format, edge months absent (all-3-months rule verified incl. synthetic-hole test), per-calendar-month 1991-2020 baselines exact (mean 0/sd 1 to 1e-9), composite re-standardization mirrors zSeries, SPEI passthrough byte-identical, and an independent python reimplementation matches JS to 9e-16. Cache audit: zMonthlyCache/zSeriesCache cells have no inputs so the Maps persist across county switches, but the zMonthly cell re-evaluates on county change (county + countyRollingAll are cell inputs, so repaints are reactive and glitch-free) and every set() path uses the driver|county key (qmd 2794/2814/2857); A->B->A round-trip verified identical; stale-under-same-key is unreachable because the parquet is immutable per session. countyRollingAll costs 1,082 rows/county (eager on county switch even with backgrounds Off - negligible); zMonthly is never called when bgMode is Off/Discrete. Fence checker PASS (479 cells); nbText 206 refs all present, 6 captions updated correctly, no leftover interpolation language. Three defects found: the Continuous branch dropped v2.7's right-edge clamp so month rects paint past from/to (jsdom-verified 6.7px/8.1px bleed outside the fixed-domain NDVI frame, and ~2-week x-domain inflation on inferred-domain charts) - major; December county-rain windows use a baseline shifted one year vs the ocean drivers' December windows (NDJ label-year vs centre-year convention) - minor; and the shared caption sentence was pasted into rwCaption whose figure is year-x only and never takes the monthly path - minor."
+      },
+      {
+        "reviewer": "Hostile climate scientist + reader — v2.8 measured monthly backgrounds (independent python recompute)",
+        "verdict": "REQUEST CHANGES. The v2.8 mechanism (rollCentre, zMonthly, measured-months Continuous branch) is correctly built — ocean-driver recomputation reproduces 1997-98, the triple dip and 2023-24 with no year-turn artifacts, nothing painted beyond last measured month, caches are county-safe, fence check passes, all nbText keys resolve. But the county paths are poisoned by a source-data defect v2.8's own comment claims to have ruled out: the served chirps_county NDJ period is a Frankenstein window Nov(Y)+Dec(Y-1)+Jan(Y) (proven exactly, 3 counties x 44 years), so EVERY December cell in the new county rain/SPEI backgrounds and Fig 3.1's SPEI strip is wrong — Turkana Dec 1997 reads Neutral (-0.0 sd) at the peak of the century's El Niño rains (true +2.51 sd). This is the exact false-dip-at-year-turn bug class v2.8 set out to eliminate, reintroduced from the data side. Additionally the SPEI-03 background is scale-compressed (sd 0.56-0.89, not ~1) and the RONI-vs-Niño3.4 caption materially undersells the divergence (the whole OND 2024 La Niña flips to Neutral). Do not ship the monthly county backgrounds until NDJ is dropped or the producer parquet is fixed (via dispatch — not by editing the pipeline directly)."
+      }
+    ],
+    "confirmed": [
+      {
+        "severity": "critical",
+        "title": "chirps_county NDJ is corrupt at source — every December-centred county cell paints a fabricated window; the code comment's 'verified by exact decomposition' claim is false",
+        "where": "notebook_v2.qmd:3841-3848 (rollCentre + comment), 2801-2815 (zMonthly county paths), 3849-3859 (speiRows, Fig 3.1); producer parquet data/KE-enso-explorer/chirps_county.parquet",
+        "problem": "The served NDJ(Y) value is Nov(Y) + Dec(Y-1) + Jan(Y) — the producer shifted only December's year label into the END year, not November's (classic `year + (month==12)` instead of `month>=11`). rollCentre correctly maps NDJ-Y to centre Dec(Y-1), but the value it places there mixes two different rainy seasons and includes Nov of the FOLLOWING year — data 11 months in the future relative to the painted cell, violating both 'blank never zero/wrong' and 'nothing painted beyond measured'. The comment at 3841-3843 asserts NDJ 1998 = Nov 1997-Jan 1998 'verified by exact decomposition against chirps_county_monthly' — that verification fails for NDJ (it passes for all 11 other periods). SPEI-03 NDJ carries the same producer fingerprint (per-window 1991-2020 sd 0.56/0.61 vs 0.71-0.89 for every other window in both counties tested), so Fig 3.1's December SPEI points and the monthly SPEI background Decembers are almost certainly corrupt too. Note speiRows consumed NDJ before v2.8, but v2.8 hoisted the map, extended NDJ into all county monthly backgrounds, and added the false verification claim.",
+        "evidence": "Exact decomposition vs chirps_county_monthly (Turkana, Nakuru, Mandera; 44 years each): NDJ(Y)=Nov(Y)+Dec(Y-1)+Jan(Y) matches 44/44 with 0 mismatches; END-label Nov(Y-1)..Jan(Y) matches 0/44; OND/DJF/JFM match END-label 36/36 exactly. Concrete damage: stored NDJ 1998 Turkana = 67.1mm (= Nov98 3.1 + Dec97 25.6 + Jan98 38.4) vs true Nov97-Jan98 = 216.3mm; notebook paints Dec 1997 as z=-0.01 'Neutral' where the true window z=+2.51 — a false dip between Nov97 +1.79 and Jan98 +0.85 at the height of the 1997-98 El Niño floods. Nakuru Dec 2021 paints +2.58 (mid-La-Niña-drought spike) where the true window z=-0.49.",
+        "fix": "Notebook-side now: remove NDJ from rollCentre (or filter it in zMonthly and speiRows) so December paints blank — an honest measured gap — and delete/correct the 'verified by exact decomposition' comment (state: NDJ quarantined, producer bug, Dec cells intentionally blank). Producer-side: route via an atlas_notebooks dispatch/ISSUE with this evidence (do NOT edit hazards_prototype directly): NDJ needs year label shifted for months>=11, then re-verify with the decomposition test for PTOT and re-check SPEI-03 NDJ sd rejoins the 0.7-0.9 band. While fixing, also align the county ref-year filter to centre year (d.year + rollCentre[period][1] in 1991-2020, qmd 2809) so a corrected NDJ baseline covers Dec 1991-2020 like the ocean drivers, not Dec 1990-2019.",
+        "reviewer": "Hostile climate scientist + reader — v2.8 measured monthly backgrounds (independent python recompute)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Attempted refutation failed on every axis; all evidence reproduces from the actual files at 300b725 (working tree has no diff on notebook_v2.qmd, so the code is live and unfixed).\n\n1. Decomposition test (Turkana, Nakuru, Mandera vs data/KE-enso-explorer/chirps_county_monthly.parquet, tolerance 0.05mm): stored NDJ(Y) = Nov(Y)+Dec(Y-1)+Jan(Y) matches 44/44 years in ALL THREE counties; the END-year hypothesis the code comment asserts (Nov(Y-1)+Dec(Y-1)+Jan(Y)) matches 0/44; START-label 0/44. All 11 other periods (JFM..OND, DJF) decompose exactly under END-label with zero mismatches. So the producer bug is real (classic year+(month==12) instead of month>=11), and the comment at qmd 3841-3843 claiming NDJ 1998 = Nov 1997–Jan 1998 'verified by exact decomposition' is demonstrably false — the served NDJ mixes Dec(Y-1) with Nov/Jan of the FOLLOWING season.\n\n2. Concrete damage numbers reproduce to the digit: Turkana NDJ-1998 stored 67.1mm = Nov98 3.1 + Dec97 25.6 + Jan98 38.4; true Nov97–Jan98 = 216.3mm (Nov97 alone = 152.2mm). Replicating the notebook's exact zMonthly PTOT path (per-window 1991–2020 label-year baseline, qmd 2806-2811), the cell painted at Dec 1997 gets z=-0.01 ('Neutral') where the true window z=+2.50 — a fabricated neutral dip between OND-1997 (centre Nov97) z=+1.79 and DJF-1998 (centre Jan98) z=+0.85, at the peak of the 1997-98 El Niño floods. Nakuru Dec 2021 paints z=+2.58 where the true window is z=-0.49, a fabricated wet spike mid-La-Niña drought. (Finding said +2.51 vs my +2.50 — rounding, immaterial.)\n\n3. SPEI-03 fingerprint reproduces: NDJ 1991-2020 sd = 0.56 (Turkana) / 0.61 (Nakuru) vs 0.75-0.89 for every other window — the variance-deflation signature of averaging across two seasons, so Fig 3.1's December SPEI points and monthly-background Decembers carry the same corruption (circumstantial but strong; SPEI is not additively decomposable, so this is inference, and wholesale NDJ quarantine covers it either way).\n\n4. Line numbers and consumers are accurate: rollCentre + false comment at 3841-3848; consumers are exactly zMonthly (2801/2804/2811) and speiRows (3850/3855-3856), both gated on rollCentre[d.period], confirmed by grep — no other consumer exists.\n\nSeverity 'critical' is justified: fabricated values painted at wrong-season positions in county-facing figures violate the project's core honesty rules ('blank ≠ zero/wrong', deterministic-provenance), and the flagship 1997-98 El Niño example is exactly the event policymakers will look at.",
+          "fix": "Proposed fix is correct; adopt with amendments. Notebook-side (now): delete the NDJ key from rollCentre (qmd 3847-3848) — both consumers (zMonthly 2801, speiRows 3855) already filter on rollCentre[d.period], so this single-point removal quarantines NDJ everywhere; December cells then render blank (an honest measured gap per project rules). Rewrite the 3841-3846 comment: state that 11 periods are END-year labelled (verified by exact decomposition against chirps_county_monthly), but NDJ is quarantined because the producer stores Nov(Y)+Dec(Y-1)+Jan(Y) — a year-label shift applied only to December (44/44 decomposition match in Turkana/Nakuru/Mandera) — so December is intentionally blank until the producer is fixed. Producer-side: route via an atlas_notebooks dispatch/ISSUE with this evidence (per standing rule, do NOT edit hazards_prototype directly): shift year labels for months >= 11 (not month == 12) when building NDJ; re-verify with the PTOT decomposition test and confirm SPEI-03 NDJ 1991-2020 sd rejoins the 0.75-0.89 band (currently 0.56/0.61 — the two-season-mixing fingerprint). Secondary (do with the producer fix, not before): align the county PTOT ref-year filter at qmd 2809 to the centre year (d.year + rollCentre[period][1] in 1991-2020) so a corrected NDJ baseline covers Dec 1991-2020 rather than Dec 1990-2019; note this is cosmetic today (the current painted -0.01 is a self-consistently-standardized z of a nonsense quantity — the baseline alignment is not the bug). One caution: the SPEI-03 corruption is inferred from the variance fingerprint, not exact decomposition (SPEI isn't additive) — the quarantine covers it regardless, but the dispatch should say 'fingerprint-consistent', not 'proven', for SPEI."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "SPEI-03 served as z 'as-is' is scale-compressed (sd 0.56-0.89, not ~1) — drought backgrounds systematically under-warn on the shared +/-2 ramp",
+        "where": "notebook_v2.qmd:2802-2804 (zMonthly __spei__ path), 2891-2900 (cardColor), 2884-2890 (categoryOf/Z_BANDS); same assumption in countyZ at 2768-2772",
+        "problem": "zMonthly passes county-mean SPEI-03 rolling values straight through as z ('already standardized'). Pixel-level SPEI is ~N(0,1); the COUNTY MEAN of imperfectly correlated pixels is not — its variance is compressed. On cardColor's +/-2 saturation ramp and categoryOf's 0.5/1.0/1.5 thresholds a genuinely strong county drought reads roughly one intensity class weaker than an identical-severity event shown via the rain background, and extreme months can never saturate the ramp. For a drought-explorer aimed at ASAL counties this is a systematic under-warning bias, and it makes the SPEI and rain backgrounds visually incomparable despite sharing one legend gradient.",
+        "evidence": "Per-window 1991-2020 stats of served SPEI-03 (python recompute): Turkana sd by window 0.56-0.86 (all-years sd 0.77, min -2.21, max 2.22 over 44 years — a 44-year record of N(0,1) should repeatedly exceed |2.5|); Nakuru sd 0.61-0.89 (all-years 0.76, min -1.79). Means ~0.01-0.06, so it is purely a variance compression.",
+        "fix": "In zMonthly, treat __spei__ like __rain__: standardize each rolling window's county-mean SPEI against its own 1991-2020 record (the code path already exists three lines below). Keep Fig 3.1's AREA chart on raw SPEI (its -1/-2 guidance in the caption refers to index units) but note in the caption that background shading is re-standardized county-level strength. Apply the same fix or an explicit caveat to the seasonal countyZ __spei__ path.",
+        "reviewer": "Hostile climate scientist + reader — v2.8 measured monthly backgrounds (independent python recompute)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Code verified at the cited lines of notebooks/KE-enso-explorer/notebook_v2.qmd (file unchanged since 300b725): zMonthly's __spei__ path (2802-2804) passes county-mean SPEI-03 rolling values straight through as z with the comment \"already standardized\", while the __rain__ path (2806-2812) standardizes each rolling window against its own 1991-2020 record; countyZ (2768-2772) does the same pass-through for seasonal SPEI; Z_BANDS={0.5,1.0,1.5} (2729) drive categoryOf (2884-2890) and bgDiscColor (2925); cardColor (2891-2900) saturates at |z|=2. Consumption chain confirmed: phaseDefs line 2736 exposes \"Drought index SPEI-3 (county)\" as a background driver; zMonthly(bgDriver) at 2939 feeds cardColor for section-3 season backgrounds on the shared -2..+2 legend (3002). Empirical reproduction from the served data/KE-enso-explorer/chirps_county.parquet (python3 recompute): Turkana SPEI-03 per-window 1991-2020 sd 0.556-0.864 (NDJ 0.556), all-years sd 0.772, min -2.207, max 2.223 over 1981-2026; Nakuru sd 0.614-0.890, all-years 0.765, min -1.786; window means 0.003-0.024 — pure variance compression, matching the finding's numbers. The \"already standardized\" defense fails: a genuinely N(0,1) county series would show per-window sd ~1; the county mean of imperfectly correlated pixels does not (value_mean/value_sd column pair confirms pixel aggregation), and pooled full-record sd is equally below 1 so it is not a calibration-window artifact. Severity math: with sd~0.77, \"Strong\" (>=1.5) requires true county z ~1.95 and ramp saturation ~2.6 (Turkana NDJ: 2.7 and 3.6 — unreachable), while the rain background saturates at exactly 2 by construction — systematic ~one-class under-warning and visual incomparability on the shared legend. Minor caveat not affecting the verdict: the evidence sub-claim that a 44-year N(0,1) record \"should repeatedly exceed |2.5|\" is overstated (expected max of 44 iid draws ~2.24 per window); the direct sd measurement is the dispositive evidence.",
+          "fix": "In zMonthly (notebook_v2.qmd ~2799-2813), delete the `wantVar === \"SPEI-03\"` pass-through branch so BOTH __spei__ and __rain__ flow through the existing per-rolling-window 1991-2020 standardization loop (the code at 2806-2812 already does exactly what is needed, including the `d3.deviation(ref) || 1` guard). In countyZ (~2768-2772), replace the seasonal SPEI pass-through with the same standardization: filter speiSeasonAll to the season, build ref from years 1991-2020, and return (value - mean)/sd per year. Update the now-false comments at 2769 (\"seasonal SPEI-3 is already standardised\") and 2864-2865 in zSeries (\"SPEI is already standardised — serve it untouched\") to say county-mean SPEI is variance-compressed by spatial averaging (measured sd 0.56-0.89) and is therefore re-standardized per window/season against 1991-2020 so backgrounds share the rain background's scale. Keep Fig 3.1's SPEI area chart on raw index units (its -1/-2 caption guidance refers to SPEI units), but add one caption sentence noting that season-background shading uses county-level re-standardized strength, not raw SPEI units."
+        }
+      },
+      {
+        "severity": "major",
+        "title": "Caption's 'categories can differ near thresholds' is dishonest — whole events flip between the RONI Discrete blocks and the monthly Nino3.4 view, including OND 2024",
+        "where": "data/KE-enso-explorer/nbText_v2.json lines 393, 409, 421, 441, 469, 499 (shared BG sentence); deviation comment notebook_v2.qmd:2785-2787",
+        "problem": "The shared sentence frames the RONI-vs-Nino3.4 deviation as marginal threshold jitter. Recomputation shows entire policy-relevant events flip phase: OND 2024 — the La Niña KMD and WMO advisories were built on — is Weak La Niña in every Discrete block (RONI z=-0.80, well past the 0.5 threshold) but Neutral in all three monthly Nino3.4 cells (-0.25, -0.33, -0.43); the flips are systematically signed in recent warm years because plain Nino3.4 absolute anomalies read warmer than the relative RONI index. A reader toggling Discrete->Continuous on the same chart watches the 2024 La Niña vanish and is told this only happens 'near thresholds'.",
+        "evidence": "Python recompute, Oct/Nov/Dec cells 1991-2025 vs roniZOnd-standardized RONI blocks (both 1991-2020 baselines, notebook's Z_BANDS): 9/105 cells flip PHASE, 23/105 change category. Whole-event flips: 2024 (block Weak LN -0.80 vs monthly Neutral all 3 months), 2014 (block Neutral +0.45 vs monthly Weak EN Nov+Dec), 2016 Dec (block -0.92 vs monthly -0.46), 2008 Oct/Nov, 2005 Dec.",
+        "fix": "Reword the nuance clause in all six captions, e.g.: '(Nuance: the season blocks classify OND ENSO with RONI, the monthly view uses the plain Nino3.4 window; in recent warm years these can disagree outright — the OND 2024 La Niña by RONI reads Neutral in the monthly view.)' Longer term: serve monthly RONI (V2-23) so both views classify on one index.",
+        "reviewer": "Hostile climate scientist + reader — v2.8 measured monthly backgrounds (independent python recompute)",
+        "verify": {
+          "confirmed": true,
+          "reasoning": "Reproduced end-to-end from the shipped files at HEAD (sentence also present at cited commit 300b725). (1) The clause \"categories can differ near thresholds\" appears verbatim at nbText_v2.json lines 393, 409, 421, 441, 469, 499 and in the deviation comment at notebook_v2.qmd:2786-2787. (2) Code paths confirmed: zSeries (qmd:2872) substitutes roniZOnd for Discrete OND ENSO blocks, while zMonthly uses plain nino34_anom_noaa centred 3-month windows standardized per calendar month; bgMarks' Continuous branch early-returns only the monthly rects, so the RONI blocks are literally replaced on toggle. (3) Python recompute replicating the notebook's exact math (enso_outlook_base roni_conc first-per-year, 1991-2020 standardization + zSeries re-standardization; driver_indices centred windows, per-calendar-month z) over Oct/Nov/Dec 1991-2025 gives 105 cells, 23 category changes, 9 phase flips — matching the finding exactly. OND 2024: block z=-0.80 (Weak La Niña, mid-band, 60% past the 0.5 threshold) vs monthly -0.25/-0.33/-0.43 (Neutral all three months); also 2014 Nov/Dec (Neutral +0.45 vs Weak EN +0.55/+0.57), 2016 Dec (-0.92 vs -0.46), 2008 Oct/Nov, 2005 Dec. The 2014/2016/2024 flips are all signed monthly-warmer, confirming systematic RONI-vs-Niño3.4 divergence rather than threshold jitter. The \"near thresholds\" framing understates a ~0.4-0.55 sd index disagreement that makes the policy-central OND 2024 La Niña vanish on a view toggle — dishonest as charged.",
+          "fix": "Reword the shared nuance clause in all six captions (nbText_v2.json lines 393, 409, 421, 441, 469, 499 — ndviCaption, ipcCaption, pricesCaption, totCaption, rwCaption, seasonStripCaption), e.g.: \"(Nuance: the season blocks classify OND ENSO with RONI; the monthly view uses the plain Niño3.4 window. The two indices can disagree outright in recent warm years — OND 2024 is a weak La Niña by RONI but reads Neutral in the monthly view.)\" Update the matching deviation comment at notebook_v2.qmd:2786-2787 to the same effect (drop \"near thresholds\"; note the whole-event disagreement, citing OND 2024). Longer term: serve a monthly RONI series (V2-23) so both views classify on one index, then delete the caveat."
+        }
+      }
+    ],
+    "refuted": [
+      {
+        "severity": "major",
+        "title": "Continuous bg rects not clamped to [from,to] — paints outside the plot frame / inflates x domain",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2942-2949 (filter at 2947, rect at 2948)",
+        "problem": "The new Continuous branch keeps any month rect that merely overlaps [from,to] (`d.x2 > f && d.x1 < t`) but never clamps x1/x2 to the range. v2.7's replaced code clamped the right edge (`x2: new Date(Math.min(nxt2, t))`); v2.8 dropped that. On charts with a fixed x domain (ndviChart, qmd 1197: `domain: [from, to]`) Plot does not clip marks, so the background paints into the margins over the frame edges. On inferred-domain charts (seasonStripChart 1133, prices 1438, ToT 1526) the rect endpoints inflate the x scale domain ~2 weeks past the data on both sides, so the data series no longer spans the frame.",
+        "evidence": "Executed in jsdom against real Machakos + driver parquet data: with x domain fixed to [2015-06-15, 2020-03-15] (ndvi pattern), bg rects span px [43.3, 888.1] vs frame [50, 880] — paints 6.7px left and 8.1px right OUTSIDE the frame. Inferred-domain chart: x domain becomes [2015-06-01, 2020-04-01] vs data [2015-06-15, 2020-03-15]. Old v2.7 code clamped x2 to t (see git show 300b725 deleted lines: `x2: new Date(Math.min(nxt2, t))`).",
+        "fix": "After the overlap filter, clamp both edges: `.map((d) => ({...d, x1: new Date(Math.max(+d.x1, f)), x2: new Date(Math.min(+d.x2, t))}))` guarding for f/t = ±Infinity (e.g. only clamp when from/to non-null). This restores the v2.7 right-edge contract and fixes the left edge too. (The unchanged Discrete branch at 2951-2963 has the same left/right bleed against mid-month from/to — pre-existing, fix optionally in the same pass.)",
+        "reviewer": "hostile-ojs-mechanic (Fable 5)",
+        "verify": {
+          "confirmed": false,
+          "reasoning": "The code fact is accurate (notebook_v2.qmd:2947 keeps any month overlapping [f,t] without clamping; git show 300b725 confirms v2.7 clamped x2 to t — though v2.7 never clamped the left edge either, so only the right edge is a regression). But the finding's harm claims collapse on real data. (1) ndviChart, the only fixed-domain Continuous consumer, always uses the full NDVI parquet extent [2002-07-01, 2026-06-21] (query has no date filter; `from` is month-aligned). zMonthly's last measured centred window with the real driver_indices data is May 2026 (niño3.4 ends 2026-06; window needs next month), so the last rect x2 = 2026-06-01 < domain end. jsdom render with real data: bleed left 0.00 px, bleed right -1.90 px — rects end INSIDE the frame; no overflow exists. (2) The finding's evidence domain [2015-06-15, 2020-03-15] is fabricated — no chart produces it; feeding it reproduces their 6.70/8.13 px numbers exactly, proving their harness tested a nonexistent configuration. (3) Inferred-domain charts: seasonStripChart's mid-month from/to inflate the domain by 0.70/0.85 px on its 45-year axis (sub-pixel, invisible); pricesChart worst case ~2.6 px left on a 26-year axis, and the extra painted month is genuinely measured driver data, consistent with v2.8's stated contract (\"nothing beyond the last measured month\" — which holds; neither version ever promised clamping to the chart's data range on both edges). Worst realistic future scenario (NDVI parquet stalls >1 month while driver indices advance) yields ~1-3 px bleed. A cosmetic sub-pixel/nil effect demonstrated only via manufactured inputs does not sustain a [major] finding. Verification: scratchpad/verify_bgclamp.mjs vs real driver_indices.parquet + ndvi_county.parquet extents.",
+          "fix": "No fix required — not a live defect. Optional one-line hardening if desired (defense against a stale-NDVI parquet vs updated drivers, worth ~1-3 px at most): after the filter at notebook_v2.qmd:2947 add `.map((d) => ({...d, x1: new Date(Math.max(+d.x1, f)), x2: new Date(Math.min(+d.x2, t))}))`. The proposed ±Infinity guard is unnecessary: Math.max(x, -Infinity) === x and Math.min(x, Infinity) === x, so f/t = ±Infinity pass through to valid finite Dates. Do not touch the Discrete branch (2951-2963): its whole-season rects on inferred-domain charts are the intended visual grammar, and clamping them to mid-month endpoints would cut measured season windows in half."
+        }
+      }
+    ],
+    "minors": [
+      {
+        "severity": "minor",
+        "title": "December county-rain windows use a 1-year-shifted baseline vs ocean drivers' December windows",
+        "where": "notebooks/KE-enso-explorer/notebook_v2.qmd:2809 (ref filter) with rollCentre NDJ: [12, -1] at 3848",
+        "problem": "For __rain__ the per-period ref filters on the END-year label `d.year >= 1991 && d.year <= 2020`. For NDJ (the only period with yearOffset -1) that selects windows centred on Dec 1990–Dec 2019, while the ocean drivers' per-calendar-month refs select Dec 1991–Dec 2020 (centre-year). So the December column of the monthly background compares county rain and ocean drivers against 30-year baselines offset by one year. All other 11 months are exactly aligned.",
+        "evidence": "Harness against real chirps_county data: December ref (keyed by centre year 1991-2020) has mean 0.00147/sd 0.99917 for Machakos and mean -0.00528/sd 1.00086 for Marsabit instead of exactly 0/1; python recompute confirms NDJ label-years 1991-2020 = centre-Dec 1990-2019. Every other calendar month passes mean<1e-9, |sd-1|<1e-9.",
+        "fix": "Either (a) filter the PTOT ref on the centre year: `const yy = d.year + rollCentre[period][1]; yy >= 1991 && yy <= 2020` (changes only NDJ; but note SPEI-03 passthrough keeps the producer's END-year baseline, so rain and SPEI would then diverge in convention), or (b) keep the code and add a one-line comment documenting that county windows follow the producer's END-year 1991-2020 convention (matches SPEI-03) while ocean windows use centre-year — measured impact ≤0.005 sd. Do not silently leave the discrepancy uncommented.",
+        "reviewer": "hostile-ojs-mechanic (Fable 5)"
+      },
+      {
+        "severity": "minor",
+        "title": "rwCaption's new shared sentence misdescribes Fig 3.7 — the chart is year-x and never paints monthly windows",
+        "where": "data/KE-enso-explorer/nbText_v2.json sections.b3.rwCaption; chart at notebooks/KE-enso-explorer/notebook_v2.qmd:1758 (bgMarks({x: \"year\"}))",
+        "problem": "The updated caption states 'Continuous paints every month with its own measured rolling 3-month window — nothing is interpolated, and nothing is painted beyond the last measured month' and adds the RONI-vs-Niño3.4 monthly-view nuance. Fig 3.7 (ReliefWeb reports) calls bgMarks with x:\"year\", which always takes the year-slot branch (2964-2973): Continuous there only switches the season half-slot fill from binned to continuous colour via bgFill — no monthly windows exist on that figure, and the 'monthly view uses the plain Niño3.4 window' clause never applies to it. The caption asserts a rendering mechanism the figure does not have (the honesty-first project explicitly polices caption/figure mismatch).",
+        "evidence": "qmd 1758: `...bgMarks({x: \"year\", y1: 0, y2: ymax, from: 2010, to: yEnd})` — bgMarks' Continuous monthly branch requires x === \"date\" (2935); year-x falls to the zSeries half-slot branch which uses zSeries (RONI for OND ENSO), so both new claims (monthly windows, plain-Niño3.4 monthly nuance) are false for this figure. The other 5 updated captions all belong to date-x charts (seasonStrip 1138, ndvi 1202, ipc steps 1294, prices 1441/1458, tot 1528/1545).",
+        "fix": "Give rwCaption a year-x-specific background sentence, e.g. 'Background shading by the chosen driver's strength: each year's OND / MAM half-slots are coloured by that season's measured strength (Discrete bins the classes; Continuous uses the full colour ramp)' — dropping the monthly-window and RONI-nuance clauses, which only apply to date-axis figures.",
+        "reviewer": "hostile-ojs-mechanic (Fable 5)"
+      },
+      {
+        "severity": "minor",
+        "title": "Western-V + Continuous: legend and captions promise a monthly measured view that is deliberately not drawn",
+        "where": "notebook_v2.qmd:2998-3003 (bgLegend), 2932-2935 (fall-through gate), 2960-2961 (Discrete branch hardcodes bgDiscColor); shared caption sentence in the six nbText entries",
+        "problem": "The fall-through itself is correct (seasons.length===2 gate confirmed; WV falls to Discrete season blocks). But with bgDriver=Western-V and bgMode=Continuous the legend prints 'continuous, MAM only' beside a smooth gradient while the chart shows 3-bin discrete blocks (the date-x Discrete branch always uses bgDiscColor regardless of bgMode), and the shared caption sentence states unconditionally 'Continuous paints every month with its own measured rolling 3-month window' — false for Western-V. A careful reader concludes either the chart or the caption is broken.",
+        "evidence": "bgLegend line 3000 interpolates bgMode.toLowerCase() with no single-season override; caption sentence (e.g. nbText line 393) has no Western-V exception; Discrete branch fill at 2961 is bgDiscColor(d.z), not bgFill.",
+        "fix": "In bgLegend, when phaseDefs[bgDriver].seasons?.length===1 && bgMode==='Continuous', print 'discrete season blocks — single-season driver' (and consider showing the 3-bin swatches instead of the gradient). Append one clause to the shared caption sentence: '(Western-V, a MAM-only control, always shows discrete season blocks.)'",
+        "reviewer": "Hostile climate scientist + reader — v2.8 measured monthly backgrounds (independent python recompute)"
+      },
+      {
+        "severity": "minor",
+        "title": "Stale pre-v2.8 interpolation language survives in the bgMarks header comment and the Section 3 intro",
+        "where": "notebook_v2.qmd:2916-2921 ('gaps between them are interpolated month-by-month (labelled as such)'); nbText_v2.json line 373 ('discrete season blocks vs a continuous blend')",
+        "problem": "The comment block directly above the rewritten Continuous branch still documents the removed interpolation contract, contradicting the 'no interpolation' comment two lines below it — the next editor cannot tell which contract holds. The Section 3 intro prose still sells Continuous as 'a continuous blend', the exact interpolation framing v2.8 eliminated and the six captions now explicitly deny ('nothing is interpolated').",
+        "evidence": "qmd 2919-2921 vs 2936-2938 state opposite behaviours for the same branch; nbText 373 vs nbText 393/409/421/441/469/499 use contradictory language for the same toggle.",
+        "fix": "Rewrite the 2916-2921 header to the v2.8 contract (Discrete = season windows; Continuous = measured monthly windows, no interpolation, single-season drivers stay discrete). In nbText 373 replace 'a continuous blend' with 'a month-by-month measured view'.",
+        "reviewer": "Hostile climate scientist + reader — v2.8 measured monthly backgrounds (independent python recompute)"
+      },
+      {
+        "severity": "minor",
+        "title": "Fig 3.1 double-encodes SPEI when the background driver is SPEI-3 — same variable drawn twice at two different scales",
+        "where": "notebook_v2.qmd Fig 3.1 (speiRows area chart, 3849-3859) + bgMarks Continuous with bgDriver='Drought index SPEI-3 (county)'; caption nbText_v2.json line 499",
+        "problem": "With the section's linked driver set to SPEI-3 and Continuous on, Fig 3.1 paints its own y-series behind itself: every monthly background cell is the same SPEI-03 rolling window the area chart already draws (identical centre-month mapping via the shared rollCentre). Worse than redundant: the area reads raw index units (caption anchors -1/-2 thresholds) while the background pushes the very same numbers through cardColor's compressed z ramp (finding 2), so one figure shows one variable on two disagreeing severity scales. When speiIdx is SPEI-6/12 the background silently stays SPEI-3, which nothing on the figure states.",
+        "evidence": "zMonthly '__spei__' path (2802-2804) and speiRows (3855-3857) read the same chirps_county SPEI-03 rows through the same rollCentre centres; the SPEI caption (nbText 499) carries the generic background sentence with no self-reference warning.",
+        "fix": "For Fig 3.1 specifically, either default/force its background off when bgDriver is the SPEI driver (one-line guard where 3.1 calls bgMarks) or add to its caption: 'With the driver set to SPEI-3, the background repeats the curve itself — choose an ocean driver here to compare drought against ENSO/IOD state.'",
+        "reviewer": "Hostile climate scientist + reader — v2.8 measured monthly backgrounds (independent python recompute)"
+      }
+    ]
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Review"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "Verify"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "review:mechanic",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "a6f3291ba46757812",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786863696470,
+      "queuedAt": 1786863693191,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "hostile-ojs-mechanic (Fable 5)",
+      "promptPreview": "REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso\nTARGET: notebooks/KE-enso-explorer/notebook_v2.qmd (v2.8, commit 300b725)\nPROSE: data/KE-enso-explorer/nbText_v2.json\nDATA: data/KE-enso-explorer/*.parquet — driver_indices (monthly nino34_anom_noaa, dmi_hadisst/dmi_ersst, wnp_std_mam...), chirps_county (variable PTOT/SPEI-01..24, 12 rolling 3-month periods labelled by END year: NDJ 1998 …",
+      "lastProgressAt": 1786864341559,
+      "tokens": 104447,
+      "toolCalls": 28,
+      "durationMs": 645089,
+      "resultPreview": "{\"reviewer\":\"hostile-ojs-mechanic (Fable 5)\",\"verdict\":\"v2.8 core machinery is sound: zMonthly executed for Machakos and Marsabit across all 6 drivers with zero NaN z's, correct key format, edge months absent (all-3-months rule verified incl. synthetic-hole test), per-calendar-month 1991-2020 baselines exact (mean 0/sd 1 to 1e-9), composite re-standardization mirrors zSeries, SPEI passthrough byte…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "review:science",
+      "phaseIndex": 1,
+      "phaseTitle": "Review",
+      "agentId": "aff287a8c7f1eac14",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786863697133,
+      "queuedAt": 1786863693191,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Hostile climate scientist + reader — v2.8 measured monthly …",
+      "promptPreview": "REPO: /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso\nTARGET: notebooks/KE-enso-explorer/notebook_v2.qmd (v2.8, commit 300b725)\nPROSE: data/KE-enso-explorer/nbText_v2.json\nDATA: data/KE-enso-explorer/*.parquet — driver_indices (monthly nino34_anom_noaa, dmi_hadisst/dmi_ersst, wnp_std_mam...), chirps_county (variable PTOT/SPEI-01..24, 12 rolling 3-month periods labelled by END year: NDJ 1998 …",
+      "lastProgressAt": 1786864348448,
+      "tokens": 93602,
+      "toolCalls": 24,
+      "durationMs": 651314,
+      "resultPreview": "{\"reviewer\":\"Hostile climate scientist + reader — v2.8 measured monthly backgrounds (independent python recompute)\",\"verdict\":\"REQUEST CHANGES. The v2.8 mechanism (rollCentre, zMonthly, measured-months Continuous branch) is correctly built — ocean-driver recomputation reproduces 1997-98, the triple dip and 2023-24 with no year-turn artifacts, nothing painted beyond last measured month, caches are …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "verify:Continuous bg rects not clamped to [from",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "a79683f35c56aee38",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786864346084,
+      "queuedAt": 1786864343950,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "The code fact is accurate (notebook_v2.qmd:2947 keeps any m…",
+      "promptPreview": "Adversarial VERIFIER: try to REFUTE this finding about KE-ENSO notebook v2.8 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, notebooks/KE-enso-explorer/notebook_v2.qmd @ 300b725).\nFinding: [major] Continuous bg rects not clamped to [from,to] — paints outside the plot frame / inflates x domain\nWhere: notebooks/KE-enso-explorer/notebook_v2.qmd:2942-2949 (filter at 2947, rect at 2948)\nPr…",
+      "lastProgressAt": 1786864733470,
+      "tokens": 74141,
+      "toolCalls": 23,
+      "durationMs": 387386,
+      "resultPreview": "{\"confirmed\":false,\"reasoning\":\"The code fact is accurate (notebook_v2.qmd:2947 keeps any month overlapping [f,t] without clamping; git show 300b725 confirms v2.7 clamped x2 to t — though v2.7 never clamped the left edge either, so only the right edge is a regression). But the finding's harm claims collapse on real data. (1) ndviChart, the only fixed-domain Continuous consumer, always uses the ful…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "verify:chirps_county NDJ is corrupt at source —",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "acbcb512220cba109",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786864352839,
+      "queuedAt": 1786864350232,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Attempted refutation failed on every axis; all evidence rep…",
+      "promptPreview": "Adversarial VERIFIER: try to REFUTE this finding about KE-ENSO notebook v2.8 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, notebooks/KE-enso-explorer/notebook_v2.qmd @ 300b725).\nFinding: [critical] chirps_county NDJ is corrupt at source — every December-centred county cell paints a fabricated window; the code comment's 'verified by exact decomposition' claim is false\nWhere: notebook…",
+      "lastProgressAt": 1786864494546,
+      "tokens": 40710,
+      "toolCalls": 9,
+      "durationMs": 141707,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Attempted refutation failed on every axis; all evidence reproduces from the actual files at 300b725 (working tree has no diff on notebook_v2.qmd, so the code is live and unfixed).\\n\\n1. Decomposition test (Turkana, Nakuru, Mandera vs data/KE-enso-explorer/chirps_county_monthly.parquet, tolerance 0.05mm): stored NDJ(Y) = Nov(Y)+Dec(Y-1)+Jan(Y) matches 44/44 years in A…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "verify:SPEI-03 served as z 'as-is' is scale-com",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "ae01dd3fb88292623",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786864352630,
+      "queuedAt": 1786864350232,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Code verified at the cited lines of notebooks/KE-enso-explo…",
+      "promptPreview": "Adversarial VERIFIER: try to REFUTE this finding about KE-ENSO notebook v2.8 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, notebooks/KE-enso-explorer/notebook_v2.qmd @ 300b725).\nFinding: [major] SPEI-03 served as z 'as-is' is scale-compressed (sd 0.56-0.89, not ~1) — drought backgrounds systematically under-warn on the shared +/-2 ramp\nWhere: notebook_v2.qmd:2802-2804 (zMonthly __sp…",
+      "lastProgressAt": 1786864470648,
+      "tokens": 40438,
+      "toolCalls": 6,
+      "durationMs": 118018,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Code verified at the cited lines of notebooks/KE-enso-explorer/notebook_v2.qmd (file unchanged since 300b725): zMonthly's __spei__ path (2802-2804) passes county-mean SPEI-03 rolling values straight through as z with the comment \\\"already standardized\\\", while the __rain__ path (2806-2812) standardizes each rolling window against its own 1991-2020 record; countyZ (27…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "verify:Caption's 'categories can differ near th",
+      "phaseIndex": 2,
+      "phaseTitle": "Verify",
+      "agentId": "ab9318b7f5d078866",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1786864352621,
+      "queuedAt": 1786864350232,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Reproduced end-to-end from the shipped files at HEAD (sente…",
+      "promptPreview": "Adversarial VERIFIER: try to REFUTE this finding about KE-ENSO notebook v2.8 (repo /Users/pstewarda/Documents/rprojects/atlas_nb-KE-enso, notebooks/KE-enso-explorer/notebook_v2.qmd @ 300b725).\nFinding: [major] Caption's 'categories can differ near thresholds' is dishonest — whole events flip between the RONI Discrete blocks and the monthly Nino3.4 view, including OND 2024\nWhere: data/KE-enso-explo…",
+      "lastProgressAt": 1786864501083,
+      "tokens": 40738,
+      "toolCalls": 10,
+      "durationMs": 148462,
+      "resultPreview": "{\"confirmed\":true,\"reasoning\":\"Reproduced end-to-end from the shipped files at HEAD (sentence also present at cited commit 300b725). (1) The clause \\\"categories can differ near thresholds\\\" appears verbatim at nbText_v2.json lines 393, 409, 421, 441, 469, 499 and in the deviation comment at notebook_v2.qmd:2786-2787. (2) Code paths confirmed: zSeries (qmd:2872) substitutes roniZOnd for Discrete ON…"
+    }
+  ],
+  "totalTokens": 394076,
+  "totalToolCalls": 100
+}

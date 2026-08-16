@@ -471,9 +471,16 @@ driver-background toggle AND the tercile lens coexisting on §3 — not either/o
 
 ### Data note (2026-08-13, from the v2.7 adversarial round)
 
-- **V2-63 · UPSTREAM: chirps_county PTOT NDJ series is corrupt · OPEN (pipeline, D409 dispatch when
-  prioritised).** Verified by lstsq decomposition against chirps_county_monthly (R²=1.0, max
-  residual 4.5e-12): PTOT NDJ-Y = Nov(Y) + Dec(Y−1) + Jan(Y) — a NON-contiguous window (Nov from
-  the wrong year). The notebook never reads PTOT NDJ (PTOT only used with OND/MAM/annual) and SPEI
-  NDJ is unaffected (correct end-year window), so no notebook impact today — but it is a trap for
-  any future use. Fix belongs in the D409 zonal extract; fold into the Wave-3/V2-24 re-run.
+- **V2-63 · UPSTREAM: chirps_county NDJ series corrupt (PTOT **and SPEI**) · OPEN — ESCALATED
+  2026-08-16 (pipeline, D409 dispatch when prioritised); notebook QUARANTINES NDJ client-side.**
+  Exact decomposition against chirps_county_monthly (Turkana/Nakuru/Mandera, 44/44 county-years):
+  served NDJ(Y) = Nov(Y) + Dec(Y−1) + Jan(Y) — a year-label shift applied only to December
+  (classic `year + (month == 12)` instead of `months >= 11`), mixing two rainy seasons. The v2.7
+  claim that SPEI NDJ was unaffected is WRONG: SPEI-03 NDJ carries the same variance-deflation
+  fingerprint (per-window 1991–2020 sd 0.56–0.61 vs 0.75–0.89 for all other windows). Concrete
+  damage before the quarantine: Turkana Dec-1997 painted Neutral (−0.0 sd) at the peak of the
+  1997–98 El Niño floods (true window +2.5 sd); Nakuru Dec-2021 painted +2.6 mid-drought (true
+  −0.5). v2.8 removes NDJ from rollCentre so December renders as an honest measured gap in
+  Fig 3.1 and the monthly county backgrounds. Producer fix: shift year labels for months ≥ 11
+  when building NDJ; re-verify with the decomposition test (PTOT) and confirm SPEI-03 NDJ sd
+  rejoins the 0.75–0.89 band. Fold into the Wave-3/V2-24 D409 re-run.
