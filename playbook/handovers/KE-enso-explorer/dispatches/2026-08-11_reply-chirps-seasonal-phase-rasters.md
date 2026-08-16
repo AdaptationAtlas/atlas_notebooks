@@ -23,6 +23,42 @@
 > _The body below is the original feasibility reply; the monthly-COG decision above supersedes the
 > "which product" question._
 
+> ## ✅ UPDATE 2026-08-13 — SEASONAL PRECALC TIER ALSO LIVE (both A/B paths ready)
+> The 12-window per-year seasonal-sum COGs are now published too, so you can A/B the render path.
+>
+> **Seasonal precalc base URL** (541 COGs, verified 206 + CORS `*`):
+> ```
+> https://digital-atlas.s3.amazonaws.com/domain=climate/type=observational/source=chirps-chirts-era5/region=africa/processing=seasonal/variable=PTOT/season={SEASON}/PTOT_{SEASON}_{YYYY}_sum.tif
+> ```
+> - `{SEASON}` ∈ JFM FMA MAM AMJ MJJ JJA JAS ASO SON OND NDJ DJF. `{YYYY}` per-year.
+> - NDJ/DJF attribute December to the **previous** year (DJF-1998 = Dec1997+Jan1998+Feb1998).
+> - Coverage per window ~44–46 years (NDJ=44, first-year Dec edge-trimmed; partial 2026 dropped
+>   where the window is incomplete).
+>
+> **Two paths, same pixels — the A/B:**
+> | Path | Fetch | URL |
+> |---|---|---|
+> | Client-side sum | 3 monthly COGs + add in-browser | `…/processing=monthly/variable=PTOT/PTOT-{YYYY}-{MM}.tif` |
+> | Precalc | 1 seasonal COG | `…/processing=seasonal/variable=PTOT/season={SEASON}/PTOT_{SEASON}_{YYYY}_sum.tif` |
+>
+> **Equivalence proven** (OND-2015 max abs diff = 7.6e-05, float): identical up to rounding, so the
+> comparison is purely fetch-count / latency, not values.
+>
+> **Anomaly:** subtract the season's climatology mean — `…/processing=climatology/variable=PTOT/period=annual/stat=max/PTOT_{SEASON}_{clim}_mean.tif`
+> (flat partition quirk: real season+stat are in the filename; `clim` ∈ `wmo_1991-2020` | `atlas_1995-2014` | `full_record`). Same grid → pixelwise subtract. Diverging palette, centre 0.
+>
+> **Render fidelity (match climateRationale — it does NOT smooth):** native-res `readRasters({window})`
+> (no overview arg) · `ctx.imageSmoothingEnabled = false` · CSS `image-rendering: pixelated`
+> (required on retina or the browser re-upsamples) · paint each native cell with integer `fillRect`
+> (Math.round row/col bounds), NOT `drawImage`/`putImageData` scaling · skip NoData (NaN/Inf/`<=-9999`).
+>
+> **1981 blocky = expected, not a bug:** identical 0.05° grid to every year; the bigger uniform
+> blocks are the CHIRPS early-record (sparse pre-2000 stations) artifact. Smoothing would falsify it.
+>
+> **Phase-composite** (`processing=phase-composite`, one COG per driver×phase×season) is NOT built —
+> decide after the A/B whether to composite client-side (you have the year-sets) or have us precalc.
+> If precalc: send `driver,phase,season,year` (long CSV) and we bake it.
+
 ---
 
 # Reply — seasonal CHIRPS rasters for phase-filterable rainfall maps

@@ -329,12 +329,15 @@ still live from it is re-registered here.
   band `NDVI`, scale 1e-4), **250 m native**, 16-day → **seasonal mean** (OND/MAM), record **2000→present
   (~26 yr)** → composite by ENSO/IOD phase exactly like rainfall. COGs w/ internal overviews (one file
   serves county-native + continental), CORS `*` + range → renderer swaps `variable=`. Planned prefix:
-  `domain=climate/type=vegetation/source=modis-mod13q1/region=africa/processing=seasonal/variable=NDVI/season={SEASON}/NDVI_{SEASON}_{YYYY}_mean.tif`.
-  **Gate:** hazards_prototype has no GEE today → dispatched a **GEE capability probe** to the compute
-  node; if auth+reach OK ingest runs there, else one-off export elsewhere. No COGs live yet.
-  **2 questions back (answered — see reply dispatch):** (1) products = seasonal OND/MAM v1 (annual cheap
-  add); (2) co-registration = 250 m + overviews enough for side-by-side (no 0.05° pixel-math tier for v1).
-  Supersedes the old "own dispatch" note; merges the intent of KE-28.
+  `domain=climate/type=vegetation/...NDVI_{SEASON}_{YYYY}_mean.tif`.
+  **⚠️ ACQUISITION CORRECTED 2026-08-16 (Pete):** the pipeline's proposed **GEE capability probe is
+  NOT authorized** — dropped. NDVI must land on the **AAA Atlas S3 bucket (`digital-atlas`)** via the
+  pipeline's existing baking tooling, same as PTOT/SPEI; the notebook only reads `digital-atlas` COGs.
+  **Open with cglabs (nudge `2026-08-16_nudge-cglabs-ndvi-atlas-s3.md`):** (a) does a vegetation/NDVI
+  product already exist on `digital-atlas`? if so send the prefix + years → wire it, no new ingest;
+  (b) else bake to `digital-atlas` (non-GEE source) + return base URL; confirm NoData convention.
+  **Product spec (settled):** seasonal OND/MAM v1 + annual mean, skip raw 16-day, native+overviews
+  only (no 0.05° pixel-math tier). Phase composite = client-side (our year-sets). Merges KE-28 intent.
 - **KE-28 · NPP / biomass raster · SUPERSEDED by KE-30 (dropped for v1).** Pipeline analysis
   (`2026-08-13_reply-ndvi-plan.md`): NPP/PSN (MODIS MOD17, WaPOR, Copernicus) is modelled carbon off
   the **same MODIS optical inputs** as NDVI → strongly correlated, not a new signal (adds carbon-magnitude

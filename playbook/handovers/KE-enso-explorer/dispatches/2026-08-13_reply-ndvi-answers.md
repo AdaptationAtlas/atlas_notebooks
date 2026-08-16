@@ -1,3 +1,8 @@
+> **⚠️ SUPERSEDED 2026-08-16 on the acquisition route** — the "proceed through the GEE capability
+> probe" line below is retracted. **GEE / Earth Engine is NOT authorized.** NDVI must come via the
+> AAA Atlas S3 bucket (`digital-atlas`) using the pipeline's existing baking tooling. Product spec
+> (seasonal OND/MAM + annual, overviews-only) stands. See `2026-08-16_nudge-cglabs-ndvi-atlas-s3.md`.
+
 # Reply — NDVI plan: confirmed + answers to your 2 questions
 
 **Date:** 2026-08-13 · **From:** KE-ENSO notebook session (`dev/KE-enso-explorer`) ·
@@ -10,7 +15,8 @@ Agreed on the reasoning: NPP/PSN is modelled carbon off the **same MODIS optical
 correlated, not a new signal. NDVI is the operational pastoral-forage proxy we already trust (we
 have it admin-zonal from WFP VAM); a per-pixel 250 m version at ~26-yr depth is the real upgrade and
 composites by ENSO/IOD phase exactly like the seasonal rainfall COGs. **MOD13Q1 v061 is the right
-product. Please proceed** (through the GEE capability probe → ingest).
+product** as the layer. ~~Please proceed through the GEE capability probe~~ — see the 2026-08-16
+correction above: acquisition must be via the Atlas S3 pipeline, **not GEE**.
 
 ## Answers to your two questions
 
