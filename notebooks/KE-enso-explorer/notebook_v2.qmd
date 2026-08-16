@@ -18,7 +18,7 @@ import { formatNumCompactShort, wrapTickLabel } from "/helpers/std.ojs";
 ```{ojs}
 // version stamp shown in the hero so reviewers always know which build
 // they are looking at. Bump NB_VERSION with every notebook version commit.
-NB_VERSION = "v2.7"
+NB_VERSION = "v2.8"
 ```
 
 ```{ojs}
@@ -2775,6 +2775,88 @@ countyZ = (kind, season) => {
   return new Map(rows.map((d) => [d.year, (d.value - m) / sd]));
 }
 zSeriesCache = new Map()
+// ---- V2-45: measured monthly driver state — NO interpolation ----
+// Every painted month is a measured rolling 3-month window centred on that
+// month, standardized per calendar-month window over 1991–2020 (so a
+// December window is only ever compared with other December windows).
+// Ocean drivers: centred windows from the monthly indices, members averaged
+// then re-standardized (mirrors zSeries). County rain/SPEI: chirps_county's
+// twelve rolling periods ARE these windows (END-year labelled, rollCentre).
+// DEVIATION (documented): monthly ENSO uses the plain Niño3.4 windows —
+// there is no monthly RONI served (V2-23) — while the Discrete season
+// blocks keep RONI for OND ENSO; categories can differ near thresholds.
+countyRollingAll = dbChirps.query(`
+  SELECT variable, period, year, value_mean AS value FROM chirps_county
+  WHERE ${normExpr("admin1_name")} = '${countyNorm(county)}'
+    AND variable IN ('PTOT', 'SPEI-03') AND period != 'annual'`)
+zMonthlyCache = new Map()
+zMonthly = (driver) => {
+  const key = driver + "|" + county;
+  if (zMonthlyCache.has(key)) return zMonthlyCache.get(key);
+  const def = phaseDefs[driver];
+  const mk = (y, m) => `${y}-${m}`;
+  let out;
+  if (def.members[0] === "__spei__" || def.members[0] === "__rain__") {
+    const wantVar = def.members[0] === "__spei__" ? "SPEI-03" : "PTOT";
+    const rows = countyRollingAll.filter((d) => d.variable === wantVar && d.value != null && rollCentre[d.period]);
+    if (wantVar === "SPEI-03") {
+      // already standardized
+      out = new Map(rows.map((d) => [mk(d.year + rollCentre[d.period][1], rollCentre[d.period][0]), d.value]));
+    } else {
+      // standardize each rolling window against its own 1991–2020 record
+      out = new Map();
+      for (const [period, v] of d3.group(rows, (d) => d.period)) {
+        const ref = v.filter((d) => d.year >= 1991 && d.year <= 2020).map((d) => d.value);
+        const m0 = d3.mean(ref), sd = d3.deviation(ref) || 1;
+        for (const d of v) out.set(mk(d.year + rollCentre[period][1], rollCentre[period][0]), (d.value - m0) / sd);
+      }
+    }
+    zMonthlyCache.set(key, out);
+    return out;
+  }
+  // ocean drivers
+  const memberMaps = def.members.map((col) => {
+    const src = col === "dmi" ? driversCoal : drivers;
+    const val = new Map(src.filter((d) => d[col] != null).map((d) => [mk(d.year, d.month), d[col]]));
+    // centred rolling 3-month mean, all 3 months required (no partial windows)
+    const win = new Map();
+    for (const [k] of val) {
+      const [y, m] = k.split("-").map(Number);
+      const prev = m === 1 ? val.get(mk(y - 1, 12)) : val.get(mk(y, m - 1));
+      const next = m === 12 ? val.get(mk(y + 1, 1)) : val.get(mk(y, m + 1));
+      const cur = val.get(k);
+      if (prev != null && next != null && cur != null) win.set(k, (prev + cur + next) / 3);
+    }
+    // standardize per calendar month over 1991–2020
+    const z = new Map();
+    for (let m = 1; m <= 12; m++) {
+      const ks = [...win.keys()].filter((k) => +k.split("-")[1] === m);
+      const ref = ks.filter((k) => { const y = +k.split("-")[0]; return y >= 1991 && y <= 2020; })
+        .map((k) => win.get(k));
+      const m0 = d3.mean(ref), sd = d3.deviation(ref) || 1;
+      for (const k of ks) z.set(k, (win.get(k) - m0) / sd);
+    }
+    return z;
+  });
+  const raw = new Map();
+  for (const k of memberMaps[0].keys()) {
+    const zs = memberMaps.map((mm) => mm.get(k));
+    if (zs.every((z) => z != null && !Number.isNaN(z))) raw.set(k, d3.mean(zs));
+  }
+  if (memberMaps.length > 1) {
+    // re-standardize the composite per calendar month (mirrors zSeries)
+    out = new Map();
+    for (let m = 1; m <= 12; m++) {
+      const ks = [...raw.keys()].filter((k) => +k.split("-")[1] === m);
+      const ref = ks.filter((k) => { const y = +k.split("-")[0]; return y >= 1991 && y <= 2020; })
+        .map((k) => raw.get(k));
+      const m0 = d3.mean(ref), sd = d3.deviation(ref) || 1;
+      for (const k of ks) out.set(k, (raw.get(k) - m0) / sd);
+    }
+  } else out = raw;
+  zMonthlyCache.set(key, out);
+  return out;
+}
 zSeries = (driver, season) => {
   const key = driver + "|" + season + "|" + county;
   if (zSeriesCache.has(key)) return zSeriesCache.get(key);
@@ -2851,39 +2933,18 @@ bgMarks = ({x = "date", y1, y2, from = null, to = null}) => {
   // with a single-season driver, Continuous interpolation across the year
   // would re-introduce the misleading wash — fall through to Discrete
   if (x === "date" && bgMode === "Continuous" && seasons.length === 2) {
-    const anchors = seasons.flatMap((sn) => {
-      const zm = zSeries(bgDriver, sn);
-      return [...zm.entries()].map(([year, z]) => ({
-        s0: Date.UTC(year, sn === "OND" ? 9 : 2, 1),
-        s1: Date.UTC(year, sn === "OND" ? 12 : 5, 1),
-        t: Date.UTC(year, sn === "OND" ? 10 : 3, 15), z, year, sn}));
-    }).sort((a, b) => a.t - b.t);
-    if (!anchors.length) return [];
-    const f = Math.max(from ? from.getTime() : anchors[0].s0, anchors[0].s0);
-    const t = Math.min(to ? to.getTime() : anchors[anchors.length - 1].s1,
-                       anchors[anchors.length - 1].s1);
-    const stateAt = (ms) => {
-      const inSeason = anchors.find((a) => ms >= a.s0 && ms < a.s1);
-      if (inSeason) return {z: inSeason.z,
-        lbl: `${inSeason.sn} ${inSeason.year}: ${categoryOf(bgDriver, inSeason.z)} — strength ${inSeason.z.toFixed(1)} sd`};
-      let i = 0;
-      while (i < anchors.length && anchors[i].t < ms) i++;
-      if (i === 0 || i === anchors.length) return null;
-      const a = anchors[i - 1], b = anchors[i];
-      const w = (ms - a.t) / (b.t - a.t);
-      const z = a.z + w * (b.z - a.z);
-      return {z, lbl: `between ${a.sn} ${a.year} (${a.z.toFixed(1)} sd) and ${b.sn} ${b.year} (${b.z.toFixed(1)} sd) — shading interpolated, not measured`};
-    };
-    const months = [];
-    const d0 = new Date(f);
-    let cur = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), 1);
-    while (cur < t) {
-      const nxt = new Date(cur);
-      const nxt2 = Date.UTC(nxt.getUTCFullYear(), nxt.getUTCMonth() + 1, 1);
-      const st = stateAt(cur + (Math.min(nxt2, t) - cur) / 2);
-      if (st) months.push({x1: new Date(cur), x2: new Date(Math.min(nxt2, t)), z: st.z, lbl: st.lbl});
-      cur = nxt2;
-    }
+    // V2-45: every month painted with a MEASURED rolling 3-month window
+    // centred on it (zMonthly) — no interpolation, nothing painted where a
+    // window is missing, nothing beyond the last measured month.
+    const zm = zMonthly(bgDriver);
+    const f = from ? from.getTime() : -Infinity, t = to ? to.getTime() : Infinity;
+    const fmt = d3.utcFormat("%b %Y");
+    const months = [...zm.entries()].map(([k, z]) => {
+      const [y, m] = k.split("-").map(Number);
+      const x1 = new Date(Date.UTC(y, m - 1, 1)), x2 = new Date(Date.UTC(y, m, 1));
+      return {x1, x2, z,
+        lbl: `${fmt(new Date(Date.UTC(y, m - 1, 15)))}: ${categoryOf(bgDriver, z)} — ${z.toFixed(1)} sd (measured, 3-month window centred here)`};
+    }).filter((d) => d.x2.getTime() > f && d.x1.getTime() < t);
     return [Plot.rect(months, {x1: "x1", x2: "x2", y1: () => y1, y2: () => y2,
       fill: (d) => cardColor(d.z), fillOpacity: 0.85, title: (d) => d.lbl})];
   }
@@ -3777,14 +3838,16 @@ chirpsYearlyAll = dbChirps.query(`
 ```
 
 ```{ojs}
-// SPEI quasi-monthly strip: chirps_county stores 12 rolling 3-month
-// periods per year, labelled by their END year (NDJ 1998 = Nov 1997 – Jan
-// 1998 — verified by exact decomposition against chirps_county_monthly).
-// Map each period to its centre month: NDJ-Y centres on Dec of Y−1,
-// DJF-Y on Jan of Y; the other ten periods never cross the year boundary.
+// chirps_county stores 12 rolling 3-month periods per year, labelled by
+// their END year (NDJ 1998 = Nov 1997 – Jan 1998 — verified by exact
+// decomposition against chirps_county_monthly). rollCentre maps each period
+// to its centre month: NDJ-Y centres on Dec of Y−1, DJF-Y on Jan of Y; the
+// other ten periods never cross the year boundary. Shared by the SPEI strip
+// (Fig 3.1) and the monthly county backgrounds (zMonthly).
+rollCentre = ({JFM: [2, 0], FMA: [3, 0], MAM: [4, 0], AMJ: [5, 0], MJJ: [6, 0],
+  JJA: [7, 0], JAS: [8, 0], ASO: [9, 0], SON: [10, 0], OND: [11, 0], NDJ: [12, -1], DJF: [1, 0]})
 speiRows = {
-  const centre = {JFM: [2, 0], FMA: [3, 0], MAM: [4, 0], AMJ: [5, 0], MJJ: [6, 0],
-    JJA: [7, 0], JAS: [8, 0], ASO: [9, 0], SON: [10, 0], OND: [11, 0], NDJ: [12, -1], DJF: [1, 0]};
+  const centre = rollCentre;
   const rows = await dbChirps.query(`
     SELECT period, year, value_mean AS v FROM chirps_county
     WHERE ${normExpr("admin1_name")} = '${countyNorm(county)}'
