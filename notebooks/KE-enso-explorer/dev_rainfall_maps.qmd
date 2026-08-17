@@ -26,7 +26,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.14</b> · 2026-08-13 · rainfall + SPEI-3 drought panel</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.15</b> · 2026-08-17 · rainfall + SPEI-3 drought + NDVI vegetation panel</span>`
 ```
 
 ```{ojs}
@@ -82,12 +82,13 @@ viewof yearTo = Inputs.range([1981, 2025], {step: 1, value: 2025, label: "To yea
 ```
 
 ```{ojs}
-viewof mapVar = Inputs.select(["Rainfall (PTOT)", "Drought (SPEI-3)"], {value: "Rainfall (PTOT)", label: "Map variable"})
+viewof mapVar = Inputs.select(["Rainfall (PTOT)", "Drought (SPEI-3)", "Vegetation (NDVI)"], {value: "Rainfall (PTOT)", label: "Map variable"})
 ```
 
 ```{ojs}
-// anomaly only applies to rainfall; SPEI is already a standardised anomaly index.
-viewof anomaly = Inputs.toggle({label: "Anomaly vs 1991–2020", value: false, disabled: isSpei})
+// anomaly only applies to rainfall; SPEI is already an anomaly index and NDVI has
+// no climatology COG yet, so disable the toggle for both.
+viewof anomaly = Inputs.toggle({label: "Anomaly vs 1991–2020", value: false, disabled: isSpei || isNdvi})
 ```
 
 ```{ojs}
@@ -115,10 +116,10 @@ yearsSel = {
 ```
 
 ```{ojs}
-md`Per-pixel CHIRPS-v3 seasonal ${isSpei ? "**SPEI-3 drought index** (3-month, standardised: −ve drier, +ve wetter)" : (anomaly ? "rainfall **anomaly** (vs 1991–2020)" : "rainfall totals")}
-(~5 km) for **${county}**, admin-2 overlain. Each card = one year; shows the county-mean
-${isSpei ? "SPEI-3 (unitless)" : (anomaly ? "anomaly (mm)" : "rainfall (mm)")} and is tinted by its section driver's phase & strength.
-${isSpei ? "SPEI-3 is read at the season-end month (OND → December, MAM → May) — a 3-month accumulation already covers the season. " : ""}Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so years compare.`
+md`Per-pixel ${isNdvi ? "MODIS **NDVI vegetation index** (~250 m)" : isSpei ? "CHIRPS-v3 seasonal **SPEI-3 drought index** (3-month, standardised: −ve drier, +ve wetter; ~5 km)" : (anomaly ? "CHIRPS-v3 seasonal rainfall **anomaly** (vs 1991–2020; ~5 km)" : "CHIRPS-v3 seasonal rainfall totals (~5 km)")}
+for **${county}**, admin-2 overlain. Each card = one year; shows the county-mean
+${isNdvi ? "NDVI (0–1)" : isSpei ? "SPEI-3 (unitless)" : (anomaly ? "anomaly (mm)" : "rainfall (mm)")} and is tinted by its section driver's phase & strength.
+${isNdvi ? "NDVI is the MOD13Q1 per-year seasonal mean (pixel-reliability masked). " : isSpei ? "SPEI-3 is read at the season-end month (OND → December, MAM → May) — a 3-month accumulation already covers the season. " : ""}Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so years compare.`
 ```
 
 ### OND — short rains (Oct–Dec) · driven by ENSO + IOD
@@ -155,7 +156,7 @@ sectionLegend(ondDriver)
 
 ```{ojs}
 ondGrid = {
-  yield html`<div class="rain-loading">⏳ Loading OND maps — fetching ${isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
+  yield html`<div class="rain-loading">⏳ Loading OND maps — fetching ${isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
   const cache = await ondCacheP.p;
   yield gridWrap(await buildPanels(cache, "OND", ondDriver, parseNum(ondMin), parseNum(ondMax)));
 }
@@ -193,7 +194,7 @@ sectionLegend(mamDriver)
 
 ```{ojs}
 mamGrid = {
-  yield html`<div class="rain-loading">⏳ Loading MAM maps — fetching ${isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
+  yield html`<div class="rain-loading">⏳ Loading MAM maps — fetching ${isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
   const cache = await mamCacheP.p;
   yield gridWrap(await buildPanels(cache, "MAM", mamDriver, parseNum(mamMin), parseNum(mamMax)));
 }
@@ -209,13 +210,17 @@ md`### Notes
   \`SPEI-03-{YYYY}-{MM}.tif\`), read at the season-end month (OND → Dec, MAM → May) — a
   3-month accumulation already covers the season. SPEI is already a standardised anomaly
   (−ve drier, +ve wetter), so the anomaly toggle is disabled for it.
+- **Vegetation data (NDVI):** MODIS **MOD13Q1** v061 per-year seasonal-mean COGs (250 m,
+  \`type=vegetation/source=modis-mod13q1/region=east-africa\`), real NDVI (DN/10000, ~0–1),
+  pixel-reliability masked. Its own 250 m East-Africa grid (≠ the ~5 km CHIRPS grid) so the
+  read window + county mask recompute for it. Anomaly toggle disabled (no NDVI climatology COG yet).
 - **Correlation:** Pearson r between the county-mean seasonal value (rainfall *or* SPEI-3)
   and each driver's standardised index over the selected years (n shown). Higher |r| = that
   driver explains more of this county's outcome that season; +r → driver-high means wetter.
 - **Filter:** min/max on the section driver's value (raw index for single drivers,
   composite z for ENSO+IOD). Card colour + phase still standardised (z vs 1991–2020).
-- **Deferred:** multi-county maps (#3); NDVI (per-pixel, to be published to the Atlas S3 bucket like
-  PTOT/SPEI), NPP/biomass (superseded by NDVI), WRSI, riverine flood — see dispatches 2026-08.`
+- **Deferred:** multi-county maps (#3); NDVI annual composite + anomaly-vs-climatology (v1 = seasonal
+  OND/MAM only); NPP/biomass (superseded by NDVI); WRSI; riverine flood — see dispatches 2026-08.`
 ```
 
 # Appendix — data + i18n {#appendix}
@@ -322,12 +327,20 @@ speiDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=observatio
 speiURL = (y, m) => `${speiDir}/SPEI-03-${y}-${String(m).padStart(2, "0")}.tif`
 seasonEndMonth = ({OND: 12, MAM: 5})
 isSpei = mapVar.startsWith("Drought")
+// MODIS MOD13Q1 NDVI (250 m, East-Africa extent) — per-year seasonal mean COG,
+// real NDVI (DN/10000), ~[-0.2, 1], NoData=NaN. Different grid to PTOT/SPEI.
+ndviDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=vegetation/source=modis-mod13q1/region=east-africa/processing=seasonal/variable=NDVI"
+ndviURL = (season, year) => `${ndviDir}/season=${season}/NDVI_${season}_${year}_mean.tif`
+isNdvi = mapVar.startsWith("Vegetation")
 ```
 
 ```{ojs}
+// reference COG for the read grid: NDVI (250 m, East-Africa) has its own origin/
+// resolution/extent, so the window + mask must be computed on the matching grid.
+gridRefURL = isNdvi ? ndviURL("OND", 2015) : monthlyURL(2000, 1)
 gridWindow = {
   const gt = await geotiffLib;
-  const tiff = await gt.fromUrl(monthlyURL(2000, 1));
+  const tiff = await gt.fromUrl(gridRefURL);
   const image = await tiff.getImage();
   const [ox0, oy0, ox1, oy1] = image.getBoundingBox();
   const W = image.getWidth(), H = image.getHeight();
@@ -413,18 +426,24 @@ seasonalYear = async (season, year, win) => {
 }
 // SPEI-3 for a season-year = a single monthly COG read at the season-end month.
 speiYear = (season, year, win) => readWindow(speiURL(year, seasonEndMonth[season]), win)
+// NDVI for a season-year = the per-year seasonal-mean COG (own 250 m grid).
+ndviYear = (season, year, win) => readWindow(ndviURL(season, year), win)
 ```
 
 ```{ojs}
 // fetch every year in range ONCE; used by both the panels and the correlation.
 seasonCache = async (season) => {
   const win = await gridWindow, mask = await countyMask;
-  const useAnom = anomaly && !isSpei; // SPEI is already an anomaly index
+  const useAnom = anomaly && !isSpei && !isNdvi; // SPEI/NDVI are index layers
   const clim = useAnom ? await climFor(season, win) : null;
   const n = win.w * win.h;
   return Promise.all(yearsSel.map(async (year) => {
     let data;
-    try { data = isSpei ? await speiYear(season, year, win) : await seasonalYear(season, year, win); }
+    try {
+      data = isNdvi ? await ndviYear(season, year, win)
+        : isSpei ? await speiYear(season, year, win)
+        : await seasonalYear(season, year, win);
+    }
     catch (e) { return {year, data: null, meanmm: null}; }
     if (useAnom && clim) {
       const o = new Float32Array(n);
@@ -600,7 +619,7 @@ corrHeader = (season, cache, keys) => {
   // does combining beat the best single? compare adjusted multiple-R to best |partial-driver| bivariate r
   const bestSingleR = best ? Math.abs(best.r ?? 0) : 0;
   const combineHelps = s.adjR != null && s.adjR > bestSingleR + 0.05;
-  const outLbl = isSpei ? "drought (SPEI-3)" : "rainfall";
+  const outLbl = isNdvi ? "vegetation (NDVI)" : isSpei ? "drought (SPEI-3)" : "rainfall";
   return html`<div style="font-size:0.92em;margin:0.2rem 0 0.5rem">
     <b>Driver ↔ ${outLbl} correlation</b> (${county} · ${season} · n=${s.n} yrs) —
     ${s.per.map((p, i) => html`${i ? " · " : ""}${chip(p)}`)}
@@ -653,11 +672,15 @@ rainCellLegend = () => {
     const v = rainDomain[0] + (x / (w - 1)) * (rainDomain[1] - rainDomain[0]);
     const c = pixelColor(v); ctx.fillStyle = c || "#fff"; ctx.fillRect(x, 0, 1, 14);
   }
+  const lbl = isNdvi ? "NDVI vegetation index" : isSpei ? "SPEI-3 drought index" : (anomaly ? "anomaly" : "rainfall");
+  const unit = (isNdvi || isSpei) ? "" : " (mm)";
+  const loTag = isNdvi ? " (bare)" : isSpei ? " (dry)" : "";
+  const hiTag = isNdvi ? " (green)" : isSpei ? " (wet)" : "";
   return html`<div style="font-size:0.78em;color:#555;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-    <span>Map cells — <b>${isSpei ? "SPEI-3 drought index" : (anomaly ? "anomaly" : "rainfall")}</b>${isSpei ? "" : " (mm)"}:</span>
-    <span>${rainDomain[0]}${isSpei ? " (dry)" : ""}</span>
+    <span>Map cells — <b>${lbl}</b>${unit}:</span>
+    <span>${rainDomain[0]}${loTag}</span>
     ${cv}
-    <span>${rainDomain[1]}${isSpei ? " (wet)" : ""}</span>
+    <span>${rainDomain[1]}${hiTag}</span>
   </div>`;
 }
 // both legends stacked, same inline format + left-aligned
@@ -703,9 +726,13 @@ parseNum = (s) => {
 // map-cell colours from a user-selected d3 palette (KE-21). Absolute rainfall =
 // sequential; anomaly = diverging RdBu (brown/red drier ↔ blue wetter, 0-centred).
 mapInterp = ({Blues: d3.interpolateBlues, YlGnBu: d3.interpolateYlGnBu, GnBu: d3.interpolateGnBu, Viridis: d3.interpolateViridis})[mapPalette]
-rainDomain = isSpei ? [-2.5, 2.5] : (anomaly ? [-300, 300] : [0, 900])
+rainDomain = isNdvi ? [0, 0.8] : isSpei ? [-2.5, 2.5] : (anomaly ? [-300, 300] : [0, 900])
 pixelColor = (v) => {
   if (v == null || !isFinite(v) || v <= -9999) return null;
+  if (isNdvi) {
+    const t = Math.max(0, Math.min(1, (v - rainDomain[0]) / (rainDomain[1] - rainDomain[0])));
+    return d3.interpolateYlGn(t); // 0 → pale (bare), 0.8 → dark green (vegetated)
+  }
   if (isSpei) {
     const t = Math.max(0, Math.min(1, (v - rainDomain[0]) / (rainDomain[1] - rainDomain[0])));
     return d3.interpolateBrBG(t); // 0 → brown (drought), 1 → teal/green (wet)
@@ -762,6 +789,7 @@ renderRainPanel = (spec, raster) => {
 
   const meanmm = spec.meanmm;
   const meanTxt = meanmm == null ? "—"
+    : isNdvi ? meanmm.toFixed(2)
     : isSpei ? `${meanmm > 0 ? "+" : ""}${meanmm.toFixed(2)}`
     : `${anomaly && meanmm > 0 ? "+" : ""}${Math.round(meanmm)} mm`;
   return html`<div class="rain-panel" style="background:${cardColor(spec.signal.z)}">
