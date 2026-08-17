@@ -413,7 +413,7 @@ still live from it is re-registered here.
   dev_rainfall_maps cards print RAW index values, v2's strips print Z — same driver, two numbers.
   Harmonize: tooltips show raw AND strength (e.g. "DMI +0.68 · strong, +1.8 sd"), adopting the map
   session's raw-value-label convention.
-- **V2-44 · Fig 2.2 upgrades · DONE (a–d) — (b)(d) v2.6, (a)(c) v2.9 (c6dd6c2).** (a) Align the OND/MAM panels (same row heights/width).
+- **V2-44 · Fig 2.2 upgrades · DONE (a–d) — (b)(d) v2.6; (a)(c) v2.9 (c6dd6c2), mosaic rebuilt after review (67e9631).** (a) Align the OND/MAM panels (same row heights/width).
   (b) Move sd band values into the caption, add the absolute counts/values there; if too long, use
   "About this plot". (c) Mosaic option: bar width scaled to n seasons; fade rows with <5 seasons.
   (d) Toggle to combine/disaggregate strong + moderate.

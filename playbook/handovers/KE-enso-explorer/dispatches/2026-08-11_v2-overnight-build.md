@@ -253,3 +253,54 @@ turns.
 month (hover any month — every value "measured"); December cells blank on county drivers +
 Fig 3.1 (deliberate, V2-63); SPEI backgrounds now stronger (re-standardized); OND-2024 nuance in
 captions.
+
+---
+
+## Addendum — cycle 9 (2026-08-17): V2-44 closed, tracker reconciled, NDJ dispatched
+
+Three strands, all on Pete's "retry"/"go":
+
+**1. v2.9 (`c6dd6c2` + `67e9631`) — Fig 2.2 finished (V2-44a/c).** (a) The OND and MAM panels now
+share one height and row pitch with the colour legend hoisted out of the left panel — that legend,
+sitting *inside* the OND panel, was the actual misalignment. Each panel keeps its own band labels
+(a shared label domain fills half of each panel with the other driver's empty bands, since the two
+panels usually run different drivers). (c) New "Row height" control adds a mosaic where band height
+∝ seasons. The small-n star came out of the group NAME (it had destabilised row keys and leaked
+into the CSV) and became a flag.
+
+**Adversarial round: 10 confirmed serious, 1 refuted, 13 minors — both reviewers rejected the first
+mosaic cut.** It rendered upside-down (quantitative y puts domain[0] at the bottom, so toggling
+"Row height" mirrored the figure); "All years" was drawn as a band at 1/10 scale — 35 seasons
+shorter than a 4-season band — in a mode that promises height ∝ seasons; and every measured panel
+had overlapping 3-line labels on ~7px rows. Rebuilt: domain reversed, "All years" replaced by
+dashed base-rate rules plus the numbers in the footnote, single-line labels drawn only where a row
+can hold one (thin rows named on hover), empty bands given a sliver rather than a season slot, both
+panels drawn on the larger unit extent. Also fixed the asymmetry the reviewers caught between
+modes: a 1-season band shouted "100%" in equal rows and nothing in mosaic — one small-n rule now
+governs both. Re-verified in node/jsdom on the real parquets: canonical row order in all 12
+county × shape × detail combinations, no label overlap, base-rate rules present.
+
+**2. Tracker reconciled against the code (3-agent evidence audit, 31 items).** The V2-01..V2-16
+block was still labelled OPEN although it shipped in v2.4–v2.5. Now: 12 items verified DONE with
+their commit and code location; V2-05/06/12/14/23/24 and KE-13 marked PARTIAL with the exact
+missing sub-item; **V2-25 marked INVALID** (v2 renders only the OND outlook — the MAM outlook was
+deliberately dropped, so there is no second panel to place side by side); V2-20/21/22/26 and
+KE-06/16 confirmed open with the blocking fact recorded. Useful for sequencing: **V2-06 and V2-14b
+are blocked on the same percentile zonal build**, so one D409 job unblocks both.
+
+**3. Four defects the audit surfaced, fixed (`2ce5165`).** Fig 3.1's SPEI line and deficit area were
+drawn straight through the quarantined December, asserting a measurement that does not exist (now
+segmented — verified 45 breaks for 45 year-turns on Turkana); the cross-border flow-map link
+pointed at `#annex-gesi`, renamed in v2.5; `rainAbout` still documented the Temperature toggle
+removed in v2.6; `.ke-sticky-sec` CSS had been dead since v2.7.
+
+**4. V2-63 dispatched to the pipeline** (`dispatches/2026-08-17_request-chirps-ndj-window-bug.md`):
+served NDJ(Y) = Nov(Y) + Dec(Y−1) + Jan(Y), 44/44 county-years in three counties, with the Turkana
+1997–98 worked example and the SPEI variance fingerprint that corrects our earlier "SPEI is
+unaffected" note.
+
+**Pete next:** hard-refresh — hero reads **v2.9**. Check Fig 2.2 with Row height on both settings
+(the mosaic should read top-down in the same order as equal rows, with dashed base-rate rules),
+and Fig 3.1's SPEI curve now breaking at each December. Open decisions unchanged: V2-03/V2-41
+(production→value: livestock has no price column anywhere), KE-13 (About text missing on 8 body +
+10 annex figures), and whether V2-61's 2015–2024 default for Fig 3.6-B stands.
