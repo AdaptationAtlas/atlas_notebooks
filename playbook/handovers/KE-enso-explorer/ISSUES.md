@@ -494,3 +494,5 @@ driver-background toggle AND the tercile lens coexisting on §3 — not either/o
   Fig 3.1 and the monthly county backgrounds. Producer fix: shift year labels for months ≥ 11
   when building NDJ; re-verify with the decomposition test (PTOT) and confirm SPEI-03 NDJ sd
   rejoins the 0.75–0.89 band. Fold into the Wave-3/V2-24 D409 re-run.
+  **Dispatch sent 2026-08-17:** `dispatches/2026-08-17_request-chirps-ndj-window-bug.md` (decomposition
+  table, worked Turkana example, SPEI sd fingerprint, exact fix + re-verification steps).
