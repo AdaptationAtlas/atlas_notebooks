@@ -87,8 +87,6 @@ html`<div class="ke-hero">
   .ke-panel-lbl { font-weight: 600; font-size: 0.9em; margin: 0 0 0.25rem; }
   .ke-stale { border-left: 4px solid #c0392b; background: #fbeeec; padding: 8px 14px; margin: 0.5rem 0; font-size: 0.9em; max-width: 62rem; }
   /* section-scoped sticky controls (V2-16): stick while their section scrolls */
-  .controls-row.ke-sticky-sec { position: sticky; top: 120px; z-index: 1018; background: #fff; padding: 0.4rem 0.25rem; border-bottom: 1px solid #e5e7eb; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-  @media print { .controls-row.ke-sticky-sec { position: static; box-shadow: none; } }
   /* ---- cycle-3 additions (climateRationale conventions) ---- */
   /* left-anchored floating TOC panel (Pete P4; helpers/toc.ojs defaults right) */
   .atlas-toc { right: auto !important; left: 22px !important; box-shadow: 2px 2px 8px rgba(0,0,0,0.15) !important; max-height: 92vh; scrollbar-width: none; transition: opacity 0.15s ease-out, transform 0.15s ease-out; z-index: 1021 !important; }
@@ -1223,6 +1221,16 @@ seasonStripChart = {
   if (!speiRows.length) return noDataPlaceholder(`No SPEI record for ${county}.`);
   const y1v = d3.min(speiRows, (d) => d.v), y2v = d3.max(speiRows, (d) => d.v);
   const from = d3.min(speiRows, (d) => d.t), to = d3.max(speiRows, (d) => d.t);
+  // break the line/area wherever a month is missing (December is quarantined —
+  // the NDJ window is corrupt upstream, V2-63): drawing straight through the
+  // gap would assert a measurement that does not exist
+  const segs = (() => {
+    let seg = 0;
+    return speiRows.map((d, i) => {
+      if (i > 0 && (d.t - speiRows[i - 1].t) / 86400000 > 45) seg++;
+      return {...d, seg};
+    });
+  })();
   const chart = Plot.plot({
     height: 240, width: 900, marginLeft: 55, marginRight: 20,
     x: {type: "utc", label: null},
@@ -1230,8 +1238,9 @@ seasonStripChart = {
     marks: [
       ...bgMarks({x: "date", y1: y1v, y2: y2v, from, to}),
       ...simMarks({x: "date", y1: y1v, y2: y2v, from, to}),
-      Plot.areaY(speiRows, {x: "t", y1: 0, y2: (d) => Math.min(0, d.v), fill: PALETTE.outcome.drier, fillOpacity: 0.45}),
-      Plot.lineY(speiRows, {x: "t", y: "v", stroke: "#555", strokeWidth: 1.1, tip: true,
+      Plot.areaY(segs, {x: "t", y1: 0, y2: (d) => Math.min(0, d.v), z: "seg",
+        fill: PALETTE.outcome.drier, fillOpacity: 0.45}),
+      Plot.lineY(segs, {x: "t", y: "v", z: "seg", stroke: "#555", strokeWidth: 1.1, tip: true,
         title: (d) => `${d.period} ${d.year}: ${speiIdx.v} ${d.v.toFixed(2)}`}),
       Plot.ruleY([-1, -2], {stroke: "#a6611a", strokeDasharray: "3"}),
       Plot.ruleY([0]),
