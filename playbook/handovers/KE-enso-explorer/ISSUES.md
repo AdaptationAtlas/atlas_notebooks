@@ -63,14 +63,16 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
 
 ## Notebook — Pete preview review (2026-07-23)
 
-- **KE-10 · Monthly CHIRPS + year/month toggle on 3.1/3.2 · OPEN (Pete: pull monthly first).** County
+- **KE-10 · Monthly CHIRPS + year/month toggle on 3.1/3.2 · DONE.** County
   rainfall parquet holds seasonal totals only; add a monthly county-CHIRPS parquet (new pipeline pull),
   then a year/month view toggle on 3.1 rainfall + 3.2 driver (month view = mean mm per calendar month =
   when rain falls). Driver (3.2) already has monthly data.
-- **KE-11 · Supplemental analysis section · OPEN (Pete: separate linked section).** Move technical
+  *Audit 2026-08-17 → **DONE**: KE-10 · Monthly CHIRPS + year/month toggle · DONE (v2.x).** `chirps_county_monthly.parquet` served (to 2026-04); Fig 2.1 has a By year / Monthly climatology toggle (`rainTimeRes`, qmd:629; monthly = AVG(ptot) per calendar month, qmd:3890) with decoupled render paths, and the driver figure (now annex A1.1) has Seasonal / Monthly (`driverTimeRes`, qmd:2181).*
+- **KE-11 · Supplemental analysis section · DONE (annex A1–A7).** Move technical
   figures (candidate: 3.3 interaction, 3.4 combined-state, 4.1/4.2 national FAOSTAT regression) to a new
   'Supplemental analysis' section after Methods, linked from the parent sections. Keeps the core story
   clean. Confirm the exact move-list with Pete first.
+  *Audit 2026-08-17 → **DONE**: KE-11 · Supplemental analysis section · DONE (v2).** Annex §A1–A7 (`{#annex}`, qmd:2158) carries the technical figures — interaction A1.2, combined-state A1.3, national FAOSTAT regression/trend A3.1–A3.2 — with in-prose links back from §2/§3 (`nbText_v2.json:351,487,661`). Methods sits as A7 inside the annex rather than before it. (Minor: `importsCaption` links a non-existent `#annex-gesi` anchor.)*
 - **DONE 2026-07-23 (preview review):** table unit header box; 2-digit year axes (3.1/3.2); sticky
   county/season/driver bar (KE-06 fixed); honest %-formatter + incompleteness disclaimer; numbered
   sections/figures (N.M); per-figure data attribution + §8.1 acknowledgements.
@@ -80,10 +82,11 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
 - **KE-05 · Produce filter for 30+ commodities · DONE.** Item filter defaults to the county's top-8
   by latest-year value; every item stays tickable. Revisit only if Pete wants grouping/search.
 
-- **KE-06 · Sticky control bar overlaps the sources panel top when scrolled · OPEN (cosmetic).** The
+- **KE-06 · Sticky control bar overlaps the sources panel top when scrolled · OPEN (cosmetic, unchanged through v2.9).** The
   `<details>` "methodology & per-table sources" panel's first lines can sit behind the sticky
   county/season controls mid-scroll. Pre-existing sticky-header behaviour; low priority.
 
+  *Audit 2026-08-17 → **OPEN**: KE-06 · Sticky control bar overlaps the sources panel top when scrolled · OPEN (cosmetic, unchanged through v2.8).** The §1.2 "KNBS NAPR — per-table sources" `<details>` (qmd:458) still scrolls under `.ke-sticky-controls` (top 56px, z-index 1019); the only scroll offset in the sheet is `scroll-margin-top:120px` on h1/h2. Scope halved since v2.7 — `.ke-sticky-sec` is now dead CSS (V2-54 removed the §3 sticky row), so it is a one-bar stack.*
 ## Standing gaps (from the v1 handover — still true, NOT NAPR)
 
 - ~~County crop series too short for a county-level teleconnection~~ **CLOSED 2026-08-13 by
@@ -107,12 +110,13 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   (`pricesSeg`, GAP_DAYS=100) breaks each market's line across gaps > ~3 months instead of
   interpolating; `Plot.dot` overlays every observation. Browser-verified: orange Marsabit-Town line
   now segments at its 2018–20 / 2024+ gaps. Also set `x:{label:null}` (was showing `_t`).
-- **KE-13 · Caption vs "About this plot" split · INFRA DONE, per-figure content OPEN.** `plotFooter`
+- **KE-13 · Caption vs "About this plot" split · PARTIAL — infra done, About authored for 11 of 19 body figures.** `plotFooter`
   rebuilt (in-notebook ~line 1046): caption now ALWAYS VISIBLE (`.plot-caption`, leads with Figure
   N.M); optional `opts.about` renders a foldable "About this plot" with detailed methodology.
   **§4.3 prices is the exemplar** (short `pricesCaption` + new `pricesAbout` in nbText). REMAINING:
   author a short caption + `about` split for the other 18 figures (they currently show their existing
   caption string visibly — number shows, but short/detailed not yet separated). Incremental content task.
+  *Audit 2026-08-17 → **PARTIAL**: KE-13 · Caption vs "About this plot" split · PARTIAL — infra done, content 11/29.** Every figure shows a visible `**Figure N.M**` caption (`plotFooter`, qmd:3566); `about:` is now authored for 11 of 19 body figures. STILL OPEN: 2.3, 2.4, 3.1 (235-word caption), 3.2, 3.3, 3.5, 3.7, 5.1 and all 10 annex figures (A1.1–A5.3). Also: `b2.rainAbout` still describes the Temperature toggle removed by V2-42(f).*
 - **KE-14 · Visible figure/table numbers · DONE 2026-08-10.** Every figure caption now renders
   visibly and leads with **Figure N.M** (was hidden behind the "About this plot" foldout). Verified:
   19/19 captions visible in-browser.
@@ -122,8 +126,9 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   `opts.meta`) above the CSV. Auto-derives columns from `opts.data`; `opts.columns:[{key,label,fmt}]`
   gives friendly labels/formatting (§4.3 wired). Built IN-NOTEBOOK — shared `chartDownloadButton`
   (parent repo) left untouched. Verified: 19/19 figures show table + download.
-- **KE-16 · Feedback widget for the team · OPEN (next).** Quick in-notebook way for the team to flag
+- **KE-16 · Feedback widget for the team · OPEN (verified absent at v2.9).** Quick in-notebook way for the team to flag
   improvements/bugs (incl. screengrabs). Pete: "note for next."
+  *Audit 2026-08-17 → **OPEN**: KE-16 · Feedback widget for the team · OPEN (unchanged).** Verified absent in v2.8 — no form, `mailto:`, issue link or screengrab control anywhere in `notebook_v2.qmd` or `nbText_v2.json`.*
 - **KE-17 · Drop redundant §2.2 maize chart · DONE 2026-08-10.** Once AFA≡KNBS was confirmed and AFA
   dropped, §2.2 (KNBS maize trend) duplicated §1.1 (Crops → Lineplot → Maize). Removed the maize
   chart/appendix cell/title var; B1 now = §2.1 GESI only. Unused nbText b1.maize* keys left harmless.
@@ -143,7 +148,7 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   ~135 reads/map — pipeline can pre-bake per-phase COGs, reply dispatch §5b, if it
   drags). **Not folded into the main notebook yet — stays in the dev sandbox.**
   **Phase II biomass/NPP: no source ingested — needs a new dispatch (not a URL swap).**
-- **KE-18 · DESIGN: production vs climate drivers · OPEN (design, priority).** Pete: "really need to
+- **KE-18 · DESIGN: production vs climate drivers · DONE v2.6 (design 57101ca → build 1ad2045, refined c145649).** Pete: "really need to
   think about the design so we can show production vs ENSO/IOD/Western-V and/or SPEI / rainfall-impact."
   Current state disconnected: county production (§1.1 KNBS, 2019-24 short) vs drivers (§3) vs national
   FAOStat regression (§7.3-7.4). Design a coherent production×climate view. Notes: county production
@@ -156,6 +161,7 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
 
 ---
 
+  *Audit 2026-08-17 → **DONE**: KE-18 · DESIGN: production vs climate drivers · DONE v2.6 (design 57101ca → `DESIGN_ke18_harveststat.md`; build 1ad2045 → Fig 3.6-B, refined v2.7 c145649).** Nine binding decisions ratified; Fig 3.6-B implements all four views (Season series / Wet vs dry / Vs climate / Table) on planting-year anchoring, with the 2002–14 hole hatched, qc rows excluded, ≥7-season era-median gate, and the two-rulers separation from NAPR 3.6-A.*
 ## V2 notebook tracker (opened 2026-08-13 — THE issue/feature tracker for notebook_v2)
 
 Feature requests & bugs from Pete's browser reviews + deferred build items. Status OPEN / HELD /
@@ -164,86 +170,109 @@ still live from it is re-registered here.
 
 ### From Pete's v2.3 browser review (2026-08-13)
 
-- **V2-01 · Fig 1.2 caption must respond to the selected View · OPEN (S).** Bars/Lines/Treemap/Table
+- **V2-01 · Fig 1.2 caption must respond to the selected View · DONE v2.4 (1454006).** Bars/Lines/Treemap/Table
   each get a view-specific caption line (esp. Treemap: what the % means — share of the county total
   for that commodity group, single year).
-- **V2-02 · Fig 1.2 Products display · OPEN (S).** (a) Do NOT include Products in the default Show
+  *Audit 2026-08-17 → **DONE**: DONE v2.4 (1454006) — per-view caption keys (produceCaptionBars/Lines/Tree/Table), treemap line states share-of-shown-items in the commodity-type panel, single year.*
+- **V2-02 · Fig 1.2 Products display · DONE v2.4 (1454006).** (a) Do NOT include Products in the default Show
   selection. (b) The "milk 0→8B" read is a DISPLAY artifact, not bad data (verified: Kajiado milk
   value 2021 = 5.08B, 2022 = 8.26B KSh; value = qty × 90 KSh/kg exactly; products exist only
   2021–2022): the Lines view draws ∅ not-reported markers AT y=0 for 2019/2020, which reads as a
   zero-to-8B jump. Fix: never anchor ∅ markers at y=0 on Lines (place at axis edge with distinct
   glyph), and don't render 1–2-point series as lines.
+  *Audit 2026-08-17 → **DONE**: DONE v2.4 (1454006) — Products out of the default Show set; ∅ markers moved to the top frame with a not-reported title, and <3-point series drawn as dots only.*
 - **V2-03 · absolute production → value conversion · OPEN (note/design).** Way to convert absolute
   production to value of production (prices layer). Needs a price source per commodity (NAPR value
   columns partially cover crops; unit_price_ksh covers products).
+  *Audit 2026-08-17 → **OPEN**: OPEN (note/design) — unchanged through v2.8: Fig 1.2 still offers Absolute / % of national only; crops (value_ksh) and products (unit_price_ksh) could carry a value ruler but livestock head has no price column in knbs_napr_livestock.*
 - **V2-04 · processing facilities data scout · OPEN (data scout, follow-on).** Counties want info
   on processing facilities for crops, livestock and feeds. Scout sources (KNBS directory? AFA
   licensing? county CIDPs?) — later.
-- **V2-05 · Fig 1.4 GESI table UX · OPEN (M).** (a) Optional expand-to-all-rows / collapse control.
+  *Audit 2026-08-17 → **OPEN**: OPEN (data scout, follow-on) — untouched through v2.8; no source scouted, no file served.*
+- **V2-05 · Fig 1.4 GESI table UX · PARTIAL (a,b done v2.4/v2.5; c,d blocked on pipeline metadata).** (a) Optional expand-to-all-rows / collapse control.
   (b) Rank-chip colours unexplained — add caption/legend. (c) DIRECTIONALITY GUARD: many indicators
   are neutral — never imply good/bad where direction is unclear (dangerous); some are clearly bad
   (maternal mortality) — needs per-indicator direction metadata (extractor/pipeline task) before any
   good/bad colouring. (d) Per-indicator tooltips: what the indicator means and how to read it —
   content task, likely from the sheet definitions (deterministic source needed).
-- **V2-06 · Fig 2.1 spread options · OPEN (M + data gap).** sd whiskers hard to interpret — offer
+  *Audit 2026-08-17 → **PARTIAL**: PARTIAL — (a) expand/collapse toggle and (b) chip-colour legend done in v2.4/v2.5 (1454006, 3c22af2); (c) no-good/bad guard held (colour = extremity only) but direction metadata still absent from gesi_v2.parquet; (d) per-indicator definition tooltips still open (pipeline sourcing).*
+- **V2-06 · Fig 2.1 spread options · PARTIAL (sd options done v2.4; percentiles blocked — data gap).** sd whiskers hard to interpret — offer
   IQR / 90% interval / min–max options and a box-plot view. DATA GAP: chirps_county serves
   mean+sd only; IQR/percentiles/min-max need a D409 zonal re-run emitting percentiles (register
   with the Wave-3 pipeline asks).
-- **V2-07 · BUG Fig 2.1 monthly climatology slow/stuck · OPEN (M, bug).** Monthly view takes
+  *Audit 2026-08-17 → **PARTIAL**: PARTIAL (data gap) — v2.4 (1454006) added None / ±1 sd / ±2 sd (~95%) with an explanatory tooltip and default None; IQR / 90% / min–max / box-plot still OPEN because chirps_county serves value_mean + value_sd only (percentile re-run registered under V2-24).*
+- **V2-07 · BUG Fig 2.1 monthly climatology slow/stuck · DONE v2.4/v2.5 (1454006, 3c22af2) — re-confirm in a real browser.** Monthly view takes
   forever or never renders; switching back to "By year" leaves the plot stuck. Suspect the
   rainCharts swap between rainMonthlyChart and the panels (loader/render interplay). Reproduce +
   fix next cycle; check chirps_county_monthly query cost and whether the monthly chart cell blocks.
-- **V2-08 · Fig 2.2 crop calendar → annex · OPEN (S).**
-- **V2-09 · Season selector demote · OPEN (M).** Remove from sticky bar; place inline at the
+  *Audit 2026-08-17 → **DONE**: DONE v2.4/v2.5 (1454006, 3c22af2) — by-year and monthly render on independent cells and independent DuckDB clients (dbChirps vs dbChirpsMonthly), rainTimeRes kept out of the loader deps, so switch-back cannot wedge; monthly parquet is 265 KB/26k rows/1 row group. Worth one browser re-confirm (headless is not trustworthy here).*
+- **V2-08 · Fig 2.2 crop calendar → annex · DONE v2.4 (1454006).**
+  *Audit 2026-08-17 → **DONE**: DONE v2.4 (1454006) — crop calendar moved to annex A5 as Fig A5.1 (title de-numbered); Fig 2.2 is now the tercile-by-driver figure.*
+- **V2-09 · Season selector demote · DONE v2.4/v2.5.** Remove from sticky bar; place inline at the
   figures it actually drives (Fig 2.1, annex A1/A3).
-- **V2-10 · Fig 2.3 band display · OPEN (M).** (a) Labels must show the actual z ranges (e.g.
+  *Audit 2026-08-17 → **DONE**: DONE v2.4 (1454006) + v2.5 (3c22af2) — season control out of the sticky bar (county-only now), master inline at Fig 2.1 with bound clones in annexes A1/A3.*
+- **V2-10 · Fig 2.3 band display · DONE v2.4 (1454006).** (a) Labels must show the actual z ranges (e.g.
   "Strong +IOD (≥1.5 sd)"). (b) Rebin: neutral+weak vs moderate vs strong (Pete: current
   weak/strong reads odd; coordinate rebin with the map session's Z_BANDS convention before
   changing). (c) Don't silently hide small-n bands (min-4 filter) — show them greyed with counts,
   or state "n<4 hidden" per panel.
-- **V2-11 · IOD short-rains distribution · INVESTIGATED (display artifact) → fold into V2-10.**
+  *Audit 2026-08-17 → **DONE**: DONE v2.4 (1454006) — (a) z ranges in every band label, (b) neutral+weak / moderate / strong rebin on the shared Z_BANDS (0.5/1.0/1.5, map-session parity), (c) min-4 filter removed: small-n bands starred, faded and shown with their season counts.*
+- **V2-11 · IOD short-rains distribution · CLOSED — display artifact; fixed with V2-10c in v2.4.**
   Verified against driver_indices (coalesced DMI, OND means, 1991–2020 z): 1991–2025 gives
   Neutral 15 · Weak −IOD 7 · Strong +IOD 3 (1997/2019/2023) · Strong −IOD 3 (1996/1998/2025) ·
   Moderate +IOD 3 · Moderate −IOD 2 · Weak +IOD 2. The Kajiado screenshot showed only
   Neutral/Weak−IOD because every other band has n<4 and the min-4 filter hid them. Data is sound;
   fix is V2-10c.
-- **V2-12 · Fig 3.1 timeline: IOD not visible · OPEN (S, investigate).** Pete reports no IOD on the
+  *Audit 2026-08-17 → **DONE**: CLOSED — display artifact, no data defect; the fix landed with V2-10c in v2.4 (1454006). Re-verified from driver_indices (coalesced DMI, OND, 1991–2020 z): Strong +IOD 1997/2019/2023, Strong −IOD 1996/1998/2025, Moderate +3 / −2 — all bands now visible with counts.*
+- **V2-12 · Fig 3.1 timeline: IOD not visible · PARTIAL (visibility fixed v2.4; per-event driver states still open).** Pete reports no IOD on the
   timeline. The 2019 positive-IOD event exists in events.json with a pale green band
   (PALETTE.event.iodpos #cde8cf) — check whether it renders too faint / is mis-drawn, and consider
   adding each event's driver states to the row labels/tooltips.
-- **V2-13 · Fig 3.2 background continuity · OPEN (M).** Smooth the season strength shading so
+  *Audit 2026-08-17 → **PARTIAL**: PARTIAL — visibility fixed in v2.4 (1454006): event palette darkened (iodpos #cde8cf → #9fd6a8) and the 2019 +IOD event has its own labelled swimlane on what is now Fig 2.3; still open: per-event driver states in the row labels/tooltips (only the editorial blurb is shown).*
+- **V2-13 · Fig 3.2 background continuity · DONE v2.7→v2.8 (c145649, 300b725).** Smooth the season strength shading so
   colour transitions read as continuous (gradient between season windows), not a barcode.
-- **V2-14 · Fig 3.2 view upgrades · OPEN (M/L).** (a) With multi-county selected, switch to a line
+  *Audit 2026-08-17 → **DONE**: DONE v2.7 (c145649) → v2.8 (300b725) — Continuous background paints every month with its own MEASURED rolling 3-month z (zMonthly); the interpolated gradient was removed as dishonest. Discrete blocks remain only for single-season drivers (Western-V, R2) and year-axis charts.*
+- **V2-14 · Fig 3.2 view upgrades · PARTIAL (a,c,e done v2.6/v2.7; b,d open — b blocked by V2-06).** (a) With multi-county selected, switch to a line
   view (or offer bar/line toggle). (b) Uncertainty display option here and on similar plots.
   (c) Anomaly/absolute control on this plot and similar. (d) Bars optionally shaded by anomaly
   magnitude. (e) STANDARDIZE these controls across most plots (shared control kit).
-- **V2-15 · Fig 3.8 MAJOR redesign · OPEN (L, earmarked).** Pete: "plot is horrible" — needs a
+  *Audit 2026-08-17 → **PARTIAL**: PARTIAL — (a) multi-county line panels done v2.6 (rainCmpLinePanels), (c) anomaly/absolute done at Fig 2.1 (V2-42g/V2-46), (e) shared control kit done v2.7 for the lens/driver/background row (bgControlsRow on 6 §3 figures); still open: (b) uncertainty is sd-only on the single-county Fig 2.1 bars (IQR blocked by the V2-06 percentile build) and (d) bars shaded by anomaly magnitude.*
+- **V2-15 · Fig 3.8 MAJOR redesign · DONE v2.6/v2.7 (1ad2045, c145649).** Pete: "plot is horrible" — needs a
   serious rethink of production-vs-driver presentation. Core design problem = THE LAG: a 2022
   production value sits visually next to background shading to its RIGHT (2022's own seasons),
   while the driving conditions are the seasons BEFORE/OVERLAPPING the harvest (e.g. OND-2021 +
   MAM-2022). Current strip is lag-shifted but the visual grammar still invites misreads. Applies
   to every plot mixing annual outcomes with seasonal backgrounds. Added to auto-memory and the
   adversarial review prompt so every future cycle checks it.
-- **V2-16 · §3 controls persistence · OPEN (M).** The section-3 driver/background/highlight
+  *Audit 2026-08-17 → **DONE**: DONE v2.6 (1ad2045) + v2.7 (c145649) — 3.6-A rebuilt as grouped bars faceted by harvest year with a LAG-SHIFTED background (full wash = OND(Y−1), top band = MAM(Y), both named in the tooltips and the legend prose), plus Lines / Vs-rainfall / Table views and ∅ = not reported; 3.6-B HarvestStat keyed on planting year, separated by the 'two rulers' callout.*
+- **V2-16 · §3 controls persistence · DONE v2.7 — superseded by V2-54 (linked per-plot rows).** The section-3 driver/background/highlight
   controls must repeat per plot or stick while scrolling the section.
 
+  *Audit 2026-08-17 → **DONE**: DONE v2.7 (c145649 + 222ba35) — SUPERSEDED BY V2-54: sticky §3 row dropped in favour of per-plot LINKED clones (master lens/driver/background row at Fig 3.1; bgControlsRow Inputs.bind clones on 3.2/3.3/3.4/3.5/3.6-A/3.7 — every figure that paints a background). Leftover only: the unused `.ke-sticky-sec` CSS at qmd:90-91.*
 ### Carried forward (deferred earlier, still live)
 
-- **V2-20 · MAM 2026 CHIRPS refresh** (checklist C6) — D409 extract re-pull; notebook picks it up
+- **V2-20 · MAM 2026 CHIRPS refresh · OPEN (upstream; MAM stops at 2025, monthly ends 2026-04)** (checklist C6) — D409 extract re-pull; notebook picks it up
   automatically (axis-to-data-end policy).
-- **V2-21 · Cross-border import/export price series** (checklist F1 / Fig 5.1 merge idea P29) —
+  *Audit 2026-08-17 → **OPEN**: V2-20 · MAM 2026 CHIRPS refresh · OPEN (data gap, upstream).** Verified: `chirps_county.parquet` PTOT MAM stops at 2025 (0 rows for MAM-2026); `chirps_county_monthly.parquet` ends 2026-04, so MAM-2026 cannot be derived client-side either. Needs the D409 re-pull; notebook side is ready.*
+- **V2-21 · Cross-border import/export price series · OPEN (xbt_trade has no price/value column)** (checklist F1 / Fig 5.1 merge idea P29) —
   scout FEWS XBT price data.
-- **V2-22 · GESI extractor label completion** — truncated labels fixed at the pipeline (feeds V2-05).
-- **V2-23 · Current-RONI serving** — enables nearest-neighbour analogue ranking (extend
+  *Audit 2026-08-17 → **OPEN**: V2-21 · Cross-border import/export price series · OPEN (data gap, unscouted).** Verified: `xbt_trade.parquet` serves qty/qty_unit only — no price, value or unit-value column; `market_prices.price_type` ∈ {Retail, Wholesale} (domestic). Fig 5.1 charts import quantities only, and the caption already discloses the gap.*
+- **V2-22 · GESI extractor label completion · OPEN (pipeline; ≥10 of 24 codes still clipped)** — truncated labels fixed at the pipeline (feeds V2-05).
+  *Audit 2026-08-17 → **OPEN**: V2-22 · GESI extractor label completion · OPEN (pipeline, verified still broken).** `gesi_v2.parquet` labels are still clipped mid-phrase on ≥10 of 24 codes (B1 '…spend less than 30', B5 '…primary reliance on', D2 '…currently using any', D10 '…with a problem in', E2 '…with no education by', etc.). Fix belongs in `_sources/gesi_extract.py` + rebuild; blocks V2-05(b)/(d).*
+- **V2-23 · Current-RONI serving · PARTIAL (seasonal RONI served + used; monthly/current RONI + analogue ranking open)** — enables nearest-neighbour analogue ranking (extend
   enso_drivers_build.py or state_probs).
-- **V2-24 · Wave-3 data builds (green-lit D15.6):** admin2 CHIRPS zonal rerun (via D409 dispatch),
+  *Audit 2026-08-17 → **PARTIAL**: V2-23 · Current-RONI serving · PARTIAL.** Seasonal RONI IS served and current (`enso_drivers_seasonal.parquet`, 1950–AMJ-2026) and drives OND ENSO strength (`roniZOnd`, qmd:2941). STILL OPEN: (i) no monthly/current RONI — `enso_drivers_monthly` is SOI+DMI only and `driver_indices` has no roni column, so `currentState` (qmd:3651) and the v2.8 Continuous background fall back to Niño 3.4 (documented deviation, qmd:2879); CPC publishes RONI seasonally, so this needs derivation. (ii) nearest-neighbour ranking never built — `analogueYearsOND` (qmd:4014) filters by phase and sorts by year.*
+- **V2-24 · Wave-3 data builds (green-lit D15.6) · PARTIAL — 1 of 6 (served-data catalog done):** admin2 CHIRPS zonal rerun (via D409 dispatch),
   GHCN/GSOD station layer, KMD CAP snapshot, CHIRPS slim re-export (+ percentiles per V2-06),
   served-data catalog, driver_indices→git-full consolidation.
-- **V2-25 · Outlook side-by-side layout** — Pete ratified "side by side"; v2 renders OND then MAM
+  *Audit 2026-08-17 → **PARTIAL**: V2-24 · Wave-3 data builds · PARTIAL — 1 of 6.** DONE: served-data catalog (`datasetRegistry`, qmd:2620 + DATA.md + 27 `.meta.json`). STILL OPEN: admin2 CHIRPS zonal (chirps_county `admin2_name` is 100% NULL), GHCN/GSOD station layer (no parquet), KMD CAP snapshot (no parquet), CHIRPS slim re-export + percentiles (still `value_mean`/`value_sd` only — blocks V2-06), driver_indices→git-full (DATA.md §4 still labels it **D409-only**).*
+- **V2-25 · Outlook side-by-side layout · INVALID (moot — v2 renders OND only; MAM outlook deliberately dropped)** — Pete ratified "side by side"; v2 renders OND then MAM
   stacked; confirm whether literal columns wanted.
-- **V2-26 · dev_rainfall_maps convention deviations** — coalesced DMI member, full-month guard,
+  *Audit 2026-08-17 → **INVALID**: V2-25 · Outlook side-by-side layout · INVALID (moot — premise removed).** v2 renders only the OND outlook (Fig 4.2, qmd:1969); the MAM outlook was deliberately dropped as not skilfully forecastable from ENSO and says so in-page (qmd:2100), so there is no second panel to column. Dead nbText keys `b4.mamTitle/mamIntro/mamCaption` remain (harmless).*
+- **V2-26 · dev_rainfall_maps convention deviations · OPEN (all three persist at map v0.15)** — coalesced DMI member, full-month guard,
   RONI-z OND ENSO strength: coordinate adoption with the map session.
 
+  *Audit 2026-08-17 → **OPEN**: V2-26 · dev_rainfall_maps convention deviations · OPEN (all three persist at v0.15).** Verified against `dev_rainfall_maps.qmd`: `phaseDefs` still uses `dmi_hadisst` alone (dev:470, coalesce reaches only the current-state card at dev:258); `zByYear` (dev:484) averages whatever months exist — no full-month guard; ENSO strength is raw Niño 3.4 (dev:471/476) not RONI-z. Main notebook has all three (qmd:2912, 2921, 2966), so the two notebooks can still label the same season differently.*
 ### New data (2026-08-13)
 
 - **V2-27 · HarvestStat county×season crop series — incorporate into the notebook · DONE v2.6
@@ -384,14 +413,16 @@ still live from it is re-registered here.
   dev_rainfall_maps cards print RAW index values, v2's strips print Z — same driver, two numbers.
   Harmonize: tooltips show raw AND strength (e.g. "DMI +0.68 · strong, +1.8 sd"), adopting the map
   session's raw-value-label convention.
-- **V2-44 · Fig 2.2 upgrades · PARTIAL v2.6 (b About, d combine/disaggregate toggle, <5-season fade done; a panel alignment + c mosaic still open).** (a) Align the OND/MAM panels (same row heights/width).
+- **V2-44 · Fig 2.2 upgrades · DONE (a–d) — (b)(d) v2.6, (a)(c) v2.9 (c6dd6c2).** (a) Align the OND/MAM panels (same row heights/width).
   (b) Move sd band values into the caption, add the absolute counts/values there; if too long, use
   "About this plot". (c) Mosaic option: bar width scaled to n seasons; fade rows with <5 seasons.
   (d) Toggle to combine/disaggregate strong + moderate.
-- **V2-45 · §3 background without interpolation · OPEN (data/design).** Obtain/derive monthly
+  *Audit 2026-08-17 → **DONE**: V2-44 · Fig 2.2 upgrades · DONE (a–d) — pending commit + browser check.** (b)/(d) landed v2.6; (a) panel alignment now solved by one shared height/row-pitch plus the colour legend hoisted out of the OND panel (qmd:951-972, 878), and (c) by a `contShape` "Mosaic (height ∝ seasons)" mode (qmd:797, 881-924). NOTE: currently UNCOMMITTED working-tree code, not yet render-verified; (c) scales row height not bar width, and "All years" is a fixed-height reference row.*
+- **V2-45 · §3 background without interpolation · DONE v2.8 (300b725 + 25776a8).** Obtain/derive monthly
   driver state so backgrounds never interpolate — driver_indices IS monthly, so the strength
   background can be computed per month directly (rolling 3-month z per month) instead of
   interpolating between season centres. Design decision + implementation.
+  *Audit 2026-08-17 → **DONE**: V2-45 · §3 background without interpolation · DONE v2.8 (`300b725` + `25776a8`).** `zMonthly` (qmd:2886) paints each month from its own MEASURED centred 3-month window (all three months required, per-calendar-month 1991–2020 standardization, composites re-standardized); `bgMarks` clamps to the chart's data window and paints nothing where a window is missing or past the last measured month. NDJ is quarantined out of `rollCentre` (qmd:3952) per V2-63, so December is a deliberate measured gap.*
 - **V2-46 · Fig 3.2 restructure · DONE v2.6 (now SPEI-only Fig 3.1; rainfall panel removed — multi-county line mode lives in Fig 2.1; anomaly toggle moved to 2.1).** Top panel duplicates Fig 2.1 → REMOVE the upper
   rainfall panel, keep the SPEI-12 drought panel (and the multi-county line mode moves where?
   decide); panels currently overlap and the bottom title is overlain by the plot (bug); full-width
