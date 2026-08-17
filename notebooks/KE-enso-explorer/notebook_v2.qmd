@@ -18,7 +18,7 @@ import { formatNumCompactShort, wrapTickLabel } from "/helpers/std.ojs";
 ```{ojs}
 // version stamp shown in the hero so reviewers always know which build
 // they are looking at. Bump NB_VERSION with every notebook version commit.
-NB_VERSION = "v2.8"
+NB_VERSION = "v2.9"
 ```
 
 ```{ojs}
@@ -793,6 +793,12 @@ viewof contYearTo = Inputs.range([1981, 2025], {step: 1, value: 2025, label: _la
 viewof contDetail = Inputs.toggle({label: _lang(nbText.sections.controls.contDetail), value: true})
 ```
 
+```{ojs}
+viewof contShape = Inputs.radio(["Equal rows", "Mosaic (height ∝ seasons)"], {
+  label: _lang(nbText.sections.controls.rowShape), value: "Equal rows",
+})
+```
+
 :::
 
 ```{ojs}
@@ -830,7 +836,10 @@ contRows = (season, driver) => {
     for (const t of ["Wet", "Near", "Dry"]) {
       const count = sub.filter((r) => r.tercile === t).length;
       const share = count / total;
-      out.push({season, driver, group: total < 4 ? group + " *" : group,
+      out.push({season, driver, group,
+        // small-n is a FLAG, never baked into the group name: the two panels
+        // share one row domain (V2-44a) and a star in the key would split it
+        small: total < 4,
         outcome: t === "Wet" ? "Wetter" : t === "Near" ? "Near-normal" : "Drier",
         count, total, share, mid: x0 + share / 2});
       x0 += share;
@@ -841,42 +850,126 @@ contRows = (season, driver) => {
     else push(g, rows.filter((r) => groupOf(r.year) === g));
   }
   const unclassified = rows.filter((r) => groupOf(r.year) == null).length;
-  return {out, unclassified, nAll: rows.length};
+  return {out, unclassified, nAll: rows.length, groups};
 }
-contingencyPanel = (season, driver) => {
+// V2-44a: both panels share ONE height and ONE row pitch (passed in by
+// contingencyChart) so their rows line up straight across; the colour legend
+// is rendered once above the pair rather than inside the left panel (which
+// used to push that panel down and break the alignment it was meant to have).
+// Each panel keeps its OWN band labels — the two seasons usually run
+// different drivers, so a shared label domain would fill half of each panel
+// with the other driver's empty bands.
+// V2-44c: "Mosaic" mode gives each row a height proportional to the number of
+// seasons in that band — visual weight then matches the evidence behind it.
+contingencyPanel = (season, driver, opts = {}) => {
   const {out, unclassified, nAll} = contRows(season, driver);
   if (!nAll) return html`<div style="color:#666;font-style:italic">No record for ${county} (${season}).</div>`;
   if (!out.length) return html`<div style="color:#666;font-style:italic">Too few classified seasons for ${driver} (${season}).</div>`;
-  const present = [...new Set(out.map((d) => d.group))];
-  const plot = Plot.plot({
-    height: 90 + present.length * 34, width: 460, marginLeft: 170, marginRight: 58,
+  const rowDomain = opts.groups ?? [...new Set(out.map((d) => d.group))];
+  const H = opts.height ?? (90 + rowDomain.length * 34);
+  const smallSet = new Set(out.filter((d) => d.small).map((d) => d.group));
+  const totalOf = new Map(out.map((d) => [d.group, d.total]));
+  const emptyRows = rowDomain.filter((g) => !totalOf.has(g)).map((g) => ({group: g}));
+  const lbl = (g) => wrapTickLabel(g + (smallSet.has(g) ? " *" : ""), 16);
+  const common = {
+    width: 460, marginLeft: 170, marginRight: 58,
     x: {label: "share of seasons", tickFormat: ".0%", domain: [0, 1]},
-    y: {domain: present, label: null, tickFormat: (g) => wrapTickLabel(g, 16)},
     color: {domain: ["Wetter", "Near-normal", "Drier"],
-      range: [PALETTE.outcome.wetter, PALETTE.outcome.near, PALETTE.outcome.drier], legend: season === "OND"},
-    marks: [
-      Plot.barX(out, {x: "share", y: "group", fill: "outcome", order: ["Wetter", "Near-normal", "Drier"],
-        fillOpacity: (d) => d.total < 5 ? 0.55 : 1,
-        title: (d) => `${d.group}\n${d.outcome}: ${d.count} of ${d.total} seasons (${Math.round(d.share * 100)}%)`, tip: true}),
-      Plot.text(out.filter((d) => d.share >= 0.12), {x: "mid", y: "group",
-        text: (d) => Math.round(d.share * 100) + "%", fill: "#fff", fontSize: 10.5, fontWeight: 600}),
-      Plot.text(out.filter((d) => d.outcome === "Drier"), {x: 1, y: "group",
-        text: (d) => `${d.total} seasons`, dx: 40, fill: "#777", fontSize: 10.5}),
-    ],
-  });
-  const small = [...new Set(out.filter((d) => d.total < 4).map((d) => d.group))].length;
+      range: [PALETTE.outcome.wetter, PALETTE.outcome.near, PALETTE.outcome.drier], legend: false},
+  };
+  let plot;
+  if (contShape.startsWith("Mosaic")) {
+    // bands stacked in canonical order, height ∝ seasons; "All years" becomes
+    // a fixed-height reference row below a gap (at true height it would be as
+    // tall as every band combined).
+    const bands = rowDomain.filter((g) => g !== "All years");
+    const bandTotal = d3.sum(bands, (g) => totalOf.get(g) ?? 0);
+    const refH = Math.max(2, bandTotal * 0.1);
+    const gap = Math.max(1, refH * 0.35);
+    const pos = new Map();
+    let yEnd = 0;
+    for (const g of bands) {
+      const h = Math.max(1, totalOf.get(g) ?? 1); // an empty band keeps a visible slot
+      pos.set(g, [yEnd, yEnd + h]);
+      yEnd += h;
+    }
+    if (rowDomain.includes("All years")) {
+      yEnd += gap;
+      pos.set("All years", [yEnd, yEnd + refH]);
+      yEnd += refH;
+    }
+    const withPos = (rows) => rows.filter((d) => pos.has(d.group))
+      .map((d) => ({...d, y1: pos.get(d.group)[0], y2: pos.get(d.group)[1],
+        yc: (pos.get(d.group)[0] + pos.get(d.group)[1]) / 2,
+        x1: d.mid - d.share / 2, x2: d.mid + d.share / 2}));
+    const rects = withPos(out);
+    const labels = withPos([...new Map(out.map((d) => [d.group, d])).values(),
+      ...emptyRows.map((d) => ({...d, mid: 0, share: 0}))]);
+    plot = Plot.plot({
+      ...common, height: H,
+      y: {domain: [0, yEnd], axis: null},
+      marks: [
+        Plot.rect(rects, {x1: "x1", x2: "x2", y1: "y1", y2: "y2", fill: "outcome", inset: 0.5,
+          fillOpacity: (d) => d.total < 5 ? 0.55 : 1,
+          title: (d) => `${d.group}\n${d.outcome}: ${d.count} of ${d.total} seasons (${Math.round(d.share * 100)}%)`, tip: true}),
+        Plot.text(rects.filter((d) => d.share >= 0.12 && d.total >= 3), {x: "mid", y: "yc",
+          text: (d) => Math.round(d.share * 100) + "%", fill: "#fff", fontSize: 10.5, fontWeight: 600}),
+        Plot.text(labels, {x: 0, y: "yc", text: (d) => lbl(d.group), dx: -8,
+          textAnchor: "end", fontSize: 10.5, fill: "#333", lineHeight: 1.1}),
+        Plot.text(labels.filter((d) => totalOf.has(d.group)), {x: 1, y: "yc",
+          text: (d) => `${totalOf.get(d.group)} seasons`, dx: 40, fill: "#777", fontSize: 10.5}),
+        Plot.text(labels.filter((d) => !totalOf.has(d.group)), {x: 0, y: "yc",
+          text: () => "no seasons in this band", dx: 6, textAnchor: "start", fill: "#aaa", fontSize: 10}),
+      ],
+    });
+  } else {
+    plot = Plot.plot({
+      ...common, height: H,
+      y: {domain: rowDomain, label: null, tickFormat: lbl},
+      marks: [
+        Plot.barX(out, {x: "share", y: "group", fill: "outcome", order: ["Wetter", "Near-normal", "Drier"],
+          fillOpacity: (d) => d.total < 5 ? 0.55 : 1,
+          title: (d) => `${d.group}\n${d.outcome}: ${d.count} of ${d.total} seasons (${Math.round(d.share * 100)}%)`, tip: true}),
+        Plot.text(out.filter((d) => d.share >= 0.12), {x: "mid", y: "group",
+          text: (d) => Math.round(d.share * 100) + "%", fill: "#fff", fontSize: 10.5, fontWeight: 600}),
+        Plot.text(out.filter((d) => d.outcome === "Drier"), {x: 1, y: "group",
+          text: (d) => `${d.total} seasons`, dx: 40, fill: "#777", fontSize: 10.5}),
+        // a band with no seasons in THIS season must not read as a zero share
+        Plot.text(emptyRows, {x: 0, y: "group", text: () => "no seasons in this band",
+          dx: 6, textAnchor: "start", fill: "#aaa", fontSize: 10}),
+      ],
+    });
+  }
   const note = html`<div style="font-size:11px;color:#888">
-    ${small ? "* fewer than 4 seasons — read as anecdote, not evidence. " : ""}
+    ${smallSet.size ? "* fewer than 4 seasons — read as anecdote, not evidence. " : ""}
     ${unclassified > 0 ? `${unclassified} season${unclassified > 1 ? "s" : ""} without a driver value appear only in “All years”.` : ""}</div>`;
   return html`<div>${plot}${note}</div>`;
 }
 ```
 
 ```{ojs}
-contingencyChart = html`<div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start">
-  <div><div class="ke-panel-lbl">OND (short rains) — ${contOndDriver}</div>${contingencyPanel("OND", contOndDriver)}</div>
-  <div><div class="ke-panel-lbl">MAM (long rains) — ${contMamDriver}</div>${contingencyPanel("MAM", contMamDriver)}</div>
-</div>`
+contingencyChart = {
+  // ONE height and one row pitch across both panels (V2-44a). Both panels
+  // always carry the same NUMBER of bands (the band structure is symmetric
+  // and contDetail is global), so equal height ⇒ rows line up; each panel
+  // keeps its own driver's labels. A band with no seasons says so.
+  const ondR = contRows("OND", contOndDriver), mamR = contRows("MAM", contMamDriver);
+  const rowCount = Math.max((ondR.groups ?? []).length, (mamR.groups ?? []).length, 1);
+  const bandSeasons = (r) => d3.sum(
+    [...new Map(r.out.filter((d) => d.group !== "All years").map((d) => [d.group, d.total])).values()],
+    (v) => v);
+  const nMax = Math.max(bandSeasons(ondR), bandSeasons(mamR), 1);
+  const height = contShape.startsWith("Mosaic")
+    ? Math.max(230, Math.min(520, 90 + nMax * 7))
+    : 90 + rowCount * 34;
+  return html`<div>${Plot.legend({color: {domain: ["Wetter", "Near-normal", "Drier"],
+      range: [PALETTE.outcome.wetter, PALETTE.outcome.near, PALETTE.outcome.drier]},
+      label: "season outcome"})}
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:flex-start">
+      <div><div class="ke-panel-lbl">OND (short rains) — ${contOndDriver}</div>${contingencyPanel("OND", contOndDriver, {groups: ondR.groups, height})}</div>
+      <div><div class="ke-panel-lbl">MAM (long rains) — ${contMamDriver}</div>${contingencyPanel("MAM", contMamDriver, {groups: mamR.groups, height})}</div>
+    </div></div>`;
+}
 ```
 
 ```{ojs}
@@ -886,7 +979,7 @@ plotFooter(_lang(nbText.sections.b2.contingencyCaption), contingencyChart, {
   filename: `${county}_tercile_by_driver`,
   data: [...contRows("OND", contOndDriver).out, ...contRows("MAM", contMamDriver).out]
     .map((d) => ({season: d.season, driver: d.driver, group: d.group, outcome: d.outcome,
-      count: d.count, total: d.total, share: +d.share.toFixed(3)})),
+      count: d.count, total: d.total, share: +d.share.toFixed(3), small_n: d.small})),
   meta: {Source: "CHIRPS v3 county terciles + NOAA driver indices",
     County: county, Drivers: `${contOndDriver} / ${contMamDriver}`,
     Period: `${Math.min(contYearFrom, contYearTo)}–${Math.max(contYearFrom, contYearTo)}`},
