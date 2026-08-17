@@ -324,7 +324,17 @@ still live from it is re-registered here.
   clamp already catches -Inf). **NEXT: wire a PTOT/SPEI variable toggle on the map** — SPEI ramp =
   diverging (brown dry ↔ blue/green wet), domain ~[-2.5,+2.5], fetch SPEI-03 at the season-end month.
   Pipeline offered a clamp+re-stat republish for the 2 -Inf pixels if we want clean embedded stats.
-- **KE-30 · Per-pixel NDVI · PLAN AGREED (net-new ingest; gated on GEE probe).** Pipeline reply
+- **KE-30 · Per-pixel NDVI · DONE (LIVE + wired + browser-verified 2026-08-17, v0.15, `fe1da81`).**
+  Pipeline baked MODIS **MOD13Q1** v061 seasonal-mean NDVI COGs to the **Atlas S3 bucket** (non-GEE,
+  earthaccess/LP DAAC) — dispatch `2026-08-17_reply-ndvi-live.md`. Base:
+  `…/type=vegetation/source=modis-mod13q1/region=east-africa/processing=seasonal/variable=NDVI/season={OND|MAM}/NDVI_{SEASON}_{YYYY}_mean.tif`
+  (250 m, OND+MAM, 2000–2025, real NDVI DN/10000 ~0–1, NoData=NaN, pixel-reliability masked, overviews).
+  Wired as the 3rd map variable (Rainfall/Drought/**Vegetation**); its 250 m East-Africa grid ≠ the
+  ~5 km CHIRPS grid so gridWindow+countyMask recompute off a reference NDVI COG; YlGn ramp [0,0.8].
+  Verify: 52/52 panels painted, 314 range-reads, 0 errors; Marsabit OND IOD partial 0.76 (consistent
+  with rainfall+SPEI). **Deferred (own follow-up):** annual composite + anomaly-vs-climatology (v1 =
+  seasonal only, no NDVI climatology COG); wider-Africa extent. _Historic plan detail below:_
+- **KE-30b · (superseded plan note) Per-pixel NDVI · PLAN AGREED (net-new ingest; gated on GEE probe).** Pipeline reply
   `2026-08-13_reply-ndvi-plan.md`: chosen lever = **MODIS MOD13Q1 v061 NDVI** (GEE `MODIS/061/MOD13Q1`,
   band `NDVI`, scale 1e-4), **250 m native**, 16-day → **seasonal mean** (OND/MAM), record **2000→present
   (~26 yr)** → composite by ENSO/IOD phase exactly like rainfall. COGs w/ internal overviews (one file
