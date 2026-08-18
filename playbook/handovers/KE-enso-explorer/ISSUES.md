@@ -386,9 +386,21 @@ still live from it is re-registered here.
 - **KE-27 · Publish WRSI COGs · OPEN (medium; pipeline).** Prior art in `climate-toolkit` (root-zone
   crop water-balance, CHC-aligned spec); today per-point/season, not gridded COG. Path = gridded run
   + publish. Own dispatch.
-- **KE-29 · Riverine flood raster · OPEN (large; net-new; scope source).** Not ingested; scope a
-  source first — GloFAS (return-period, pipeline lean), JRC GFM, or Global Flood Database. Own dispatch.
-  Pipeline suggested sequence: OND fix → SPEI → WRSI → NPP → flood.
+- **KE-29 · Riverine flood rasters · DATA LIVE on Atlas S3 (2026-08-18) — notebook wiring OPEN (design
+  needed).** Pipeline baked BOTH flood products (non-GEE, 206 + CORS + overviews) — dispatch
+  `2026-08-18_reply-flood-live.md`:
+  - **JRC GloFAS hazard (static, return-period):** `type=flood/source=jrc-glofas/region=east-africa/processing=return-period/variable=flood-depth/rp={RP}/flood-depth_rp{RP}.tif`;
+    `{RP}` ∈ 10/20/50/75/100/200/500; value = flood **depth (m)**, 90 m, Kenya extent; **no year/season**
+    → an **RP slider** over one static "flood-prone" map. NaN = no-flood.
+  - **Global Flood DB observed occurrence (per-year):** `type=flood/source=global-flood-db/region=east-africa/processing=annual/variable=flooded/flooded_{YYYY}.tif`;
+    value = **0/1** flooded-that-year, 250 m, Kenya extent; years present 2001–03, 2005–08, 2011–2018
+    (15 COGs); **missing 2000/2004/2009/2010/2019+ → treat missing URL as "no data", NOT zero**;
+    **ENSO-composable** (2015/2012/2006 = big flood years).
+  - **⚠️ Grammar mismatch — does NOT fit the OND/MAM seasonal variable-toggle** like PTOT/SPEI/NDVI:
+    JRC is static (RP slider, no year); GFD is **annual** (no season) so showing it under both OND and
+    MAM headers = identical maps, season-mislabeled → violates the harvest-lag/honesty rule. Needs its
+    own block (RP-slider hazard map + per-year annual GFD grid, ENSO-composited). **Design decision with
+    Pete pending** (separate flood section in the dev panel vs the main notebook's impacts block B4).
 - **KE-25 · Legend format consistency · DONE 2026-08-13.** Card-colour legend and map-cell rainfall
   legend now use the SAME inline format (`<label>: <low> [gradient] <high>`), stacked + left-aligned
   in `sectionLegend` (was: card inline vs cell stacked-3-line → mismatched).
