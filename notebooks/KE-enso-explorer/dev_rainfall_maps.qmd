@@ -26,7 +26,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.15</b> · 2026-08-17 · rainfall + SPEI-3 drought + NDVI vegetation panel</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.16</b> · 2026-08-18 · rainfall + SPEI drought + NDVI + observed-flood panel</span>`
 ```
 
 ```{ojs}
@@ -82,13 +82,13 @@ viewof yearTo = Inputs.range([1981, 2025], {step: 1, value: 2025, label: "To yea
 ```
 
 ```{ojs}
-viewof mapVar = Inputs.select(["Rainfall (PTOT)", "Drought (SPEI-3)", "Vegetation (NDVI)"], {value: "Rainfall (PTOT)", label: "Map variable"})
+viewof mapVar = Inputs.select(["Rainfall (PTOT)", "Drought (SPEI-3)", "Vegetation (NDVI)", "Flood (observed, annual)"], {value: "Rainfall (PTOT)", label: "Map variable"})
 ```
 
 ```{ojs}
-// anomaly only applies to rainfall; SPEI is already an anomaly index and NDVI has
-// no climatology COG yet, so disable the toggle for both.
-viewof anomaly = Inputs.toggle({label: "Anomaly vs 1991–2020", value: false, disabled: isSpei || isNdvi})
+// anomaly only applies to rainfall; SPEI is an anomaly index, NDVI has no climatology
+// COG, and flood is a 0/1 occurrence — disable the toggle for all three.
+viewof anomaly = Inputs.toggle({label: "Anomaly vs 1991–2020", value: false, disabled: isSpei || isNdvi || isFlood})
 ```
 
 ```{ojs}
@@ -116,10 +116,10 @@ yearsSel = {
 ```
 
 ```{ojs}
-md`Per-pixel ${isNdvi ? "MODIS **NDVI vegetation index** (~250 m)" : isSpei ? "CHIRPS-v3 seasonal **SPEI-3 drought index** (3-month, standardised: −ve drier, +ve wetter; ~5 km)" : (anomaly ? "CHIRPS-v3 seasonal rainfall **anomaly** (vs 1991–2020; ~5 km)" : "CHIRPS-v3 seasonal rainfall totals (~5 km)")}
+md`Per-pixel ${isFlood ? "**observed flood occurrence** (Global Flood DB, 250 m, 0/1 per year — **annual, not seasonal**)" : isNdvi ? "MODIS **NDVI vegetation index** (~250 m)" : isSpei ? "CHIRPS-v3 seasonal **SPEI-3 drought index** (3-month, standardised: −ve drier, +ve wetter; ~5 km)" : (anomaly ? "CHIRPS-v3 seasonal rainfall **anomaly** (vs 1991–2020; ~5 km)" : "CHIRPS-v3 seasonal rainfall totals (~5 km)")}
 for **${county}**, admin-2 overlain. Each card = one year; shows the county-mean
-${isNdvi ? "NDVI (0–1)" : isSpei ? "SPEI-3 (unitless)" : (anomaly ? "anomaly (mm)" : "rainfall (mm)")} and is tinted by its section driver's phase & strength.
-${isNdvi ? "NDVI is the MOD13Q1 per-year seasonal mean (pixel-reliability masked). " : isSpei ? "SPEI-3 is read at the season-end month (OND → December, MAM → May) — a 3-month accumulation already covers the season. " : ""}Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so years compare.`
+${isFlood ? "flooded-area share (%)" : isNdvi ? "NDVI (0–1)" : isSpei ? "SPEI-3 (unitless)" : (anomaly ? "anomaly (mm)" : "rainfall (mm)")} and is tinted by its section driver's phase & strength.
+${isFlood ? "Flood is annual (season-agnostic) — see the flag below each section. " : isNdvi ? "NDVI is the MOD13Q1 per-year seasonal mean (pixel-reliability masked). " : isSpei ? "SPEI-3 is read at the season-end month (OND → December, MAM → May) — a 3-month accumulation already covers the season. " : ""}Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so years compare.`
 ```
 
 ### OND — short rains (Oct–Dec) · driven by ENSO + IOD
@@ -156,9 +156,9 @@ sectionLegend(ondDriver)
 
 ```{ojs}
 ondGrid = {
-  yield html`<div class="rain-loading">⏳ Loading OND maps — fetching ${isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
+  yield html`<div class="rain-loading">⏳ Loading OND maps — fetching ${isFlood ? "observed-flood" : isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
   const cache = await ondCacheP.p;
-  yield gridWrap(await buildPanels(cache, "OND", ondDriver, parseNum(ondMin), parseNum(ondMax)));
+  yield html`<div>${isFlood ? floodNote("OND") : ""}${gridWrap(await buildPanels(cache, "OND", ondDriver, parseNum(ondMin), parseNum(ondMax)))}</div>`;
 }
 ```
 
@@ -194,9 +194,9 @@ sectionLegend(mamDriver)
 
 ```{ojs}
 mamGrid = {
-  yield html`<div class="rain-loading">⏳ Loading MAM maps — fetching ${isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
+  yield html`<div class="rain-loading">⏳ Loading MAM maps — fetching ${isFlood ? "observed-flood" : isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
   const cache = await mamCacheP.p;
-  yield gridWrap(await buildPanels(cache, "MAM", mamDriver, parseNum(mamMin), parseNum(mamMax)));
+  yield html`<div>${isFlood ? floodNote("MAM") : ""}${gridWrap(await buildPanels(cache, "MAM", mamDriver, parseNum(mamMin), parseNum(mamMax)))}</div>`;
 }
 ```
 
@@ -214,6 +214,12 @@ md`### Notes
   \`type=vegetation/source=modis-mod13q1/region=east-africa\`), real NDVI (DN/10000, ~0–1),
   pixel-reliability masked. Its own 250 m East-Africa grid (≠ the ~5 km CHIRPS grid) so the
   read window + county mask recompute for it. Anomaly toggle disabled (no NDVI climatology COG yet).
+- **Flood data (observed):** Global Flood DB per-year 0/1 occurrence COGs (250 m,
+  \`type=flood/source=global-flood-db/…/flooded_{YYYY}.tif\`). **Annual, not seasonal** — the same
+  yearly map shows under both OND & MAM, tinted by each section's driver (flag shown above each grid).
+  Only observed-event years exist (2001–03, 2005–08, 2011–2018); **missing years = no data, not zero**.
+  Card mean = share of county pixels flooded that year. A separate static JRC-GloFAS return-period
+  hazard map (RP slider) is the planned companion (not yet wired). Own 250 m grid.
 - **Correlation:** Pearson r between the county-mean seasonal value (rainfall *or* SPEI-3)
   and each driver's standardised index over the selected years (n shown). Higher |r| = that
   driver explains more of this county's outcome that season; +r → driver-high means wetter.
@@ -332,12 +338,19 @@ isSpei = mapVar.startsWith("Drought")
 ndviDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=vegetation/source=modis-mod13q1/region=east-africa/processing=seasonal/variable=NDVI"
 ndviURL = (season, year) => `${ndviDir}/season=${season}/NDVI_${season}_${year}_mean.tif`
 isNdvi = mapVar.startsWith("Vegetation")
+// Global Flood DB observed occurrence (250 m, Kenya) — per-year 0/1, ANNUAL (not
+// seasonal): same yearly map regardless of the season section, tinted by that
+// section's driver. Missing years (2000/04/09/10/19+) = no observed data, NOT zero.
+floodDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=flood/source=global-flood-db/region=east-africa/processing=annual/variable=flooded"
+floodURL = (year) => `${floodDir}/flooded_${year}.tif`
+gfdYears = new Set([2001, 2002, 2003, 2005, 2006, 2007, 2008, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018])
+isFlood = mapVar.startsWith("Flood")
 ```
 
 ```{ojs}
 // reference COG for the read grid: NDVI (250 m, East-Africa) has its own origin/
 // resolution/extent, so the window + mask must be computed on the matching grid.
-gridRefURL = isNdvi ? ndviURL("OND", 2015) : monthlyURL(2000, 1)
+gridRefURL = isFlood ? floodURL(2015) : isNdvi ? ndviURL("OND", 2015) : monthlyURL(2000, 1)
 gridWindow = {
   const gt = await geotiffLib;
   const tiff = await gt.fromUrl(gridRefURL);
@@ -428,23 +441,28 @@ seasonalYear = async (season, year, win) => {
 speiYear = (season, year, win) => readWindow(speiURL(year, seasonEndMonth[season]), win)
 // NDVI for a season-year = the per-year seasonal-mean COG (own 250 m grid).
 ndviYear = (season, year, win) => readWindow(ndviURL(season, year), win)
+// GFD flood = the per-year annual 0/1 COG (season-agnostic; own 250 m Kenya grid).
+// Years outside the observed set have no COG → return null (no data, not zero flood).
+gfdYear = (year, win) => gfdYears.has(year) ? readWindow(floodURL(year), win) : Promise.resolve(null)
 ```
 
 ```{ojs}
 // fetch every year in range ONCE; used by both the panels and the correlation.
 seasonCache = async (season) => {
   const win = await gridWindow, mask = await countyMask;
-  const useAnom = anomaly && !isSpei && !isNdvi; // SPEI/NDVI are index layers
+  const useAnom = anomaly && !isSpei && !isNdvi && !isFlood; // index/occurrence layers
   const clim = useAnom ? await climFor(season, win) : null;
   const n = win.w * win.h;
   return Promise.all(yearsSel.map(async (year) => {
     let data;
     try {
-      data = isNdvi ? await ndviYear(season, year, win)
+      data = isFlood ? await gfdYear(year, win)
+        : isNdvi ? await ndviYear(season, year, win)
         : isSpei ? await speiYear(season, year, win)
         : await seasonalYear(season, year, win);
     }
     catch (e) { return {year, data: null, meanmm: null}; }
+    if (data == null) return {year, data: null, meanmm: null};
     if (useAnom && clim) {
       const o = new Float32Array(n);
       for (let i = 0; i < n; i++) o[i] = (Number.isNaN(data[i]) || Number.isNaN(clim[i])) ? NaN : data[i] - clim[i];
@@ -619,7 +637,7 @@ corrHeader = (season, cache, keys) => {
   // does combining beat the best single? compare adjusted multiple-R to best |partial-driver| bivariate r
   const bestSingleR = best ? Math.abs(best.r ?? 0) : 0;
   const combineHelps = s.adjR != null && s.adjR > bestSingleR + 0.05;
-  const outLbl = isNdvi ? "vegetation (NDVI)" : isSpei ? "drought (SPEI-3)" : "rainfall";
+  const outLbl = isFlood ? "flooded-area fraction" : isNdvi ? "vegetation (NDVI)" : isSpei ? "drought (SPEI-3)" : "rainfall";
   return html`<div style="font-size:0.92em;margin:0.2rem 0 0.5rem">
     <b>Driver ↔ ${outLbl} correlation</b> (${county} · ${season} · n=${s.n} yrs) —
     ${s.per.map((p, i) => html`${i ? " · " : ""}${chip(p)}`)}
@@ -665,6 +683,12 @@ cardLegend = (driver) => {
 }
 // rainfall-cell colour scale — SAME inline format as cardLegend so the two align
 rainCellLegend = () => {
+  if (isFlood) return html`<div style="font-size:0.78em;color:#555;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+    <span>Map cells — <b>observed flood</b>:</span>
+    <span>not flooded (transparent)</span>
+    <span style="display:inline-block;width:16px;height:14px;background:#2171b5;vertical-align:middle"></span>
+    <span>flooded that year</span>
+  </div>`;
   const w = 120;
   const cv = html`<canvas width=${w} height=${14} style="vertical-align:middle"></canvas>`;
   const ctx = cv.getContext("2d");
@@ -713,6 +737,11 @@ buildPanels = async (cache, season, driver, mn, mx) => {
 ```{ojs}
 gridWrap = (nodes) => html`<div class="rain-grid"
   style="grid-template-columns:repeat(${Math.round(facetCols)}, minmax(0, 1fr))">${nodes}</div>`
+// prominent honesty flag for the flood layer: it is ANNUAL, not seasonal.
+floodNote = (season) => html`<div class="flood-note">⚠️ <b>Annual observed flood occurrence</b> (Global Flood DB) — <b>not season-specific</b>.
+  The same yearly flood map is shown under both OND and MAM; here it is tinted by the <b>${season}</b> driver's phase, so you can
+  read the flood years against that season's ENSO/IOD/Western-V state, but the flood footprint itself is the whole-year total.
+  Only years with observed events appear (2001–03, 2005–08, 2011–2018); <b>missing years are "no observed data", not zero flood</b>.</div>`
 parseNum = (s) => {
   if (s == null) return null;
   const t = String(s).trim();
@@ -726,9 +755,13 @@ parseNum = (s) => {
 // map-cell colours from a user-selected d3 palette (KE-21). Absolute rainfall =
 // sequential; anomaly = diverging RdBu (brown/red drier ↔ blue wetter, 0-centred).
 mapInterp = ({Blues: d3.interpolateBlues, YlGnBu: d3.interpolateYlGnBu, GnBu: d3.interpolateGnBu, Viridis: d3.interpolateViridis})[mapPalette]
-rainDomain = isNdvi ? [0, 0.8] : isSpei ? [-2.5, 2.5] : (anomaly ? [-300, 300] : [0, 900])
+rainDomain = isFlood ? [0, 1] : isNdvi ? [0, 0.8] : isSpei ? [-2.5, 2.5] : (anomaly ? [-300, 300] : [0, 900])
 pixelColor = (v) => {
   if (v == null || !isFinite(v) || v <= -9999) return null;
+  if (isFlood) {
+    if (v <= 0) return null; // unflooded → transparent, only paint flooded pixels
+    return "#2171b5"; // observed flood (binary 0/1) → solid blue
+  }
   if (isNdvi) {
     const t = Math.max(0, Math.min(1, (v - rainDomain[0]) / (rainDomain[1] - rainDomain[0])));
     return d3.interpolateYlGn(t); // 0 → pale (bare), 0.8 → dark green (vegetated)
@@ -788,7 +821,8 @@ renderRainPanel = (spec, raster) => {
     <path d="${cntyPaths}" fill="none" stroke="#111" stroke-width="1.4"/></svg>`;
 
   const meanmm = spec.meanmm;
-  const meanTxt = meanmm == null ? "—"
+  const meanTxt = meanmm == null ? (isFlood ? "no flood mapped in county" : "—")
+    : isFlood ? `${(meanmm * 100).toFixed(1)}% flooded`
     : isNdvi ? meanmm.toFixed(2)
     : isSpei ? `${meanmm > 0 ? "+" : ""}${meanmm.toFixed(2)}`
     : `${anomaly && meanmm > 0 ? "+" : ""}${Math.round(meanmm)} mm`;
@@ -816,6 +850,8 @@ renderRainPanel = (spec, raster) => {
   .rain-panel-err { color:#b45309; font-size:0.8em; padding:0.6rem; border:1px dashed #e0b466; border-radius:6px; }
   .rain-loading { color:#3a5a44; font-size:0.9em; padding:0.9rem 1rem; background:#eef4ef;
     border:1px solid #cfd8d3; border-radius:6px; margin:0.4rem 0 1.2rem; }
+  .flood-note { color:#7a4b12; font-size:0.82em; line-height:1.35; padding:0.6rem 0.8rem;
+    background:#fdf4e6; border:1px solid #e6c489; border-radius:6px; margin:0.2rem 0 0.7rem; }
 </style>
 ```
 
