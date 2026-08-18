@@ -396,11 +396,17 @@ still live from it is re-registered here.
     value = **0/1** flooded-that-year, 250 m, Kenya extent; years present 2001–03, 2005–08, 2011–2018
     (15 COGs); **missing 2000/2004/2009/2010/2019+ → treat missing URL as "no data", NOT zero**;
     **ENSO-composable** (2015/2012/2006 = big flood years).
-  - **⚠️ Grammar mismatch — does NOT fit the OND/MAM seasonal variable-toggle** like PTOT/SPEI/NDVI:
-    JRC is static (RP slider, no year); GFD is **annual** (no season) so showing it under both OND and
-    MAM headers = identical maps, season-mislabeled → violates the harvest-lag/honesty rule. Needs its
-    own block (RP-slider hazard map + per-year annual GFD grid, ENSO-composited). **Design decision with
-    Pete pending** (separate flood section in the dev panel vs the main notebook's impacts block B4).
+  - **GFD wired · DONE (v0.16, `bef5d49`, browser-verified 2026-08-18).** GFD added as the 4th map
+    variable — season-agnostic (same annual map under both OND & MAM, tinted by each section's driver),
+    with a prominent **amber flag** stating annual-not-seasonal + missing-years=no-data. Only observed
+    years render (gfdYears guard avoids 404 spam); own 250 m Kenya grid; flooded=blue / unflooded
+    transparent; card mean = % county flooded; "no flood mapped in county" ≠ "0.0%". Verify: 30 panels
+    (15 yrs ×2), 0 console errors; 2015 El-Niño OND heavy flood; OND IOD partial 0.58 / MAM Western-V
+    −0.71. _Corrected earlier over-claim: GFD DOES fit the per-year panel (it's what the panel does) —
+    only the annual≠seasonal labeling needed the flag; JRC is the one that truly can't ride the toggle._
+  - **JRC RP-slider hazard map · OPEN (next add).** Static return-period flood-depth (7 RPs) — no year/
+    season, so it needs its own RP slider + one static clipped map, not the per-year grid. Small
+    standalone build; queued next.
 - **KE-25 · Legend format consistency · DONE 2026-08-13.** Card-colour legend and map-cell rainfall
   legend now use the SAME inline format (`<label>: <low> [gradient] <high>`), stacked + left-aligned
   in `sectionLegend` (was: card inline vs cell stacked-3-line → mismatched).
