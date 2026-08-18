@@ -26,7 +26,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.16</b> · 2026-08-18 · rainfall + SPEI drought + NDVI + observed-flood panel</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.17</b> · 2026-08-18 · rainfall + SPEI + NDVI + observed-flood + flood-hazard panel</span>`
 ```
 
 ```{ojs}
@@ -200,6 +200,30 @@ mamGrid = {
 }
 ```
 
+### Flood hazard — GloFAS return period (static, not year-specific)
+
+```{ojs}
+md`_Where is flood-prone, and how deep? JRC GloFAS modelled river-flood **depth (m)** for a
+1-in-**${jrcRP}**-year event. Static hazard — the same map every year (independent of ENSO);
+use it to read **which parts of ${county}** the observed-flood years above actually hit._`
+```
+
+::: {.controls-row}
+
+```{ojs}
+viewof jrcRP = Inputs.select([10, 20, 50, 75, 100, 200, 500], {value: 100, label: "Return period (1-in-N years)"})
+```
+
+:::
+
+```{ojs}
+jrcMap = {
+  yield html`<div class="rain-loading">⏳ Loading flood-hazard map (1-in-${jrcRP}-year)…</div>`;
+  const win = await jrcWindow(jrcRP);
+  yield jrcRender(win);
+}
+```
+
 
 ```{ojs}
 md`### Notes
@@ -218,8 +242,11 @@ md`### Notes
   \`type=flood/source=global-flood-db/…/flooded_{YYYY}.tif\`). **Annual, not seasonal** — the same
   yearly map shows under both OND & MAM, tinted by each section's driver (flag shown above each grid).
   Only observed-event years exist (2001–03, 2005–08, 2011–2018); **missing years = no data, not zero**.
-  Card mean = share of county pixels flooded that year. A separate static JRC-GloFAS return-period
-  hazard map (RP slider) is the planned companion (not yet wired). Own 250 m grid.
+  Card mean = share of county pixels flooded that year. Own 250 m grid.
+- **Flood hazard (JRC GloFAS):** static return-period flood **depth (m)** COGs (90 m,
+  \`type=flood/source=jrc-glofas/…/rp={RP}/flood-depth_rp{RP}.tif\`), one map per return period
+  (10–500 yr) via the RP slider. **Static** — same every year, independent of ENSO; it answers
+  "where is flood-prone + how deep", read alongside the observed-flood years. Own 90 m grid.
 - **Correlation:** Pearson r between the county-mean seasonal value (rainfall *or* SPEI-3)
   and each driver's standardised index over the selected years (n shown). Higher |r| = that
   driver explains more of this county's outcome that season; +r → driver-high means wetter.
@@ -345,6 +372,10 @@ floodDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=flood/sou
 floodURL = (year) => `${floodDir}/flooded_${year}.tif`
 gfdYears = new Set([2001, 2002, 2003, 2005, 2006, 2007, 2008, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018])
 isFlood = mapVar.startsWith("Flood")
+// JRC GloFAS return-period flood HAZARD (90 m, Kenya) — static depth (m) per RP.
+// Independent of the map-variable machinery: its own window + render below.
+jrcDir = "https://digital-atlas.s3.amazonaws.com/domain=climate/type=flood/source=jrc-glofas/region=east-africa/processing=return-period/variable=flood-depth"
+jrcURL = (rp) => `${jrcDir}/rp=${rp}/flood-depth_rp${rp}.tif`
 ```
 
 ```{ojs}
@@ -835,6 +866,91 @@ renderRainPanel = (spec, raster) => {
 }
 ```
 
+```{ojs}
+// JRC flood-hazard: own window read (90 m grid ≠ every other layer) + county stats.
+jrcWindow = async (rp) => {
+  const gt = await geotiffLib;
+  const tiff = await gt.fromUrl(jrcURL(rp));
+  const image = await tiff.getImage();
+  const [ox0, oy0, ox1, oy1] = image.getBoundingBox();
+  const W = image.getWidth(), H = image.getHeight();
+  const xres = (ox1 - ox0) / W, yres = (oy1 - oy0) / H;
+  const [bx0, by0, bx1, by1] = countyBbox;
+  const px0 = Math.max(0, Math.floor((bx0 - ox0) / xres));
+  const px1 = Math.min(W, Math.ceil((bx1 - ox0) / xres));
+  const py0 = Math.max(0, Math.floor((oy1 - by1) / yres));
+  const py1 = Math.min(H, Math.ceil((oy1 - by0) / yres));
+  const win = {window: [px0, py0, px1, py1], w: px1 - px0, h: py1 - py0,
+    bbox: [ox0 + px0 * xres, oy1 - py1 * yres, ox0 + px1 * xres, oy1 - py0 * yres]};
+  const rr = await image.readRasters({window: win.window});
+  const src = rr[0], n = win.w * win.h, data = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const v = src[i]; data[i] = (v == null || !isFinite(v) || v <= -9999) ? NaN : v; }
+  // county mask for this grid + depth stats over flood-prone pixels (depth > 0)
+  const [mbx0, mby0, mbx1, mby1] = win.bbox, rings = ringsOf(countyA1);
+  const inside = (x, y) => { let c = false;
+    for (const ring of rings) for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) c = !c;
+    } return c; };
+  let inCounty = 0, floodCells = 0, sum = 0, mx = 0;
+  for (let j = 0; j < win.h; j++) { const lat = mby1 - (j + 0.5) / win.h * (mby1 - mby0);
+    for (let i = 0; i < win.w; i++) { const lon = mbx0 + (i + 0.5) / win.w * (mbx1 - mbx0);
+      if (!inside(lon, lat)) continue; inCounty++;
+      const v = data[j * win.w + i];
+      if (!Number.isNaN(v) && v > 0) { floodCells++; sum += v; if (v > mx) mx = v; }
+    } }
+  return {...win, data, rp, share: inCounty ? floodCells / inCounty : 0,
+    meanDepth: floodCells ? sum / floodCells : null, maxDepth: floodCells ? mx : null};
+}
+jrcDepthColor = (v) => {
+  if (v == null || !isFinite(v) || v <= 0) return null; // no-flood / nodata → transparent
+  const t = Math.max(0, Math.min(1, v / 4)); // depth (m), cap 4 m for contrast
+  return d3.interpolateBlues(0.2 + 0.8 * t);
+}
+jrcRender = (win) => {
+  const {data, w, h, bbox} = win, [bx0, by0, bx1, by1] = bbox;
+  const aspect = ((bx1 - bx0) / (by1 - by0)) * Math.cos((by0 + by1) / 2 * Math.PI / 180);
+  const W = 560, H = Math.max(220, Math.min(720, Math.round(W / aspect)));
+  const tx = (lon) => (lon - bx0) / (bx1 - bx0) * W, ty = (lat) => (by1 - lat) / (by1 - by0) * H;
+  const colX = new Int32Array(w + 1), rowY = new Int32Array(h + 1);
+  for (let i = 0; i <= w; i++) colX[i] = Math.round(i / w * W);
+  for (let j = 0; j <= h; j++) rowY[j] = Math.round(j / h * H);
+  const canvas = html`<canvas width=${W} height=${H}></canvas>`;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  const clip = new Path2D();
+  for (const ring of ringsOf(countyA1)) {
+    ring.forEach(([lon, lat], i) => i ? clip.lineTo(tx(lon), ty(lat)) : clip.moveTo(tx(lon), ty(lat)));
+    clip.closePath();
+  }
+  ctx.save(); ctx.clip(clip);
+  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+    const c = jrcDepthColor(data[j * w + i]); if (!c) continue;
+    ctx.fillStyle = c; ctx.fillRect(colX[i], rowY[j], colX[i + 1] - colX[i], rowY[j + 1] - rowY[j]);
+  }
+  ctx.restore();
+  const ringPath = (ring) => "M" + ring.map(([lon, lat]) => `${tx(lon).toFixed(1)},${ty(lat).toFixed(1)}`).join("L") + "Z";
+  const subPaths = countySubs.flatMap((f) => ringsOf(f)).map(ringPath).join(" ");
+  const cntyPaths = ringsOf(countyA1).map(ringPath).join(" ");
+  const svg = html`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%">
+    <path d="${subPaths}" fill="none" stroke="#555" stroke-width="0.6" opacity="0.8"/>
+    <path d="${cntyPaths}" fill="none" stroke="#111" stroke-width="1.4"/></svg>`;
+  const rampW = 120;
+  const ramp = html`<canvas width=${rampW} height=${14} style="vertical-align:middle"></canvas>`;
+  const rctx = ramp.getContext("2d");
+  for (let x = 0; x < rampW; x++) { const c = jrcDepthColor((x / (rampW - 1)) * 4 + 0.001); rctx.fillStyle = c || "#fff"; rctx.fillRect(x, 0, 1, 14); }
+  const stat = win.meanDepth == null
+    ? html`<b>no modelled river flood</b> in ${county} at this return period`
+    : html`flood-prone area <b>${(win.share * 100).toFixed(1)}%</b> of county · mean depth <b>${win.meanDepth.toFixed(2)} m</b> · max <b>${win.maxDepth.toFixed(1)} m</b>`;
+  return html`<div>
+    <div class="jrc-stack" style="max-width:${W}px">${canvas}${svg}</div>
+    <div style="font-size:0.8em;color:#555;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-top:0.35rem">
+      <span>Flood depth (m), 1-in-${win.rp}-yr:</span><span>0</span>${ramp}<span>≥4</span>
+      <span style="margin-left:0.6rem">${stat}</span>
+    </div></div>`;
+}
+```
+
 ```{=html}
 <style>
   .controls-row { display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-end; margin:0.5rem 0 1rem; }
@@ -852,6 +968,9 @@ renderRainPanel = (spec, raster) => {
     border:1px solid #cfd8d3; border-radius:6px; margin:0.4rem 0 1.2rem; }
   .flood-note { color:#7a4b12; font-size:0.82em; line-height:1.35; padding:0.6rem 0.8rem;
     background:#fdf4e6; border:1px solid #e6c489; border-radius:6px; margin:0.2rem 0 0.7rem; }
+  .jrc-stack { position:relative; line-height:0; }
+  .jrc-stack canvas { width:100%; height:auto; display:block; image-rendering:pixelated;
+    border:1px solid rgba(0,0,0,0.08); background:#fff; }
 </style>
 ```
 
