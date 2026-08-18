@@ -110,7 +110,7 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   (`pricesSeg`, GAP_DAYS=100) breaks each market's line across gaps > ~3 months instead of
   interpolating; `Plot.dot` overlays every observation. Browser-verified: orange Marsabit-Town line
   now segments at its 2018–20 / 2024+ gaps. Also set `x:{label:null}` (was showing `_t`).
-- **KE-13 · Caption vs "About this plot" split · PARTIAL — infra done, About authored for 11 of 19 body figures.** `plotFooter`
+- **KE-13 · Caption vs "About this plot" split · IN PROGRESS (scope set D16: BODY FIGURES ONLY — 2.3, 2.4, 3.1, 3.2, 3.3, 3.5, 3.7, 5.1; annex figures keep single captions).** `plotFooter`
   rebuilt (in-notebook ~line 1046): caption now ALWAYS VISIBLE (`.plot-caption`, leads with Figure
   N.M); optional `opts.about` renders a foldable "About this plot" with detailed methodology.
   **§4.3 prices is the exemplar** (short `pricesCaption` + new `pricesAbout` in nbText). REMAINING:
@@ -181,7 +181,7 @@ still live from it is re-registered here.
   zero-to-8B jump. Fix: never anchor ∅ markers at y=0 on Lines (place at axis edge with distinct
   glyph), and don't render 1–2-point series as lines.
   *Audit 2026-08-17 → **DONE**: DONE v2.4 (1454006) — Products out of the default Show set; ∅ markers moved to the top frame with a not-reported title, and <3-point series drawn as dots only.*
-- **V2-03 · absolute production → value conversion · OPEN (note/design).** Way to convert absolute
+- **V2-03 · absolute production → value conversion · OPEN (DATA BUILD, ratified D16 2026-08-18).** Build a producer-price layer (FAO Kenya producer prices / KNBS Economic Survey / AFA) × KNBS production → measured county VoP for staples AND livestock. Blocking fact: KNBS value_ksh covers 11 industrial crops = 1.2–1.9% of tonnage; knbs_napr_livestock has NO price column; only livestock *products* carry values.** Way to convert absolute
   production to value of production (prices layer). Needs a price source per commodity (NAPR value
   columns partially cover crops; unit_price_ksh covers products).
   *Audit 2026-08-17 → **OPEN**: OPEN (note/design) — unchanged through v2.8: Fig 1.2 still offers Absolute / % of national only; crops (value_ksh) and products (unit_price_ksh) could carry a value ruler but livestock head has no price column in knbs_napr_livestock.*
@@ -415,7 +415,7 @@ still live from it is re-registered here.
 
 - **V2-40 · Fig 1.2 captions · DONE v2.6 (1ad2045).** "Blank means not reported — never zero" belongs in every
   view's caption (currently in the intro/note only).
-- **V2-41 · KNBS-production→VoP conversion replaces MapSPAM · OPEN (design/data).** If V2-03's
+- **V2-41 · KNBS-production→VoP conversion replaces MapSPAM · BLOCKED on V2-03 (ratified D16).** MapSPAM/GLW stays as the stakes layer until the measured VoP exists, then moves to the annex labelled modelled — not deleted before a replacement lands. Original ask: If V2-03's
   conversion works, drop the MapSPAM exposure data from Fig 1.3 entirely ("no-one trusts it") —
   VoP computed from KNBS production × prices becomes the stakes figure.
 - **V2-42 · Fig 2.1 polish set · DONE v2.6 (1ad2045; a–g incl. per-lane strip scaling, IOD chips, Temperature removed, anomaly toggle kept here).** (a) Stray event dots floating above the plot —
@@ -519,7 +519,7 @@ driver-background toggle AND the tercile lens coexisting on §3 — not either/o
   bars: x = years, crops = groups (side-by-side per year), background toggle = driver phase/
   strength. The Lines view should also use the background shading instead of the ocean/tercile
   strip.
-- **V2-61 · Fig 3.6-B: is the gapped record useful? Consider 2015–2024 default · DONE v2.7 (Records control, 2015–2024 default, full record opt-in; PETE TO VETO if the full record should lead).**
+- **V2-61 · Fig 3.6-B default era · CLOSED — 2015–2024 default RATIFIED (D16, 2026-08-18).** Era B: 1,540 qc-clean seasons vs era A 686; maize clears ≥7 seasons in 80 of 93 county-seasons in era B, 57 in both. Full record stays one click away.
   Pete: the 2002–14 hole makes the full series look of limited use — "unless we just use the
   2015–2024 record?" Options to evaluate: default the figure to the 2015–2024 county era (full
   record opt-in), or lead with the Wet-vs-dry / Vs-climate views where the hole matters less.

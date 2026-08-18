@@ -128,3 +128,28 @@ Pete is the sole human owner of this branch (notebook + data pipeline) — no ot
   6. **Green-lit both new pipelines**: D409 admin2 CHIRPS v3 zonal rerun (~0.3 MB parquet +
      ~0.2 MB Kenya a2 topojson cut) and the GHCN-Daily/GSOD station pipeline (git-full,
      `_sources/`, point-validation framing).
+
+## D16 — three v2 calls ratified (Pete, 2026-08-18)
+
+Each was put with the data checked first, so the options were real rather than hypothetical.
+
+1. **Value of production: build a price layer** (V2-03 → data build; V2-41 depends on it).
+   The proposed KNBS→VoP swap is **not viable as served**: `knbs_napr_county_production.value_ksh`
+   is non-null on 578 of 3,442 rows — 11 industrial crops only (cashew, sisal, cotton, macadamia,
+   sunflower…), which is **1.2–1.9 % of county production tonnage**; no maize, beans or potatoes;
+   and `knbs_napr_livestock` carries head counts with **no price or value column at all**. Only
+   `knbs_napr_livestock_products` is complete (`unit_price_ksh` 99 %, `value_ksh` 100 %).
+   **Decision:** build a producer-price layer (FAO Kenya producer prices / KNBS Economic Survey /
+   AFA, whichever passes the gates) and multiply it by KNBS production to get a measured county
+   VoP covering staples *and* livestock. **MapSPAM/GLW `exposure_vop` stays in place until that
+   lands, then moves to the annex** labelled as modelled — it is not deleted before a measured
+   replacement exists.
+2. **KE-13 About text: body figures only.** Write `about:` blocks for the 8 body figures that lack
+   one (2.3, 2.4, 3.1, 3.2, 3.3, 3.5, 3.7, 5.1) and move the method detail out of their captions —
+   3.1's caption had grown to 235 words. The 10 annex figures keep single captions: their readers
+   are already in technical prose, so the marginal gain does not justify the writing.
+3. **Fig 3.6-B keeps the 2015–2024 default** (V2-61 → CLOSED, no code change). Verified: era B has
+   1,540 qc-clean seasons against era A's 686; for maize 80 of 93 county-seasons clear the ≥7-season
+   bar in era B (only 2 are nearly empty) and 57 clear it in both eras. The recent county records
+   read cleanly almost everywhere, match today's boundaries and reporting system, and the full
+   1990–2024 record stays one click away with its hatched gap.
