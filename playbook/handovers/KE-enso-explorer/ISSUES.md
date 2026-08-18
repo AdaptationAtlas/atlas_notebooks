@@ -404,9 +404,13 @@ still live from it is re-registered here.
     (15 yrs ×2), 0 console errors; 2015 El-Niño OND heavy flood; OND IOD partial 0.58 / MAM Western-V
     −0.71. _Corrected earlier over-claim: GFD DOES fit the per-year panel (it's what the panel does) —
     only the annual≠seasonal labeling needed the flag; JRC is the one that truly can't ride the toggle._
-  - **JRC RP-slider hazard map · OPEN (next add).** Static return-period flood-depth (7 RPs) — no year/
-    season, so it needs its own RP slider + one static clipped map, not the per-year grid. Small
-    standalone build; queued next.
+  - **JRC RP-slider hazard map · DONE (v0.17, `775856d`, browser-verified 2026-08-18).** Standalone
+    section: RP slider (10–500) + one static clipped depth map on an independent **90 m** grid
+    (`jrcWindow`/`jrcRender`). Blue depth ramp (cap 4 m), admin-2 + county overlay, caption = flood-prone
+    share + mean/max depth. Static by design (same every year, ENSO-independent) → read against the
+    observed-flood years. Verify: 10,578 flood pixels at RP100, river network resolved, 0 errors;
+    Marsabit RP100 = 7.9% flood-prone, mean 0.67 m, max 8.8 m. ⚠️ RP500 COG (28 MB) slow in-browser.
+    **→ KE-29 COMPLETE** (both flood products wired).
 - **KE-25 · Legend format consistency · DONE 2026-08-13.** Card-colour legend and map-cell rainfall
   legend now use the SAME inline format (`<label>: <low> [gradient] <high>`), stacked + left-aligned
   in `sectionLegend` (was: card inline vs cell stacked-3-line → mismatched).
