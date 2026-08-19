@@ -26,15 +26,15 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.18</b> · 2026-08-19 · rainfall + SPEI + NDVI + flood + WRSI panel</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.19</b> · 2026-08-19 · 6-layer panel (adversarial-review fixes)</span>`
 ```
 
 ```{ojs}
-md`County / season / ocean-driver bar are the **main notebook's** controls. The
-per-year maps below have their own **per-section driver + a min/max range filter**
-on that driver's value, a year range, an anomaly toggle, and a facet-columns
-control. Each section header shows the **county's driver↔rainfall correlation**
-so you can see which driver matters most for that place & season.`
+md`Pick a **county** below. The per-year maps then have their own **map variable**,
+**per-section driver + a min/max range filter** on that driver's value, a year range,
+an anomaly toggle, and a facet-columns control. Each section header shows the
+**county's driver↔outcome correlation** so you can see which driver matters most for
+that place & season & variable.`
 ```
 
 ::: {.controls-row .ke-sticky-controls}
@@ -43,20 +43,6 @@ so you can see which driver matters most for that place & season.`
 viewof county = Inputs.select(countyNames, {
   label: _lang(nbText.sections.controls.county),
   value: "Marsabit",
-})
-```
-
-```{ojs}
-viewof season = Inputs.select(["OND", "MAM", "OND+MAM", "annual"], {
-  label: _lang(nbText.sections.controls.season),
-  value: "OND",
-})
-```
-
-```{ojs}
-viewof driverKind = Inputs.radio(["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"], {
-  label: _lang(nbText.sections.controls.driver),
-  value: "ENSO (Niño 3.4)",
 })
 ```
 
@@ -102,7 +88,9 @@ viewof wrsiCrop = Inputs.select(["cropland", "rangeland"], {value: "cropland", l
 ```
 
 ```{ojs}
-viewof mapPalette = Inputs.select(["Blues", "YlGnBu", "GnBu", "Viridis"], {value: "Blues", label: "Map palette"})
+// map palette only applies to ABSOLUTE rainfall; SPEI/NDVI/flood/WRSI and the
+// anomaly view have fixed purpose-built ramps, so disable it there (was a no-op).
+viewof mapPalette = Inputs.select(["Blues", "YlGnBu", "GnBu", "Viridis"], {value: "Blues", label: "Map palette (rainfall only)", disabled: isSpei || isNdvi || isFlood || isWrsi || anomaly})
 ```
 
 ```{ojs}
@@ -255,7 +243,8 @@ md`### Notes
   "where is flood-prone + how deep", read alongside the observed-flood years. Own 90 m grid.
 - **Correlation:** Pearson r between the county-mean seasonal value (rainfall *or* SPEI-3)
   and each driver's standardised index over the selected years (n shown). Higher |r| = that
-  driver explains more of this county's outcome that season; +r → driver-high means wetter.
+  driver explains more of this county's outcome that season; +r → driver-high raises the outcome
+  (wetter / greener / better crop-water / more flood, per the selected variable).
 - **Filter:** min/max on the section driver's value (raw index for single drivers,
   composite z for ENSO+IOD). Card colour + phase still standardised (z vs 1991–2020).
 - **Deferred:** multi-county maps (#3); NDVI annual composite + anomaly-vs-climatology (v1 = seasonal
@@ -687,23 +676,27 @@ corrHeader = (season, cache, keys) => {
   const bestSingleR = best ? Math.abs(best.r ?? 0) : 0;
   const combineHelps = s.adjR != null && s.adjR > bestSingleR + 0.05;
   const outLbl = isWrsi ? `crop-water (WRSI ${wrsiCrop})` : isFlood ? "flooded-area fraction" : isNdvi ? "vegetation (NDVI)" : isSpei ? "drought (SPEI-3)" : "rainfall";
+  // outcome-aware direction words (a positive r means "driver high → …")
+  const dirHi = isFlood ? "more flood" : isNdvi ? "greener" : isWrsi ? "better crop-water" : "wetter";
+  const dirLo = isFlood ? "less flood" : isNdvi ? "browner" : isWrsi ? "worse crop-water" : "drier";
   return html`<div style="font-size:0.92em;margin:0.2rem 0 0.5rem">
-    <b>Driver ↔ ${outLbl} correlation</b> (${county} · ${season} · n=${s.n} yrs) —
+    <b>Driver ↔ ${outLbl} correlation</b> (${county} · ${season} · n=${s.n} yrs${s.n < 15 ? html` · <span style="color:#b45309">small sample — low power</span>` : ""}) —
     ${s.per.map((p, i) => html`${i ? " · " : ""}${chip(p)}`)}
     <div style="font-size:0.92em;color:#444;margin-top:2px">
-      Strongest independent driver: <b>${best ? best.name : "—"}</b>${best ? ` (partial ${f(best.partial)}, ${strength(best.partial)}; ${best.partial > 0 ? "↑ → wetter" : "↑ → drier"})` : ""}.
+      Strongest independent driver: <b>${best ? best.name : "—"}</b>${best ? ` (partial ${f(best.partial)}, ${strength(best.partial)}; ${best.partial > 0 ? `↑ → ${dirHi}` : `↑ → ${dirLo}`})` : ""}.
       Best linear combination R=${f(s.multiR)} (adj ${f(s.adjR)}).
       ${combineHelps
         ? html` <b>Combining the drivers improves skill</b> (adj R ${f(s.adjR)} &gt; best single ${f(bestSingleR)}) — a weighted multi-driver index beats any one alone.`
         : best && Math.abs(best.partial) >= 0.4
           ? html` Suggested ${season} driver: <b>${shortName(best.key)}</b> — combining adds little here.`
           : html` No driver is a strong predictor for this county &amp; season; combining doesn't rescue it.`}
+      ${isFlood ? html`<br><i>Flood note: correlated over observed-flood years only (sparse 0/1 footprints, small n) — treat as indicative, and the driver is the ${season}-season index vs a whole-year flood total.</i>` : ""}
     </div>
     <details style="font-size:0.85em;color:#555;margin-top:3px"><summary style="cursor:pointer">Method &amp; how to read it</summary>
       <div style="margin-top:4px;max-width:62rem">
-        <b>r</b> = Pearson correlation of the county's seasonal ${outLbl} with a driver's standardised index (over ${s.n} yrs). +: driver high → wetter; −: driver high → drier. |r|: &lt;0.2 negligible · 0.2–0.4 weak · 0.4–0.6 moderate · &gt;0.6 strong.<br>
+        <b>r</b> = Pearson correlation of the county's seasonal ${outLbl} with a driver's standardised index (over ${s.n} yrs). +: driver high → ${dirHi}; −: driver high → ${dirLo}. |r|: &lt;0.2 negligible · 0.2–0.4 weak · 0.4–0.6 moderate · &gt;0.6 strong.<br>
         <b>partial r</b> = the same, but with the <i>other</i> drivers held constant — the driver's <b>independent</b> signal. This matters because the drivers are correlated (max ${s.collPair || "n/a"} r=${f(s.maxColl)}); raw r double-counts shared variance.<br>
-        <b>Best linear combination R</b> = multiple regression of rainfall on all drivers (optimal weights) — the ceiling for a linear multi-driver index; <b>adj R</b> penalises extra predictors so a higher adj R is a genuine gain, not overfit (n is short, so treat as indicative).<br>
+        <b>Best linear combination R</b> = multiple regression of the ${outLbl} on all drivers (optimal weights) — the ceiling for a linear multi-driver index; <b>adj R</b> penalises extra predictors so a higher adj R is a genuine gain, not overfit (n is short, so treat as indicative).<br>
         Only science-standard measures are shown: single r, partial r, multiple-regression R. An A×B interaction term was removed (not a standard teleconnection method; nonlinear phase behaviour is better seen in the phase composites). Correlation ≠ causation.
       </div></details>
   </div>`;
