@@ -383,9 +383,13 @@ still live from it is re-registered here.
   framing only). NDVI is the operational pastoral-forage proxy (FEWS/WFP VAM) we already trust → chose
   per-pixel NDVI (KE-30) instead. Revisit NPP only if a carbon-productivity **magnitude** layer is
   specifically wanted. WaPOR (100 m, 2009–) noted as optional finer-detail second source, deferred.
-- **KE-27 · Publish WRSI COGs · OPEN (medium; pipeline).** Prior art in `climate-toolkit` (root-zone
-  crop water-balance, CHC-aligned spec); today per-point/season, not gridded COG. Path = gridded run
-  + publish. Own dispatch.
+- **KE-27 · WRSI crop-water layer · DONE (LIVE + wired + browser-verified 2026-08-19, v0.18, `f4535cd`).**
+  Pipeline baked FEWS/USGS CHIRPS-ETos WRSI to the Atlas S3 bucket — dispatch `2026-08-19_reply-wrsi-live.md`.
+  Base: `…/type=agriculture/source=fews-wrsi/region=east-africa/processing=seasonal/variable=wrsi/crop={cropland|rangeland}/season={OND|MAM}/wrsi_{CROP}_{SEASON}_{YYYY}.tif`
+  (10 km Kenya, WRSI % 0–100, 2003–2025). Wired as the 5th map variable + a **cropland/rangeland
+  sub-toggle** (maize WRSI misleads on ASAL → use rangeland there). Own 10 km grid; RdYlGn ramp; card
+  mean = % WRSI; pre-2003 skipped (no 404 noise). Verify: 46/46 panels both domains, 0 console errors;
+  Marsabit cropland ~60–88% / rangeland ~37–53%; OND IOD partial 0.66. **Backlog now clear.**
 - **KE-29 · Riverine flood rasters · DATA LIVE on Atlas S3 (2026-08-18) — notebook wiring OPEN (design
   needed).** Pipeline baked BOTH flood products (non-GEE, 206 + CORS + overviews) — dispatch
   `2026-08-18_reply-flood-live.md`:
