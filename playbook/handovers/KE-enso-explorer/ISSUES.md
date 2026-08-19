@@ -110,7 +110,7 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   (`pricesSeg`, GAP_DAYS=100) breaks each market's line across gaps > ~3 months instead of
   interpolating; `Plot.dot` overlays every observation. Browser-verified: orange Marsabit-Town line
   now segments at its 2018–20 / 2024+ gaps. Also set `x:{label:null}` (was showing `_t`).
-- **KE-13 · Caption vs "About this plot" split · IN PROGRESS (scope set D16: BODY FIGURES ONLY — 2.3, 2.4, 3.1, 3.2, 3.3, 3.5, 3.7, 5.1; annex figures keep single captions).** `plotFooter`
+- **KE-13 · Caption vs "About this plot" split · DONE v2.10 (D16.2 scope: all 19 body figures now carry About; 10 annex figures keep single captions by decision).** Captions across the 8 new splits: 925 → 486 words (3.1: 235 → 59). Three fabricated/incorrect numbers caught in my own verification pass after the agent fact-check (3.7 org count, 3.5 pre-2008 counties + 2020 gap, 3.1 NDJ spread) — see reviews/2026-08-19_ke13_about/. `plotFooter`
   rebuilt (in-notebook ~line 1046): caption now ALWAYS VISIBLE (`.plot-caption`, leads with Figure
   N.M); optional `opts.about` renders a foldable "About this plot" with detailed methodology.
   **§4.3 prices is the exemplar** (short `pricesCaption` + new `pricesAbout` in nbText). REMAINING:

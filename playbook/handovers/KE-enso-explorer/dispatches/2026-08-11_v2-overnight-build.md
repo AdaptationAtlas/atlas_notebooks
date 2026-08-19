@@ -304,3 +304,42 @@ unaffected" note.
 and Fig 3.1's SPEI curve now breaking at each December. Open decisions unchanged: V2-03/V2-41
 (production→value: livestock has no price column anywhere), KE-13 (About text missing on 8 body +
 10 annex figures), and whether V2-61's 2015–2024 default for Fig 3.6-B stands.
+
+---
+
+## Addendum — cycle 10 (2026-08-18/19): D16 decisions + KE-13 About text (v2.10)
+
+**Three decisions ratified with the data checked first (DECISIONS.md D16).** Each was put to Pete
+with real options rather than hypotheticals:
+1. **VoP → build a price layer.** The KNBS→VoP swap in V2-41 is not viable as served: `value_ksh`
+   covers 11 industrial crops = 1.2–1.9 % of county tonnage (no maize, tea, potato, beans) and
+   `knbs_napr_livestock` has no price column at all. V2-03 is now a data build, specced in
+   `dispatches/2026-08-18_request-vop-price-layer.md`. Key design point sent to the pipeline:
+   **KNBS livestock is a stock (head), not a flow** — the honest livestock analogue of production
+   value is the products table (beef, milk, eggs…), which already carries measured county unit
+   prices. MapSPAM/GLW stays until a measured replacement lands, then moves to the annex.
+2. **KE-13 scoped to body figures.** Done below.
+3. **Fig 3.6-B keeps its 2015–2024 default** (V2-61 closed): era B has 1,540 qc-clean seasons
+   against era A's 686 and clears the ≥7-season bar in 80 of 93 maize county-seasons.
+
+**v2.10 — KE-13 delivered.** All 19 body figures now split caption from "About this plot"; the 8
+new ones drop from **925 caption words to 486** (Fig 3.1: 235 → 59). Written by one agent per
+figure from the actual cell code, then fact-checked by a second agent per figure against the
+parquets (~90 draft defects corrected). The substantive catch: **Fig 2.3's phase colours are
+editorial labels from `events.json` that can disagree with the notebook's own computed
+classification** — OND 2005 sits exactly on the −0.50 RONI threshold, so the page reads it Neutral
+while the timeline paints the 2005–06 band La Niña — and the same file silently switches one line
+of outlook advice through `recentDroughtFlag`. Both are now documented in the About.
+
+**Then I re-verified every number myself before applying, and three were wrong:** Fig 3.7 claimed
+306 publishing organisations against an actual 408 (no grouping variant yields 306 — fabricated,
+and it had survived the agent fact-check); Fig 3.5 credited only Garissa with pre-2008 goat prices
+when Turkana also starts 2000-01 and Isiolo 2001-01, and said 18 of 20 counties miss May–July 2020
+when it is 16; Fig 3.1 stated NDJ's deflated spread as "0.60 sd against 0.75–0.89" when across all
+counties it is a median 0.59 against 0.82, NDJ being the narrowest window in 40 of 48 admin-1
+units. Everything else reproduced exactly. **Lesson for future prose cycles: an agent fact-check is
+necessary but not sufficient — the final numeric pass has to be run against the data by the session
+applying the change.**
+
+**Pete next:** hard-refresh — hero reads **v2.10**. Open a few "About this plot" foldouts (3.1, 3.3,
+3.7 are the most changed) and check the captions now read in one breath.
