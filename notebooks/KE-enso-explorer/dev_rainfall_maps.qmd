@@ -26,7 +26,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.20</b> · 2026-08-21 · flood-% fix + palette/driver/UX fixes</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.21</b> · 2026-08-22 · single-season switch + anomaly-cache refactor</span>`
 ```
 
 ```{ojs}
@@ -55,9 +55,15 @@ Niño 3.4 (ONI) **${currentState.oni?.toFixed(2)} °C** (**${currentState.phase}
 Selected county: **${county}**.`
 ```
 
-## OND & MAM seasonal rainfall — one map per year
+## Seasonal maps — one map per year
 
 ::: {.controls-row}
+
+```{ojs}
+// default to the current-or-upcoming Kenya rains season: Jan–May → MAM (long rains
+// in/ahead), Jun–Dec → OND (short rains in/ahead). One season shown at a time (#4).
+viewof activeSeason = Inputs.select(["OND", "MAM"], {value: (new Date().getMonth() + 1) <= 5 ? "MAM" : "OND", label: "Season"})
+```
 
 ```{ojs}
 viewof yearFrom = Inputs.range([1981, 2025], {step: 1, value: 2000, label: "From year"})
@@ -119,84 +125,50 @@ yearsSel = {
 md`Per-pixel ${isWrsi ? `FEWS/USGS **WRSI crop-water index** — **${wrsiCrop}** domain (10 km, end-of-season %, 0–100)` : isFlood ? "**observed flood occurrence** (Global Flood DB, 250 m, 0/1 per year — **annual, not seasonal**)" : isNdvi ? "MODIS **NDVI vegetation index** (~250 m)" : isSpei ? "CHIRPS-v3 seasonal **SPEI-3 drought index** (3-month, standardised: −ve drier, +ve wetter; ~5 km)" : (anomaly ? "CHIRPS-v3 seasonal rainfall **anomaly** (vs 1991–2020; ~5 km)" : "CHIRPS-v3 seasonal rainfall totals (~5 km)")}
 for **${county}**, admin-2 overlain. Each card = one year; shows the county-mean
 ${isWrsi ? "WRSI (%)" : isFlood ? "flooded-area share (%)" : isNdvi ? "NDVI (0–1)" : isSpei ? "SPEI-3 (unitless)" : (anomaly ? "anomaly (mm)" : "rainfall (mm)")} and is tinted by its section driver's phase & strength.
-${isWrsi ? "WRSI = end-of-season crop-water satisfaction (<50 failure … >95 good). Use **cropland** over farmland, **rangeland** over ASAL/pastoral land (maize WRSI misleads on rangeland). " : isFlood ? "Flood is annual (season-agnostic) — see the flag below each section. " : isNdvi ? "NDVI is the MOD13Q1 per-year seasonal mean (pixel-reliability masked). " : isSpei ? "SPEI-3 is read at the season-end month (OND → December, MAM → May) — a 3-month accumulation already covers the season. " : ""}Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so years compare.`
+${isWrsi ? "WRSI = end-of-season crop-water satisfaction (<50 failure … >95 good). Use **cropland** over farmland, **rangeland** over ASAL/pastoral land (maize WRSI misleads on rangeland). " : isFlood ? "Flood is annual (season-agnostic) — see the flag below. " : isNdvi ? "NDVI is the MOD13Q1 per-year seasonal mean (pixel-reliability masked). " : isSpei ? "SPEI-3 is read at the season-end month (OND → December, MAM → May) — a 3-month accumulation already covers the season. " : ""}Cells drawn faithfully (nearest-neighbour, no smoothing). Colour scale locked so years compare.`
 ```
 
-### OND — short rains (Oct–Dec) · driven by ENSO + IOD
+```{ojs}
+md`### ${activeSeason} — ${activeSeason === "OND" ? "short rains (Oct–Dec) · ENSO + IOD" : "long rains (Mar–May) · Western-V control"}`
+```
 
 ```{ojs}
-corrHeader("OND", ondCache, ["ENSO (Niño 3.4)", "IOD (DMI)"])
+corrHeader(activeSeason, seasonCache, seasonKeys(activeSeason))
 ```
 
 ::: {.controls-row}
 
 ```{ojs}
-viewof ondDriver = Inputs.select(driverOptions, {value: "IOD (DMI)", label: "OND driver"})
+// driver default follows the active season (#7): OND→IOD, MAM→ENSO. Re-created on
+// season switch so the default tracks the season; user can still override.
+viewof seasonDriver = Inputs.select(driverOptions, {value: activeSeason === "OND" ? "IOD (DMI)" : "ENSO (Niño 3.4)", label: activeSeason + " driver"})
 ```
 
 ```{ojs}
 // text inputs (empty = open bound); Inputs.number with no value never emits an
 // initial value in this OJS stdlib and hangs every dependent cell.
-viewof ondMin = Inputs.text({placeholder: "min", label: "min", width: 90})
+viewof seasonMin = Inputs.text({placeholder: "min", label: "min", width: 90})
 ```
 
 ```{ojs}
-viewof ondMax = Inputs.text({placeholder: "max", label: "max", width: 90})
-```
-
-:::
-
-```{ojs}
-md`_Filter years by ${ondDriver.replace(/ \(.*\)$/, "")} value in [min, max] (blank = open). Guide: ${driverHint(ondDriver)}._`
-```
-
-```{ojs}
-sectionLegend(ondDriver)
-```
-
-```{ojs}
-ondGrid = {
-  yield html`<div class="rain-loading">⏳ Loading OND maps — fetching ${isWrsi ? "WRSI crop-water" : isFlood ? "observed-flood" : isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
-  const cache = await ondCacheP.p;
-  yield html`<div>${isFlood ? floodNote("OND") : ""}${gridWrap(await buildPanels(cache, "OND", ondDriver, parseNum(ondMin), parseNum(ondMax)))}</div>`;
-}
-```
-
-### MAM — long rains (Mar–May) · Western-V control
-
-```{ojs}
-corrHeader("MAM", mamCache, ["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"])
-```
-
-::: {.controls-row}
-
-```{ojs}
-viewof mamDriver = Inputs.select(driverOptions, {value: "ENSO (Niño 3.4)", label: "MAM driver"})
-```
-
-```{ojs}
-viewof mamMin = Inputs.text({placeholder: "min", label: "min", width: 90})
-```
-
-```{ojs}
-viewof mamMax = Inputs.text({placeholder: "max", label: "max", width: 90})
+viewof seasonMax = Inputs.text({placeholder: "max", label: "max", width: 90})
 ```
 
 :::
 
 ```{ojs}
-md`_Filter years by ${mamDriver.replace(/ \(.*\)$/, "")} value in [min, max] (blank = open). Guide: ${driverHint(mamDriver)}._`
+md`_Filter years by ${seasonDriver.replace(/ \(.*\)$/, "")} value in [min, max] (blank = open). Guide: ${driverHint(seasonDriver)}._`
 ```
 
 ```{ojs}
-sectionLegend(mamDriver)
+sectionLegend(seasonDriver)
 ```
 
 ```{ojs}
-mamGrid = {
-  yield html`<div class="rain-loading">⏳ Loading MAM maps — fetching ${isWrsi ? "WRSI crop-water" : isFlood ? "observed-flood" : isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
-  const cache = await mamCacheP.p;
-  yield html`<div>${isFlood ? floodNote("MAM") : ""}${gridWrap(await buildPanels(cache, "MAM", mamDriver, parseNum(mamMin), parseNum(mamMax)))}</div>`;
+seasonGrid = {
+  yield html`<div class="rain-loading">⏳ Loading ${activeSeason} maps — fetching ${isWrsi ? "WRSI crop-water" : isFlood ? "observed-flood" : isNdvi ? "MODIS NDVI" : isSpei ? "SPEI-3 drought" : "CHIRPS rainfall"} rasters…</div>`;
+  const cache = await seasonCacheP.p;
+  yield html`<div>${isFlood ? floodNote(activeSeason) : ""}${gridWrap(await buildPanels(cache, activeSeason, seasonDriver, parseNum(seasonMin), parseNum(seasonMax)))}</div>`;
 }
 ```
 
@@ -240,7 +212,7 @@ md`### Notes
   read window + county mask recompute for it. Anomaly toggle disabled (no NDVI climatology COG yet).
 - **Flood data (observed):** Global Flood DB per-year 0/1 occurrence COGs (250 m,
   \`type=flood/source=global-flood-db/…/flooded_{YYYY}.tif\`). **Annual, not seasonal** — the same
-  yearly map shows under both OND & MAM, tinted by each section's driver (flag shown above each grid).
+  yearly map shows whichever season is picked, tinted by that season's driver (flag shown above the grid).
   Only observed-event years exist (2001–03, 2005–08, 2011–2018); **missing years = no data, not zero**.
   Card mean = share of county pixels flooded that year. Own 250 m grid.
 - **Flood hazard (JRC GloFAS):** static return-period flood **depth (m)** COGs (90 m,
@@ -490,12 +462,12 @@ wrsiYear = (crop, season, year, win) => year >= 2003 ? readWindow(wrsiURL(crop, 
 ```
 
 ```{ojs}
-// fetch every year in range ONCE; used by both the panels and the correlation.
-seasonCache = async (season) => {
-  const win = await gridWindow, mask = await countyMask;
-  const useAnom = anomaly && !isSpei && !isNdvi && !isFlood && !isWrsi; // index/occurrence layers
-  const clim = useAnom ? await climFor(season, win) : null;
-  const n = win.w * win.h;
+// RAW per-year data for a season — anomaly-INDEPENDENT, so toggling the anomaly view
+// never refetches the COG stack (#5). Body references (yearsSel, variable flags,
+// wrsiCrop, gridWindow) are the ONLY things that trigger a refetch; `anomaly` is not
+// referenced here, so OJS keeps this cell (and the fetch) stable across the toggle.
+rawCache = async (season) => {
+  const win = await gridWindow;
   return Promise.all(yearsSel.map(async (year) => {
     let data;
     try {
@@ -505,40 +477,51 @@ seasonCache = async (season) => {
         : isSpei ? await speiYear(season, year, win)
         : await seasonalYear(season, year, win);
     }
-    catch (e) { return {year, data: null, meanmm: null}; }
+    catch (e) { return {year, data: null}; }
+    return {year, data};
+  }));
+}
+// anomaly climatology: ONE small COG, fetched only when the anomaly view applies
+// (absolute rainfall). Toggling anomaly re-runs just this + the cheap derive below.
+useAnom = anomaly && !isSpei && !isNdvi && !isFlood && !isWrsi
+climForSeason = { const win = await gridWindow; return useAnom ? await climFor(activeSeason, win) : null; }
+// DERIVE: apply the anomaly subtraction (if any) + compute the county mean. No fetch
+// of the year stack — reuses the cached raw arrays, so the anomaly toggle is instant.
+deriveCache = async (season) => {
+  const raw = await seasonRawP.p, win = await gridWindow, mask = await countyMask;
+  const clim = climForSeason, n = win.w * win.h;
+  return raw.map(({year, data}) => {
     if (data == null) return {year, data: null, meanmm: null};
-    if (useAnom && clim) {
+    let d = data;
+    if (clim) {
       const o = new Float32Array(n);
       for (let i = 0; i < n; i++) o[i] = (Number.isNaN(data[i]) || Number.isNaN(clim[i])) ? NaN : data[i] - clim[i];
-      data = o;
+      d = o;
     }
     if (isFlood) {
-      // flooded-area SHARE of the whole county: numerator = flooded pixels, denominator
-      // = ALL county pixels (NaN = unobserved → treated as not-flooded, a lower bound).
-      // GFD writes NaN outside observed footprints, so dividing by valid-only pixels
-      // (the old bug) inflated the % ~10× vs the visible flood. null only when the
-      // county has zero observed pixels that year ("no flood mapped in county").
+      // flooded-area SHARE of the whole county: flooded pixels / ALL county pixels
+      // (NaN = unobserved → not-flooded, a lower bound). Dividing by valid-only pixels
+      // was the old bug that inflated the % ~10×. null only when zero observed pixels.
       let flooded = 0, county = 0, valid = 0;
       for (let i = 0; i < n; i++) {
         if (!mask[i]) continue;
         county++;
-        const v = data[i];
+        const v = d[i];
         if (!Number.isNaN(v) && v > -9999) { valid++; if (v > 0) flooded++; }
       }
-      return {year, data, meanmm: valid ? flooded / county : null};
+      return {year, data: d, meanmm: valid ? flooded / county : null};
     }
     let sum = 0, cnt = 0;
-    for (let i = 0; i < n; i++) { const v = data[i]; if (mask[i] && !Number.isNaN(v) && v > -9999) { sum += v; cnt++; } }
-    return {year, data, meanmm: cnt ? sum / cnt : null};
-  }));
+    for (let i = 0; i < n; i++) { const v = d[i]; if (mask[i] && !Number.isNaN(v) && v > -9999) { sum += v; cnt++; } }
+    return {year, data: d, meanmm: cnt ? sum / cnt : null};
+  });
 }
-// promise-wrapped so the grid cells can show a loader WHILE the COGs fetch
-// (a plain `await` cell would block until done, showing nothing). The awaited
-// aliases feed the correlation header (text — fine to wait).
-ondCacheP = ({p: seasonCache("OND")})
-mamCacheP = ({p: seasonCache("MAM")})
-ondCache = await ondCacheP.p
-mamCache = await mamCacheP.p
+// promise-wrapped so the grid can show a loader WHILE the COGs fetch. Only the active
+// season is fetched (#4) — half the network of the old two-section panel.
+seasonRawP = ({p: rawCache(activeSeason)})
+seasonCacheP = ({p: deriveCache(activeSeason)})
+seasonCache = await seasonCacheP.p
+seasonKeys = (s) => s === "OND" ? ["ENSO (Niño 3.4)", "IOD (DMI)"] : ["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"]
 ```
 
 ```{ojs}
@@ -802,9 +785,10 @@ gridWrap = (nodes) => html`<div class="rain-grid"
   style="grid-template-columns:repeat(${Math.round(facetCols)}, minmax(0, 1fr))">${nodes}</div>`
 // prominent honesty flag for the flood layer: it is ANNUAL, not seasonal.
 floodNote = (season) => html`<div class="flood-note">⚠️ <b>Annual observed flood occurrence</b> (Global Flood DB) — <b>not season-specific</b>.
-  The same yearly flood map is shown under both OND and MAM; here it is tinted by the <b>${season}</b> driver's phase, so you can
+  The same yearly flood map appears whichever season you pick; here it is tinted by the <b>${season}</b> driver's phase, so you can
   read the flood years against that season's ENSO/IOD/Western-V state, but the flood footprint itself is the whole-year total.
-  Only years with observed events appear (2001–03, 2005–08, 2011–2018); <b>missing years are "no observed data", not zero flood</b>.</div>`
+  Only years with observed events appear (2001–03, 2005–08, 2011–2018); <b>missing years are "no observed data", not zero flood</b>.
+  Card % = flooded area as a share of the whole county (unobserved pixels count as not-flooded — a lower bound).</div>`
 parseNum = (s) => {
   if (s == null) return null;
   const t = String(s).trim();
