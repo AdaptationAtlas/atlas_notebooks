@@ -96,6 +96,38 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   value. Don't count GESI as fully LLM-independent-gated.
 - Climate-conflict signal is exploratory (small n) — never a headline figure.
 
+## Map-panel review — Pete 2026-08-21 (dev_rainfall_maps.qmd, KE-31..KE-39)
+
+- **KE-31 · Flood % denominator bug · DONE (v0.20, `d4a109a`).** GFD flooded-share was
+  flooded/valid-pixels; GFD writes NaN outside observed footprints (~12% valid over Marsabit) → "40.5%"
+  meant 40% of a tiny footprint, ~10× inflated vs the visible strip. Now flooded / ALL county pixels
+  (NaN = not-flooded lower bound); null only when zero observed. Verified: shares drop to ≤~7%.
+- **KE-32 · WRSI domain toggle only when WRSI · DONE (v0.20).** Hidden (not just disabled) unless the
+  variable = WRSI; verified hidden on rainfall, visible on WRSI.
+- **KE-33 · Driver defaults per season · DONE (v0.20/v0.21).** OND → IOD, MAM → ENSO; default now
+  follows the season switch.
+- **KE-34 · More map palettes + map/card same colours · DONE (v0.20).** Map palette → 9 sequential
+  schemes; anomaly-rainfall map now uses the card's diverging palette so the two can match.
+- **KE-35 · Single-season view + month-aware switch · DONE (v0.21, `7b5b9a7`).** One season at a time
+  via a Season control defaulting to current-or-upcoming rains (Jan–May → MAM, Jun–Dec → OND). Heading,
+  correlation, driver + filter all adapt. Halves default page space + network.
+- **KE-36 · Optimize anomaly caching · DONE (v0.21).** Split rawCache (anomaly-independent fetch) from
+  a cheap deriveCache (anomaly subtraction + mean). Toggling anomaly now fetches ONLY the 1 climatology
+  COG (verified +1 request) instead of re-downloading the whole year stack.
+- **KE-37 · Controls + ToC on the LEFT · PARTIAL (v0.22, `toc-location: left`).** ToC now left; controls
+  grouped 2-col at content top-left with facet-columns among them (KE-38). **Not done:** docking the
+  controls INTO the far-left margin beside the ToC — blocked by the Quarto OJS-cell-hoisting trap
+  ([[feedback_quarto-ojs-hide-and-layout-controls]]); a true margin sidebar needs runtime DOM
+  relocation of the `.cell:has(form)` control cells. **Confirm with Pete** whether the current grouped
+  top-left panel is enough or to invest in the JS-relocated margin sidebar.
+- **KE-38 · Facet columns as a sidebar control · DONE (v0.22).** Facet-columns sits in the grouped
+  control panel (folds into KE-37).
+- **KE-39 · admin-2 select within admin-1 + settlement/infra intersect · OPEN (split).** (a) Admin-2
+  (sub-county) selection is buildable in-notebook from the existing GAUL a2 topojson — notebook task,
+  no new data. (b) The settlement + infrastructure exposure data (population/GRID3/OSM/health) is
+  **net-new → dispatched** `2026-08-22_request-settlement-infra-exposure.md` (WorldPop 100 m + GRID3 +
+  OSM/health to Atlas S3, non-GEE). The flood×population intersect UI follows once that data lands.
+
 ---
 
 ## Recently closed (2026-07-15 → 22)
