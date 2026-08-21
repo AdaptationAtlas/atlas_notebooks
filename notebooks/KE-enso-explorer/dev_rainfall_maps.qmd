@@ -26,7 +26,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.19</b> · 2026-08-19 · 6-layer panel (adversarial-review fixes)</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.20</b> · 2026-08-21 · flood-% fix + palette/driver/UX fixes</span>`
 ```
 
 ```{ojs}
@@ -83,18 +83,24 @@ viewof facetCols = Inputs.range([1, 8], {step: 1, value: 6, label: "Facet column
 
 ```{ojs}
 // WRSI domain — use cropland WRSI over farmland, rangeland WRSI over ASAL/pastoral
-// land (maize WRSI is misleading on rangeland). Only applies when WRSI is selected.
-viewof wrsiCrop = Inputs.select(["cropland", "rangeland"], {value: "cropland", label: "WRSI domain", disabled: !isWrsi})
+// land (maize WRSI is misleading on rangeland). Control is HIDDEN unless WRSI is the
+// selected variable (referencing isWrsi re-creates it on switch; value stays readable).
+viewof wrsiCrop = {
+  const el = Inputs.select(["cropland", "rangeland"], {value: "cropland", label: "WRSI domain"});
+  el.style.display = isWrsi ? "" : "none";
+  return el;
+}
 ```
 
 ```{ojs}
 // map palette only applies to ABSOLUTE rainfall; SPEI/NDVI/flood/WRSI and the
 // anomaly view have fixed purpose-built ramps, so disable it there (was a no-op).
-viewof mapPalette = Inputs.select(["Blues", "YlGnBu", "GnBu", "Viridis"], {value: "Blues", label: "Map palette (rainfall only)", disabled: isSpei || isNdvi || isFlood || isWrsi || anomaly})
+viewof mapPalette = Inputs.select(["Blues", "YlGnBu", "GnBu", "Greens", "PuBu", "BuPu", "Viridis", "Cividis", "Magma"], {value: "Blues", label: "Map palette (rainfall only)", disabled: isSpei || isNdvi || isFlood || isWrsi || anomaly})
 ```
 
 ```{ojs}
-viewof cardPalette = Inputs.select(["PRGn", "BrBG", "RdBu", "PuOr"], {value: "PRGn", label: "Card palette"})
+// diverging (phase); also drives the anomaly-rainfall map so map & card can match (#6).
+viewof cardPalette = Inputs.select(["PRGn", "BrBG", "RdBu", "PuOr", "RdYlBu", "Spectral"], {value: "PRGn", label: "Card / anomaly-map palette"})
 ```
 
 :::
@@ -125,7 +131,7 @@ corrHeader("OND", ondCache, ["ENSO (Niño 3.4)", "IOD (DMI)"])
 ::: {.controls-row}
 
 ```{ojs}
-viewof ondDriver = Inputs.select(driverOptions, {value: "ENSO + IOD", label: "OND driver"})
+viewof ondDriver = Inputs.select(driverOptions, {value: "IOD (DMI)", label: "OND driver"})
 ```
 
 ```{ojs}
@@ -165,7 +171,7 @@ corrHeader("MAM", mamCache, ["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"]
 ::: {.controls-row}
 
 ```{ojs}
-viewof mamDriver = Inputs.select(driverOptions, {value: "Western-V (WNP)", label: "MAM driver"})
+viewof mamDriver = Inputs.select(driverOptions, {value: "ENSO (Niño 3.4)", label: "MAM driver"})
 ```
 
 ```{ojs}
@@ -506,6 +512,21 @@ seasonCache = async (season) => {
       for (let i = 0; i < n; i++) o[i] = (Number.isNaN(data[i]) || Number.isNaN(clim[i])) ? NaN : data[i] - clim[i];
       data = o;
     }
+    if (isFlood) {
+      // flooded-area SHARE of the whole county: numerator = flooded pixels, denominator
+      // = ALL county pixels (NaN = unobserved → treated as not-flooded, a lower bound).
+      // GFD writes NaN outside observed footprints, so dividing by valid-only pixels
+      // (the old bug) inflated the % ~10× vs the visible flood. null only when the
+      // county has zero observed pixels that year ("no flood mapped in county").
+      let flooded = 0, county = 0, valid = 0;
+      for (let i = 0; i < n; i++) {
+        if (!mask[i]) continue;
+        county++;
+        const v = data[i];
+        if (!Number.isNaN(v) && v > -9999) { valid++; if (v > 0) flooded++; }
+      }
+      return {year, data, meanmm: valid ? flooded / county : null};
+    }
     let sum = 0, cnt = 0;
     for (let i = 0; i < n; i++) { const v = data[i]; if (mask[i] && !Number.isNaN(v) && v > -9999) { sum += v; cnt++; } }
     return {year, data, meanmm: cnt ? sum / cnt : null};
@@ -706,7 +727,7 @@ corrHeader = (season, cache, keys) => {
 ```{ojs}
 // card background from a user-selected diverging d3 palette (KE-21), z in [-2,2],
 // lightened 45% toward white so it reads as a subtle tint behind the map.
-cardInterp = ({PRGn: d3.interpolatePRGn, BrBG: d3.interpolateBrBG, RdBu: d3.interpolateRdBu, PuOr: d3.interpolatePuOr})[cardPalette]
+cardInterp = ({PRGn: d3.interpolatePRGn, BrBG: d3.interpolateBrBG, RdBu: d3.interpolateRdBu, PuOr: d3.interpolatePuOr, RdYlBu: d3.interpolateRdYlBu, Spectral: d3.interpolateSpectral})[cardPalette]
 cardColor = (z) => {
   if (z == null || Number.isNaN(z)) return "#ffffff";
   const t = Math.max(0, Math.min(1, (z / 2 + 1) / 2)); // z∈[-2,2] → [0,1], 0=neg phase
@@ -796,7 +817,7 @@ parseNum = (s) => {
 ```{ojs}
 // map-cell colours from a user-selected d3 palette (KE-21). Absolute rainfall =
 // sequential; anomaly = diverging RdBu (brown/red drier ↔ blue wetter, 0-centred).
-mapInterp = ({Blues: d3.interpolateBlues, YlGnBu: d3.interpolateYlGnBu, GnBu: d3.interpolateGnBu, Viridis: d3.interpolateViridis})[mapPalette]
+mapInterp = ({Blues: d3.interpolateBlues, YlGnBu: d3.interpolateYlGnBu, GnBu: d3.interpolateGnBu, Greens: d3.interpolateGreens, PuBu: d3.interpolatePuBu, BuPu: d3.interpolateBuPu, Viridis: d3.interpolateViridis, Cividis: d3.interpolateCividis, Magma: d3.interpolateMagma})[mapPalette]
 rainDomain = isWrsi ? [0, 100] : isFlood ? [0, 1] : isNdvi ? [0, 0.8] : isSpei ? [-2.5, 2.5] : (anomaly ? [-300, 300] : [0, 900])
 pixelColor = (v) => {
   if (v == null || !isFinite(v) || v <= -9999) return null;
@@ -818,7 +839,7 @@ pixelColor = (v) => {
   }
   if (anomaly) {
     const t = Math.max(0, Math.min(1, (v - rainDomain[0]) / (rainDomain[1] - rainDomain[0])));
-    return d3.interpolateRdBu(t); // 0 → red/brown (drier), 1 → blue (wetter)
+    return cardInterp(t); // anomaly map shares the card's diverging palette (#6)
   }
   const t = Math.max(0, Math.min(1, v / rainDomain[1]));
   return mapInterp(t);
