@@ -131,7 +131,9 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   `2026-08-22_request-settlement-infra-exposure.md`. **Kenya-specific source scan done**
   (`2026-08-22_kenya-exposure-datasets-scan.md`): top picks = **GRID3 Kenya Population v1.0** (KNBS-
   census-based, licence-check) + **GRID3 settlement extents**, **KMHFR** (health, official API),
-  **OSM** roads, **NDMA/RCMRD** for drought/pastoral. Flood×population intersect UI follows the bake.
+  **OSM** roads, **electricity** (energydata.info KPLC grid, CC0, + gridfinder modelled), **schools**
+  (HOTOSM Education Facilities, ODbL / GIGA CC-BY), **NDMA/RCMRD** for drought/pastoral. All infra =
+  raw geometry, no p-codes → spatial-join to GAUL county. Flood×population intersect UI follows the bake.
   See [[reference — build the IEBC p-code↔GAUL crosswalk once]].
   **OWNER: cglabs (Pete 2026-08-22) — cglabs handles the KE-39 exposure ingest.** Our side is paused
   on the intersect UI until cglabs delivers the layers to Atlas S3; the scan + p-code↔GAUL caveat
