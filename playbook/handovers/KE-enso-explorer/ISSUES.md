@@ -133,6 +133,9 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   census-based, licence-check) + **GRID3 settlement extents**, **KMHFR** (health, official API),
   **OSM** roads, **NDMA/RCMRD** for drought/pastoral. Flood×population intersect UI follows the bake.
   See [[reference — build the IEBC p-code↔GAUL crosswalk once]].
+  **OWNER: cglabs (Pete 2026-08-22) — cglabs handles the KE-39 exposure ingest.** Our side is paused
+  on the intersect UI until cglabs delivers the layers to Atlas S3; the scan + p-code↔GAUL caveat
+  above are the handoff notes for them.
 
 ---
 

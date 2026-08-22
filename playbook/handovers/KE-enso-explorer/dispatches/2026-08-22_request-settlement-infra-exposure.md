@@ -1,7 +1,7 @@
 # Request — settlement + infrastructure layers for flood/hazard EXPOSURE (admin-2)
 
 **Date:** 2026-08-22 · **From:** KE-ENSO notebook session (`dev/KE-enso-explorer`) ·
-**To:** hazards_prototype (obs pipeline) + cglabs (bake node) ·
+**To:** cglabs (bake node — **owns this KE-39 exposure ingest**, per Pete 2026-08-22) + hazards_prototype ·
 **Re:** Pete map-panel review #9 — make the flood layers *actionable* by intersecting with where
 people and assets are, at admin-2 (sub-county) resolution.
 

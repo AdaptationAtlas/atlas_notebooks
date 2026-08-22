@@ -51,6 +51,16 @@ admin-2 = legacy districts, NOT the 290 IEBC/KNBS sub-counties**, and GAUL has *
 - **Extraction friction (PDF):** KNBS ward counts, NDMA VCI/phase.
 - **Restricted:** DRSRS; KRCS/IFRC (response products, no open layer).
 
+## Candidate under review (Pete 2026-08-22, not yet assessed)
+- **GMIA-NEXT — Next-Generation Global Map of Irrigated Areas** · DOI 10.5281/zenodo.17627111
+  (https://zenodo.org/records/17627111). Global **30 m** irrigated-cropland probability + binary maps
+  (ML-derived, within cropland extents), 2023–24 growing season, **GeoTIFF, CC-BY-4.0** (15.4 GB;
+  2.7 TB with ground truth). 32-author collab (lead E.A. Kebede; K.F. Davis). **Possible use:**
+  irrigated-vs-rainfed split as a drought-exposure nuance (irrigated land buffers ENSO drought; rainfed
+  is the vulnerable class) — pairs with WRSI/SPEI. No Kenya-specific analysis in it (global). **To
+  assess:** does it resolve Kenya smallholder/pastoral irrigation meaningfully at 30 m; ingest = clip
+  Kenya + COG to Atlas S3 (non-GEE, straightforward). Status: logged, usefulness TBD.
+
 ## Follow-ups needing live confirmation
 - GRID3 KEN v3.0 exact per-file licence.
 - RCMRD current Kenya layer inventory (interactive browse).
