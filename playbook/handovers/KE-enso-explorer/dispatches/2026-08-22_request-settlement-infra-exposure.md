@@ -47,6 +47,15 @@ Refined recommendations, in priority order:
   constrained 2020** (CC BY 4.0, clean GeoTIFF). Pair with **GRID3 Kenya Settlement Extents v3.0**.
 - **Health facilities:** **KMHFR** (MoH official, JSON/GeoJSON API + CSV) — authoritative, not OSM.
 - **Roads:** **OSM** (HOTOSM/Geofabrik, ODbL) — official road-authority portals are viewers only.
+- **Electricity (Pete asked):** **energydata.info "Kenya Electricity Network" (KPLC)** — official grid
+  lines by voltage (11/33/66/132/220 kV), **CC0**, GeoJSON/SHP:
+  `https://energydata.info/dataset/kenya-kenya-electricity-network` (2020 vintage). Clean non-GEE
+  ingest → keep as S3 vector or rasterize to a grid-presence/proximity COG. Modelled complement where
+  KPLC is sparse: **gridfinder** `targets.tif` (CC-BY, DOI 10.5281/zenodo.3538890, needs Kenya clip).
+- **Schools (Pete asked):** **HOTOSM "Education Facilities of Kenya"** (HDX, ODbL) — clean
+  gpkg/GeoJSON point+polygon, S3-hosted, current: `https://data.humdata.org/dataset/hotosm_ken_education_facilities`.
+  Authoritative alt: **GIGA** (UNICEF–ITU, CC-BY, `maps.giga.global` API) — higher provenance but
+  API-key friction + coverage gap (~7k/33k schools geolocated). Ideal = GIGA points + OSM fill.
 - **Drought/pastoral:** **NDMA** county VCI/phase (PDF → transcription) + **RCMRD** (our partner)
   LULC/VCI rasters; **DRSRS** livestock is restricted (request via partner, not a pipeline ingest).
 - **⚠️ Admin gotcha:** everything official is IEBC/KNBS-p-coded; **GAUL24 admin-2 = legacy districts,

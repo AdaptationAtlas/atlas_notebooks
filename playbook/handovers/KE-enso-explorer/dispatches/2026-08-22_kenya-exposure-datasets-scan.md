@@ -35,6 +35,17 @@ admin-2 = legacy districts, NOT the 290 IEBC/KNBS sub-counties**, and GAUL has *
    KeNHA/KURA/KeRRA portals are viewers, no clean bulk download. Watch ASAL completeness + attribution.
 3. **HDX Kenya Healthsites** — lat/long mirror/cross-check of KMHFR.
 
+**(b+) Electricity + schools (Pete asked 2026-08-22 — both confirmed available)**
+- **Electricity:** **energydata.info "Kenya Electricity Network" (KPLC)** — official grid lines by
+  voltage (11/33/66/132/220 kV), **CC0**, GeoJSON/SHP, 2020 vintage
+  (`energydata.info/dataset/kenya-kenya-electricity-network`). Best pick. Complement =
+  **gridfinder** modelled MV grid (`targets.tif`, CC-BY, DOI 10.5281/zenodo.3538890, global → Kenya
+  clip). HREA VIIRS = electricity *access* surface (different question). Meta grid maps **exclude Kenya**.
+- **Schools:** **HOTOSM Education Facilities of Kenya** (HDX, ODbL, gpkg/GeoJSON, S3-hosted, current) =
+  cleanest ingestable point layer. Authoritative alt = **GIGA** (UNICEF–ITU, CC-BY, API-key + ~7k/33k
+  geolocated coverage gap). Kenya MoE/NEMIS = names, not geolocated. Ideal = GIGA + OSM fill.
+- Both are **raw geometry, no p-codes** → spatial join to GAUL county (same admin gotcha).
+
 **(c) Drought / pastoral vulnerability**
 1. **NDMA county drought bulletins** (VCI + drought phase, ~23 ASAL counties) — authoritative but
    **PDF-only, no API** → county/month transcription (NAPR-class extraction friction). ASAL-only.
