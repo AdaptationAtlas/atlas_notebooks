@@ -122,11 +122,17 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   top-left panel is enough or to invest in the JS-relocated margin sidebar.
 - **KE-38 · Facet columns as a sidebar control · DONE (v0.22).** Facet-columns sits in the grouped
   control panel (folds into KE-37).
-- **KE-39 · admin-2 select within admin-1 + settlement/infra intersect · OPEN (split).** (a) Admin-2
-  (sub-county) selection is buildable in-notebook from the existing GAUL a2 topojson — notebook task,
-  no new data. (b) The settlement + infrastructure exposure data (population/GRID3/OSM/health) is
-  **net-new → dispatched** `2026-08-22_request-settlement-infra-exposure.md` (WorldPop 100 m + GRID3 +
-  OSM/health to Atlas S3, non-GEE). The flood×population intersect UI follows once that data lands.
+- **KE-39 · admin-2 select within admin-1 + settlement/infra intersect · OPEN (split).**
+  (a) **⚠️ CORRECTION:** admin-2 selection is NOT simply "buildable from the existing a2 topojson" —
+  **GAUL24 admin-2 = legacy DISTRICTS, not the 290 IEBC/KNBS sub-counties** (and GAUL has no ward
+  level). Our `countySubs` overlay is GAUL districts; verify that before labelling anything
+  "sub-county". Real sub-county/ward selection needs **IEBC boundaries + an IEBC-p-code↔GAUL24
+  crosswalk** (1:1 at county). (b) Settlement + infrastructure exposure = net-new → **dispatched**
+  `2026-08-22_request-settlement-infra-exposure.md`. **Kenya-specific source scan done**
+  (`2026-08-22_kenya-exposure-datasets-scan.md`): top picks = **GRID3 Kenya Population v1.0** (KNBS-
+  census-based, licence-check) + **GRID3 settlement extents**, **KMHFR** (health, official API),
+  **OSM** roads, **NDMA/RCMRD** for drought/pastoral. Flood×population intersect UI follows the bake.
+  See [[reference — build the IEBC p-code↔GAUL crosswalk once]].
 
 ---
 

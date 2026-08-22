@@ -37,3 +37,18 @@ topojson). What's **net-new = the exposure data** to overlay.
 
 Admin-2 selection + the flood×population intersect UI we build our side once (1) lands. No rush on
 (3); (1)+(2) are what unlock the flood-exposure story.
+
+## ADDENDUM 2026-08-22 — Kenya-specific source picks (scan done)
+Ran a Kenya-specific exposure-source scan (full catalogue: `2026-08-22_kenya-exposure-datasets-scan.md`).
+Refined recommendations, in priority order:
+- **Population:** **GRID3 Kenya Population v1.0** (~100 m, disaggregates the KNBS 2019 census — better
+  than global WorldPop for Kenya) via `data.grid3.org`. ⚠️ **confirm the per-file licence** (CC BY vs
+  BY-SA/NC-SA varies per GRID3 asset) before S3 promotion; if restrictive, fall back to **WorldPop
+  constrained 2020** (CC BY 4.0, clean GeoTIFF). Pair with **GRID3 Kenya Settlement Extents v3.0**.
+- **Health facilities:** **KMHFR** (MoH official, JSON/GeoJSON API + CSV) — authoritative, not OSM.
+- **Roads:** **OSM** (HOTOSM/Geofabrik, ODbL) — official road-authority portals are viewers only.
+- **Drought/pastoral:** **NDMA** county VCI/phase (PDF → transcription) + **RCMRD** (our partner)
+  LULC/VCI rasters; **DRSRS** livestock is restricted (request via partner, not a pipeline ingest).
+- **⚠️ Admin gotcha:** everything official is IEBC/KNBS-p-coded; **GAUL24 admin-2 = legacy districts,
+  NOT the 290 IEBC sub-counties** (no ward in GAUL). Below county, a **p-code↔GAUL24 crosswalk** is
+  required — flag whether the bake should carry IEBC p-codes so we can build it.
