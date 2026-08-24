@@ -27,7 +27,7 @@ Data: per-year seasonal PTOT COGs (processing=seasonal), monthly-sum fallback.
 # Rainfall-map panel — development
 
 ```{ojs}
-md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.22</b> · 2026-08-22 · TOC-left + review batch (map-panel review)</span>`
+md`<span style="display:inline-block;background:#eef4ef;border:1px solid #cfd8d3;border-radius:5px;padding:2px 9px;font-size:0.8em;color:#3a5a44;">dev build <b>v0.23</b> · 2026-08-24 · official IEBC boundaries (was GAUL)</span>`
 ```
 
 ```{ojs}
@@ -279,24 +279,26 @@ topojsonClient = import("https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/+esm
 ```
 
 ```{ojs}
-// ONE admin source (a2): county outline = dissolve of its a2 sub-counties.
-a2topo = FileAttachment("/data/shared/atlas_gaul24_a2_africa_simple-lowres.topojson").json()
-a2objName = Object.keys(a2topo.objects)[0]
+// Official Kenya IEBC boundaries (COD-AB, source=IEBC) — NOT GAUL (GAUL carries the
+// disputed Ilemi Triangle + no p-codes). adm1 = 47 counties, adm2 = 290 sub-counties;
+// both carry gaul1_code (injected via name match) so existing joins work, + adm2_pcode.
+admTopo = FileAttachment("/data/KE-enso-explorer/ken_adm2_iebc_simple.topojson").json()
+adm1Topo = FileAttachment("/data/KE-enso-explorer/ken_adm1_iebc_simple.topojson").json()
+countyGaul = new Map(counties.map((c) => [c.county, +c.gaul1_code]))
 kenA2 = {
   const tc = await topojsonClient;
-  return tc.feature(a2topo, a2topo.objects[a2objName]).features
-    .filter((f) => f.properties.iso3 === "KEN");
+  return tc.feature(admTopo, admTopo.objects["ken_adm2"]).features;
+}
+kenA1 = {
+  const tc = await topojsonClient;
+  return tc.feature(adm1Topo, adm1Topo.objects["ken_adm1"]).features;
 }
 ```
 
 ```{ojs}
-countySubs = kenA2.filter((f) => f.properties.admin1_name === county)
-countyA1 = {
-  const tc = await topojsonClient;
-  const geoms = a2topo.objects[a2objName].geometries
-    .filter((g) => g.properties.iso3 === "KEN" && g.properties.admin1_name === county);
-  return {type: "Feature", geometry: tc.merge(a2topo, geoms)};
-}
+// match geometry by gaul1_code (robust to county-name spelling diffs), not string name.
+countySubs = kenA2.filter((f) => f.properties.gaul1_code === countyGaul.get(county))
+countyA1 = kenA1.find((f) => f.properties.gaul1_code === countyGaul.get(county))
 ```
 
 ```{ojs}

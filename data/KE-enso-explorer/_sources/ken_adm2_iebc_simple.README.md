@@ -1,4 +1,16 @@
-# ken_adm2_iebc_simple.topojson — provenance
+# ken_adm{1,2}_iebc_simple.topojson — provenance
+
+**Two files, same recipe:** `ken_adm1_iebc_simple.topojson` (47 counties, 57 KB) +
+`ken_adm2_iebc_simple.topojson` (290 sub-counties, 179 KB). Both are the official Kenya boundaries
+used across BOTH notebooks (map prototype + main) in place of GAUL — GAUL carries the disputed **Ilemi
+Triangle** (a 48th GAUL "county") and has no p-codes; IEBC is the Kenya-government-authoritative set.
+
+**`gaul1_code` injected** into every feature by matching `admin1_name` → the GAUL a1 topojson's
+gaul1_code (47/47 counties matched; only GAUL-only unit = Ilemi Triangle, correctly dropped). This lets
+existing `gaul1_code`-keyed data joins work unchanged against the IEBC geometry. Props on each feature:
+`admin1_name, admin1_pcode, gaul1_code` (+ `admin2_name, admin2_pcode` on adm2), `area_sqkm`.
+
+
 
 Browser-ready simplified IEBC sub-county (admin-2) boundaries for the KE-39 flood/exposure
 admin-2 selection + intersect UI.
