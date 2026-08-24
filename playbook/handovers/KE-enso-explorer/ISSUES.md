@@ -96,6 +96,17 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   value. Don't count GESI as fully LLM-independent-gated.
 - Climate-conflict signal is exploratory (small n) — never a headline figure.
 
+- **KE-40 · Official IEBC boundaries notebook-wide (was GAUL) · DONE (2026-08-24).** Pete imperative:
+  Kenya-authoritative boundaries (GAUL carries the disputed Ilemi Triangle + no p-codes). Built
+  simplified IEBC COD-AB assets in `data/KE-enso-explorer/`: `ken_adm0_iebc_simple` (9.7KB national),
+  `ken_adm1_iebc_simple` (57KB, 47 counties), `ken_adm2_iebc_simple` (179KB, 290 sub-counties w/
+  official `adm2_pcode`); `gaul1_code` injected by name (47/47, Ilemi dropped) so existing joins work.
+  **Map prototype (v0.23):** adm1 county clip + adm2 sub-county overlay, matched by gaul1_code
+  (browser-verified). **Main notebook:** outlook choropleth GAUL a1→IEBC adm1; flow-map Kenya outline→
+  IEBC adm0 (neighbours stay GAUL); highlight by gaul1_code. Verified: node-check + build + headless
+  topojson-requests/no-boundary-errors; DuckDB-gated map render outcome = Pete's browser. Recipe:
+  `_sources/ken_adm2_iebc_simple.README.md`. See [[reference_kenya-gaul-admin2-districts]].
+
 ## Map-panel review — Pete 2026-08-21 (dev_rainfall_maps.qmd, KE-31..KE-39)
 
 - **KE-31 · Flood % denominator bug · DONE (v0.20, `d4a109a`).** GFD flooded-share was
