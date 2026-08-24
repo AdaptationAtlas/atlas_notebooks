@@ -123,21 +123,26 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
 - **KE-38 · Facet columns as a sidebar control · DONE (v0.22).** Facet-columns sits in the grouped
   control panel (folds into KE-37).
 - **KE-39 · admin-2 select within admin-1 + settlement/infra intersect · OPEN (split).**
-  (a) **⚠️ CORRECTION:** admin-2 selection is NOT simply "buildable from the existing a2 topojson" —
-  **GAUL24 admin-2 = legacy DISTRICTS, not the 290 IEBC/KNBS sub-counties** (and GAUL has no ward
-  level). Our `countySubs` overlay is GAUL districts; verify that before labelling anything
-  "sub-county". Real sub-county/ward selection needs **IEBC boundaries + an IEBC-p-code↔GAUL24
-  crosswalk** (1:1 at county). (b) Settlement + infrastructure exposure = net-new → **dispatched**
-  `2026-08-22_request-settlement-infra-exposure.md`. **Kenya-specific source scan done**
-  (`2026-08-22_kenya-exposure-datasets-scan.md`): top picks = **GRID3 Kenya Population v1.0** (KNBS-
-  census-based, licence-check) + **GRID3 settlement extents**, **KMHFR** (health, official API),
-  **OSM** roads, **electricity** (energydata.info KPLC grid, CC0, + gridfinder modelled), **schools**
-  (HOTOSM Education Facilities, ODbL / GIGA CC-BY), **NDMA/RCMRD** for drought/pastoral. All infra =
-  raw geometry, no p-codes → spatial-join to GAUL county. Flood×population intersect UI follows the bake.
-  See [[reference — build the IEBC p-code↔GAUL crosswalk once]].
-  **OWNER: cglabs (Pete 2026-08-22) — cglabs handles the KE-39 exposure ingest.** Our side is paused
-  on the intersect UI until cglabs delivers the layers to Atlas S3; the scan + p-code↔GAUL caveat
-  above are the handoff notes for them.
+  **OWNER: cglabs.** Ingest running since 2026-08-22; **4 layers LIVE** on `digital-atlas` (verified
+  206) per `2026-08-24_cglabs-reply-ke39-exposure-status.md`:
+  - **Population (both, CC-BY-4.0):** `…/domain=exposure/type=population/source=worldpop-constrained-2020/…/population_2020.tif`
+    (top-down, use for v1 intersect) + `…/source=grid3/…/processing=bottom-up/…` (WOPR bottom-up).
+    ⚠️ both national totals ≈55M (UN-adjusted), NOT the KNBS-2019 census 47.6M — fine for the pixel
+    intersect, but a census-accurate denominator would need KNBS ward tables.
+  - **Admin backbone (IEBC COD-AB, CC-BY-IGO):** `…/domain=boundaries/type=admin/source=iebc-codab/region=kenya/…/level=adm{1,2}/ken_adm{1,2}.geojson`
+    — 47 counties + 290 sub-counties WITH official `adm1_pcode`/`adm2_pcode`. ⚠️ `ken_adm2.geojson`
+    is ~109 MB → **simplify/topojson before browser use.**
+  - **Roads (OSM, ODbL):** LIVE (16,014 classified segments).
+  - Pending: health (tier 13 — KMHFR API unreachable from node → HOTOSM ODbL fallback), schools
+    (tier 14 — GIGA API unreachable → HOTOSM), electricity (tier 15 — KPLC CC0 + gridfinder). Drought/
+    pastoral (NDMA/RCMRD) not scoped (PDF/SPA) — separate effort.
+  - **⚠️ ADMIN CORRECTION (cglabs on-node):** the earlier "GAUL24 a2 = legacy districts" premise was
+    WRONG — Kenya GAUL24 a2 IS IEBC-aligned (47/291 incl. disputed Ilemi). But it lacks p-codes → **use
+    the published IEBC COD-AB as the admin backbone, NOT GAUL; NO crosswalk needed** (COD-AB IS the
+    p-code source). See [[reference_kenya-gaul-admin2-districts]].
+  - **NEXT (our side):** wire the admin-2 select + flood×population intersect UI against
+    `worldpop-constrained-2020` + `ken_adm2.geojson` (both live) — awaiting Pete's go. Simplify the
+    109 MB adm2 vector first.
 
 ---
 
