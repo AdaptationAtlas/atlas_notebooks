@@ -709,8 +709,8 @@ tradeMap = {
     projection: {type: "mercator", domain, inset: 24}, width: 760, height: 560,
     color: {domain: ["Import", "Export"], range: ["#d95f0e", "#238b45"], legend: true},
     marks: [
-      Plot.geo(africaFeatures, {stroke: "#d0d0d0", fill: "#f6f6f4"}),
-      Plot.geo(domain.features.filter((f) => f.properties.iso3 === "KEN"), {fill: "#e6efe6", stroke: "#333"}),
+      Plot.geo(africaFeatures.filter((f) => f.properties.iso3 !== "KEN"), {stroke: "#d0d0d0", fill: "#f6f6f4"}),
+      Plot.geo(kenAdm0, {fill: "#e6efe6", stroke: "#333"}),
       Plot.arrow(links, {x1: "x1", y1: "y1", x2: "x2", y2: "y2", stroke: "direction",
         strokeWidth: (d) => 1 + 7 * Math.sqrt(d.qty / maxQ), bend: 18, headLength: 9,
         tip: true, title: (d) => `${d.direction}: ${d.partner}\n${d3.format(",.0f")(d.qty)} ${d.unit}`}),
@@ -868,6 +868,7 @@ md`${_lang(nbText.sections.b5.outlookIntro)}`
 ```{ojs}
 outlookMap = {
   const label = {Wet: "Wetter", Dry: "Drier", Near: "Near-normal"};
+  const selGaul = +((counties.find((c) => c.county === county) || {}).gaul1_code);
   const feats = kenyaA1.map((f) => {
     const o = countyOutlook.get(f.properties.gaul1_code);
     return {...f, properties: {...f.properties,
@@ -884,7 +885,7 @@ outlookMap = {
         {fill: (d) => label[d.properties.modal], stroke: "#fff", strokeWidth: 0.5,
          title: (d) => `${d.properties.admin1_name}: likely ${label[d.properties.modal]} `
            + `(${Math.round(d.properties.share * 100)}% of ${d.properties.n} analogue years)`}),
-      Plot.geo(feats.filter((f) => f.properties.admin1_name === county),
+      Plot.geo(feats.filter((f) => f.properties.gaul1_code === selGaul),
         {fill: "none", stroke: "#111", strokeWidth: 2}),
     ],
   });
@@ -1426,12 +1427,13 @@ stateProbs = dbOutlook.query(`SELECT * FROM state_probs`)
 ```
 
 ```{ojs}
-a1Topo = FileAttachment("/data/shared/atlas_gaul24_a1_africa_simple-vlowres.topojson").json()
+// Official Kenya IEBC county boundaries (COD-AB), NOT GAUL — GAUL carries the disputed
+// Ilemi Triangle + no p-codes. gaul1_code injected by name so existing joins work.
+a1Topo = FileAttachment("/data/KE-enso-explorer/ken_adm1_iebc_simple.topojson").json()
 ```
 
 ```{ojs}
-kenyaA1 = topojsonClient.feature(a1Topo, a1Topo.objects["atlas_gaul24_a1_africa"])
-  .features.filter((f) => f.properties.iso3 === "KEN")
+kenyaA1 = topojsonClient.feature(a1Topo, a1Topo.objects["ken_adm1"]).features
 ```
 
 ```{ojs}
@@ -1838,6 +1840,10 @@ xbtImports = dbXbt.query(`
 topojsonClient = await import("https://esm.sh/topojson-client@3.1.0")
 africaTopo = FileAttachment("/data/shared/atlas_gaul24_a0_africa_simple-vlowres.topojson").json()
 africaFeatures = topojsonClient.feature(africaTopo, africaTopo.objects["atlas_gaul24_a0_africa"]).features
+// Kenya's own national outline = official IEBC (dissolved COD-AB adm1), drawn over the
+// GAUL neighbour backdrop so Kenya's border is the Kenya-authoritative one, not GAUL.
+kenAdm0Topo = FileAttachment("/data/KE-enso-explorer/ken_adm0_iebc_simple.topojson").json()
+kenAdm0 = topojsonClient.feature(kenAdm0Topo, kenAdm0Topo.objects[Object.keys(kenAdm0Topo.objects)[0]]).features
 
 centroidByIso = {
   const m = {};
