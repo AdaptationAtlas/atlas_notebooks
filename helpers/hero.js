@@ -97,11 +97,6 @@ export function atlasHero({ title, image, group = "", alt = "" } = {}) {
   return hero;
 }
 
-/** @deprecated Use `atlasHero({title, image, group, alt})`. */
-export function heroImage(title, bgImage, group = "") {
-  return atlasHero({ title, image: bgImage, group });
-}
-
 class AtlasNotebookHero extends HTMLElement {
   connectedCallback() {
     const config = readNotebookConfig();
