@@ -17,9 +17,13 @@ import { filterableDataTable } from "/helpers/atlasTable.ojs";
 
 import {
   adminMultiSelect,
+  adminSelections,
   admin0Select,
   admin1Select,
   admin2Select,
+  selectedAdmin0,
+  selectedAdmin1,
+  selectedAdmin2,
 } from "/helpers/adminSelectors.ojs";
 
 import { chartStyle, inputTemplate } from "/helpers/std.ojs";
@@ -62,11 +66,6 @@ adminControls = (levels) =>
     selectAll: true,
     searchable: { admin1: true, admin2: true },
   })
-
-// Downstream helpers consume plain names; [] means unrestricted.
-selectedAdmin0 = admin0Select.map((d) => d.admin0_name)
-selectedAdmin1 = admin1Select.map((d) => d.admin1_name)
-selectedAdmin2 = admin2Select.map((d) => d.admin2_name)
 ```
 
 ## Data
@@ -95,27 +94,15 @@ import {
 // Levels 0 and 1 are small (14 KB and 48 KB over the wire) and always drawn.
 atlasBoundaries = await getAdminBoundaries([0, 1])
 
-// Lazy-load and memoize admin 2 because it is only needed after region selection.
-loadAdmin2Boundaries = {
-  let pending = null;
-  return () => (pending ??= getAdminBoundaries(2).then((b) => b.admin2));
-}
-
 // Fetch deep geometry only when drill-down needs it.
-admin2Boundaries = selectedAdmin0.length && selectedAdmin1.length
-  ? await loadAdmin2Boundaries()
-  : null
+admin2Boundaries = selectedAdmin1.length ? (await getAdminBoundaries(2)).admin2 : null
 
 // Resolve drill-down once; maxLevel caps shallower datasets and turns deeper
 // selections into highlights.
 adminViewFor = (maxLevel) =>
   adminBoundariesForSelection({
     boundaries: { ...atlasBoundaries, admin2: admin2Boundaries },
-    selection: {
-      admin0: selectedAdmin0,
-      admin1: selectedAdmin1,
-      admin2: selectedAdmin2,
-    },
+    selection: adminSelections,
     maxLevel,
   })
 
@@ -134,11 +121,7 @@ highlightFor = (view) => {
   if (!selected) return null;
 
   const names = new Set(selected.names);
-  return {
-    filter: (feature) => names.has(feature.properties[selected.field]),
-    stroke: "#000",
-    strokeWidth: 2.5,
-  };
+  return { filter: (feature) => names.has(feature.properties[selected.field]) };
 }
 
 adminHighlight = highlightFor(adminView)
