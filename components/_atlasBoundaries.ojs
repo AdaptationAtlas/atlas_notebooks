@@ -1,3 +1,5 @@
+import { countries } from "/helpers/adminSelectors.ojs";
+
 ADMIN_CONFIG = new Object({
   0: {
     file: FileAttachment(
@@ -21,36 +23,32 @@ ADMIN_CONFIG = new Object({
   },
 });
 
-// Match helpers/adminSelectors.ojs so maps never draw unselectable countries.
-EXCLUDED_ISO3 = new Set(["SDN"])
+// The selectors' own list, so maps never draw a country the controls exclude.
+iso3Set = new Set(countries.map((d) => d.iso3));
 
-admin_json = {
-  const country_list = await FileAttachment(
-    "/data/shared/atlas_countries.json",
-  ).json();
+// One promise per level: admin 2 is 3.3 MB and every section asks for it.
+_loadAdminBoundaries = {
+  const cache = new Map();
 
-  return country_list
-    .filter((d) => d.include && !EXCLUDED_ISO3.has(d.iso3c))
-    .map(({ include, ...rest }) => rest);
-};
+  return (level) => {
+    if (!cache.has(level)) {
+      const { file, object } = ADMIN_CONFIG[level];
+      cache.set(
+        level,
+        file.json().then((bounds) =>
+          topojson.feature(bounds, {
+            type: "GeometryCollection",
+            geometries: bounds.objects[object].geometries.filter((g) =>
+              iso3Set.has(g.properties.iso3),
+            ),
+          }),
+        ),
+      );
+    }
 
-iso3Set = new Set(admin_json.map(d => d.iso3c));
-
-_loadAdminBoundaries = async (level = 0, iso3Set = null) => {
-  const { file, object } = ADMIN_CONFIG[level];
-  const bounds = await file.json();
-
-  const geometries = iso3Set
-    ? bounds.objects[object].geometries.filter((g) =>
-        iso3Set.has(g.properties.iso3),
-      )
-    : bounds.objects[object].geometries;
-
-  return topojson.feature(bounds, {
-    type: "GeometryCollection",
-    geometries,
-  });
-};
+    return cache.get(level);
+  };
+}
 
 
 /** Load one or more admin levels (0–2) as keyed GeoJSON collections. */
@@ -66,7 +64,7 @@ getAdminBoundaries = async (levels) => {
 
   // Normalize scalar input before mapping.
   const results = await Promise.all(
-    levelsArray.map((l) => _loadAdminBoundaries(l, iso3Set)),
+    levelsArray.map((l) => _loadAdminBoundaries(l)),
   );
 
   return Object.fromEntries(
