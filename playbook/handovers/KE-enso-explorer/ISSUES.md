@@ -459,6 +459,9 @@ still live from it is re-registered here.
     value = **0/1** flooded-that-year, 250 m, Kenya extent; years present 2001–03, 2005–08, 2011–2018
     (15 COGs); **missing 2000/2004/2009/2010/2019+ → treat missing URL as "no data", NOT zero**;
     **ENSO-composable** (2015/2012/2006 = big flood years).
+  - **GFD → GFM swap · DONE (v0.24, `b819148`, 2026-08-31).** GFD (MODIS, annual) retired; observed
+    flood now Copernicus **GFM** (Sentinel-1 SAR, ~111 m, SEASONAL, 2018–2025) — season-specific, 255=SAR
+    not-observed→NaN, %=flooded share of observed area. Reply sent to delete GFD S3 prefix. JRC unchanged.
   - **GFD wired · DONE (v0.16, `bef5d49`, browser-verified 2026-08-18).** GFD added as the 4th map
     variable — season-agnostic (same annual map under both OND & MAM, tinted by each section's driver),
     with a prominent **amber flag** stating annual-not-seasonal + missing-years=no-data. Only observed
