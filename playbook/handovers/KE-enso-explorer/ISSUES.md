@@ -151,6 +151,14 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
     WRONG — Kenya GAUL24 a2 IS IEBC-aligned (47/291 incl. disputed Ilemi). But it lacks p-codes → **use
     the published IEBC COD-AB as the admin backbone, NOT GAUL; NO crosswalk needed** (COD-AB IS the
     p-code source). See [[reference_kenya-gaul-admin2-districts]].
+  - **ALL 7 EXPOSURE LAYERS LIVE (2026-09-01, `2026-09-01_reply-ke39-exposure-all-live.md`, verified 206):**
+    population ×2 (WorldPop top-down + GRID3 bottom-up, both ~55.9M not KNBS 47.6M → spatial only),
+    IEBC adm1/adm2 (p-codes), roads (OSM, 30MB), health (HOTOSM, 2MB), schools (HOTOSM, 10MB),
+    **electricity grid (KPLC, ⚠️ 53MB / 141k features / 5 voltages** — filter to the 132/220kV backbone
+    ~118 feats and/or bbox before rendering; DO NOT load whole). adm2 = zonal unit for the intersect
+    tables. All raw vectors are browser-heavy → need pre-simplify/filter like the admin swap did
+    (adm2 11MB→179KB). GeoJSON served octet-stream; `fetch().json()` fine. CDH metadata in
+    `hazards_prototype/metadata/cdh/*.yaml`.
   - **NEXT (our side):** wire the admin-2 select + flood×population intersect UI against
     `worldpop-constrained-2020` + `ken_adm2.geojson` (both live) — awaiting Pete's go. Simplify the
     109 MB adm2 vector first.
