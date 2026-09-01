@@ -159,6 +159,13 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
     tables. All raw vectors are browser-heavy → need pre-simplify/filter like the admin swap did
     (adm2 11MB→179KB). GeoJSON served octet-stream; `fetch().json()` fine. CDH metadata in
     `hazards_prototype/metadata/cdh/*.yaml`.
+  - **ARCHITECTURE (Pete 2026-09-01): intersect is PRE-COOKED pipeline-side, NOT client-side** — the raw
+    exposure vectors/rasters (grid 53MB, roads 30MB, 100m pop, 111m flood) are too heavy for the browser.
+    Requested per-adm2 stats tables (`2026-09-01_request-precooked-exposure-tables.md`):
+    `exposure_gfm_seasonal.parquet` (adm2×season×year: flooded/pop/roads/health/schools/grid exposed),
+    `exposure_jrc_rp.parquet` (adm2×return-period), `exposure_totals.parquet` (denominators), keyed on
+    `adm2_pcode`. Notebook then reads the small table (DuckDB-WASM) + our 179KB adm2 topojson and renders
+    choropleth+tables — no heavy geometry/raster client-side. Awaiting pipeline bake + final paths.
   - **NEXT (our side):** wire the admin-2 select + flood×population intersect UI against
     `worldpop-constrained-2020` + `ken_adm2.geojson` (both live) — awaiting Pete's go. Simplify the
     109 MB adm2 vector first.
