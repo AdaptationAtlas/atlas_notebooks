@@ -82,6 +82,9 @@ insights, Methods & Sources, Appendix-at-bottom.
 ## Branch management (this dir)
 - `README.md` — status + framing (this file). `ISSUES.md` — open backlog. `DECISIONS.md` — settled
   calls + rationale. `dispatches/` — chronological work records (append one per work session).
+- **Dispatch convention:** every dispatch must state **From:** with the **session** (e.g. `cglabs`,
+  `hazards_prototype (macbook)`, `KE-ENSO notebook`) + date at the top, so authorship is traceable
+  across the multiple hazard/notebook sessions. Reply dispatches from any session belong in this dir.
 - NAPR pipeline: `data/KE-enso-explorer/_sources/` — engine `napr_extract.py`; builders
   `napr_build.py` / `napr_build_livestock.py` / `napr_build_products.py`; tools `napr_audit.py` +
   `napr_probe.py`; provenance `napr_audit_ledger.csv` + `napr_validation_report.csv`. Reuse for the

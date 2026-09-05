@@ -1,7 +1,11 @@
 # Request — PRE-COOK the flood × exposure intersect (per-adm2 tables), not client-side
 
 **From:** KE-ENSO notebook session (`dev/KE-enso-explorer`) · 2026-09-01 ·
-**To:** hazards_prototype + cglabs · **Re:** KE-39 exposure (`2026-09-01_reply-ke39-exposure-all-live.md`).
+**To:** **cglabs (primary — owns the KE-39 exposure data on-node)** + hazards_prototype (producer authoring
+if the zonal-stats step needs it) · **Re:** KE-39 exposure (`2026-09-01_reply-ke39-exposure-all-live.md`).
+
+> **Please note session authorship (cglabs vs macbook/hazards_prototype) at the top of future replies** —
+> we're tracking who does what across the two hazard sessions and some recent dispatches don't say.
 
 Thanks — all 7 exposure layers are live. **But the notebook can't do the intersect client-side:** the
 grid alone is 53 MB / 141k features, roads 30 MB, schools 10 MB, plus 100 m population + ~111 m flood
