@@ -647,7 +647,7 @@ md`Which **sub-counties** have the most people and assets in harm's way when the
 pre-computed tables intersect the flood layers with population, roads, health facilities, schools and
 the power grid, per IEBC sub-county. Pick a **flood source** — observed (Copernicus GFM, a season &
 year) or modelled hazard (JRC return-period) — and an **exposure metric**. The selected county
-(**${county}**) is outlined; the table ranks the most-exposed sub-counties nationally.`
+map + table show **${county}**'s sub-counties, ranked by the chosen metric — change the county selector above to switch.`
 ```
 
 ::: {.controls-row}
@@ -676,21 +676,24 @@ viewof expRP = { const el = Inputs.select([10, 20, 50, 75, 100, 200, 500], {valu
 
 ```{ojs}
 expMap = {
-  const feats = kenA2.map((f) => {
+  const selGaul = +((counties.find((c) => c.county === county) || {}).gaul1_code);
+  // just this county's sub-counties, coloured by the chosen exposure metric.
+  const feats = kenA2.filter((f) => f.properties.gaul1_code === selGaul).map((f) => {
     const r = expByPcode.get(f.properties.admin2_pcode);
     return {...f, properties: {...f.properties, val: r ? +r.val : 0}};
   });
-  const selGaul = +((counties.find((c) => c.county === county) || {}).gaul1_code);
+  if (!feats.length) return html`<div class="rain-panel-err">No sub-county exposure for ${county}.</div>`;
   const domain = {type: "FeatureCollection", features: feats};
   const scaleLabel = expIsGfm ? `${expMetric} · ${expSeason} ${expYear}` : `${expMetric} · JRC 1-in-${expRP}yr`;
   return Plot.plot({
-    projection: {type: "mercator", domain, inset: 6}, width: 720, height: 640,
+    projection: {type: "mercator", domain, inset: 14}, width: 720, height: 560,
     color: {type: "sqrt", scheme: "YlOrRd", legend: true, label: scaleLabel, unknown: "#f0f0ec"},
     marks: [
-      Plot.geo(feats, {fill: (d) => d.properties.val || 0, stroke: "#fff", strokeWidth: 0.3,
-        title: (d) => `${d.properties.admin2_name} (${d.properties.admin1_name}): ${expCfg.fmt(d.properties.val || 0)} ${expCfg.unit}`}),
-      Plot.geo(feats.filter((f) => f.properties.gaul1_code === selGaul),
-        {fill: "none", stroke: "#111", strokeWidth: 1.6}),
+      Plot.geo(feats, {fill: (d) => d.properties.val || 0, stroke: "#666", strokeWidth: 0.7,
+        title: (d) => `${d.properties.admin2_name}: ${expCfg.fmt(d.properties.val || 0)} ${expCfg.unit}`}),
+      Plot.text(feats, {text: (d) => d.properties.admin2_name,
+        x: (d) => d3.geoCentroid(d)[0], y: (d) => d3.geoCentroid(d)[1],
+        fontSize: 9, fill: "#222", stroke: "#fff", strokeWidth: 2, paintOrder: "stroke"}),
     ],
   });
 }
@@ -702,11 +705,12 @@ md`${expObservedNote}`
 
 ```{ojs}
 expTable = {
-  const rows = [...expRows].filter((r) => r.val != null).sort((a, b) => b.val - a.val).slice(0, 15);
+  const rows = [...expRows].filter((r) => r.val != null).sort((a, b) => b.val - a.val);
+  if (!rows.length) return html`<div class="rain-panel-err">No exposure rows for ${county}.</div>`;
   return html`<table class="plot-data-table">
-    <thead><tr><th>Sub-county</th><th>County</th><th>${expMetric}</th><th>People exposed</th><th>% of people</th></tr></thead>
+    <thead><tr><th>${county} sub-county</th><th>${expMetric}</th><th>People exposed</th><th>% of people</th></tr></thead>
     <tbody>${rows.map((r) => html`<tr>
-      <td>${r.adm2_name}</td><td>${r.adm1_name}</td>
+      <td>${r.adm2_name}</td>
       <td>${expCfg.fmt(+r.val)} ${expCfg.unit}</td>
       <td>${d3.format(",.0f")(+r.pop_exposed)}</td>
       <td>${d3.format(".1%")(+r.pop_pct)}</td></tr>`)}</tbody></table>`;
@@ -3032,9 +3036,17 @@ expIsGfm = expSource.startsWith("Observed")
 
 ```{ojs}
 // col is a trusted key from expMetricCfg (not user free-text) → safe to interpolate.
+// selected county's IEBC adm1 p-code (via gaul1_code on the adm1 vector) — scopes the
+// exposure section to the chosen county's sub-counties (#floodexposure responds to county).
+selAdm1 = {
+  const g = +((counties.find((c) => c.county === county) || {}).gaul1_code);
+  const f = kenyaA1.find((c) => c.properties.gaul1_code === g);
+  return f ? f.properties.admin1_pcode : null;
+}
+// col is a trusted key from expMetricCfg; selAdm1 is a p-code from our own vector → safe.
 expRows = expIsGfm
-  ? dbExposure.query(`SELECT adm2_pcode, adm2_name, adm1_name, ${expCfg.col}::DOUBLE AS val, observed_pct, pop_exposed, pop_pct FROM exp_gfm WHERE season='${expSeason}' AND year=${expYear}`)
-  : dbExposure.query(`SELECT adm2_pcode, adm2_name, adm1_name, ${expCfg.col}::DOUBLE AS val, pop_exposed, pop_pct FROM exp_jrc WHERE rp=${expRP}`)
+  ? dbExposure.query(`SELECT adm2_pcode, adm2_name, adm1_name, ${expCfg.col}::DOUBLE AS val, observed_pct, pop_exposed, pop_pct FROM exp_gfm WHERE season='${expSeason}' AND year=${expYear} AND adm1_pcode='${selAdm1}'`)
+  : dbExposure.query(`SELECT adm2_pcode, adm2_name, adm1_name, ${expCfg.col}::DOUBLE AS val, pop_exposed, pop_pct FROM exp_jrc WHERE rp=${expRP} AND adm1_pcode='${selAdm1}'`)
 expByPcode = new Map(expRows.map((r) => [r.adm2_pcode, r]))
 ```
 
