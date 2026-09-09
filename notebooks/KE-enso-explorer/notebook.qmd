@@ -744,25 +744,6 @@ plotFooter(_lang(nbText.sections.b4.ipcCaption), ipcChart, {
 })
 ```
 
-## `{ojs} title_acled`
-
-```{ojs}
-acledChart = Plot.plot({
-  height: 320, width: 900, marginLeft: 45,
-  x: {tickFormat: "d", label: "year"}, y: {label: "fatalities"},
-  marks: [
-    Plot.barY(acledCty, {x: "year", y: "fatalities", fill: "#7b241c", tip: true}),
-    Plot.ruleY([0]),
-  ],
-})
-```
-
-```{ojs}
-plotFooter(_lang(nbText.sections.b4.acledCaption), acledChart, {
-  filename: `${county}_conflict_fatalities_acled`,
-  data: acledCty,
-})
-```
 
 ## `{ojs} title_prices`
 
@@ -1328,6 +1309,30 @@ md`${_lang(nbText.sections.b3.insight)}`
 ```
 
 
+## `{ojs} title_acled`
+
+```{ojs}
+// bars coloured by the SELECTED ocean driver's phase in that year (season-mean over
+// the chosen climate season, driver-specific thresholds) — Pete review 2026-09-09.
+acledChart = Plot.plot({
+  height: 320, width: 900, marginLeft: 45,
+  x: {tickFormat: "d", label: "year"}, y: {label: "fatalities"},
+  color: {domain: [driverPhase.pos, "Neutral", driverPhase.neg], range: ["#d73027", "#bbbbbb", "#4575b4"],
+    legend: true, label: `${driverName} phase (${season}-season mean)`},
+  marks: [
+    Plot.barY(acledCty, {x: "year", y: "fatalities", fill: (d) => driverPhaseByYear.get(d.year) ?? "Neutral", tip: true}),
+    Plot.ruleY([0]),
+  ],
+})
+```
+
+```{ojs}
+plotFooter(_lang(nbText.sections.b4.acledCaption), acledChart, {
+  filename: `${county}_conflict_fatalities_acled`,
+  data: acledCty,
+})
+```
+
 # `{ojs} heading_methods` {#methods}
 
 ```{ojs}
@@ -1475,7 +1480,7 @@ title_driver = `3.2 ${driverName} — ${season} ${_lang(nbText.sections.b2.drive
 title_scatter = `7.3 ${cropSel} ${_lang(nbText.sections.b3.scatterTitle)} ${driverName}`
 title_trend = `7.4 ${cropSel} ${_lang(nbText.sections.b3.trendTitle)}`
 title_ipc = `4.1 ${county} — ${_lang(nbText.sections.b4.ipcTitle)}`
-title_acled = `4.2 ${county} — ${_lang(nbText.sections.b4.acledTitle)}`
+title_acled = `7.5 ${county} — ${_lang(nbText.sections.b4.acledTitle)}`
 title_cmpRain = `5.1 ${season} — ${_lang(nbText.sections.compare.rainTitle)}`
 title_cmpNdvi = _lang(nbText.sections.compare.ndviTitle)
 title_prices = priceProducts.length
@@ -1516,6 +1521,20 @@ ensoPhaseByYear = {
   const by = d3.rollups(drivers.filter((d) => seasonMonths.includes(d.month) && d.nino34_anom_noaa != null),
     (v) => d3.mean(v, (d) => d.nino34_anom_noaa), (d) => d.year);
   return new Map(by.map(([y, v]) => [y, v > 0.5 ? "El Niño" : v < -0.5 ? "La Niña" : "Neutral"]));
+}
+```
+
+```{ojs}
+// per-year phase of the SELECTED ocean driver: season-mean of driverCol over the chosen
+// climate season (same recipe as ensoPhaseByYear), classified with the driver's own
+// threshold (ENSO ±0.5 °C · IOD ±0.4 · Western-V ±0.5 std) and phaseDefs labels.
+driverPhase = phaseDefs[driverKind]
+driverPhaseThresh = ({"ENSO (Niño 3.4)": 0.5, "IOD (DMI)": 0.4, "Western-V (WNP)": 0.5})[driverKind]
+driverPhaseByYear = {
+  const by = d3.rollups(drivers.filter((d) => seasonMonths.includes(d.month) && d[driverCol] != null),
+    (v) => d3.mean(v, (d) => d[driverCol]), (d) => d.year);
+  const t = driverPhaseThresh, P = driverPhase;
+  return new Map(by.map(([y, v]) => [y, v > t ? P.pos : v < -t ? P.neg : "Neutral"]));
 }
 ```
 

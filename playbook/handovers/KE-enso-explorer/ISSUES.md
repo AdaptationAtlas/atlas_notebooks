@@ -107,6 +107,23 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   topojson-requests/no-boundary-errors; DuckDB-gated map render outcome = Pete's browser. Recipe:
   `_sources/ken_adm2_iebc_simple.README.md`. See [[reference_kenya-gaul-admin2-districts]].
 
+## Main-notebook review round 2 — Pete 2026-09-09 (R2-1..R2-3)
+
+- **R2-1 · #floodexposure must respond to the county selector · DONE (`d5becfb`).** Was national (290
+  sub-counties, county outlined). Now: query filtered by the county's IEBC `adm1_pcode` (via gaul1_code on
+  the adm1 vector), map zooms to that county's sub-counties (labelled), table ranks only them. Verified
+  Marsabit→4 rows, Nairobi→17, both update on switch.
+- **R2-2 · Fig 4.2 ACLED → Supplemental + bars coloured by selected ocean driver · DONE.** Block moved
+  from B4 to the end of §7 Supplemental (before Methods) as **Fig 7.5**; caption text renumbered in
+  nbText (`sections.b4.acledCaption` — key path left as-is, cosmetic). New `driverPhaseByYear` (season-
+  mean of `driverCol` over the chosen climate season, driver-specific thresholds ENSO ±0.5 °C / IOD ±0.4 /
+  WNP ±0.5 std, labels from `phaseDefs`); bars fill El Niño/+IOD/High-WV `#d73027` · Neutral `#bbb` ·
+  La Niña/−IOD/Low-WV `#4575b4`, legend labelled by driver. Verified: in Supplemental, 29 bars in the 3
+  phase colours, legend flips El Niño/La Niña → +IOD/−IOD on the driver radio.
+- **R2-3 · B4 figure numbering gap · OPEN (Pete decision).** Removing 4.2 leaves B4 = 4.1 IPC · 4.3 prices ·
+  4.4 ReliefWeb · 4.5 NDVI. Cascade-renumber (4.3→4.2 …) touches title_prices/title_rw/title_ndvi + nbText
+  captions + the "§4.3 prices" references in ISSUES/dispatches (KE-12). Leave the gap, or cascade?
+
 ## Map-panel review — Pete 2026-08-21 (dev_rainfall_maps.qmd, KE-31..KE-39)
 
 - **KE-31 · Flood % denominator bug · DONE (v0.20, `d4a109a`).** GFD flooded-share was
