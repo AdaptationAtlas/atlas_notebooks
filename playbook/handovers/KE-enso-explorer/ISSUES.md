@@ -173,7 +173,7 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
     (matches our IEBC adm2 topojson). `pop_pct`/`grid_km_exposed_hv` precomputed; `observed_pct` = SAR
     coverage (low → treat exposed as floor). **The intersect is now a LIGHT client-side job** (read small
     parquet + join `adm2_pcode` to geometry → choropleth + ranked table, toggle GFM season/year vs JRC RP).
-    No heavy raster/vector client-side. **READY TO BUILD the exposure section — awaiting Pete's go.**
+    No heavy raster/vector client-side. **BUILT (2026-09-09, #floodexposure block):** national 290-sub-county choropleth (IEBC adm2) + ranked table, flood-source toggle (GFM season/year ↔ JRC RP) + metric selector (people/%/roads/health/schools/grid). Reads the 3 local parquets via DuckDBClient, joins adm2_pcode→adm2 topojson. Browser-verified: 294-path choropleth, 15-row table, 3 parquets load, no exposure errors.
   - **NEXT (our side):** wire the admin-2 select + flood×population intersect UI against
     `worldpop-constrained-2020` + `ken_adm2.geojson` (both live) — awaiting Pete's go. Simplify the
     109 MB adm2 vector first.

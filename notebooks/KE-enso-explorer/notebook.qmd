@@ -640,6 +640,80 @@ md`### Notes
 ```
 
 
+# Who & what is flood-exposed {#floodexposure}
+
+```{ojs}
+md`Which **sub-counties** have the most people and assets in harm's way when the rains flood? These
+pre-computed tables intersect the flood layers with population, roads, health facilities, schools and
+the power grid, per IEBC sub-county. Pick a **flood source** — observed (Copernicus GFM, a season &
+year) or modelled hazard (JRC return-period) — and an **exposure metric**. The selected county
+(**${county}**) is outlined; the table ranks the most-exposed sub-counties nationally.`
+```
+
+::: {.controls-row}
+
+```{ojs}
+viewof expSource = Inputs.radio(["Observed flood (GFM)", "Modelled hazard (JRC)"], {value: "Observed flood (GFM)", label: "Flood source"})
+```
+
+```{ojs}
+viewof expMetric = Inputs.select(["People exposed", "People exposed (%)", "Roads flooded (km)", "Health facilities exposed", "Schools exposed", "Power grid (km)", "Power grid HV (km)"], {value: "People exposed", label: "Exposure metric"})
+```
+
+```{ojs}
+viewof expSeason = { const el = Inputs.select(["OND", "MAM"], {value: "OND", label: "Season (GFM)"}); el.style.display = expSource.startsWith("Observed") ? "" : "none"; return el; }
+```
+
+```{ojs}
+viewof expYear = { const el = Inputs.select([2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025], {value: 2019, label: "Year (GFM)"}); el.style.display = expSource.startsWith("Observed") ? "" : "none"; return el; }
+```
+
+```{ojs}
+viewof expRP = { const el = Inputs.select([10, 20, 50, 75, 100, 200, 500], {value: 100, label: "Return period (JRC)"}); el.style.display = expSource.startsWith("Observed") ? "none" : ""; return el; }
+```
+
+:::
+
+```{ojs}
+expMap = {
+  const feats = kenA2.map((f) => {
+    const r = expByPcode.get(f.properties.admin2_pcode);
+    return {...f, properties: {...f.properties, val: r ? +r.val : 0}};
+  });
+  const selGaul = +((counties.find((c) => c.county === county) || {}).gaul1_code);
+  const domain = {type: "FeatureCollection", features: feats};
+  const scaleLabel = expIsGfm ? `${expMetric} · ${expSeason} ${expYear}` : `${expMetric} · JRC 1-in-${expRP}yr`;
+  return Plot.plot({
+    projection: {type: "mercator", domain, inset: 6}, width: 720, height: 640,
+    color: {type: "sqrt", scheme: "YlOrRd", legend: true, label: scaleLabel, unknown: "#f0f0ec"},
+    marks: [
+      Plot.geo(feats, {fill: (d) => d.properties.val || 0, stroke: "#fff", strokeWidth: 0.3,
+        title: (d) => `${d.properties.admin2_name} (${d.properties.admin1_name}): ${expCfg.fmt(d.properties.val || 0)} ${expCfg.unit}`}),
+      Plot.geo(feats.filter((f) => f.properties.gaul1_code === selGaul),
+        {fill: "none", stroke: "#111", strokeWidth: 1.6}),
+    ],
+  });
+}
+```
+
+```{ojs}
+md`${expObservedNote}`
+```
+
+```{ojs}
+expTable = {
+  const rows = [...expRows].filter((r) => r.val != null).sort((a, b) => b.val - a.val).slice(0, 15);
+  return html`<table class="plot-data-table">
+    <thead><tr><th>Sub-county</th><th>County</th><th>${expMetric}</th><th>People exposed</th><th>% of people</th></tr></thead>
+    <tbody>${rows.map((r) => html`<tr>
+      <td>${r.adm2_name}</td><td>${r.adm1_name}</td>
+      <td>${expCfg.fmt(+r.val)} ${expCfg.unit}</td>
+      <td>${d3.format(",.0f")(+r.pop_exposed)}</td>
+      <td>${d3.format(".1%")(+r.pop_pct)}</td></tr>`)}</tbody></table>`;
+}
+```
+
+
 # `{ojs} heading_b4` {#b4}
 
 ```{ojs}
@@ -2929,5 +3003,47 @@ jrcRender = (win) => {
 ```
 
 :::
+
+
+<!-- ---- flood exposure intersect (pre-cooked per-adm2 tables) ---- -->
+
+```{ojs}
+dbExposure = DuckDBClient.of({
+  exp_gfm: FileAttachment("/data/KE-enso-explorer/exposure_gfm_seasonal.parquet"),
+  exp_jrc: FileAttachment("/data/KE-enso-explorer/exposure_jrc_rp.parquet"),
+  exp_tot: FileAttachment("/data/KE-enso-explorer/exposure_totals.parquet"),
+})
+```
+
+```{ojs}
+// exposure metric config — column names are identical in the GFM (A) and JRC (B) tables.
+expMetricCfg = ({
+  "People exposed":            {col: "pop_exposed",        fmt: (v) => d3.format(",.0f")(v), unit: "people"},
+  "People exposed (%)":        {col: "pop_pct",            fmt: (v) => d3.format(".1%")(v),  unit: ""},
+  "Roads flooded (km)":        {col: "roads_km_exposed",   fmt: (v) => d3.format(",.1f")(v), unit: "km"},
+  "Health facilities exposed": {col: "health_n_exposed",   fmt: (v) => d3.format(",.0f")(v), unit: ""},
+  "Schools exposed":           {col: "schools_n_exposed",  fmt: (v) => d3.format(",.0f")(v), unit: ""},
+  "Power grid (km)":           {col: "grid_km_exposed",    fmt: (v) => d3.format(",.1f")(v), unit: "km"},
+  "Power grid HV (km)":        {col: "grid_km_exposed_hv", fmt: (v) => d3.format(",.1f")(v), unit: "km"},
+})
+expCfg = expMetricCfg[expMetric]
+expIsGfm = expSource.startsWith("Observed")
+```
+
+```{ojs}
+// col is a trusted key from expMetricCfg (not user free-text) → safe to interpolate.
+expRows = expIsGfm
+  ? dbExposure.query(`SELECT adm2_pcode, adm2_name, adm1_name, ${expCfg.col}::DOUBLE AS val, observed_pct, pop_exposed, pop_pct FROM exp_gfm WHERE season='${expSeason}' AND year=${expYear}`)
+  : dbExposure.query(`SELECT adm2_pcode, adm2_name, adm1_name, ${expCfg.col}::DOUBLE AS val, pop_exposed, pop_pct FROM exp_jrc WHERE rp=${expRP}`)
+expByPcode = new Map(expRows.map((r) => [r.adm2_pcode, r]))
+```
+
+
+```{ojs}
+expObservedNote = expIsGfm
+  ? `_Observed flood = Copernicus **GFM** (Sentinel-1 SAR), ${expSeason} ${expYear}. Where SAR coverage is sparse, exposure is a **floor** — a not-observed sub-county reads 0, not "safe". Short record 2018–2025 = recent flood-proneness, not magnitude._`
+  : `_Modelled hazard = **JRC GloFAS** 1-in-${expRP}-year flood extent (depth > 0). Static return-period map (rises with the return period), not an observed event._`
+```
+
 
 :::
