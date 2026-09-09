@@ -120,6 +120,14 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   WNP ±0.5 std, labels from `phaseDefs`); bars fill El Niño/+IOD/High-WV `#d73027` · Neutral `#bbb` ·
   La Niña/−IOD/Low-WV `#4575b4`, legend labelled by driver. Verified: in Supplemental, 29 bars in the 3
   phase colours, legend flips El Niño/La Niña → +IOD/−IOD on the driver radio.
+- **R2-4 · Stray `:::` from the fold early-closed the hidden appendix · DONE (found during R2 verify).** The
+  fold (`e635d11`) sliced the prototype engine "to EOF" and so carried the prototype's own appendix-closing
+  `:::` into the main appendix → the `::: {.hidden}` div closed early, a literal `:::` rendered on the
+  page, and the 4 exposure-engine cells added after it (dbExposure/metric cfg/expRows/note) were visible
+  as inspector dumps at the page bottom. Removed the orphan (fence balance now 14/14); verified 0 visible
+  dumps, 0 literal fences on :4333. Also: Quarto preview stale-snapshot mystery = an orphaned
+  `quarto.js preview` from 08:14 holding :4333 (see memory `feedback_quarto-preview-overwrites-site`).
+
 - **R2-3 · B4 figure numbering gap · OPEN (Pete decision).** Removing 4.2 leaves B4 = 4.1 IPC · 4.3 prices ·
   4.4 ReliefWeb · 4.5 NDVI. Cascade-renumber (4.3→4.2 …) touches title_prices/title_rw/title_ndvi + nbText
   captions + the "§4.3 prices" references in ISSUES/dispatches (KE-12). Leave the gap, or cascade?
