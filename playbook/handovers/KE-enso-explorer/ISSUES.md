@@ -166,6 +166,14 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
     `exposure_jrc_rp.parquet` (adm2×return-period), `exposure_totals.parquet` (denominators), keyed on
     `adm2_pcode`. Notebook then reads the small table (DuckDB-WASM) + our 179KB adm2 topojson and renders
     choropleth+tables — no heavy geometry/raster client-side. Awaiting pipeline bake + final paths.
+  - **PRE-COOKED EXPOSURE TABLES LIVE (2026-09-09, `2026-09-09_reply-precooked-exposure-tables-live.md`,
+    verified 206, tiny):** `…/domain=exposure/type=intersect/region=kenya/processing=analysis-ready/`
+    `exposure_gfm_seasonal.parquet` (361KB, adm2×season×year, GFM flood), `exposure_jrc_rp.parquet`
+    (68KB, adm2×RP, JRC hazard), `exposure_totals.parquet` (22KB, denominators). Key = `adm2_pcode`
+    (matches our IEBC adm2 topojson). `pop_pct`/`grid_km_exposed_hv` precomputed; `observed_pct` = SAR
+    coverage (low → treat exposed as floor). **The intersect is now a LIGHT client-side job** (read small
+    parquet + join `adm2_pcode` to geometry → choropleth + ranked table, toggle GFM season/year vs JRC RP).
+    No heavy raster/vector client-side. **READY TO BUILD the exposure section — awaiting Pete's go.**
   - **NEXT (our side):** wire the admin-2 select + flood×population intersect UI against
     `worldpop-constrained-2020` + `ken_adm2.geojson` (both live) — awaiting Pete's go. Simplify the
     109 MB adm2 vector first.
