@@ -53,6 +53,13 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   new JS cells pass `node --check`. **Remaining: render in a real browser** (per memory, headless
   mis-reproduces gated DuckDB-WASM render outcome → Pete's browser is ground truth). Live KMD CAP layer
   (KE-08) still to add. Design + data-source detail: dispatch `2026-07-23_block5-outlook-and-climweb-cap.md`.
+  *Audit 2026-09-15 (pipeline session) → **DEFECTS FOUND, see V2-64..V2-69**: the analogue selector sorts by
+  `Math.abs(roni)` descending, so it returns the most EXTREME phase-matching years rather than the most
+  SIMILAR (V2-65); the notebook mixes RONI and Niño 3.4, which disagree by up to 0.567 °C on a time-trending
+  gap (V2-64, decision needed); DMI is missing for all of 2025 so the newest year cannot be used as an
+  analogue (V2-67); RONI is stale to AMJ 2026 (V2-68). The CPC forecast phase itself was **verified correct**
+  against the live page. Full detail:
+  `dispatches/2026-09-15_reply-audit-drivers-and-explainer-recommendation.md`.*
 
 - **KE-07 · IWMI ENSO Outlook API · CLOSED (not worth building).** Live
   public API (`https://enso.iwmi.org/ENSO_api/api/v1`, 34 layers) scanned 2026-07-22 — see
@@ -663,3 +670,177 @@ driver-background toggle AND the tercile lens coexisting on §3 — not either/o
   rejoins the 0.75–0.89 band. Fold into the Wave-3/V2-24 D409 re-run.
   **Dispatch sent 2026-08-17:** `dispatches/2026-08-17_request-chirps-ndj-window-bug.md` (decomposition
   table, worked Turkana example, SPEI sd fingerprint, exact fix + re-verification steps).
+
+### From the pipeline-session data audit (2026-09-15) — drivers, analogue engine, explainer
+
+Full findings, SQL, and the explainer recommendation: `dispatches/2026-09-15_reply-audit-drivers-and-explainer-recommendation.md`.
+GitHub tracker: **AdaptationAtlas/atlas_notebooks#48**. Target version **v2.11**.
+V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writing the prose.
+
+- **V2-64 · ENSO index inconsistency: RONI vs Niño 3.4 · DECIDED — RONI end to end (D17, 2026-09-15).** The notebook
+  carries **two different ENSO indices** and mixes them. Forecast side is RONI: `enso_state_probabilities`
+  is the CPC RONI-based product, and `enso_outlook_base.roni_conc`/`roni_pred` is genuine CPC RONI pulled
+  native-seasonal from `RONI.ascii.txt` (`_sources/enso_drivers_build.py:25,150`). Driver-explorer UI and
+  the analogue distance run on `driver_indices.nino34_anom_noaa`. Against the OND mean of that column,
+  `roni_conc` gives r = 0.981 but **max abs diff 0.567 °C**, and the gap trends: mean +0.20 over 1981–95,
+  ~0.00 over 1996–2010, **−0.30 over 2015–25** (2024 = −0.567). That is the RONI signature — RONI = ONI
+  minus tropical-mean (20°S–20°N) SST anomaly, so it strips background warming and measures the gradient
+  the atmosphere responds to, which is the only way Kenya feels ENSO at all. **Recommendation: RONI
+  end-to-end** (the forecast already is, and `roni_conc`/`dmi_conc` sit beside `tercile` — zero plumbing).
+  Consequence: live state must be a **fetched CPC RONI value**, never a Niño 3.4 reading nor a rule-of-thumb
+  offset. Note `ISSUES.md:251` currently labels the `driver_indices` ENSO column "ONI" — a third name for
+  the same column; whatever is chosen, the naming needs unifying across qmd, nbText, and this file.
+  *IOD axis has no equivalent fork: `dmi_conc` is exactly the OND mean of `dmi_hadisst`, r = 1.000000,
+  max abs diff 0.0 across all 45 years.*
+
+- **V2-65 · Analogue selector returns the most EXTREME years, not the most SIMILAR · OPEN (bug, KE-09).**
+  `notebook.qmd:1734-1746` filters years whose `roni_conc` crosses the ±0.5 phase threshold matching the
+  forecast phase, then sorts `Math.abs(b.roni) - Math.abs(a.roni)` and slices 8. So with the current
+  El Niño-100% OND forecast **the page is showing the eight most extreme El Niño OND years on record** as
+  its analogues. Phase is right; selection within phase is biased toward catastrophe. Replace with a
+  z-scored two-axis distance:
+  `d = sqrt(((enso_y − enso_now)/sd_enso)^2 + ((iod_y − iod_now)/sd_iod)^2)`, ascending, nearest N.
+  **Z-scoring is not optional:** OND sd is ENSO 1.179 vs IOD 0.362, so a raw Euclidean lets ENSO contribute
+  ~10× the squared distance and leaves the IOD decorative — backwards for Kenya OND, where the IOD is the
+  stronger driver. Worked proof on the requested live state: raw units say ENSO dominates 2:1 (0.88 vs 0.44),
+  standardized says **IOD is the larger departure** (+0.81 sd vs −1.02 sd). Complete inversion. Any
+  deliberate weighting goes on top of the z-scores as named weights, never left implicit in the units.
+  Also: **must explicitly drop-or-flag years with a NULL axis** — a distance over a NULL fails silently and
+  the year just falls out of the sort (see V2-67).
+  **D17(2) changes the comparator: use `_pred`, not `_conc`.** The live state is now a fetched
+  most-recent-available reading, and since the target season has not happened yet that reading is
+  necessarily *pre-season* — so matching it against historical in-season `roni_conc` compares unlike things
+  and flatters the apparent skill. Use the lagged predictor built for exactly this: **OND ← JAS, MAM ← DJF**
+  (`_sources/enso_outlook_build.py:10-11`). And "most recent available" must mean *the predictor window for
+  the target season*, not literally the newest row: for OND pull the **JAS** value, and if JAS is unpublished
+  say so rather than substituting a nearer window, or the comparator drifts out of alignment with `roni_pred`
+  as the months pass. Same rule on the DMI axis — where `dmi_pred` is NULL for OND 2025 (V2-67).
+
+- **V2-66 · Plain-language driver explainer + data-sources panel · OPEN (the main enhancement).** The page
+  shows four ocean indices, two index families for one of them, terciles, phase thresholds, partial
+  correlations and a proxy-flagged forecast window with **no interpretive onramp**. Data is sound; the path
+  from number to decision is missing. One `<details>` accordion, **collapsed by default**, below the hero
+  and above the first driver chart, prose via `nbText.json` + `_lang(...)` so the EN/FR gate is not made
+  worse. Distinct from the annex Methods (A7, KE-11) — that justifies the method to a reviewer, this tells
+  a planner what to take away. Content: **state the notebook's two jobs first** (show the coming season's
+  outlook; show which past seasons resemble it, so impacts are reasoned from lived history) and use them as
+  the editorial spine — anything serving neither gets folded or cut, which on that test means folding the
+  correlation/partial-correlation blocks (`notebook.qmd:2643-2726`) — **ratified to the annex, not deleted,
+  per D17(3)**, consistent with KE-11/D15 (technical figures live in §A1–A7). Then: why a Pacific pattern reaches
+  Kenya at all (atmospheric teleconnection, not the ocean — this one point does more interpretive work than
+  any chart on the page); **the IOD is the stronger OND driver, stated explicitly**, because the raw
+  magnitudes on screen imply the opposite (±2 °C ENSO vs ±0.4 IOD) and a reader will conclude wrongly; MAM
+  as a *different system* under Western-V control, not "the other season", with its FMA-proxy
+  low-confidence stated in prose and not only in a chart caption; **what an analogue year is and is not** —
+  a similar ocean state, answering "when it last looked like this, what happened here", NOT a magnitude
+  forecast (the most carefully-written paragraph on the page, since it is what stops the analogue map being
+  read as a prediction); and honest limits — up to 8 years from a 45-year record means a modal tercile is
+  weak evidence and the share must be shown not just the label, a warming background degrades old matches,
+  and these are shifted odds not outcomes. Plus a **plain-language data-sources table** (what it is / who
+  makes it / the one limitation that matters — not a citation block), 11 rows drafted in the dispatch.
+  The GFM row is the one not to compress: it is the only dataset on the page where **a zero can mean "not
+  observed"**, which is the single most likely misreading in the notebook. Finally, the explainer **must
+  name the chosen ENSO index in one sentence** — the RONI/Niño-3.4 gap is something a literate user will
+  eventually spot against a news bulletin, and unpre-empted it reads as a bug rather than a decision.
+
+- **V2-67 · DMI missing for all of 2025 → 2025 unusable as an analogue year · OPEN (data).** `dmi_conc` is
+  NULL for **all 48 units in 2025, both MAM and OND**; `dmi_pred` NULL for OND 2025. Cause: DMI seasonal
+  coverage in `enso_drivers_seasonal` stops at DJF/JFM/FMA 2025 — no MAM 2025, no OND 2025. So the most
+  recent year in the record, and the closest to today's background state, is the one year a two-axis
+  distance cannot use. Refetch DMI before the V2-65 engine is trustworthy. RONI itself is **complete and
+  zero-null** 1981–2025, so the engine switch needs no new data on that axis.
+
+- **V2-68 · Driver/forecast refresh + harden the CPC parser against a column swap · OPEN.** (a) RONI runs
+  only to **AMJ 2026** (fetched ~2026-07-10) — the current season is absent, so no "live ocean state" can be
+  read from our own data yet; rerun `_sources/enso_drivers_build.py` (self-fetching, a rerun not new code).
+  (b) `enso_state_probabilities` is two issuances stale (stored July 2026, live September 2026); the **OND
+  row is 0/0/100 in both so the selected phase is unaffected** — hygiene, not a live defect — but rerun
+  `enso_state_prob_build.py`. (c) **Parser fragility, worth fixing while this is open:** the values looked
+  implausible (El Niño 100% across seven seasons) and were **verified correct against the live CPC page** —
+  column order really is `La Niña, Neutral, El Niño` and the 100% values are genuinely published (corroborated
+  by the window rolling forward exactly two months, `FMA = 97` identical across both issuances, and September
+  adding `MAM 0/18/82` + `AMJ 2/55/43`; it also reconciles with observed RONI DJF-2026 −0.88 → AMJ-2026 +0.47,
+  a decayed La Niña warming into an El Niño our record does not yet reach). **But** `enso_state_prob_build.py:25-28`
+  keys the three values off *positional* column order and the row gate only checks they sum to ~100 — which
+  `0+0+100` passes whichever way the columns sit. A future CPC redesign that swaps columns would invert the
+  forecast phase **silently**, and phase inversion flips the analogue set, which flips the rainfall outlook.
+  Key off the header cells, or assert the header text reads `La Niña / Neutral / El Niño` left to right.
+
+- **V2-69 · Add monthly RONI to the driver charts via centre-month mapping · OPEN (D17(4)).**
+  **Correction: the earlier claim that monthly RONI does not exist was WRONG.** Verified against both the
+  parquet and the source — `RONI.ascii.txt` is `SEAS YR ANOM` carrying **12 overlapping 3-month windows per
+  calendar year** (one value per month, the same cadence as ONI), and `enso_drivers_seasonal` holds all 12
+  labels for every year 1950–2026 (917 rows, 11.9/yr). RONI therefore plots on a monthly axis directly, by
+  centre month: DJF→Jan, JFM→Feb, FMA→Mar, MAM→Apr, AMJ→May, MJJ→Jun, JJA→Jul, JAS→Aug, ASO→Sep, SON→Oct,
+  OND→Nov, NDJ→Dec. There is no *single-month* RONI, but that is inherent to the index (a 3-month running
+  mean by construction), not a gap in our data.
+  **Route is in-repo, not a pipeline ask:** `driver_indices.parquet` is externally staged by the D409
+  pipeline — no `_sources` script writes it — so adding a RONI column there would be a pipeline request.
+  Instead attach **`enso_drivers_seasonal.parquet`** (self-fetching in this repo, currently referenced
+  **nowhere** in the notebook) and map centre-month client-side. No pipeline dependency, and it refreshes on
+  the same rerun that clears V2-68. Follow the existing centred-window convention (`rollCentre` / `zMonthly`,
+  V2-45) and **respect the NDJ quarantine (V2-63) for NDJ→Dec**.
+  *Build sub-item:* confirm whether `driver_indices.nino34_anom_noaa` is the 3-month-running ONI or a
+  single-month anomaly before plotting it beside RONI on one axis. First-difference sd is 0.2669 for
+  `nino34_anom_noaa` vs 0.2087 for centre-mapped RONI — suggestive of different smoothing but not conclusive,
+  since RONI's tropical-mean subtraction also removes common variance. If they are differently processed, say
+  so in the caption rather than implying like-for-like.
+
+- **V2-70 · `wep_std_ond` built but never used · OPEN (minor).** The OND-season Western-V member has **zero
+  references** in the notebook despite being built and documented (`meta_build.py:245`), while `wnp_std_mam`
+  is wired hard (14+ sites: `notebook.qmd:213, 1069-1070, 1513, 1532, 1598-1602, 1816, 1848-1854, 2556-2570`).
+  Wire it into the OND story or drop it from the build — a built-but-unused column invites the assumption
+  that it is load-bearing. Related: both Western-V members are **derived in-house** on a Funk et al. basis
+  (`meta_build.py:244`), the only driver on the page that is not a published agency index; that status should
+  be stated wherever Western-V is shown.
+
+- **V2-71 · `observed_pct` is a fraction, rendered as if a percent · OPEN (bug).** `exposure_gfm_seasonal.observed_pct`
+  is stored 0–1, not 0–100 — the column name misleads. Marsabit 2023 OND: Laisamis 0.6389, Saku 0.6058
+  (= 63.9% / 60.6%), Moyale and North Horr both ~0.99998. Format with `d3.format(".1%")` as `pop_pct`
+  already is in `expMetricCfg`, or the page publishes "0.64% SAR coverage". Two related copy points: the
+  SAR coverage gap is a **Laisamis + Saku** statement, not Marsabit-wide — phrasing it county-wide is wrong
+  and undersells North Horr, the sub-county with real coverage behind its 2,150 people / 25.2 km; and
+  table-wide `min(observed_pct)` is `-0.0`, which renders as `-0` through a raw formatter.
+
+- **V2-72 · VoP chart absent; stale `used_by`; snapshot vintage unverified · OPEN.** `exposure_vop` has
+  **zero references** in `notebook.qmd`, yet `exposure_vop.meta.json` claims `used_by: notebook.qmd Block 1
+  (value-of-production bar + livestock-share insight)` — either the block was removed or was never built and
+  the metadata is aspirational; reconcile it, because stale `used_by` makes the metadata untrustworthy for
+  every other dataset. Numbers verified for the chart when built: Marsabit Livestock **$46.217M / 94.97%**,
+  Crop **$2.447M / 5.03%** (`vop_intld15`, constant 2015 I$). **Check the snapshot vintage before the 95%
+  pastoralist share becomes a headline** — there was a known Atlas-side bug carrying livestock VoP in nominal
+  USD rather than constant I$, inflating livestock ~7×, and this snapshot (pulled 2026-07-09) does not record
+  its vintage. 95% is plausible for Marsabit and the direction is certainly right, but it is exactly the
+  number that bug would produce.
+  **Scope constraint from D16(1):** `exposure_vop` is the MapSPAM/GLW *modelled* layer and **stays in place
+  only until a measured producer-price VoP lands**, at which point it moves to the annex labelled as modelled.
+  So build the chart, but do not invest in it as a permanent Block-1 headline, and label it modelled now.
+
+- **V2-73 · Terms-of-trade wiring: pivot + monthly framing · OPEN.** `market_prices` is long-format — there
+  are no `goat_val`/`maize_val` columns, and `period_date` is VARCHAR; the ToT needs a `max(CASE WHEN product
+  = ...)` pivot grouped by year+month (working SQL in the dispatch). Filter on **`market = 'Marsabit'`** not
+  on `county`: the county also contains `Marsabit Town` (49 obs, 2018+) and filtering by county splices two
+  series. Verified: 218 monthly observations each for `Maize Grain (White)` and `Goats (Local Quality)`,
+  2008-01-31 → 2026-05-31; units are goats `ea` and maize `kg`, both Retail, so KES/head ÷ KES/kg = kg maize
+  per goat. **Caption the framing:** ">50% collapse" holds on **monthly vs trailing-24-month peak**
+  (2011-08 −68.1%, 2022-10 −65.4%) and **fails on annual means** (2011 −32.5%, 2022 −37.6%) — a reader who
+  downloads the data and averages by year will not reproduce the headline. Two extras: the deepest point in
+  the whole series is **2023-02 at −68.1%**, the tail of the 2020–23 multi-season failure, so this indicator
+  should read "the 2020–23 drought" rather than "the 2022 drought"; and 2020 has only 9 paired months, so its
+  annual mean is not comparable to its neighbours.
+
+- **V2-74 · `execute:` block absent from the notebook frontmatter · OPEN (trivial).** `notebooks/KE-enso-explorer/notebook.qmd`
+  frontmatter carries only `pagetitle`, `hide: true`, `nb-authors`, `date-created`, `date-edited`.
+  `echo: false` is set project-wide at `_quarto.yml:74-75` so code is not echoing today, but `warning:` and
+  `message:` are set **nowhere** in `_quarto.yml` — those are unsuppressed. Add the block so the notebook's
+  render behaviour is self-evident rather than inherited, and to close the warning/message gap:
+  `execute: {echo: false, warning: false, message: false}`.
+
+- **Audit no-op, recorded so it is not re-opened:** the Tier-16 flood-exposure binding is **already done** —
+  `notebook.qmd:3030-3034` attaches the three pre-cooked parquets and `:3059-3062` queries them in
+  DuckDB-WASM. No client-side vector intersection remains; that was retired when the pre-cooked tables
+  landed (2026-09-09). Also note the three tables do **not** share one schema: only `exposure_gfm_seasonal`
+  has `season`/`year`/`observed_pct`; `exposure_jrc_rp` has `rp`/`flood_prone_km2`; `exposure_totals` is
+  denominators only. Code assuming a common schema will break on B and totals. And Marsabit's WorldPop total
+  is **365,683.09** — the figure 365,684 is the sum of the *rounded* sub-county parts, so pick one convention
+  if a county total is ever printed beside the sub-county table.

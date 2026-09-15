@@ -153,3 +153,65 @@ Each was put with the data checked first, so the options were real rather than h
    bar in era B (only 2 are nearly empty) and 57 clear it in both eras. The recent county records
    read cleanly almost everywhere, match today's boundaries and reporting system, and the full
    1990–2024 record stays one click away with its hatched gap.
+
+## D17 — four ENSO-driver calls ratified (Pete, 2026-09-15)
+
+Arising from the pipeline-session data audit (`dispatches/2026-09-15_reply-audit-drivers-and-explainer-recommendation.md`,
+GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
+
+1. **RONI end to end.** The notebook stands behind NOAA CPC **RONI**, not Niño 3.4. Pete: "the
+   justification for using RONI is strong." Rationale: RONI = ONI minus the tropical-mean (20°S–20°N)
+   SST anomaly, so it strips background tropical warming and measures the SST *gradient* — the only
+   mechanism by which Kenya feels ENSO at all. The forecast side was already RONI
+   (`enso_state_prob_build.py:8-9`), so this removes a genuine inconsistency: `roni_conc` and the OND
+   mean of `driver_indices.nino34_anom_noaa` correlate at r = 0.981 but differ by up to **0.567 °C**
+   on a *time-trending* gap (+0.20 mean 1981–95 → −0.30 mean 2015–25), so mixing them biased analogue
+   selection toward older years. **Consequence:** every ENSO number on the page is RONI, the label says
+   so, and the explainer names the index in one sentence (the `ISSUES.md:251` "ONI" naming and the qmd
+   "Niño 3.4" naming both retire). **Closes V2-64.**
+
+2. **Live ocean state = most recent available, fetched automatically from source — never typed.**
+   Pete: "it should be the most recent available information to date that we can obtain (preferably
+   automatically pulling from the source)." D14-compliant: a driver *index* is permitted; this is not a
+   Kenya-rainfall forecast, so D11 is untouched.
+
+   **This settles the `_conc` vs `_pred` question in favour of `_pred`, which is the opposite of the
+   current code.** The engine at `notebook.qmd:1734-1746` matches against `roni_conc` — the *in-season*
+   state. But for an outlook the target season has not happened yet, so the live value is necessarily a
+   **pre-season** observation. Matching a pre-season reading against historical in-season values compares
+   unlike things and flatters the apparent skill. The honest comparator is the lagged predictor already
+   built for exactly this: **OND ← JAS, MAM ← DJF** (`_sources/enso_outlook_build.py:10-11`).
+
+   **Implementation constraint that follows:** "most recent available" must mean *the predictor window for
+   the target season*, not literally the newest row. For an OND outlook the engine pulls the **JAS** value
+   (and DJF for MAM); if that window is not yet published, it says so rather than substituting a nearer
+   window — otherwise the comparator silently drifts out of alignment with `roni_pred` as the months pass.
+   Same rule for the DMI axis. **Feeds V2-65; note `dmi_pred` is NULL for OND 2025 (V2-67).**
+
+3. **Correlation and partial-correlation blocks move to the annex.** `notebook.qmd:2643-2726` — they
+   justify the method to a reviewer rather than informing a planner's decision, and they are the densest
+   thing on the page. Annex, not deleted: consistent with KE-11/D15 (technical figures live in §A1–A7,
+   whose readers are already in technical prose). **Feeds V2-66.**
+
+4. **Obtain monthly RONI.** Pete: "obtain monthly RONI and be thorough." **The audit's earlier claim that
+   monthly RONI does not exist was WRONG and is retracted here.** Verified against both the parquet and the
+   source: `RONI.ascii.txt` is `SEAS YR ANOM` carrying **12 overlapping 3-month windows per calendar year**
+   — one value per month, exactly the cadence of ONI — and `enso_drivers_seasonal` holds all 12 labels for
+   every year 1950–2026 (917 rows, 11.9/yr). So RONI plots on a monthly axis directly, by mapping each
+   window to its centre month: DJF→Jan, JFM→Feb, FMA→Mar, MAM→Apr, AMJ→May, MJJ→Jun, JJA→Jul, JAS→Aug,
+   ASO→Sep, SON→Oct, OND→Nov, NDJ→Dec. There is no *single-month* RONI, but that is inherent to the index
+   (it is a 3-month running mean by construction), not a gap in our data.
+
+   **Route: in-repo, not a pipeline ask.** `driver_indices.parquet` is externally staged by the D409
+   pipeline — no `_sources` script writes it — so adding a RONI column *there* would be a pipeline request.
+   Instead attach **`enso_drivers_seasonal.parquet`** (self-fetching in this repo, currently referenced
+   nowhere in the notebook) and do the centre-month mapping client-side. This needs no pipeline dependency,
+   and it refreshes on the same rerun that clears the V2-68 staleness. The notebook already has a
+   centred-window convention to follow (`rollCentre` / `zMonthly`, V2-45), including the NDJ quarantine
+   (V2-63) — **NDJ→Dec must respect that quarantine**. **Rewrites V2-69.**
+
+   *Open sub-item for the build:* confirm whether `driver_indices.nino34_anom_noaa` is the 3-month-running
+   ONI or a single-month anomaly before plotting it on one axis beside RONI. First-difference sd is 0.2669
+   for `nino34_anom_noaa` against 0.2087 for centre-mapped RONI — suggestive of different smoothing, but not
+   conclusive, since RONI's tropical-mean subtraction also removes common variance. If the two turn out to
+   be differently processed, say so in the caption rather than implying like-for-like.
