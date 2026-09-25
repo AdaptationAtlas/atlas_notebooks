@@ -240,4 +240,36 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   7. **Figure 3.5 Single Interactive Flood Explorer (ENSO-V3-045)**: Dual-layer diagnostic architecture integrating EC JRC GloFAS modelled riverine return periods (10–500 yr) with seasonal regimes and critical HOT-OSM infrastructure coverage caveats, alongside Copernicus GFM Sentinel-1 SAR observed flooded fraction and transparent radar coverage blindspot metrics.
   8. **Table 3.1 Multi-Hazard Baseline Summary**: Comprehensive multi-decadal hazard indicators with complete provenance footers.
 
+## D21 — WP-07 Section 4 Rebuild: Historical Impacts, Multi-Sector Vulnerability & Causal Boundaries (2026-09-25)
+- **RESOLVED.** Rebuilt Section 4 (Historical Impacts & Multi-Sector Vulnerability) adhering strictly to sequential implementation backlog WP-07:
+  1. **Standardized Section Header & 4-Sector Architecture**: Rebuilt `.enso-section-header` and `.enso-section-eyebrow` (`4 Historical Impacts • Multi-Sector Vulnerability`) dynamically bound to county. Added an editorial 4-domain reading guide card framing the critical causal boundary ("Association is Not Causation: Equatorial ocean indices alter conditional rainfall probabilities, but realized socioeconomic outcomes are mediated by agronomic management, livestock vaccination, soil memory, and market access"). Embedded `#sec4ToolbarHost.enso-sticky-toolbar` directly below the reading guide.
+  2. **Streamlined 4-Subtab Navigation**:
+     - `1 • Agricultural Production (KNBS)` (`subtab-production`)
+     - `2 • Rangeland Pasture & Terms of Trade` (`subtab-rangeland`)
+     - `3 • Flood Inundation & Asset Exposure` (`subtab-floods`)
+     - `4 • Humanitarian Appeals (ReliefWeb)` (`subtab-reliefweb`)
+  3. **Figure 4.1 & Table 4.1 (Agricultural Production vs Ocean Drivers)**:
+     - Unified bimodal reactive data model (`sec31Bimodal`) pairing KNBS audited production with preceding OND (Short Rains $t-1$) and concurrent MAM (Long Rains $t$).
+     - Implemented bimodal view toggle (`Plot (Dual Panel) | Table (Balance Sheet)`).
+     - Standardized legend title to `Commodity:`, added prominent lag banner for pastoral livestock (6–12 month demographic delay), expanded margins (marginRight: 95px) to eliminate label clipping at 1024px.
+     - Mounted `#fig41FooterHost` with complete dataset download and provenance metadata.
+  4. **Figure 4.2 & Table 4.2 (Empirical Ocean Driver Phase Response)**:
+     - Replaced plain bar chart with a high-fidelity **Dot + Range Interval Plot** showing: observed min-max range line, individual surveyed year dots, prominent circle marker for empirical mean, and sample size / year annotations ($n=X$).
+     - Implemented view mode toggle (`Range & Mean Plot | Phase Summary Table`).
+     - Eliminated 3 repetitive summary cards above the plot; unified all metrics into the reactive container `#sec31bContentHost`.
+     - Fixed footer host collision by isolating Section 2 Figure 2.2 to `#fig22FooterHost` and Section 4 Figure 4.2 to `#fig42FooterHost`.
+  5. **Subtab 2 (Rangeland Pasture & Terms of Trade)**:
+     - Figure 4.3: Continuous MODIS dekadal NDVI pasturage dynamics (864 dekads, 2002–2026) with benchmark crisis bands and `#fig43FooterHost`.
+     - Figure 4.4: Pastoral retail prices and Terms of Trade (ToT) purchasing power (kg maize grain / goat). Explicit formula callout prominently displayed: $\text{ToT} = \text{Goat Price (KES/head)} \div \text{Maize Price (KES/kg)}$ with the 25 kg/goat emergency collapse threshold.
+     - Table 4.3: Multi-hazard pasture anomalies and ToT shocks benchmark summary across major historical famine and drought epochs. Mounted `#fig44FooterHost`.
+  6. **Subtab 3 (Flood Inundation & Asset Exposure)**:
+     - Distinguishes physical flood hazard (Section 3.2) from downstream consequential human/asset exposure.
+     - Figure 4.5: Subcounty choropleth map and Table 4.4 exposure inventory table driven by Copernicus GFM SAR flood extents and JRC GloFAS return periods intersected with WorldPop 100m building footprints anchored to KNBS 2019 Census counts. Mounted full-width `#fig45FooterHost`.
+  7. **Subtab 4 (Humanitarian Disaster Chronology — ReliefWeb)**:
+     - Figure 4.6: UN OCHA ReliefWeb disaster situation reports (2010–2026) classified by deterministic first-match taxonomy (Drought $\to$ Flood $\to$ Epidemic $\to$ Other).
+     - Prominent institutional reporting notice: Clarifies that report volume reflects international humanitarian attention and donor appeal cycles rather than physical hazard severity alone.
+     - Removed redundant `viewof rwYearRange` slider to streamline controls; fixed full 2010–2026 record default.
+     - Table 4.5: Situation reports table with direct external links to full ReliefWeb appeals and bulletins. Mounted `#fig46FooterHost`.
+  8. **OJS Architectural Rigor**: Refactored Section 4 OJS reactive variables (`sec31Rain`, `sec31Spei`, `sec31ClimMAM`, `sec31ClimOND`, `sec31ProdRows`, `sec31SurveyedYears`, `sec31NdviSeasonal`, `sec31Medians`, `sec31Bimodal`, `COMMODITY_COLORS`, `sec31Chart`) into isolated single-variable code blocks, adhering strictly to the Observable JS rule.
+
 
