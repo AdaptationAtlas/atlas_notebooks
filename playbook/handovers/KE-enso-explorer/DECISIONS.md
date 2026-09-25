@@ -229,4 +229,15 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   4. **Figure 2.2 Multi-Hazard Compound Stress-Testing**: Historical analogue scenarios framed explicitly as planning precedent scenarios with Table 2.1 compound two-season outcome matrix. Ocean trajectory curve compares current cycle against selected analogue. Spatial view links directly to Section 3 to avoid map duplication.
   5. **Statutory Authority**: Citations updated to the Republic of Kenya **Meteorology Act No. 7 of 2026** and the **Kenya Meteorological Service Authority (KMSA)**, clarifying ongoing administrative transition from KMD branding. Advisory directory lists 6 verified operational agencies with verified URLs.
 
+## D20 — WP-06 Section 3 Rebuild: Empirical Climate Evidence, Dual-Tier Navigation & Observational Flood Grounding (2026-09-25)
+- **RESOLVED.** Rebuilt Section 3 (Historical Climate Evidence) adhering strictly to sequential implementation backlog WP-06:
+  1. **Dual Sub-Tab Navigation & Standardized Header**: Split historical evidence into Section 3.1 (`Climate Graphs`) and Section 3.2 (`Climate Maps`) with standardized `.enso-section-header` and `.enso-section-eyebrow` dynamically bound to county. Embedded an editorial 3-tier reading guide card.
+  2. **Geography Mode & Project Rule D1 Notice (ENSO-V3-040)**: Implemented `County summary | Compare sub-counties` mode with multi-card sub-county comparison panel. Bound strictly to Project Rule D1 prohibiting unverified statistical downscaling without Level 2 CHIRPS v3 rerun (`hazards_prototype#31`).
+  3. **Figure 3.1 Climatology (ENSO-V3-041)**: Compact controls (`Between-sub-county variation`, `Ocean-state markers`), interactive empirical-mean chips directly below season titles with `aria-pressed` toggle state, clean 2-digit years (`81`, `82`), explicit near-normal category, and data export footer.
+  4. **Figure 3.2 Tercile Distributions (ENSO-V3-042)**: Natural frequency primary metric (`X of Y seasons (Z%)`), 1991–2020 WMO baseline thresholds, and elimination of label clipping.
+  5. **Figure 3.3 Driver Scatter & Regression (ENSO-V3-043)**: Multi-driver comparison table (ENSO, IOD, Western-V) reporting $r$, $R^2$, $N$, and $p$-value; regression statistics badge; shared year highlighting; and data export footer.
+  6. **Figure 3.4 Gridded Satellite History Grid (ENSO-V3-044)**: Two-row controls, explicit `⬜ White = NoData` legend classification, client-side window caching, and architectural refactoring into isolated single-variable Observable JS cells to eliminate variable shadowing and hanging promises.
+  7. **Figure 3.5 Single Interactive Flood Explorer (ENSO-V3-045)**: Dual-layer diagnostic architecture integrating EC JRC GloFAS modelled riverine return periods (10–500 yr) with seasonal regimes and critical HOT-OSM infrastructure coverage caveats, alongside Copernicus GFM Sentinel-1 SAR observed flooded fraction and transparent radar coverage blindspot metrics.
+  8. **Table 3.1 Multi-Hazard Baseline Summary**: Comprehensive multi-decadal hazard indicators with complete provenance footers.
+
 
