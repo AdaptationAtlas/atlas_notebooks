@@ -272,4 +272,25 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Table 4.5: Situation reports table with direct external links to full ReliefWeb appeals and bulletins. Mounted `#fig46FooterHost`.
   8. **OJS Architectural Rigor**: Refactored Section 4 OJS reactive variables (`sec31Rain`, `sec31Spei`, `sec31ClimMAM`, `sec31ClimOND`, `sec31ProdRows`, `sec31SurveyedYears`, `sec31NdviSeasonal`, `sec31Medians`, `sec31Bimodal`, `COMMODITY_COLORS`, `sec31Chart`) into isolated single-variable code blocks, adhering strictly to the Observable JS rule.
 
+## D22 — Weather-Station Analysis Spike: NO-GO for v3 UI Charting, GO for CHIRPS Satellite-Gauge Justification (2026-09-25)
+- **RESOLVED.** Evaluated in-situ station availability across Kenya (Meteostat / KMD station records, ENSO-V3-061):
+  1. **Extreme Spatial Sparsity**: Over 37 of Kenya's 47 counties (especially pastoral ASALs like Marsabit, Turkana, Wajir, Mandera, Isiolo) have zero high-frequency digital stations.
+  2. **Runway Microclimate Bias**: Existing long-record stations are concentrated almost exclusively at commercial airports and military airstrips (e.g. Wilson, Jomo Kenyatta, Moi International, Kisumu, Lodwar, Eldoret). Their microclimate is unrepresentative of surrounding rural agricultural and pastoral basins.
+  3. **High Missingness & Discontinuous Records**: Station time series exhibit multi-month gaps and undocumented instrument relocations.
+  4. **Decision Gate**: **NO-GO for v3 UI station charting / subtabs** (avoids presenting misleading, sparse, or unrepresentative records to county planners). **GO for satellite-gauge CHIRPS v3 justification**: The extreme sparsity of in-situ telemetry provides the primary scientific and policy justification for serving 5 km blended satellite-gauge CHIRPS v3 as the universal spatial rainfall backbone in Section 3 and Section 5.
+
+## D23 — AgroClimateAF Specialized Agroclimatic Indices Spike: NO-GO for v3 UI Integration, GO for v4 Research Roadmap (2026-09-25)
+- **RESOLVED.** Evaluated `jemsethio/AgClimateAF_indices` repository and associated agroclimatic index pipelines (ENSO-V3-062):
+  1. **Disallowed Model Dependencies**: The pipeline relies on third-party seasonal forecast engines (SEAS5/C3S/NMME) for forward projections, violating Project Rule D11.
+  2. **Pipeline Immaturity & Fragile Production Footprint**: The codebase lacks a reproducible CI/CD GeoParquet compilation pipeline, unit test suite, and verified Kenyan agro-ecological zoning configurations.
+  3. **Redundant Physical Drivers**: Core drought and water balance dynamics are already robustly quantified in v3 via validated multi-sensor CHIRPS v3 rainfall, dekadal MODIS NDVI vegetation health, FEWS NET WRSI crop water satisfaction, and Vicente-Serrano SPEI-3 standardized moisture balances.
+  4. **Decision Gate**: **NO-GO for v3 UI integration** (deferred to Deferred Feature Backlog ENSO-V3-F03). **GO for v4 Research Roadmap**: Defined research requirements (onset/cessation algorithms, dry spell runs, and heat stress thresholds) documented in Section 5 Table 5.3 for potential integration if an audited, KMSA-co-produced national pipeline is developed.
+
+## D24 — Process-Based Crop Simulation Models (DSSAT / APSIM) Spike: NO-GO for Production UI, Anti-AI Slop Mandate (2026-09-25)
+- **RESOLVED.** Evaluated biophysical process-based crop modeling (DSSAT, APSIM, WOFOST) for county yield and planting date optimization (ENSO-V3-063):
+  1. **Anti-AI Slop & Anti-Hallucination Integrity (Project Rule D1)**: Running uncalibrated crop simulation models across 47 counties without verified site-specific soil physical profiles (ISRIC / AfSIS), locally calibrated cultivar genetic coefficients (e.g. Kenya Seed Company H614 or SC Dumbuka), and audited field planting dates produces pseudoscientific, fabricated yield projections.
+  2. **Lack of Representative Observational Priors**: Standardized agronomic management data (fertilizer application rates, weed control regimes, sowing depth) are unavailable at sub-county resolution across Kenya.
+  3. **Decision Gate**: **NO-GO for production UI yield or planting-date charting** (deferred to ENSO-V3-F04). The notebook serves strictly empirical, audited historical statistics (KNBS agricultural production balances and FEWS NET market purchasing power) rather than uncalibrated synthetic model outputs. **GO for research specification**: Documented formal biophysical prerequisites in Section 5 Table 5.3 as a long-term CGIAR/KALRO agronomic research roadmap.
+
+
 
