@@ -292,5 +292,25 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   2. **Lack of Representative Observational Priors**: Standardized agronomic management data (fertilizer application rates, weed control regimes, sowing depth) are unavailable at sub-county resolution across Kenya.
   3. **Decision Gate**: **NO-GO for production UI yield or planting-date charting** (deferred to ENSO-V3-F04). The notebook serves strictly empirical, audited historical statistics (KNBS agricultural production balances and FEWS NET market purchasing power) rather than uncalibrated synthetic model outputs. **GO for research specification**: Documented formal biophysical prerequisites in Section 5 Table 5.3 as a long-term CGIAR/KALRO agronomic research roadmap.
 
+## D25 — WP-09 Section 6 Rebuild: Sources, Methods & 100% CDH v0.3.0 Provenance Lineage (2026-09-25)
+- **RESOLVED.** Rebuilt Section 6 (Sources, Methods & CDH Provenance Lineage) adhering strictly to sequential implementation backlog WP-09:
+  1. **Standardized Section Header & 5-Subsection Architecture**: Rebuilt `.enso-section-header` and `.enso-section-eyebrow` (`6 Data Sources • Analytical Methods & CDH Provenance Lineage`). Structured into 5 visible, navigable subsections with clean responsive layout.
+  2. **Subsection 6.1 (Official Citation & Institutional Custodians)**: Citation text matches Section 0 verbatim; interactive copy button with animated confirmation feedback; 6 collaborating partner cards (CGIAR/Alliance, RCMRD, KMSA, KNBS, NDMA, ICPAC).
+  3. **Subsection 6.2 (Analysis Methods & Formulations)**: 6 formula cards with clean HTML math typography:
+     - Spatial Zonal Aggregation & Waterbody Pre-masking (HydroLAKES v1.0 and RCMRD 30m Land Cover pre-masking permanent open water).
+     - Climatological Baselines & Tercile Partitioning (1991–2020 WMO normal, $\pm 0.4307\sigma$).
+     - Linear Detrending & Secular Tropical Warming Adjustment (NOAA CPC RONI baseline $\mu_{\text{tropics}}$ removal).
+     - Multi-Month Analogue Nearest-Neighbour Distance Metric ($D_i$, z-score standardized trajectory matching).
+     - Hydrodynamic Flood Hazard & Asset Exposure Intersection (WorldPop 100m + KNBS 2019 Census, Blank $\neq$ Zero, GFM mask 255 exclusion).
+     - Socioeconomic Terms of Trade (ToT) Purchasing Power (Amartya Sen Entitlements, 25 kg/goat emergency collapse threshold).
+  4. **Subsection 6.3 (Master Dataset Catalogue & CDH v0.3.0 Governance)**:
+     - Authored authoritative CDH v0.3.0 YAML metadata files in `hazards_prototype/metadata/cdh/`: `enso-driver-indices.yaml`, `livestock-vop.yaml`, and `knbs-napr.yaml`.
+     - Updated `data/KE-enso-explorer/_sources/provenance_keymap.json`, bringing total CDH metadata coverage to 22/22 (100% `state: authored`).
+     - Added real-time search input with clear button, single category select dropdown (`#datasetCategorySelect`), and 22 interactive dataset cards with CDH status badges.
+     - Enhanced `helpers/provenanceDrawer.js` to populate category select dropdown and isolated z-index hierarchy (drawer `z-index: 2010`, close button `z-index: 2020`, backdrop `z-index: 2000`) to guarantee click reliability without backdrop interception.
+  5. **Subsection 6.4 (Analytical Limitations & Data Gaps)**: 5 structured operational boundary cards (Uncalibrated crop models gated [D24], In-situ station telemetry scarcity [D22], Radar revisit blindspots [Blank $\neq$ Zero], ReliefWeb reporting volume $\neq$ physical hazard severity, KNBS administrative estimates vs census).
+  6. **Subsection 6.5 (Reproducibility & Update Toolchain)**: Terminal command block documenting `napr_build.py`, `enso_drivers_build.py`, `provenance_build.py`, and `quarto render`.
+
+
 
 

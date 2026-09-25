@@ -438,18 +438,24 @@
   }
 
   function renderFilters() {
-    var box = document.getElementById('datasetCategoryFilters');
-    if (!box) return;
     var counts = {};
     S.entries.forEach(function (e) { counts[e.category] = (counts[e.category] || 0) + 1; });
-    var html = '<button type="button" class="filter-pill active" data-prov-cat="all">All datasets (' +
-      S.entries.length + ')</button>';
-    S.categories.forEach(function (c) {
-      if (!counts[c.id]) return;
-      html += '<button type="button" class="filter-pill" data-prov-cat="' + esc(c.id) + '">' +
-        esc(c.label) + ' (' + counts[c.id] + ')</button>';
-    });
-    box.innerHTML = html;
+
+    var select = document.getElementById('datasetCategorySelect');
+    if (select) {
+      var optHtml = '<option value="all">All categories (' + S.entries.length + ' datasets)</option>';
+      S.categories.forEach(function (c) {
+        if (!counts[c.id]) return;
+        optHtml += '<option value="' + esc(c.id) + '">' + esc(c.label) + ' (' + counts[c.id] + ')</option>';
+      });
+      select.innerHTML = optHtml;
+    }
+
+    var box = document.getElementById('datasetCategoryFilters');
+    if (box) {
+      box.innerHTML = '';
+      box.style.display = 'none';
+    }
   }
 
   function renderCatalogue() {
