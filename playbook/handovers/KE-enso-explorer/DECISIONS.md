@@ -215,3 +215,18 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
    for `nino34_anom_noaa` against 0.2087 for centre-mapped RONI — suggestive of different smoothing, but not
    conclusive, since RONI's tropical-mean subtraction also removes common variance. If the two turn out to
    be differently processed, say so in the caption rather than implying like-for-like.
+
+## D18 — JRC ASAP crop calendar rejected on provenance; national sources only (Pete, 2026-09-22)
+- **RESOLVED.** The third-party European Commission JRC ASAP dataset (`seasonal_calendar.parquet`) is **rejected as not appropriate on provenance grounds**. 
+- Any crop-calendar or agricultural timing layer served in this notebook must be **local information preparable from authoritative Kenyan national documentation** (e.g. Kenya Ministry of Agriculture & Livestock Development [MoALD], Kenya Meteorological Department [KMD] county agro-weather advisories, or KALRO/KNBS publications) that we have independently extracted, analyzed, and logged under our audited verification protocol.
+- `seasonal_calendar.parquet` remains unattached. Documented in GitHub Issue #50.
+
+## D19 — WP-05 Section 2 Architecture, Natural Frequency Presentation & Statutory Grounding (2026-09-25)
+- **RESOLVED.** Rebuilt Section 2 (Seasonal Outlook & Preparedness) adhering strictly to sequential implementation backlog WP-05:
+  1. **Three-Tier Early Warning Architecture**: Separates physical driver telemetry (Tier 1: Pacific RONI + HadISST DMI), statutory seasonal outlook (Tier 2: KMSA terciles), and empirical stress-test scenarios (Tier 3: 8 historical analogues).
+  2. **Rule D1 Live Telemetry Hero Card**: 100% data-driven, binding directly to `currentState` and `probRow` with verified observation vintage; eliminates all hardcoded dates or forecast percentages.
+  3. **Figure 2.1 Natural Frequency First & Sample Size Callout**: Primary statistic presents natural frequency first (`X of 8 seasons` in top tercile) with percentage subtitle and prominent small-sample warning callout (`N = 8`). Includes 24-month forecast plume view tracking RONI evolution into 9-month CPC envelope with operational thresholds (±0.5 °C).
+  4. **Figure 2.2 Multi-Hazard Compound Stress-Testing**: Historical analogue scenarios framed explicitly as planning precedent scenarios with Table 2.1 compound two-season outcome matrix. Ocean trajectory curve compares current cycle against selected analogue. Spatial view links directly to Section 3 to avoid map duplication.
+  5. **Statutory Authority**: Citations updated to the Republic of Kenya **Meteorology Act No. 7 of 2026** and the **Kenya Meteorological Service Authority (KMSA)**, clarifying ongoing administrative transition from KMD branding. Advisory directory lists 6 verified operational agencies with verified URLs.
+
+

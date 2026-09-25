@@ -13,6 +13,47 @@ report series = one dataset). Build scripts live in [`_sources/`](./_sources/).
   explorer/` — private, **not versioned**. Run raw-reading scripts with
   `/Users/pstewarda/miniforge3/bin/python3` (has pandas/pyarrow/pdfplumber/fitz).
 - CGIAR Climate Data Hub / S3: **not yet** (no submission).
+- **Provenance projection**: `provenance.json` — generated, never hand-edited. See below.
+
+## Provenance — one generated projection, no third copy
+
+The notebook's provenance drawer and the Section 6 master catalogue both render from
+`provenance.json`, built by [`_sources/provenance_build.py`](./_sources/provenance_build.py) out of the
+two upstream metadata stores in `hazards_prototype`:
+
+| Store | Owns |
+|---|---|
+| `metadata/cdh/*.yaml` (CDH v0.3.0) | licence, attribution, citation, caveats (`note`), not-recommended uses, coverage, assets, processing, dimensions/variables |
+| `metadata/catalogue/*.json` (issue #29) | host location, transfer strategy, stage wiring, status, `gaps[]` |
+
+Rules (contract: `hazards_prototype/HANDOVER_2026-09-18_provenance-drawer-and-metadata-gaps.md` §1):
+
+- **Never hand-write a licence, citation, attribution string or caveat into `notebook_v3.qmd`,
+  `provenance_keymap.json` or `provenance.json`.** Those three would be a third copy and will drift.
+  Fix the CDH record upstream and rebuild.
+- `_sources/provenance_keymap.json` carries **ids and UI routing only** — notebook handle, aliases,
+  category, which CDH/catalogue record it maps to, which parquets it backs.
+- `note` is rendered **verbatim**, in full, never collapsed. That is where "255 = not observed, NOT
+  dry", the SAR gaps, the GFM-vs-CHIRPS NDJ/DJF label mismatch and the KNBS 345-vs-290 admin trap live.
+- Two orthogonal axes are both rendered: `state` (`authored` / `draft` / `invalid` / `catalogue-only` /
+  `undocumented`) and `hosting` (`atlas` / `federated` / `unknown`). A dataset with no record renders
+  **"provenance not documented"**, never a blank.
+
+Rebuild (state is probed against the real CDH validator when a checkout is available):
+
+```sh
+git clone --depth 1 --branch v0.3.0 \
+  https://github.com/CGIAR-Climate-Data-Hub/cdh-metadata-standard.git /tmp/cdh-std && (cd /tmp/cdh-std && npm ci)
+uv run --with pyyaml python data/KE-enso-explorer/_sources/provenance_build.py
+npm exec --yes --package=jsdom -- node data/KE-enso-explorer/_sources/provenance_drawer_test.js
+```
+
+Without the checkout the build still runs, but every entry records `state_basis: "version-probe"` —
+a soft check that must not be reported as a strict one.
+
+Current coverage (2026-09-18): **14 authored, 2 catalogue-only, 6 undocumented** of 22 entries. The 8
+non-authored datasets are tracked in
+`playbook/handovers/KE-enso-explorer/dispatches/2026-09-18_request-cdh-draft-records.md`.
 
 ## Reproducibility legend
 - **git-full** — the script fetches the source and builds the parquet with no external inputs; anyone
@@ -104,7 +145,18 @@ report series = one dataset). Build scripts live in [`_sources/`](./_sources/).
 - **Source/URLs:** IPC <https://fews.net/>; FDW retail prices <https://fdw.fews.net/>; cross-border trade
   <https://fews.net/>. **Reproducibility:** `xbt_trade` has `_sources/parse_xbt.py` (git-transform);
   `ipc_county` + `market_prices` are D409-only.
-- **Licence:** FEWS NET (public).
+- **Licence:** FEWS NET — reading and display unencumbered. **Redistribution caveat:** FEWS NET states
+  that third-party series held in the warehouse may not be redistributed without the originating
+  provider's consent, and market prices are usually collected by national agencies. Display is fine;
+  **identify the originating agency for a given series before republishing it.**
+- **Terms of trade is ours, not FEWS'.** No agency publishes it. The notebook derives it client-side
+  (`notebook_v3.qmd` `totRows`) as median goat price (KES/head) ÷ median maize-grain price (KES/kg) per
+  county-month. Being a ratio it is ambiguous alone — a fall can mean cheaper livestock **or** dearer
+  grain, which imply opposite responses — so it must be read against both price legs.
+- **NDMA is not a source here.** No NDMA bulletin is ingested anywhere in this notebook. Earlier
+  "FEWS NET / NDMA" provenance strings were unsupported and were removed (2026-09-18). NDMA still
+  appears as an *institution* (KMSA bulletin co-authorship, the Table 4.3 advisory directory) — that is
+  a statement about those bodies, not about our data.
 - **Files:** `ipc_county.parquet` · `market_prices.parquet` · `xbt_trade.parquet` (+`.meta.json`).
 
 ### 9. ACLED — conflict

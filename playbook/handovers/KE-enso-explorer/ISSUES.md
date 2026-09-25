@@ -750,21 +750,18 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   distance cannot use. Refetch DMI before the V2-65 engine is trustworthy. RONI itself is **complete and
   zero-null** 1981–2025, so the engine switch needs no new data on that axis.
 
-- **V2-68 · Driver/forecast refresh + harden the CPC parser against a column swap · OPEN.** (a) RONI runs
-  only to **AMJ 2026** (fetched ~2026-07-10) — the current season is absent, so no "live ocean state" can be
-  read from our own data yet; rerun `_sources/enso_drivers_build.py` (self-fetching, a rerun not new code).
-  (b) `enso_state_probabilities` is two issuances stale (stored July 2026, live September 2026); the **OND
-  row is 0/0/100 in both so the selected phase is unaffected** — hygiene, not a live defect — but rerun
-  `enso_state_prob_build.py`. (c) **Parser fragility, worth fixing while this is open:** the values looked
-  implausible (El Niño 100% across seven seasons) and were **verified correct against the live CPC page** —
-  column order really is `La Niña, Neutral, El Niño` and the 100% values are genuinely published (corroborated
-  by the window rolling forward exactly two months, `FMA = 97` identical across both issuances, and September
-  adding `MAM 0/18/82` + `AMJ 2/55/43`; it also reconciles with observed RONI DJF-2026 −0.88 → AMJ-2026 +0.47,
-  a decayed La Niña warming into an El Niño our record does not yet reach). **But** `enso_state_prob_build.py:25-28`
-  keys the three values off *positional* column order and the row gate only checks they sum to ~100 — which
-  `0+0+100` passes whichever way the columns sit. A future CPC redesign that swaps columns would invert the
-  forecast phase **silently**, and phase inversion flips the analogue set, which flips the rainfall outlook.
-  Key off the header cells, or assert the header text reads `La Niña / Neutral / El Niño` left to right.
+- **V2-68 · Driver/forecast refresh + harden the CPC parser against a column swap · DONE 2026-09-20.**
+  (a) Reran `_sources/enso_drivers_build.py`: refreshed `enso_drivers_monthly.parquet` (2,785 rows) and
+  `enso_drivers_seasonal.parquet` (3,700 rows) with observed RONI extending through JJA 2026 (+1.36 °C).
+  (b) Reran `_sources/enso_state_prob_build.py`: refreshed `enso_state_probabilities.parquet` and `.meta.json`
+  (synced to both `data/` and `_site/data/`) to September 2026 issuance (ASO through AMJ; OND is 0/0/100,
+  MAM is 0/18/82).
+  (c) Hardened CPC table parser: dynamically inspects `<th scope="col">` headers (`Season`, `La Niña`,
+  `Neutral`, `El Niño`) to map column positions rather than relying on positional assumptions. Explicit gate
+  assertions ensure all 4 columns are identified and each row sums to 97%–103%.
+  (d) Updated `notebook_v3.qmd` `outlookForecast` cell to take direct advantage of published MAM probabilities
+  now present in the 9-season rolling window (falling back to FMA proxy only if absent). Browser verified
+  with zero console errors on preview.
 
 - **V2-69 · Add monthly RONI to the driver charts via centre-month mapping · OPEN (D17(4)).**
   **Correction: the earlier claim that monthly RONI does not exist was WRONG.** Verified against both the
@@ -844,3 +841,27 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   denominators only. Code assuming a common schema will break on B and totals. And Marsabit's WorldPop total
   is **365,683.09** — the figure 365,684 is the sum of the *rounded* sub-county parts, so pick one convention
   if a county total is ever printed beside the sub-county table.
+
+- **V2-75 · WRSI `cropland`/`rangeland` are inverted upstream · OPEN (blocking the rangeland story) · pipeline.**
+  Marsabit renders a near-empty card every year on **Crop-water (WRSI) · rangeland** — 8 of 614 county
+  pixels valid (1%) for OND, 18 (3%) for MAM — while `crop=cropland` covers the same county at 98%. The two
+  published footprints are near-complementary and the opposite of their names: "cropland" covers the ASAL at
+  98–100% (Mandera, Marsabit, Wajir, Turkana, Garissa) and **0% of the maize belt** (Trans Nzoia, Uasin
+  Gishu, Kakamega, Nakuru); "rangeland" covers the maize belt at 95–100% and ~0% of the ASAL. Cause is
+  `hazards_prototype/python/ingest_wrsi_fews.py:49-53`, whose header already flags `ek`/`et` as UNVERIFIED:
+  the FEWS instruction PDF shipped inside every product zip (`W_images.pdf`, Table 1, 2025-02-03) states
+  **`E1`/`E2` = Rangeland** (Sep–Jan / Feb–Jul) and **`ET`/`EE` = Maize** (Oct–Feb / Mar–Nov), `EK` =
+  Sorghum **belg** (Mar–Sep). The bake is faithful — S3 objects match the raw upstream `*eo.tif` per county
+  to within rounding (`cropland_OND_2015` ≡ `east1/w201536e1`, `rangeland_OND_2015` ≡ `eastt/w201536et`) —
+  so this is purely which product went to which path. **Two consequences beyond Marsabit:** `rangeland/MAM`
+  is `ek`, an Ethiopian-highland belg product with 839 valid pixels in the whole Kenya bbox and ~0% in
+  **all 47 counties**, so that view is blank nationwide and has been since ingest; and the real long-rains
+  maize layer (`ee`, Mar–Nov) was **never ingested**, so there is no honest cropland MAM layer at all.
+  Requested repath is in `dispatches/2026-09-18_request-wrsi-crop-rangeland-inversion.md` §5. After the fix
+  Marsabit rangeland goes 1% → 98–100% in both seasons. Checked and ruled out: the deferred `ee`/`el` zones
+  do **not** fill the northern hole under the current labels (Marsabit 1%, Mandera 0%, Wajir 4%) — the
+  inversion is the entire explanation. EOS dekads are fine and need no revisit (extended WRSI `e1` 2015
+  dk36 Kenya-bbox mean 91.0 vs the same season at 2016 dk03 = 90.8, i.e. converged).
+  *Notebook side, done:* the Fig 2.4 / 3.1 grid now detects an all-nodata county × domain × season and
+  renders a "no WRSI zone coverage" notice instead of a grid of blank cards, so a zone gap is visible
+  rather than silent. That guard is not a workaround and stays after the repath.
