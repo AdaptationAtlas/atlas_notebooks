@@ -311,6 +311,17 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   5. **Subsection 6.4 (Analytical Limitations & Data Gaps)**: 5 structured operational boundary cards (Uncalibrated crop models gated [D24], In-situ station telemetry scarcity [D22], Radar revisit blindspots [Blank $\neq$ Zero], ReliefWeb reporting volume $\neq$ physical hazard severity, KNBS administrative estimates vs census).
   6. **Subsection 6.5 (Reproducibility & Update Toolchain)**: Terminal command block documenting `napr_build.py`, `enso_drivers_build.py`, `provenance_build.py`, and `quarto render`.
 
-
-
-
+## D26 — WP-10 Final Regression Release Gate, Accessibility & Multi-County Verification (2026-09-25)
+- **RESOLVED.** Successfully executed and passed the comprehensive WP-10 release regression gate:
+  1. **Zero Duplicate HTML IDs**: Eliminated 13 duplicate placeholder IDs across static and dynamic templates (`fig22ContentHost`, `gesiCountyProfileLink`). Audit confirmed 180/180 completely unique IDs.
+  2. **Zero Console & Zero Page Errors**: Full headless browser end-to-end regression test suite (`scratch/verify_wp10.mjs`) passed across all 11 phases with 0 console errors and 0 page uncaught exceptions.
+  3. **Cross-County Reactive Matrix (Marsabit, Turkana, Kakamega, Mombasa)**: Verified dynamic reactive updates without stale previous-county artifacts. All 23 dynamic `.county-name-txt` spans updated synchronously.
+  4. **Multi-Season & Driver State Switching**: Verified bi-seasonal toggles (OND $\leftrightarrow$ MAM) and teleconnection driver selection (RONI, DMI, Western-V) across global sticky controls.
+  5. **Defensive Geometry & Null-State Hardening**: Hardened `ringsOf` and `countyBbox` against null/undefined geometry features with graceful Kenya bbox fallbacks (`[33.5, -4.8, 42.0, 5.5]`). Hardened `countyNorm` and `currentGesiCountyName` against null string method invocation.
+  6. **Multi-Viewport Responsive & Mobile Layout**:
+     - Verified zero horizontal page overflow across desktop (1440px), tablet landscape (1024px), and tablet portrait (768px).
+     - Fixed mobile (390px) hero container flex-basis (`flex: 1 1 280px; min-width: 0;`) and institutional partner logos row (`flex-wrap: wrap;`), bringing document scrollWidth to exactly 390px.
+     - Captured multi-resolution screenshot artifacts: `wp10_1440px.png`, `wp10_1024px.png`, `wp10_768px.png`, `wp10_390px.png`.
+  7. **Figure Footers & Download Affordances**: Verified 18 complete figure/table footers with split-button downloads (PNG, SVG, CSV) and metadata header stamps.
+  8. **Keyboard Accessibility**: Verified tab navigation and escape key handler closing the provenance drawer cleanly.
+  9. **Production Quarto Render**: `quarto render notebooks/KE-enso-explorer/notebook_v3.qmd` completed cleanly with exit code 0, generating production artifact `_site/notebooks/KE-enso-explorer/notebook_v3.html`.
