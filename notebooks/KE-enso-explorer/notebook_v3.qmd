@@ -2750,6 +2750,28 @@ wrapTickLabel = (label, maxWidth = 10) => {
       border-color: #1d4ed8 !important;
       box-shadow: 0 1px 2px rgba(37, 99, 235, 0.25) !important;
     }
+    .btn-driver-tab {
+      background: #ffffff !important;
+      border: 1.5px solid #cbd5e1 !important;
+      border-radius: 6px !important;
+      padding: 4px 11px !important;
+      font-size: 0.78rem !important;
+      font-weight: 700 !important;
+      cursor: pointer !important;
+      color: #475569 !important;
+      transition: all 0.15s ease !important;
+      line-height: 1.25 !important;
+    }
+    .btn-driver-tab:hover {
+      background: #f8fafc !important;
+      border-color: #94a3b8 !important;
+    }
+    .btn-driver-tab.active {
+      background: #0284c7 !important;
+      color: #ffffff !important;
+      border-color: #0369a1 !important;
+      box-shadow: 0 1px 3px rgba(2, 132, 199, 0.25) !important;
+    }
     .iri-plume-grid {
       display: grid !important;
       grid-template-columns: minmax(0, 1fr) 280px !important;
@@ -15474,15 +15496,17 @@ sec5LiveHero = {
 // =============================================================================
 
 iriPlumeBundle = FileAttachment("/data/KE-enso-explorer/iri_forecast_plume.json").json()
+iodPlumeBundle = FileAttachment("/data/KE-enso-explorer/iod_forecast_plume.json").json()
 
 sec2PlumeHero = {
   if (!iriPlumeBundle || !iriPlumeBundle.current) {
-    return html`<div style="padding: 1rem; color: #b91c1c;">IRI ENSO Plume feed unavailable.</div>`;
+    return html`<div style="padding: 1rem; color: #b91c1c;">Forecast Plume feed unavailable.</div>`;
   }
 
   const container = html`<div style="width: 100%;"></div>`;
 
-  // Local interactive state: hindcast seasons to show
+  // Reactive default driver from global driverKind selector, can also be toggled locally
+  let activeDriver = (driverKind && driverKind.includes("IOD")) ? "IOD" : "ENSO";
   let hindcastSeasons = 6;
 
   const seasons_order = ['DJF', 'JFM', 'FMA', 'MAM', 'AMJ', 'MJJ', 'JJA', 'JAS', 'ASO', 'SON', 'OND', 'NDJ'];
@@ -15503,58 +15527,76 @@ sec2PlumeHero = {
     }
   }
 
-  // Observed map
-  const obs_map = {};
-  if (iriPlumeBundle.observed) {
-    for (const item of iriPlumeBundle.observed) {
-      const [yStr, mStr] = item.date.split('-');
-      const y = parseInt(yStr, 10);
-      const m = parseInt(mStr, 10);
-      const s = seasons_order[m - 1];
-      obs_map[s + '_' + y] = item.value;
-    }
-  }
-  obs_map['MJJ_2026'] = 1.5067;
-  const latestObsVal = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : 1.44;
-  obs_map['JAS_2026'] = latestObsVal;
-
-  // Build forward forecast ensemble statistics for the 9 forecast seasons (ASO '26 to AMJ '27)
-  const fcstSeasons = ['ASO', 'SON', 'OND', 'NDJ', 'DJF', 'JFM', 'FMA', 'MAM', 'AMJ'];
-  const fcstStats = [];
-
-  // Anchor at the latest observed season (JAS '26)
-  fcstStats.push({
-    label: "JAS '26",
-    season: "JAS",
-    year: 2026,
-    min: latestObsVal,
-    max: latestObsVal,
-    median: latestObsVal,
-    mean: latestObsVal,
-    count: 28
-  });
-
-  fcstSeasons.forEach((s, idx) => {
-    const sy = ['ASO', 'SON', 'OND', 'NDJ'].includes(s) ? 2026 : 2027;
-    const vals = iriPlumeBundle.current.models
-      .map(m => m.data[idx])
-      .filter(v => v != null)
-      .sort((a,b) => a - b);
-    if (vals.length > 0) {
-      fcstStats.push({
-        label: s + " '" + String(sy).slice(2),
-        season: s,
-        year: sy,
-        min: d3.min(vals),
-        max: d3.max(vals),
-        median: d3.median(vals),
-        mean: d3.mean(vals),
-        count: vals.length
-      });
-    }
-  });
-
   function renderPlume() {
+    const isIOD = (activeDriver === "IOD");
+    const bundle = isIOD ? iodPlumeBundle : iriPlumeBundle;
+    if (!bundle || !bundle.current) return;
+
+    const themeColor = isIOD ? "#0f766e" : "#2563eb";
+    const themeBg = isIOD ? "#f0fdfa" : "#eff6ff";
+    const ribbonColor = isIOD ? "#99f6e4" : "#93c5fd";
+
+    // Build observed map
+    const obs_map = {};
+    if (bundle.observed) {
+      for (const item of bundle.observed) {
+        const [yStr, mStr] = item.date.split('-');
+        const y = parseInt(yStr, 10);
+        const m = parseInt(mStr, 10);
+        const s = seasons_order[m - 1];
+        obs_map[s + '_' + y] = item.value;
+      }
+    }
+    if (isIOD) {
+      obs_map['MJJ_2026'] = -0.44;
+      const latestDmi = (currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : -0.44;
+      obs_map['JAS_2026'] = latestDmi;
+    } else {
+      obs_map['MJJ_2026'] = 1.5067;
+      const latestRoni = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : 1.44;
+      obs_map['JAS_2026'] = latestRoni;
+    }
+
+    const latestObsVal = isIOD 
+      ? ((currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : -0.44)
+      : ((currentState && currentState.roniLatest != null) ? currentState.roniLatest : 1.44);
+
+    // Build forward forecast ensemble statistics for the 9 forecast seasons
+    const fcstSeasons = ['ASO', 'SON', 'OND', 'NDJ', 'DJF', 'JFM', 'FMA', 'MAM', 'AMJ'];
+    const fcstStats = [];
+
+    // Anchor at the latest observed season (JAS '26)
+    fcstStats.push({
+      label: "JAS '26",
+      season: "JAS",
+      year: 2026,
+      min: latestObsVal,
+      max: latestObsVal,
+      median: latestObsVal,
+      mean: latestObsVal,
+      count: bundle.current.models.length
+    });
+
+    fcstSeasons.forEach((s, idx) => {
+      const sy = ['ASO', 'SON', 'OND', 'NDJ'].includes(s) ? 2026 : 2027;
+      const vals = bundle.current.models
+        .map(m => m.data[idx])
+        .filter(v => v != null)
+        .sort((a,b) => a - b);
+      if (vals.length > 0) {
+        fcstStats.push({
+          label: s + " '" + String(sy).slice(2),
+          season: s,
+          year: sy,
+          min: d3.min(vals),
+          max: d3.max(vals),
+          median: d3.median(vals),
+          mean: d3.mean(vals),
+          count: vals.length
+        });
+      }
+    });
+
     const firstFcstIdx = all_seasons.findIndex(s => s.id === 'ASO_2026');
     let startIdx = firstFcstIdx - hindcastSeasons;
     if (hindcastSeasons === 0) startIdx = firstFcstIdx - 1; // Anchor at JAS '26
@@ -15576,29 +15618,45 @@ sec2PlumeHero = {
     const targetSeasonTitle = isOND ? "OND 2026 (Short Rains)" : "MAM 2027 (Long Rains)";
 
     const targetStat = fcstStats.find(d => d.season === (isOND ? 'OND' : 'MAM')) || fcstStats[3];
-    const targetMedian = targetStat ? targetStat.median : (isOND ? 3.10 : 1.30);
-    const targetMin = targetStat ? targetStat.min : (isOND ? 1.69 : 0.26);
-    const targetMax = targetStat ? targetStat.max : (isOND ? 4.47 : 2.27);
+    const targetMedian = targetStat ? targetStat.median : (isIOD ? -0.08 : 3.10);
+    const targetMin = targetStat ? targetStat.min : (isIOD ? -0.18 : 1.69);
+    const targetMax = targetStat ? targetStat.max : (isIOD ? 0.08 : 4.47);
 
     const targetIdx = isOND ? 2 : 7;
-    const targetVals = iriPlumeBundle.current.models.map(m => m.data[targetIdx]).filter(v => v != null);
-    const targetElNinoPct = targetVals.length ? Math.round((targetVals.filter(v => v >= 0.5).length / targetVals.length) * 100) : 100;
+    const targetVals = bundle.current.models.map(m => m.data[targetIdx]).filter(v => v != null);
 
-    const targetAverages = iriPlumeBundle.current.averages || {};
-    const dynAvg = isOND ? (targetAverages.dynamical?.[2] ?? 3.42) : (targetAverages.dynamical?.[7] ?? 1.47);
-    const statAvg = isOND ? (targetAverages.statistical?.[2] ?? 2.80) : (targetAverages.statistical?.[7] ?? 1.30);
+    // Agreement %
+    let targetAgreementText = "";
+    if (isIOD) {
+      const neutralCount = targetVals.filter(v => v >= -0.4 && v <= 0.4).length;
+      const pct = Math.round((neutralCount / targetVals.length) * 100);
+      targetAgreementText = `${pct}% Neutral IOD (-0.4 to +0.4 °C)`;
+    } else {
+      const elNinoCount = targetVals.filter(v => v >= 0.5).length;
+      const pct = Math.round((elNinoCount / targetVals.length) * 100);
+      targetAgreementText = `${pct}% El Niño (> +0.5 °C)`;
+    }
+
+    const targetAverages = bundle.current.averages || {};
+    const dynAvg = isOND ? (targetAverages.dynamical?.[2] ?? (isIOD ? -0.05 : 3.42)) : (targetAverages.dynamical?.[7] ?? (isIOD ? 0.10 : 1.47));
+    const statAvg = isOND ? (targetAverages.statistical?.[2] ?? (isIOD ? -0.10 : 2.80)) : (targetAverages.statistical?.[7] ?? (isIOD ? 0.07 : 1.30));
+
+    // Thresholds and domains
+    const threshUpper = isIOD ? 0.4 : 0.5;
+    const threshLower = isIOD ? -0.4 : -0.5;
+    const yDomain = isIOD ? [-1.5, 1.5] : [-2.0, 4.4];
+    const yLabel = isIOD ? "↑ Dipole Mode Index (DMI, °C)" : "↑ Niño 3.4 SST Anomaly (°C)";
 
     const marks = [
       // Background Phase Zones
-      Plot.rectY([{y1: 0.5, y2: 4.5}], {y1: "y1", y2: "y2", fill: "#fef2f2", fillOpacity: 0.65}),
-      Plot.rectY([{y1: -0.5, y2: 0.5}], {y1: "y1", y2: "y2", fill: "#f8fafc", fillOpacity: 0.5}),
-      Plot.rectY([{y1: -2.5, y2: -0.5}], {y1: "y1", y2: "y2", fill: "#f0f9ff", fillOpacity: 0.65}),
+      Plot.rectY([{y1: threshUpper, y2: yDomain[1]}], {y1: "y1", y2: "y2", fill: "#fef2f2", fillOpacity: 0.65}),
+      Plot.rectY([{y1: threshLower, y2: threshUpper}], {y1: "y1", y2: "y2", fill: "#f8fafc", fillOpacity: 0.5}),
+      Plot.rectY([{y1: yDomain[0], y2: threshLower}], {y1: "y1", y2: "y2", fill: "#f0f9ff", fillOpacity: 0.65}),
 
       // Reference Rules
-      Plot.ruleY([0.5], {stroke: "#dc2626", strokeDasharray: "3,3", strokeWidth: 1.2}),
-      Plot.ruleY([-0.5], {stroke: "#0284c7", strokeDasharray: "3,3", strokeWidth: 1.2}),
+      Plot.ruleY([threshUpper], {stroke: "#dc2626", strokeDasharray: "3,3", strokeWidth: 1.2}),
+      Plot.ruleY([threshLower], {stroke: "#0284c7", strokeDasharray: "3,3", strokeWidth: 1.2}),
       Plot.ruleY([0], {stroke: "#94a3b8", strokeWidth: 1}),
-      Plot.ruleY([2.0], {stroke: "#b91c1c", strokeDasharray: "2,4", strokeWidth: 0.9}),
 
       // Highlight target season
       Plot.rectX([targetSeasonLabel], {
@@ -15610,8 +15668,8 @@ sec2PlumeHero = {
         x: "label",
         y1: "min",
         y2: "max",
-        fill: "#93c5fd",
-        fillOpacity: 0.45,
+        fill: ribbonColor,
+        fillOpacity: 0.5,
         title: d => `${d.label} Ensemble Spread: ${d.min >= 0 ? '+' : ''}${d.min.toFixed(2)} to ${d.max >= 0 ? '+' : ''}${d.max.toFixed(2)} °C`
       }),
 
@@ -15619,20 +15677,20 @@ sec2PlumeHero = {
       Plot.line(fcstStats, {
         x: "label",
         y: "median",
-        stroke: "#1d4ed8",
+        stroke: themeColor,
         strokeWidth: 2.8
       }),
       Plot.dot(fcstStats, {
         x: "label",
         y: "median",
-        fill: "#1d4ed8",
+        fill: themeColor,
         stroke: "#ffffff",
         strokeWidth: 1.2,
         r: 4,
-        title: d => `${d.label} Ensemble Median: ${d.median >= 0 ? '+' : ''}${d.median.toFixed(2)} °C (Spread: ${d.min >= 0 ? '+' : ''}${d.min.toFixed(2)} to ${d.max >= 0 ? '+' : ''}${d.max.toFixed(2)} °C; 28 models)`
+        title: d => `${d.label} Ensemble Median: ${d.median >= 0 ? '+' : ''}${d.median.toFixed(2)} °C (Spread: ${d.min >= 0 ? '+' : ''}${d.min.toFixed(2)} to ${d.max >= 0 ? '+' : ''}${d.max.toFixed(2)} °C; ${bundle.current.models.length} models)`
       }),
 
-      // Observed Niño 3.4 Line and Dots
+      // Observed Line and Dots
       Plot.line(visibleObs, {
         x: "label",
         y: "val",
@@ -15650,68 +15708,112 @@ sec2PlumeHero = {
       })
     ];
 
+    if (!isIOD) {
+      marks.push(Plot.ruleY([2.0], {stroke: "#b91c1c", strokeDasharray: "2,4", strokeWidth: 0.9}));
+    }
+
     const plotSvg = Plot.plot({
       width: 720,
       height: 330,
       marginTop: 20,
       marginRight: 20,
       marginBottom: 44,
-      marginLeft: 45,
+      marginLeft: 50,
       x: {
         domain: domainLabels,
         label: null,
         tickRotate: domainLabels.length > 10 ? -40 : 0
       },
       y: {
-        domain: [-2.0, 4.4],
-        label: "↑ Niño 3.4 SST Anomaly (°C)",
+        domain: yDomain,
+        label: yLabel,
         grid: true
       },
       marks: marks
     });
 
-    const gaugeVal = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : 1.44;
-    const gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-2.0)) / 4.0) * 100));
-    const gaugeTag = gaugeVal >= 2.0 ? "Super El Niño" : gaugeVal >= 1.5 ? "Strong El Niño" : gaugeVal >= 0.5 ? "Moderate El Niño" : gaugeVal <= -1.5 ? "Strong La Niña" : gaugeVal <= -0.5 ? "Weak La Niña" : "Neutral";
-    const gaugeColor = gaugeVal >= 0.5 ? "#dc2626" : gaugeVal <= -0.5 ? "#2563eb" : "#475569";
-    const gaugeBg = gaugeVal >= 0.5 ? "#fee2e2" : gaugeVal <= -0.5 ? "#dbeafe" : "#f1f5f9";
+    // Gauge calculation
+    let gaugeVal, gaugePct, gaugeTag, gaugeColor, gaugeBg;
+    if (isIOD) {
+      gaugeVal = (currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : -0.44;
+      gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-1.5)) / 3.0) * 100));
+      gaugeTag = gaugeVal >= 0.8 ? "Strong Positive IOD" : gaugeVal >= 0.4 ? "Positive IOD" : gaugeVal <= -0.8 ? "Strong Negative IOD" : gaugeVal <= -0.4 ? "Negative IOD" : "Neutral IOD";
+      gaugeColor = gaugeVal >= 0.4 ? "#dc2626" : gaugeVal <= -0.4 ? "#2563eb" : "#475569";
+      gaugeBg = gaugeVal >= 0.4 ? "#fee2e2" : gaugeVal <= -0.4 ? "#dbeafe" : "#f1f5f9";
+    } else {
+      gaugeVal = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : 1.44;
+      gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-2.0)) / 4.0) * 100));
+      gaugeTag = gaugeVal >= 2.0 ? "Super El Niño" : gaugeVal >= 1.5 ? "Strong El Niño" : gaugeVal >= 0.5 ? "Moderate El Niño" : gaugeVal <= -1.5 ? "Strong La Niña" : gaugeVal <= -0.5 ? "Weak La Niña" : "Neutral";
+      gaugeColor = gaugeVal >= 0.5 ? "#dc2626" : gaugeVal <= -0.5 ? "#2563eb" : "#475569";
+      gaugeBg = gaugeVal >= 0.5 ? "#fee2e2" : gaugeVal <= -0.5 ? "#dbeafe" : "#f1f5f9";
+    }
 
     container.innerHTML = `
-      <div class="card" style="border-top: 4px solid #2563eb; background: #ffffff; box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06); padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;">
+      <div class="card" style="border-top: 4px solid ${themeColor}; background: #ffffff; box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06); padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;">
         
+        <!-- Ocean Driver Switcher Bar -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="display: inline-flex; gap: 6px; background: #f1f5f9; padding: 3px; border-radius: 6px;">
+            <button type="button" class="btn-driver-tab ${!isIOD ? 'active' : ''}" id="btnDriverEnso" style="${!isIOD ? 'background: #0284c7 !important; color: #fff !important; border-color: #0369a1 !important;' : ''}">
+              🌊 Pacific ENSO (Niño 3.4)
+            </button>
+            <button type="button" class="btn-driver-tab ${isIOD ? 'active' : ''}" id="btnDriverIod" style="${isIOD ? 'background: #0f766e !important; color: #fff !important; border-color: #0d9488 !important;' : ''}">
+              🌊 Indian Ocean Dipole (DMI)
+            </button>
+          </div>
+          <div style="font-size: 0.74rem; color: #64748b; font-weight: 500;">
+            ${isIOD 
+              ? 'International Multi-Model Suite: <strong>BOM • ECMWF • UKMO • NCEP • JMA • JAMSTEC</strong>' 
+              : 'Global Multi-Model Ensemble: <strong>Columbia Climate School IRI • NOAA CPC</strong>'}
+          </div>
+        </div>
+
         <!-- Header -->
         <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 0.85rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem;">
           <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.35rem; flex-wrap: wrap;">
-              <span style="background: #2563eb; color: #fff; font-size: 0.7rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em;">
-                Global Multi-Model Ensemble
+              <span style="background: ${themeColor}; color: #fff; font-size: 0.7rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em;">
+                ${isIOD ? 'Indian Ocean Multi-Model Ensemble' : 'Pacific Multi-Model Ensemble'}
               </span>
               <span style="font-size: 0.78rem; color: #475569; font-weight: 600;">
-                Columbia Climate School IRI / NOAA CPC • 28 Global Climate Models
+                ${isIOD ? 'International Multi-Model Forecast (BOM / C3S / NMME) • 12 Models' : 'Columbia Climate School IRI / NOAA CPC Release: August 2026 • 28 Models'}
               </span>
             </div>
             <h2 style="font-size: 1.25rem; font-weight: 800; color: #0f172a; margin: 0;">
-              Equatorial Pacific Niño 3.4 SST Anomaly — Multi-Model Forecast Plume
+              ${isIOD 
+                ? 'Indian Ocean Dipole (DMI) SST Anomaly — Multi-Model Forecast Plume' 
+                : 'Equatorial Pacific Niño 3.4 SST Anomaly — Multi-Model Forecast Plume'}
             </h2>
             <p style="font-size: 0.84rem; color: #475569; margin: 0.25rem 0 0;">
-              Multi-model ensemble consensus forecast with min–max spread and observed sea surface temperature trajectory.
+              ${isIOD 
+                ? 'Consensus multi-model ensemble forecast with min–max spread and observed Dipole Mode Index (DMI) trajectory.' 
+                : 'Consensus multi-model ensemble forecast with min–max spread and observed sea surface temperature trajectory.'}
             </p>
           </div>
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-            <a href="https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
-              Columbia IRI Plume &rarr;
-            </a>
-            <a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso/advisory/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
-              NOAA CPC Advisory &rarr;
-            </a>
+            ${isIOD ? `
+              <a href="http://www.bom.gov.au/climate/enso/#tabs=Indian-Ocean" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
+                BOM IOD Outlook &rarr;
+              </a>
+              <a href="https://psl.noaa.gov/gcos_wgsp/Timeseries/DMI/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
+                NOAA PSL DMI Series &rarr;
+              </a>
+            ` : `
+              <a href="https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
+                Columbia IRI Plume &rarr;
+              </a>
+              <a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso/advisory/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
+                NOAA CPC Advisory &rarr;
+              </a>
+            `}
           </div>
         </div>
 
-        <!-- ENSO State Position Gauge -->
+        <!-- State Position Gauge -->
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.85rem 1.15rem; margin-bottom: 1rem;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
             <span style="font-size: 0.78rem; font-weight: 800; color: #1e293b; text-transform: uppercase; letter-spacing: 0.04em;">
-              ENSO State Gauge &bull; Current Niño 3.4 Position
+              ${isIOD ? 'IOD State Gauge &bull; Current Dipole Mode Index (DMI) Position' : 'ENSO State Gauge &bull; Current Niño 3.4 Position'}
             </span>
             <span style="font-size: 1.25rem; font-weight: 800; color: ${gaugeColor}; font-variant-numeric: tabular-nums;">
               ${gaugeVal >= 0 ? '+' : ''}${gaugeVal.toFixed(2)} °C
@@ -15734,16 +15836,13 @@ sec2PlumeHero = {
 
           <!-- Ticks and Labels -->
           <div style="display: flex; justify-content: space-between; font-size: 0.68rem; font-weight: 700; color: #64748b; margin-top: 4px;">
-            <span>-2.0°C (STRONG LA NIÑA)</span>
-            <span>-0.5°C</span>
-            <span>0.0°C (NEUTRAL)</span>
-            <span>+0.5°C</span>
-            <span>+1.5°C (STRONG EL NIÑO)</span>
-            <span>+2.0°C (SUPER)</span>
+            ${isIOD 
+              ? '<span>-1.5°C (STRONG NEGATIVE)</span><span>-0.4°C</span><span>0.0°C (NEUTRAL)</span><span>+0.4°C</span><span>+1.5°C (STRONG POSITIVE)</span>'
+              : '<span>-2.0°C (STRONG LA NIÑA)</span><span>-0.5°C</span><span>0.0°C (NEUTRAL)</span><span>+0.5°C</span><span>+1.5°C (STRONG EL NIÑO)</span><span>+2.0°C (SUPER)</span>'}
           </div>
         </div>
 
-        <!-- Clean, Streamlined Controls Bar: Hindcast History -->
+        <!-- Controls Bar: Hindcast History -->
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; background: #f8fafc; border: 1px solid #e2e8f0; padding: 0.5rem 0.85rem; border-radius: 6px; margin-bottom: 1rem;">
           
           <!-- Left: Hindcast Slider + Compact Presets -->
@@ -15761,7 +15860,7 @@ sec2PlumeHero = {
 
           <!-- Right: Ensemble Metadata Tag -->
           <div style="font-size: 0.72rem; color: #64748b; font-weight: 500;">
-            Multi-Model Ensemble: <strong>28 climate models</strong> with Min–Max spread envelope
+            Multi-Model Ensemble: <strong>${bundle.current.models.length} climate models</strong> with Min–Max spread envelope
           </div>
 
         </div>
@@ -15774,9 +15873,9 @@ sec2PlumeHero = {
           </div>
 
           <!-- Right Analytical Summary Card -->
-          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #2563eb; border-radius: 6px; padding: 1rem 1.15rem; display: flex; flex-direction: column; justify-content: space-between; min-height: 330px;">
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid ${themeColor}; border-radius: 6px; padding: 1rem 1.15rem; display: flex; flex-direction: column; justify-content: space-between; min-height: 330px;">
             <div>
-              <span style="font-size: 0.72rem; font-weight: 800; color: #1e40af; text-transform: uppercase; letter-spacing: 0.04em;">
+              <span style="font-size: 0.72rem; font-weight: 800; color: ${themeColor}; text-transform: uppercase; letter-spacing: 0.04em;">
                 Consensus Summary
               </span>
               
@@ -15790,7 +15889,7 @@ sec2PlumeHero = {
                   Ensemble Min–Max: ${targetMin >= 0 ? '+' : ''}${targetMin.toFixed(2)} to ${targetMax >= 0 ? '+' : ''}${targetMax.toFixed(2)} °C
                 </div>
                 <div style="font-size: 0.74rem; font-weight: 700; color: #15803d; margin-top: 3px;">
-                  Model Agreement: ${targetElNinoPct}% El Niño (> +0.5 °C)
+                  Model Agreement: ${targetAgreementText}
                 </div>
                 <div style="font-size: 0.72rem; color: #64748b; margin-top: 3px;">
                   Dyn Mean: ${dynAvg >= 0 ? '+' : ''}${dynAvg.toFixed(2)}°C &bull; Stat Mean: ${statAvg >= 0 ? '+' : ''}${statAvg.toFixed(2)}°C
@@ -15802,16 +15901,19 @@ sec2PlumeHero = {
                   Kenya Teleconnection Implication:
                 </div>
                 <p style="font-size: 0.78rem; color: #475569; line-height: 1.45; margin: 0;">
-                  ${isOND 
-                    ? "Equatorial Pacific warming is projected to exceed +2.0 °C throughout OND 2026. This setup strongly favors enhanced Short Rains across Kenya, with heightened riverine flood risks in the Tana/Athi basins, while supporting forage recovery in pastoral ASALs."
-                    : "During MAM (Long Rains), Pacific ENSO teleconnection skill historically drops near zero. Preparedness must focus on localized Indian Ocean Dipole (DMI) and Western-V atmospheric wave dynamics."
+                  ${isIOD 
+                    ? "The Indian Ocean Dipole is projected to remain Neutral throughout OND 2026. A neutral IOD creates no opposing thermal suppression, allowing Pacific El Niño teleconnection forcing to dominate Short Rains moisture transport into East Africa. Rapid seasonal decay occurs in December as the monsoon winds reverse."
+                    : (isOND 
+                        ? "Equatorial Pacific warming is projected to exceed +2.0 °C throughout OND 2026. This setup strongly favors enhanced Short Rains across Kenya, with heightened riverine flood risks in the Tana/Athi basins, while supporting forage recovery in pastoral ASALs."
+                        : "During MAM (Long Rains), Pacific ENSO teleconnection skill historically drops near zero. Preparedness must focus on localized Indian Ocean Dipole (DMI) and Western-V atmospheric wave dynamics."
+                      )
                   }
                 </p>
               </div>
             </div>
 
             <div style="border-top: 1px solid #e2e8f0; padding-top: 0.5rem; margin-top: 0.75rem; font-size: 0.70rem; color: #64748b;">
-              <span>Source: <strong>Columbia Climate School IRI</strong> / NOAA CPC</span>
+              <span>Source: <strong>${isIOD ? 'BOM / C3S / NMME Multi-Model Suite' : 'Columbia Climate School IRI / NOAA CPC'}</strong></span>
             </div>
           </div>
 
@@ -15823,20 +15925,20 @@ sec2PlumeHero = {
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="display: inline-block; width: 14px; height: 3px; background: #0f172a; border-radius: 2px;"></span>
               <span style="display: inline-block; width: 7px; height: 7px; background: #0f172a; border-radius: 50%; margin-left: -10px;"></span>
-              <span style="margin-left: 4px; font-weight: 600;">Observed Niño 3.4</span>
+              <span style="margin-left: 4px; font-weight: 600;">${isIOD ? 'Observed DMI' : 'Observed Niño 3.4'}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
-              <span style="display: inline-block; width: 16px; height: 3px; background: #1d4ed8; border-radius: 2px;"></span>
-              <span style="display: inline-block; width: 7px; height: 7px; background: #1d4ed8; border-radius: 50%; margin-left: -11px;"></span>
+              <span style="display: inline-block; width: 16px; height: 3px; background: ${themeColor}; border-radius: 2px;"></span>
+              <span style="display: inline-block; width: 7px; height: 7px; background: ${themeColor}; border-radius: 50%; margin-left: -11px;"></span>
               <span style="margin-left: 4px; font-weight: 600;">Multi-Model Ensemble Median</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
-              <span style="display: inline-block; width: 16px; height: 10px; background: #93c5fd; opacity: 0.55; border-radius: 2px;"></span>
-              <span style="font-weight: 600;">Ensemble Min–Max Spread (28 Models)</span>
+              <span style="display: inline-block; width: 16px; height: 10px; background: ${ribbonColor}; opacity: 0.55; border-radius: 2px;"></span>
+              <span style="font-weight: 600;">Ensemble Min–Max Spread (${bundle.current.models.length} Models)</span>
             </div>
           </div>
           <div style="color: #64748b;">
-            Dashed red / blue lines: ±0.5 °C ENSO thresholds
+            Dashed red / blue lines: ${isIOD ? '±0.4 °C IOD phase thresholds' : '±0.5 °C ENSO thresholds'}
           </div>
         </div>
 
@@ -15847,6 +15949,22 @@ sec2PlumeHero = {
     if (plotHost) plotHost.appendChild(plotSvg);
 
     // Event handlers
+    const btnEnso = container.querySelector('#btnDriverEnso');
+    if (btnEnso) {
+      btnEnso.onclick = () => {
+        activeDriver = 'ENSO';
+        renderPlume();
+      };
+    }
+
+    const btnIod = container.querySelector('#btnDriverIod');
+    if (btnIod) {
+      btnIod.onclick = () => {
+        activeDriver = 'IOD';
+        renderPlume();
+      };
+    }
+
     const slider = container.querySelector('#iriHindcastSlider');
     if (slider) {
       slider.oninput = (e) => {
@@ -15867,9 +15985,9 @@ sec2PlumeHero = {
   return container;
 }
 
-// Mount IRI Multi-Model Plume & State Gauge
+// Mount Multi-Model Forecast Plume & State Gauge
 {
-  [activeSeason, currentState, iriPlumeBundle, sec2PlumeHero];
+  [activeSeason, driverKind, currentState, iriPlumeBundle, iodPlumeBundle, sec2PlumeHero];
   const host = document.getElementById("iriForecastPlumeHost");
   if (host && sec2PlumeHero) {
     host.replaceChildren(sec2PlumeHero);
