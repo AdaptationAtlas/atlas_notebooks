@@ -2659,7 +2659,7 @@ wrapTickLabel = (label, maxWidth = 10) => {
       background: #eff6ff !important;
       border: 1px solid #bfdbfe !important;
       border-left: 3.5px solid #2563eb !important;
-      padding: 0.2rem 0.65rem !important;
+      padding: 0.2rem 0.5rem !important;
       border-radius: 4px !important;
       box-sizing: border-box !important;
       min-height: 28px !important;
@@ -2669,7 +2669,7 @@ wrapTickLabel = (label, maxWidth = 10) => {
       flex-direction: row !important;
       flex-wrap: nowrap !important;
       align-items: center !important;
-      gap: 0.5rem !important;
+      gap: 0.35rem !important;
       min-width: 0 !important;
       overflow: hidden !important;
       text-overflow: ellipsis !important;
@@ -8636,16 +8636,49 @@ driverPhaseByYear = {
 
 ```{ojs}
 // current state: 3-month mean of RONI; DMI coalesced (dmi_hadisst lags about a year,
-// so fall back to dmi_ersst for the most recent value)
+// so fall back to dmi_ersst for the most recent value). Includes 1-month trajectory trends.
 currentState = {
   const roniRows = drivers.filter((d) => d.roni != null);
   const roni = d3.mean(roniRows.slice(-3), (d) => d.roni);
   const asOf = roniRows.slice(-1)[0]?.date;
+  
+  // RONI 1-month trend trajectory
+  const nRoni = roniRows.length;
+  const roniLatest = nRoni > 0 ? roniRows[nRoni - 1]?.roni : null;
+  const roniPrev = nRoni > 1 ? roniRows[nRoni - 2]?.roni : null;
+  const roniDelta = (roniLatest != null && roniPrev != null) ? (roniLatest - roniPrev) : 0;
+  const roniTrend = roniDelta > 0.05 ? "warming" : roniDelta < -0.05 ? "cooling" : "steady";
+  const roniArrow = roniDelta > 0.05 ? "↑" : roniDelta < -0.05 ? "↓" : "→";
+
+  // DMI 1-month trend trajectory
   const dmiRows = drivers.filter((d) => d.dmi_hadisst != null || d.dmi_ersst != null);
-  const last = dmiRows.slice(-1)[0];
-  const dmi = last ? (last.dmi_hadisst ?? last.dmi_ersst) : null;
+  const nDmi = dmiRows.length;
+  const dmi = nDmi > 0 ? (dmiRows[nDmi - 1]?.dmi_hadisst ?? dmiRows[nDmi - 1]?.dmi_ersst) : null;
+  const dmiPrev = nDmi > 1 ? (dmiRows[nDmi - 2]?.dmi_hadisst ?? dmiRows[nDmi - 2]?.dmi_ersst) : null;
+  const dmiDelta = (dmi != null && dmiPrev != null) ? (dmi - dmiPrev) : 0;
+  const dmiTrend = dmiDelta > 0.05 ? "warming" : dmiDelta < -0.05 ? "cooling" : "steady";
+  const dmiArrow = dmiDelta > 0.05 ? "↑" : dmiDelta < -0.05 ? "↓" : "→";
+
   const phase = roni > 0.5 ? "El Niño" : roni < -0.5 ? "La Niña" : "neutral";
-  return {oni: roni, roni, dmi, phase, asOf};
+  const stateObj = {
+    oni: roni,
+    roni,
+    dmi,
+    phase,
+    asOf,
+    roniLatest,
+    roniPrev,
+    roniDelta,
+    roniTrend,
+    roniArrow,
+    dmiLatest: dmi,
+    dmiPrev,
+    dmiDelta,
+    dmiTrend,
+    dmiArrow
+  };
+  if (typeof window !== "undefined") window._currentState = stateObj;
+  return stateObj;
 }
 ```
 
@@ -11826,13 +11859,25 @@ yearsSel = {
       const dominantPct = Math.max(pElNino, pNeutral, pLaNina);
       
       const roniVal = (currentState && currentState.roni != null) 
-        ? `${currentState.roni >= 0 ? "+" : ""}${currentState.roni.toFixed(2)} °C` 
+        ? `${currentState.roni >= 0 ? "+" : ""}${currentState.roni.toFixed(2)}°C` 
         : "Unavailable";
       const dmiVal = (currentState && currentState.dmi != null) 
-        ? `${currentState.dmi >= 0 ? "+" : ""}${currentState.dmi.toFixed(2)} °C` 
+        ? `${currentState.dmi >= 0 ? "+" : ""}${currentState.dmi.toFixed(2)}°C` 
         : "Unavailable";
 
-      probDetailsHtml = `<b>${dominantPct}% ${dominantPhase}</b> &bull; RONI: <b>${roniVal}</b> &bull; DMI: <b>${dmiVal}</b>`;
+      const roniTrend = currentState?.roniTrend || "steady";
+      const roniArrow = currentState?.roniArrow || "→";
+      const roniDelta = currentState?.roniDelta ?? 0;
+      const roniColor = roniTrend === "warming" ? "#dc2626" : roniTrend === "cooling" ? "#2563eb" : "#475569";
+      const roniTitle = `RONI 1-month trajectory: ${roniDelta >= 0 ? "+" : ""}${roniDelta.toFixed(2)} °C (${roniTrend})`;
+
+      const dmiTrend = currentState?.dmiTrend || "steady";
+      const dmiArrow = currentState?.dmiArrow || "→";
+      const dmiDelta = currentState?.dmiDelta ?? 0;
+      const dmiColor = dmiTrend === "warming" ? "#dc2626" : dmiTrend === "cooling" ? "#2563eb" : "#475569";
+      const dmiTitle = `DMI 1-month trajectory: ${dmiDelta >= 0 ? "+" : ""}${dmiDelta.toFixed(2)} °C (${dmiTrend})`;
+
+      probDetailsHtml = `<b>${dominantPct}% ${dominantPhase}</b> &bull; RONI: <b>${roniVal}</b> <span style="color:${roniColor}; font-weight:700;" title="${roniTitle}">${roniArrow} ${roniTrend}</span> &bull; DMI: <b>${dmiVal}</b> <span style="color:${dmiColor}; font-weight:700;" title="${dmiTitle}">${dmiArrow} ${dmiTrend}</span>`;
     } else {
       probDetailsHtml = `<span style="color:#b91c1c; font-weight:700;">Forecast feed unavailable</span>`;
     }
@@ -11850,16 +11895,16 @@ yearsSel = {
         <span class="ke-outlook-details">
           ${probDetailsHtml}
         </span>
-        <span class="ke-outlook-dates" style="font-size: 0.70rem; color: #64748b; margin-left: 4px; white-space: nowrap;">
-          [Obs: ${obsDate} | Issued: ${forecastIssued}]
+        <span class="ke-outlook-dates" style="font-size: 0.70rem; color: #64748b; margin-left: 2px; white-space: nowrap;" title="Observed sea surface temperature telemetry measured through ${obsDate} 2026 (NOAA ERSSTv5 / HadISST); NOAA CPC probabilistic seasonal forecast bulletin issued ${forecastIssued} 2026">
+          [Obs: ${obsDate} | Fct: ${forecastIssued}]
         </span>
       </div>
       <div class="ke-outlook-actions">
-        <button type="button" id="btnOpenOutlook" class="btn-outlook-jump" onclick="switchTab('tab-outlook')" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:3px 8px; border-radius:4px; font-size:0.74rem; font-weight:600; cursor:pointer; white-space:nowrap;">
-          <span>Open outlook &rarr;</span>
+        <button type="button" id="btnOpenOutlook" class="btn-outlook-jump" onclick="switchTab('tab-outlook')" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:2px 7px; border-radius:4px; font-size:0.72rem; font-weight:600; cursor:pointer; white-space:nowrap;">
+          <span>Outlook &rarr;</span>
         </button>
-        <button type="button" id="btnToggleSimilar" class="btn-analogue-jump" onclick="toggleSimilarSeasons()" aria-pressed="${isFiltered ? 'true' : 'false'}" style="background:${isFiltered ? '#1d4ed8' : '#2563eb'}; color:#fff; border:1px solid ${isFiltered ? '#1e40af' : '#1d4ed8'}; padding:3px 10px; border-radius:4px; font-size:0.74rem; font-weight:600; cursor:pointer; white-space:nowrap; ${isFiltered ? 'box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);' : ''}">
-          <span>${isFiltered ? '✓ Similar seasons highlighted' : 'Highlight similar seasons'}</span>
+        <button type="button" id="btnToggleSimilar" class="btn-analogue-jump" onclick="toggleSimilarSeasons()" aria-pressed="${isFiltered ? 'true' : 'false'}" style="background:${isFiltered ? '#1d4ed8' : '#2563eb'}; color:#fff; border:1px solid ${isFiltered ? '#1e40af' : '#1d4ed8'}; padding:2px 7px; border-radius:4px; font-size:0.72rem; font-weight:600; cursor:pointer; white-space:nowrap; ${isFiltered ? 'box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);' : ''}">
+          <span>${isFiltered ? '✓ Similar years' : 'Similar years'}</span>
         </button>
       </div>
     `;
@@ -15245,7 +15290,7 @@ sec5LiveHero = {
               Live Climate Driver Telemetry
             </span>
             <span style="font-size: 0.78rem; color: #475569; font-weight: 600;">
-              Verified Observation Vintage: <strong>${obsMonthYear}</strong> &bull; Monthly Automated Feed
+              Telemetry Observation Vintage: <strong>${obsMonthYear}</strong> &bull; NOAA Forecast Issued: <strong>${issuedDate}</strong>
             </span>
           </div>
           <h2 class="card-title" style="font-size: 1.25rem; font-weight: 800; color: #0f172a; margin: 0;">
@@ -15277,12 +15322,15 @@ sec5LiveHero = {
                 Latest Observed
               </span>
             </div>
-            <div style="display: flex; align-items: baseline; gap: 8px; margin: 0.25rem 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px; margin: 0.25rem 0; flex-wrap: wrap;">
               <span style="font-size: 1.85rem; font-weight: 800; color: #0284c7; font-variant-numeric: tabular-nums;">
                 ${obsRoni} °C
               </span>
               <span style="font-size: 0.82rem; font-weight: 700; color: #0369a1;">
                 ${roniStateTag}
+              </span>
+              <span style="background: ${currentState?.roniTrend === 'warming' ? '#fee2e2' : '#eff6ff'}; color: ${currentState?.roniTrend === 'warming' ? '#dc2626' : '#2563eb'}; font-size: 0.72rem; font-weight: 700; padding: 2px 7px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 3px;" title="1-month trajectory: ${currentState?.roniDelta >= 0 ? '+' : ''}${currentState?.roniDelta?.toFixed(2)} °C/mo">
+                ${currentState?.roniArrow} ${currentState?.roniTrend === 'warming' ? 'Warming' : currentState?.roniTrend === 'cooling' ? 'Cooling' : 'Steady'} (${currentState?.roniDelta >= 0 ? '+' : ''}${currentState?.roniDelta?.toFixed(2)} °C/mo)
               </span>
             </div>
             <p style="font-size: 0.79rem; color: #334155; line-height: 1.45; margin: 0.4rem 0 0.6rem;">
@@ -15306,12 +15354,15 @@ sec5LiveHero = {
                 Latest Observed
               </span>
             </div>
-            <div style="display: flex; align-items: baseline; gap: 8px; margin: 0.25rem 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px; margin: 0.25rem 0; flex-wrap: wrap;">
               <span style="font-size: 1.85rem; font-weight: 800; color: #334155; font-variant-numeric: tabular-nums;">
                 ${obsDmi} °C
               </span>
               <span style="font-size: 0.82rem; font-weight: 700; color: #475569;">
                 ${dmiStateTag}
+              </span>
+              <span style="background: ${currentState?.dmiTrend === 'cooling' ? '#dbeafe' : '#fee2e2'}; color: ${currentState?.dmiTrend === 'cooling' ? '#2563eb' : '#dc2626'}; font-size: 0.72rem; font-weight: 700; padding: 2px 7px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 3px;" title="1-month trajectory: ${currentState?.dmiDelta >= 0 ? '+' : ''}${currentState?.dmiDelta?.toFixed(2)} °C/mo">
+                ${currentState?.dmiArrow} ${currentState?.dmiTrend === 'cooling' ? 'Cooling' : currentState?.dmiTrend === 'warming' ? 'Warming' : 'Steady'} (${currentState?.dmiDelta >= 0 ? '+' : ''}${currentState?.dmiDelta?.toFixed(2)} °C/mo)
               </span>
             </div>
             <p style="font-size: 0.79rem; color: #334155; line-height: 1.45; margin: 0.4rem 0 0.6rem;">
