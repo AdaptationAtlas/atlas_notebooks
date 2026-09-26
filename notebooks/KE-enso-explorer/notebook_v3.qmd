@@ -3579,13 +3579,13 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
             <div class="enso-figure-header-main">
               <div class="enso-figure-title-row">
                 <span class="enso-figure-number">Figure 2.1</span>
-                <h3 class="enso-figure-title">Short Rains (OND) Empirical Tercile Distribution &amp; Forward Forecast Plume</h3>
+                <h3 class="enso-figure-title">Short Rains (OND) Empirical Tercile Probabilities &amp; Analogue Matching</h3>
               </div>
-              <p class="enso-figure-purpose">What is the empirical probability of a wetter, near-normal, or drier season based on nearest historical ocean analogues, and how is the Pacific ENSO state projected to evolve over the next 9 months?</p>
+              <p class="enso-figure-purpose">What is the empirical probability of a wetter, near-normal, or drier season across Kenya conditioned on nearest historical ocean analogues, and how do scenarios shift when matching lead-in months vs. the projected season?</p>
             </div>
           </div>
 
-          <!-- Controls: View toggle (Tercile distribution | Forecast plume) -->
+          <!-- Controls: Matching Criterion Toggle (Full Trajectory | Lead-in | Projected Peak) -->
           <div class="enso-control-bar" id="fig21ControlsHost"></div>
 
           <!-- Output container -->
@@ -8865,6 +8865,20 @@ drivers = dbDrivers.query(`
 ```
 
 ```{ojs}
+seasonalDrivers = dbDrivers.query(`
+  SELECT index, season, CAST(year AS INT) AS year, value 
+  FROM enso_drivers_seasonal 
+  WHERE index IN ('RONI', 'DMI')
+  ORDER BY year, season
+`)
+```
+
+```{ojs}
+seasonalDriverMap = new Map(seasonalDrivers.map((d) => [`${d.index}_${d.season}_${d.year}`, d.value]))
+```
+
+
+```{ojs}
 dbCounties = DuckDBClient.of({
   county_key: FileAttachment("/data/KE-enso-explorer/county_key.parquet"),
 })
@@ -8957,22 +8971,31 @@ ensoPhaseOf = (roni) => roni == null ? null : roni > 0.5 ? "El Niño" : roni < -
 
 ```{ojs}
 // analogue years = historical target-season years ranked by standardized Euclidean
-// distance in joint predictor space (RONI JAS + DMI JAS for OND; DJF for MAM)
-// against the target ocean driver state, evaluated against the 1991-2020 WMO normal.
+// distance in joint predictor and target space conditioned on matchingCriterion:
+// 1. Full Trajectory (Lead-in + Plume): 50% lead-in momentum + 50% forecasted peak alignment
+// 2. Lead-in Observed (JAS): purely antecedent observed ocean conditions
+// 3. Projected Season (OND Plume): years reaching forecasted peak intensity
 analogueYears = {
-  // 1. Reference baseline (1991-2020) standard deviations in predictor space
+  // 1. Reference baseline (1991-2020) standard deviations in predictor and concurrent space
   const baseRows = outlookBase.filter((r) => r.season === outlookTarget && r.year >= 1991 && r.year <= 2020 && r.is_county);
   const byYr = new Map();
   for (const r of baseRows) {
-    if (!byYr.has(r.year)) byYr.set(r.year, { roni: r.roni_pred, dmi: r.dmi_pred });
+    if (!byYr.has(r.year)) byYr.set(r.year, { roni_pred: r.roni_pred, dmi_pred: r.dmi_pred, roni_conc: r.roni_conc, dmi_conc: r.dmi_conc });
   }
   const baseVals = [...byYr.values()];
-  const sdRoni = d3.deviation(baseVals.map((d) => d.roni).filter((v) => v != null)) || 0.821;
-  const sdDmi = d3.deviation(baseVals.map((d) => d.dmi).filter((v) => v != null)) || 0.370;
+  const sdPredRoni = d3.deviation(baseVals.map((d) => d.roni_pred).filter((v) => v != null)) || 0.821;
+  const sdPredDmi = d3.deviation(baseVals.map((d) => d.dmi_pred).filter((v) => v != null)) || 0.370;
+  const sdConcRoni = d3.deviation(baseVals.map((d) => d.roni_conc).filter((v) => v != null)) || 0.950;
+  const sdConcDmi = d3.deviation(baseVals.map((d) => d.dmi_conc).filter((v) => v != null)) || 0.450;
 
-  // 2. Target ocean state (RONI_0, DMI_0) from current observations
-  const r0 = (currentState && currentState.roni != null) ? currentState.roni : 0.47;
-  const d0 = (currentState && currentState.dmi != null) ? currentState.dmi : 0.08;
+  // 2. Target ocean states:
+  // Lead-in targets (observed JAS):
+  const r0_lead = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : ((currentState && currentState.roni != null) ? currentState.roni : 1.44);
+  const d0_lead = (currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : ((currentState && currentState.dmi != null) ? currentState.dmi : -0.44);
+
+  // Forecast peak targets (multi-model ensemble median for OND):
+  const r0_peak = 3.09;
+  const d0_peak = -0.07;
 
   // 3. Unique candidate historical years for the target season
   const candMap = new Map();
@@ -8989,12 +9012,28 @@ analogueYears = {
     }
   }
 
-  // 4. Compute standardized Euclidean distance Di in joint (z_RONI, z_DMI) space
+  // 4. Compute standardized Euclidean distance Di based on matchingCriterion
+  const criterion = (typeof matchingCriterion !== "undefined" && matchingCriterion) ? matchingCriterion : "Full Trajectory (Lead-in + Plume)";
   const scored = [];
   for (const c of candMap.values()) {
-    const zRoni = (c.roni_pred - r0) / sdRoni;
-    const zDmi = c.dmi_pred != null ? (c.dmi_pred - d0) / sdDmi : 0;
-    const dist = Math.sqrt(zRoni * zRoni + zDmi * zDmi);
+    let dist;
+    if (criterion.includes("Full Trajectory")) {
+      // Full Trajectory: 50% lead-in momentum + 50% peak alignment
+      const zLeadRoni = (c.roni_pred - r0_lead) / sdPredRoni;
+      const zLeadDmi = c.dmi_pred != null ? (c.dmi_pred - d0_lead) / sdPredDmi : 0;
+      const zPeakRoni = (c.roni_conc - r0_peak) / sdConcRoni;
+      const zPeakDmi = c.dmi_conc != null ? (c.dmi_conc - d0_peak) / sdConcDmi : 0;
+      dist = Math.sqrt(0.5 * (zLeadRoni * zLeadRoni + zLeadDmi * zLeadDmi) + 0.5 * (zPeakRoni * zPeakRoni + zPeakDmi * zPeakDmi));
+    } else if (criterion.includes("Lead-in")) {
+      const zRoni = (c.roni_pred - r0_lead) / sdPredRoni;
+      const zDmi = c.dmi_pred != null ? (c.dmi_pred - d0_lead) / sdPredDmi : 0;
+      dist = Math.sqrt(zRoni * zRoni + zDmi * zDmi);
+    } else {
+      // Projected Season (OND Plume)
+      const zRoni = (c.roni_conc - r0_peak) / sdConcRoni;
+      const zDmi = c.dmi_conc != null ? (c.dmi_conc - d0_peak) / sdConcDmi : 0;
+      dist = Math.sqrt(zRoni * zRoni + zDmi * zDmi);
+    }
     scored.push({
       year: c.year,
       distance: dist,
@@ -9013,7 +9052,8 @@ analogueYears = {
     ...d,
     rank: idx + 1,
     distStr: d.distance.toFixed(2),
-    totalSample
+    totalSample,
+    criterion
   }));
 }
 ```
@@ -15508,6 +15548,8 @@ sec2PlumeHero = {
   // Reactive default driver from global driverKind selector, can also be toggled locally
   let activeDriver = (driverKind && driverKind.includes("IOD")) ? "IOD" : "ENSO";
   let hindcastSeasons = 6;
+  let overlayMode = "top3"; // "none", "top3", "top5"
+  const analogueColors = ["#d97706", "#7c3aed", "#059669", "#0891b2", "#e11d48"];
 
   const seasons_order = ['DJF', 'JFM', 'FMA', 'MAM', 'AMJ', 'MJJ', 'JJA', 'JAS', 'ASO', 'SON', 'OND', 'NDJ'];
 
@@ -15712,6 +15754,67 @@ sec2PlumeHero = {
       marks.push(Plot.ruleY([2.0], {stroke: "#b91c1c", strokeDasharray: "2,4", strokeWidth: 0.9}));
     }
 
+    // Overlay Historical Analogue Traces if enabled
+    let topAnalogues = [];
+    if (overlayMode !== "none") {
+      const topN = (overlayMode === "top3") ? 3 : 5;
+      topAnalogues = (analogueYears && analogueYears.length) ? analogueYears.slice(0, topN) : [];
+
+      topAnalogues.forEach((a, aIdx) => {
+        const col = analogueColors[aIdx % analogueColors.length];
+        const pts = [];
+        visibleSeasons.forEach(s => {
+          const yrOffset = s.year - 2026;
+          const targetHistYear = a.year + yrOffset;
+          const key = `${isIOD ? 'DMI' : 'RONI'}_${s.season}_${targetHistYear}`;
+          const val = seasonalDriverMap ? seasonalDriverMap.get(key) : null;
+          if (val != null) {
+            pts.push({ label: s.label, season: s.season, val: val, year: a.year, rank: a.rank, color: col });
+          }
+        });
+
+        if (pts.length > 0) {
+          marks.push(
+            Plot.line(pts, {
+              x: "label",
+              y: "val",
+              stroke: col,
+              strokeWidth: 2.0,
+              strokeDasharray: "4,3",
+              title: d => `${a.year} (#${a.rank} Analogue) ${d.label}: ${d.val >= 0 ? '+' : ''}${d.val.toFixed(2)} °C`
+            }),
+            Plot.dot(pts, {
+              x: "label",
+              y: "val",
+              fill: col,
+              stroke: "#ffffff",
+              strokeWidth: 1.0,
+              r: 3.5,
+              title: d => `${a.year} (#${a.rank} Analogue) ${d.label}: ${d.val >= 0 ? '+' : ''}${d.val.toFixed(2)} °C`
+            })
+          );
+          const ondPt = pts.find(p => p.season === "OND") || pts[pts.length - 1];
+          if (ondPt) {
+            marks.push(
+              Plot.text([ondPt], {
+                x: "label",
+                y: "val",
+                text: d => `${a.year} (#${a.rank})`,
+                fill: col,
+                fontWeight: 700,
+                fontSize: 10,
+                dy: -10,
+                textAnchor: "middle",
+                paintOrder: "stroke",
+                stroke: "#ffffff",
+                strokeWidth: 3
+              })
+            );
+          }
+        }
+      });
+    }
+
     const plotSvg = Plot.plot({
       width: 720,
       height: 330,
@@ -15786,8 +15889,8 @@ sec2PlumeHero = {
             </h2>
             <p style="font-size: 0.84rem; color: #475569; margin: 0.25rem 0 0;">
               ${isIOD 
-                ? 'Consensus multi-model ensemble forecast with min–max spread and observed Dipole Mode Index (DMI) trajectory.' 
-                : 'Consensus multi-model ensemble forecast with min–max spread and observed sea surface temperature trajectory.'}
+                ? 'Consensus multi-model ensemble forecast with min–max spread, observed Dipole Mode Index (DMI) trajectory, and historical analogue traces.' 
+                : 'Consensus multi-model ensemble forecast with min–max spread, observed sea surface temperature trajectory, and historical analogue traces.'}
             </p>
           </div>
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
@@ -15842,7 +15945,7 @@ sec2PlumeHero = {
           </div>
         </div>
 
-        <!-- Controls Bar: Hindcast History -->
+        <!-- Controls Bar: Hindcast History & Analogue Overlay -->
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; background: #f8fafc; border: 1px solid #e2e8f0; padding: 0.5rem 0.85rem; border-radius: 6px; margin-bottom: 1rem;">
           
           <!-- Left: Hindcast Slider + Compact Presets -->
@@ -15850,7 +15953,7 @@ sec2PlumeHero = {
             <span style="font-size: 0.76rem; font-weight: 700; color: #334155;">
               Observed History: <strong>${hindcastSeasons}</strong> seasons
             </span>
-            <input type="range" min="0" max="18" value="${hindcastSeasons}" step="1" id="iriHindcastSlider" style="width: 120px; cursor: pointer;">
+            <input type="range" min="0" max="18" value="${hindcastSeasons}" step="1" id="iriHindcastSlider" style="width: 110px; cursor: pointer;">
             <div style="display: inline-flex; gap: 4px;">
               <button class="btn-plume-pill ${hindcastSeasons === 0 ? 'active' : ''}" data-hc="0">Forecast only</button>
               <button class="btn-plume-pill ${hindcastSeasons === 6 ? 'active' : ''}" data-hc="6">6 mo (Default)</button>
@@ -15858,9 +15961,19 @@ sec2PlumeHero = {
             </div>
           </div>
 
+          <!-- Middle: Analogue Overlay Toggle -->
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span style="font-size: 0.74rem; font-weight: 700; color: #475569;">Overlay Analogues:</span>
+            <div style="display: inline-flex; gap: 4px; background: #ffffff; padding: 2px; border: 1px solid #cbd5e1; border-radius: 6px;">
+              <button class="btn-plume-pill ${overlayMode === 'none' ? 'active' : ''}" data-overlay="none">Off</button>
+              <button class="btn-plume-pill ${overlayMode === 'top3' ? 'active' : ''}" data-overlay="top3">Top 3</button>
+              <button class="btn-plume-pill ${overlayMode === 'top5' ? 'active' : ''}" data-overlay="top5">Top 5</button>
+            </div>
+          </div>
+
           <!-- Right: Ensemble Metadata Tag -->
           <div style="font-size: 0.72rem; color: #64748b; font-weight: 500;">
-            Multi-Model Ensemble: <strong>${bundle.current.models.length} climate models</strong> with Min–Max spread envelope
+            Multi-Model Ensemble: <strong>${bundle.current.models.length} models</strong>
           </div>
 
         </div>
@@ -15896,7 +16009,27 @@ sec2PlumeHero = {
                 </div>
               </div>
 
-              <div style="border-top: 1px solid #e2e8f0; padding-top: 0.65rem; margin-top: 0.5rem;">
+              <!-- Top Analogue Matches Callout -->
+              ${topAnalogues.length > 0 ? `
+                <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.65rem 0.75rem; margin-top: 0.65rem;">
+                  <div style="font-weight: 700; font-size: 0.74rem; color: #0f172a; margin-bottom: 0.35rem; display: flex; justify-content: space-between; align-items: center;">
+                    <span>Top Matched Analogues:</span>
+                    <span style="color: #64748b; font-size: 0.68rem; font-weight: 500;">OND Peak</span>
+                  </div>
+                  ${topAnalogues.map((a, i) => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.73rem; margin-bottom: 3px;">
+                      <span style="color: ${analogueColors[i % analogueColors.length]}; font-weight: 700;">#${a.rank} ${a.year}</span>
+                      <span style="font-weight: 600; color: #334155; font-variant-numeric: tabular-nums;">
+                        ${isIOD 
+                          ? (a.dmi_conc != null ? `${a.dmi_conc >= 0 ? '+' : ''}${a.dmi_conc.toFixed(2)} °C` : '—') 
+                          : (a.roni_conc != null ? `${a.roni_conc >= 0 ? '+' : ''}${a.roni_conc.toFixed(2)} °C` : '—')}
+                      </span>
+                    </div>
+                  `).join("")}
+                </div>
+              ` : ''}
+
+              <div style="border-top: 1px solid #e2e8f0; padding-top: 0.65rem; margin-top: 0.65rem;">
                 <div style="font-size: 0.76rem; font-weight: 700; color: #334155; margin-bottom: 0.25rem;">
                   Kenya Teleconnection Implication:
                 </div>
@@ -15919,7 +16052,7 @@ sec2PlumeHero = {
 
         </div>
 
-        <!-- Clean, Uncluttered Legend -->
+        <!-- Clean, Uncluttered Legend with Optional Analogue Swatches -->
         <div style="margin-top: 0.75rem; padding-top: 0.65rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.74rem; color: #334155; flex-wrap: wrap; gap: 0.75rem;">
           <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
             <div style="display: flex; align-items: center; gap: 6px;">
@@ -15934,8 +16067,14 @@ sec2PlumeHero = {
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="display: inline-block; width: 16px; height: 10px; background: ${ribbonColor}; opacity: 0.55; border-radius: 2px;"></span>
-              <span style="font-weight: 600;">Ensemble Min–Max Spread (${bundle.current.models.length} Models)</span>
+              <span style="font-weight: 600;">Ensemble Min–Max Spread</span>
             </div>
+            ${topAnalogues.map((a, i) => `
+              <div style="display: flex; align-items: center; gap: 5px; color: ${analogueColors[i % analogueColors.length]}; font-weight: 600;">
+                <span style="display: inline-block; width: 14px; border-top: 2px dashed ${analogueColors[i % analogueColors.length]};"></span>
+                <span>${a.year} (#${a.rank})</span>
+              </div>
+            `).join("")}
           </div>
           <div style="color: #64748b;">
             Dashed red / blue lines: ${isIOD ? '±0.4 °C IOD phase thresholds' : '±0.5 °C ENSO thresholds'}
@@ -15979,6 +16118,13 @@ sec2PlumeHero = {
         renderPlume();
       };
     });
+
+    container.querySelectorAll('button[data-overlay]').forEach(btn => {
+      btn.onclick = () => {
+        overlayMode = btn.getAttribute('data-overlay');
+        renderPlume();
+      };
+    });
   }
 
   renderPlume();
@@ -15987,7 +16133,7 @@ sec2PlumeHero = {
 
 // Mount Multi-Model Forecast Plume & State Gauge
 {
-  [activeSeason, driverKind, currentState, iriPlumeBundle, iodPlumeBundle, sec2PlumeHero];
+  [activeSeason, driverKind, currentState, iriPlumeBundle, iodPlumeBundle, analogueYears, seasonalDriverMap, sec2PlumeHero];
   const host = document.getElementById("iriForecastPlumeHost");
   if (host && sec2PlumeHero) {
     host.replaceChildren(sec2PlumeHero);
@@ -16016,20 +16162,52 @@ viewof sec4SelectedYear = {
 // FIGURE 2.1: TERCILE DISTRIBUTION & FORECAST PLUME MACHINERY
 // -----------------------------------------------------------------------------
 
-viewof fig21View = Inputs.radio(["Tercile distribution", "Forecast plume (RONI evolution)"], {
-  value: "Tercile distribution",
-  label: "View:"
-})
+viewof matchingCriterion = {
+  const modes = [
+    { id: "Full Trajectory (Lead-in + Plume)", label: "📈 Full Trajectory (Lead-in + Plume)", desc: "Matches multi-month onset momentum + forecasted peak alignment" },
+    { id: "Lead-in Observed (JAS)", label: "🔍 Lead-in Observed (JAS)", desc: "Matches purely antecedent observed ocean conditions" },
+    { id: "Projected Season (OND Plume)", label: "🎯 Projected Season (OND Plume)", desc: "Matches years reaching forecasted peak intensity" }
+  ];
+  let currentVal = "Full Trajectory (Lead-in + Plume)";
+  const container = html`
+    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+      <span style="font-size: 0.8rem; font-weight: 700; color: #475569; margin-right: 4px;">Matching Criterion:</span>
+      <div style="display: inline-flex; gap: 6px; background: #f1f5f9; padding: 3px; border-radius: 6px;">
+        ${modes.map(m => {
+          const btn = html`<button type="button" class="btn-driver-tab ${m.id === currentVal ? 'active' : ''}" style="${m.id === currentVal ? 'background: #0284c7 !important; color: #fff !important; border-color: #0369a1 !important;' : ''}" title="${m.desc}">${m.label}</button>`;
+          btn.onclick = () => {
+            currentVal = m.id;
+            container.value = currentVal;
+            container.dispatchEvent(new CustomEvent("input", { bubbles: true }));
+            container.querySelectorAll("button").forEach(b => {
+              b.classList.remove("active");
+              b.style.background = "";
+              b.style.color = "";
+              b.style.borderColor = "";
+            });
+            btn.classList.add("active");
+            btn.style.background = "#0284c7";
+            btn.style.color = "#fff";
+            btn.style.borderColor = "#0369a1";
+          };
+          return btn;
+        })}
+      </div>
+    </div>
+  `;
+  container.value = currentVal;
+  return container;
+}
 
 // Mount Figure 2.1 Controls
 {
   const host = document.getElementById("fig21ControlsHost");
-  if (host && viewof fig21View) {
-    host.replaceChildren(viewof fig21View);
+  if (host && viewof matchingCriterion) {
+    host.replaceChildren(viewof matchingCriterion);
   }
 }
 
-// Generate Figure 2.1 Output (Tercile Distribution OR Forecast Plume)
+// Generate Figure 2.1 Output (Empirical Tercile Distribution conditioned on Analogues)
 sec4TercileView = {
   const o = selectedOutlook ? selectedOutlook.outlook : null;
   const dots = selectedOutlook ? selectedOutlook.dots : [];
@@ -16040,195 +16218,68 @@ sec4TercileView = {
   const pDry = n > 0 ? Math.round((counts.Dry / n) * 100) : 0;
   const modal = o ? o.modal : "Near";
 
-  // VIEW 1: TERCILE DISTRIBUTION
-  if (fig21View === "Tercile distribution") {
-    const pipColor = { Wet: "#0284c7", Near: "#475569", Dry: "#d97706" };
+  const pipColor = { Wet: "#0284c7", Near: "#475569", Dry: "#d97706" };
 
-    const chips = dots.map((d) => {
-      const aInfo = analogueYears.find((a) => a.year === d.year);
-      const col = pipColor[d.tercile] || "#94a3b8";
-      const isSelected = sec4SelectedYear === d.year;
-      const rankText = aInfo?.rank != null ? `#${aInfo.rank}` : "";
-      const distText = aInfo?.distStr != null ? `D=${aInfo.distStr}` : "";
-      const btn = html`
-        <button
-          type="button"
-          style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 14px; font-size: 0.78rem; font-family: inherit; font-weight: 600; cursor: pointer; border: ${isSelected ? '2px solid #0284c7' : '1px solid #cbd5e1'}; background: ${isSelected ? '#e0f2fe' : '#ffffff'}; color: #1e293b; transition: all 0.15s ease;"
-          title="${rankText ? `Rank ${rankText} (${distText}) • ` : ''}Click to inspect ${d.year} analogue scenario in Figure 2.2"
-        >
-          <span>${rankText ? `${rankText} ` : ''}${d.year}</span>
-          <span style="width: 8px; height: 8px; border-radius: 50%; background: ${col}; display: inline-block;"></span>
-        </button>
-      `;
-      btn.onclick = () => {
-        viewof sec4SelectedYear.value = d.year;
-        viewof sec4SelectedYear.dispatchEvent(new CustomEvent("input", { bubbles: true }));
-      };
-      return btn;
-    });
-
-    const totalSample = (analogueYears && analogueYears[0]?.totalSample) || 44;
-
-    return html`
-      <div style="text-align: center; padding: 0.5rem 0 0.8rem 0;">
-        <!-- Natural Frequency First (e.g. 6 of 8 seasons, 75%) -->
-        <div style="display: flex; justify-content: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-          <div style="background: ${modal === 'Wet' ? '#e0f2fe' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Wet' ? '2px solid #0284c7' : '1px solid #e2e8f0'}; min-width: 150px;">
-            <div style="font-size: 0.74rem; font-weight: 700; color: #0284c7; text-transform: uppercase;">Wetter than normal</div>
-            <div style="font-size: 1.65rem; font-weight: 800; color: #0284c7; margin: 0.15rem 0;">${counts.Wet} of ${n} seasons</div>
-            <div style="font-size: 0.78rem; color: #0369a1; font-weight: 600;">${pWet}% &bull; Top Tercile (&gt; +0.43&sigma;)</div>
-          </div>
-          <div style="background: ${modal === 'Near' ? '#f1f5f9' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Near' ? '2px solid #475569' : '1px solid #e2e8f0'}; min-width: 150px;">
-            <div style="font-size: 0.74rem; font-weight: 700; color: #475569; text-transform: uppercase;">Near normal</div>
-            <div style="font-size: 1.65rem; font-weight: 800; color: #334155; margin: 0.15rem 0;">${counts.Near} of ${n} seasons</div>
-            <div style="font-size: 0.78rem; color: #475569; font-weight: 600;">${pNear}% &bull; Middle Tercile (&plusmn;0.43&sigma;)</div>
-          </div>
-          <div style="background: ${modal === 'Dry' ? '#fef3c7' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Dry' ? '2px solid #d97706' : '1px solid #e2e8f0'}; min-width: 150px;">
-            <div style="font-size: 0.74rem; font-weight: 700; color: #d97706; text-transform: uppercase;">Drier than normal</div>
-            <div style="font-size: 1.65rem; font-weight: 800; color: #d97706; margin: 0.15rem 0;">${counts.Dry} of ${n} seasons</div>
-            <div style="font-size: 0.78rem; color: #b45309; font-weight: 600;">${pDry}% &bull; Bottom Tercile (&lt; &minus;0.43&sigma;)</div>
-          </div>
-        </div>
-
-        <!-- Sample-size advisory warning when n < 10 -->
-        ${n < 10 ? html`
-          <div class="sample-size-warning">
-            ⚠️ <strong>Small-Sample Advisory (N = ${n}):</strong> Empirical probabilities are conditioned on the ${n} nearest ocean analogues from ${totalSample} candidate historical seasons (1981–2025). Small samples carry wide binomial sampling intervals (e.g. ${counts.Wet}/${n} = ${pWet}% has a 95% Wilson CI of ~41%–93%). Interpret as indicative physical risk scenarios, not deterministic odds.
-          </div>
-        ` : html``}
-
-        <div style="font-size: 0.8rem; color: #475569; margin: 0.6rem 0 0.4rem 0;">
-          <strong>Conditioned Analogue Years (Top ${n} Nearest Neighbors in Joint RONI + DMI Space):</strong>
-        </div>
-        <div style="display: flex; justify-content: center; gap: 0.4rem; flex-wrap: wrap; max-width: 650px; margin: 0 auto;">
-          ${chips}
-        </div>
-      </div>
+  const chips = dots.map((d) => {
+    const aInfo = analogueYears.find((a) => a.year === d.year);
+    const col = pipColor[d.tercile] || "#94a3b8";
+    const isSelected = sec4SelectedYear === d.year;
+    const rankText = aInfo?.rank != null ? `#${aInfo.rank}` : "";
+    const distText = aInfo?.distStr != null ? `D=${aInfo.distStr}` : "";
+    const btn = html`
+      <button
+        type="button"
+        style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 14px; font-size: 0.78rem; font-family: inherit; font-weight: 600; cursor: pointer; border: ${isSelected ? '2px solid #0284c7' : '1px solid #cbd5e1'}; background: ${isSelected ? '#e0f2fe' : '#ffffff'}; color: #1e293b; transition: all 0.15s ease;"
+        title="${rankText ? `Rank ${rankText} (${distText}) • ` : ''}Click to inspect ${d.year} analogue scenario in Figure 2.2"
+      >
+        <span>${rankText ? `${rankText} ` : ''}${d.year}</span>
+        <span style="font-size: 0.72rem; color: #64748b; font-weight: 500;">(${distText})</span>
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: ${col}; display: inline-block;"></span>
+      </button>
     `;
-  }
-
-  // VIEW 2: FORECAST PLUME (RONI EVOLUTION)
-  const histMonths = drivers.filter((d) => d.year >= 2025 && d.roni != null).map((d) => ({
-    date: new Date(Date.UTC(d.year, d.month - 1, 1)),
-    year: d.year,
-    month: d.month,
-    roni: d.roni,
-    type: "Observed"
-  }));
-
-  // Forecast trajectory data from stateProbs
-  const seasonOffsets = [
-    { s: "ASO", y: 2026, m: 8 },
-    { s: "SON", y: 2026, m: 9 },
-    { s: "OND", y: 2026, m: 10 },
-    { s: "NDJ", y: 2026, m: 11 },
-    { s: "DJF", y: 2027, m: 0 },
-    { s: "JFM", y: 2027, m: 1 },
-    { s: "FMA", y: 2027, m: 2 },
-    { s: "MAM", y: 2027, m: 3 },
-    { s: "AMJ", y: 2027, m: 4 }
-  ];
-
-  const fcstRows = [];
-  seasonOffsets.forEach((item, idx) => {
-    const row = stateProbs ? stateProbs.find((r) => r.season === item.s) : null;
-    if (!row) return;
-    const pEl = row.el_nino / 100;
-    const pNeu = row.neutral / 100;
-    const pLa = row.la_nina / 100;
-    // Expected value of RONI anomaly based on probabilistic phase blend
-    const meanVal = pEl * (1.65 - idx * 0.05) + pNeu * 0.0 - pLa * 1.1;
-    const spread = 0.35 + idx * 0.04;
-    fcstRows.push({
-      date: new Date(Date.UTC(item.y, item.m, 1)),
-      season: item.s,
-      roni: meanVal,
-      lower: meanVal - spread,
-      upper: meanVal + spread,
-      el_nino: row.el_nino,
-      neutral: row.neutral,
-      la_nina: row.la_nina,
-      type: "Forecast Plume"
-    });
+    btn.onclick = () => {
+      viewof sec4SelectedYear.value = d.year;
+      viewof sec4SelectedYear.dispatchEvent(new CustomEvent("input", { bubbles: true }));
+    };
+    return btn;
   });
 
-  const plumePlot = Plot.plot({
-    width: 680,
-    height: 310,
-    marginTop: 25,
-    marginRight: 40,
-    marginBottom: 35,
-    marginLeft: 45,
-    y: {
-      domain: [-1.5, 2.5],
-      label: "RONI SST Anomaly (°C)",
-      grid: true
-    },
-    x: {
-      type: "utc",
-      label: null
-    },
-    marks: [
-      // Background Phase Zones
-      Plot.rectY([{y1: 0.5, y2: 2.5}], {y1: "y1", y2: "y2", fill: "#fef2f2", fillOpacity: 0.7}),
-      Plot.rectY([{y1: -1.5, y2: -0.5}], {y1: "y1", y2: "y2", fill: "#f0f9ff", fillOpacity: 0.7}),
-      
-      // Target Season Highlight (OND 2026)
-      Plot.rectX([{x1: new Date("2026-10-01"), x2: new Date("2026-12-31")}], {
-        x1: "x1", x2: "x2", fill: "#fde68a", fillOpacity: 0.35
-      }),
-      Plot.text([{x: new Date("2026-11-15"), y: 2.3}], {
-        x: "x", y: "y", text: () => "Target Short Rains (OND)", fontSize: 9, fontWeight: 700, fill: "#92400e"
-      }),
-
-      // Threshold Rules
-      Plot.ruleY([0.5], {stroke: "#dc2626", strokeDasharray: "3,3", strokeWidth: 1.2}),
-      Plot.ruleY([-0.5], {stroke: "#0284c7", strokeDasharray: "3,3", strokeWidth: 1.2}),
-      Plot.ruleY([0], {stroke: "#94a3b8", strokeWidth: 1}),
-      Plot.text([{x: new Date("2025-02-01"), y: 0.65}], {x: "x", y: "y", text: () => "+0.5 °C El Niño Threshold", fontSize: 8.5, fill: "#dc2626", textAnchor: "start"}),
-      Plot.text([{x: new Date("2025-02-01"), y: -0.65}], {x: "x", y: "y", text: () => "-0.5 °C La Niña Threshold", fontSize: 8.5, fill: "#0284c7", textAnchor: "start"}),
-
-      // Forecast Plume Uncertainty Band
-      Plot.areaY(fcstRows, {x: "date", y1: "lower", y2: "upper", fill: "#f97316", fillOpacity: 0.25}),
-      Plot.line(fcstRows, {x: "date", y: "roni", stroke: "#ea580c", strokeWidth: 2.2, strokeDasharray: "4,3"}),
-      Plot.dot(fcstRows, {
-        x: "date", y: "roni", fill: "#ea580c", stroke: "#ffffff", strokeWidth: 1.5, r: 4,
-        title: (d) => `${d.season}: Projected RONI ${d.roni.toFixed(2)} °C (Plume: ${d.lower.toFixed(2)} to ${d.upper.toFixed(2)} °C)
-NOAA CPC Probabilities: ${d.el_nino}% El Niño, ${d.neutral}% Neutral, ${d.la_nina}% La Niña`
-      }),
-
-      // Historical Observed Segment
-      Plot.line(histMonths, {x: "date", y: "roni", stroke: "#0f172a", strokeWidth: 2}),
-      Plot.dot(histMonths, {
-        x: "date", y: "roni", fill: "#0f172a", r: 3,
-        title: (d) => `Observed ${d.date.toLocaleDateString('en-US', {month: 'short', year: 'numeric'})}: ${d.roni.toFixed(2)} °C (RONI)`
-      })
-    ]
-  });
+  const totalSample = (analogueYears && analogueYears[0]?.totalSample) || 44;
+  const activeCrit = matchingCriterion || "Full Trajectory (Lead-in + Plume)";
 
   return html`
-    <div style="padding: 0.5rem 0;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
-        <div style="font-size: 0.82rem; font-weight: 700; color: #0f172a;">
-          NOAA CPC Multi-Season ENSO Evolution &amp; Forecast Plume (2025–2027)
+    <div style="text-align: center; padding: 0.5rem 0 0.8rem 0;">
+      <!-- Natural Frequency First (e.g. 6 of 8 seasons, 75%) -->
+      <div style="display: flex; justify-content: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+        <div style="background: ${modal === 'Wet' ? '#e0f2fe' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Wet' ? '2px solid #0284c7' : '1px solid #e2e8f0'}; min-width: 150px;">
+          <div style="font-size: 0.74rem; font-weight: 700; color: #0284c7; text-transform: uppercase;">Wetter than normal</div>
+          <div style="font-size: 1.65rem; font-weight: 800; color: #0284c7; margin: 0.15rem 0;">${counts.Wet} of ${n} seasons</div>
+          <div style="font-size: 0.78rem; color: #0369a1; font-weight: 600;">${pWet}% &bull; Top Tercile (&gt; +0.43&sigma;)</div>
         </div>
-        <div style="display: flex; align-items: center; gap: 12px; font-size: 0.74rem;">
-          <span style="display: inline-flex; align-items: center; gap: 4px;">
-            <span style="width: 14px; height: 3px; background: #0f172a; display: inline-block;"></span> Observed Monthly RONI
-          </span>
-          <span style="display: inline-flex; align-items: center; gap: 4px;">
-            <span style="width: 14px; height: 3px; background: #ea580c; border-top: 1px dashed #ea580c; display: inline-block;"></span> Forecast Mean
-          </span>
-          <span style="display: inline-flex; align-items: center; gap: 4px;">
-            <span style="width: 12px; height: 10px; background: #f97316; opacity: 0.3; display: inline-block;"></span> &plusmn;1&sigma; Plume Uncertainty
-          </span>
+        <div style="background: ${modal === 'Near' ? '#f1f5f9' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Near' ? '2px solid #475569' : '1px solid #e2e8f0'}; min-width: 150px;">
+          <div style="font-size: 0.74rem; font-weight: 700; color: #475569; text-transform: uppercase;">Near normal</div>
+          <div style="font-size: 1.65rem; font-weight: 800; color: #334155; margin: 0.15rem 0;">${counts.Near} of ${n} seasons</div>
+          <div style="font-size: 0.78rem; color: #475569; font-weight: 600;">${pNear}% &bull; Middle Tercile (&plusmn;0.43&sigma;)</div>
+        </div>
+        <div style="background: ${modal === 'Dry' ? '#fef3c7' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Dry' ? '2px solid #d97706' : '1px solid #e2e8f0'}; min-width: 150px;">
+          <div style="font-size: 0.74rem; font-weight: 700; color: #d97706; text-transform: uppercase;">Drier than normal</div>
+          <div style="font-size: 1.65rem; font-weight: 800; color: #d97706; margin: 0.15rem 0;">${counts.Dry} of ${n} seasons</div>
+          <div style="font-size: 0.78rem; color: #b45309; font-weight: 600;">${pDry}% &bull; Bottom Tercile (&lt; &minus;0.43&sigma;)</div>
         </div>
       </div>
-      <div style="display: flex; justify-content: center;">
-        ${plumePlot}
+
+      <!-- Sample-size advisory warning when n < 10 -->
+      ${n < 10 ? html`
+        <div class="sample-size-warning">
+          ⚠️ <strong>Sample Advisory (N = ${n}):</strong> Empirical probabilities are conditioned on the ${n} nearest ocean analogues from ${totalSample} candidate seasons (1981–2025) using <strong>${activeCrit}</strong>. Small samples carry wide binomial sampling intervals (e.g. ${counts.Wet}/${n} = ${pWet}% has a 95% Wilson CI of ~41%–93%). Interpret as indicative physical risk scenarios, not deterministic odds.
+        </div>
+      ` : html``}
+
+      <div style="font-size: 0.8rem; color: #475569; margin: 0.6rem 0 0.4rem 0;">
+        <strong>Conditioned Analogue Years (Top ${n} Nearest Neighbors Ranked by Standardized Distance D):</strong>
       </div>
-      <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.4rem; text-align: center;">
-        Observed through latest feed; forward forecast trajectory dynamically conditioned on official NOAA CPC seasonal probability distribution.
+      <div style="display: flex; justify-content: center; gap: 0.4rem; flex-wrap: wrap; max-width: 680px; margin: 0 auto;">
+        ${chips}
       </div>
     </div>
   `;
@@ -16236,7 +16287,7 @@ NOAA CPC Probabilities: ${d.el_nino}% El Niño, ${d.neutral}% Neutral, ${d.la_ni
 
 // Mount Figure 2.1
 {
-  [county, selectedOutlook, sec4SelectedYear, fig21View, sec4TercileView];
+  [county, selectedOutlook, sec4SelectedYear, matchingCriterion, sec4TercileView];
   const host = document.getElementById("fig21TercileHost");
   if (host && sec4TercileView) {
     host.replaceChildren(sec4TercileView);
@@ -16244,14 +16295,14 @@ NOAA CPC Probabilities: ${d.el_nino}% El Niño, ${d.neutral}% Neutral, ${d.la_ni
   const fHost = document.getElementById("fig21FooterHost");
   if (fHost) {
     const footer = plotFooter(
-      `Empirical tercile probability distribution & forecast plume for ${county} based on ${analogueYears.length} nearest-neighbor ocean analogues ranked in standardized predictor space (1991–2020 WMO baseline).`,
+      `Empirical tercile probability distribution for ${county} based on ${analogueYears.length} nearest-neighbor ocean analogues ranked in standardized predictor space (${matchingCriterion || 'Full Trajectory'}).`,
       fHost,
       {
         fig: "2.1",
         filename: `${county}_ond_analogue_tercile_probabilities`,
         data: selectedOutlook?.dots || [],
-        about: `Historical Short Rains (OND) rainfall outcomes classified into climatological terciles (1991–2020 WMO baseline) across the ${analogueYears.length} nearest analogue seasons in standardized pre-season predictor space (JAS for OND; DJF for MAM). Natural frequencies prevent false precision.`,
-        meta: { County: county, Phase: outlookForecast.phase, Analogues: analogueYears.length }
+        about: `Historical Short Rains (OND) rainfall outcomes classified into climatological terciles (1991–2020 WMO baseline) across the ${analogueYears.length} nearest analogue seasons. Natural frequencies prevent false precision.`,
+        meta: { County: county, Phase: outlookForecast.phase, Analogues: analogueYears.length, Criterion: matchingCriterion }
       }
     );
     fHost.replaceChildren(footer);
