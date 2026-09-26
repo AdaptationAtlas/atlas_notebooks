@@ -9089,9 +9089,19 @@ selectedOutlook = {
   const o = key != null ? countyOutlook.get(key) : null;
   const dots = analogueYears.map((a) => {
     const row = outlookBase.find((r) => r.season === outlookTarget && r.year === a.year && r.gaul1_code === key);
-    return {year: a.year, tercile: row ? row.tercile : null, distance: a.distance, rank: a.rank, distStr: a.distStr};
+    return {
+      year: a.year, 
+      tercile: row ? row.tercile : null,
+      anomaly_pct: row ? row.anomaly_pct : null,
+      ptot: row ? row.ptot : null,
+      clim_mean: row ? row.clim_mean : null,
+      distance: a.distance, 
+      rank: a.rank, 
+      distStr: a.distStr
+    };
   });
-  return {outlook: o, dots};
+  const climMean = dots.find((d) => d.clim_mean != null)?.clim_mean || (o ? o.clim_mean : null);
+  return {outlook: o, dots, countyName: county, key, climMean};
 }
 ```
 
@@ -15774,6 +15784,7 @@ sec2PlumeHero = {
         });
 
         if (pts.length > 0) {
+          const anchorPts = pts.filter(p => p.season === "OND" || p.season === "ASO");
           marks.push(
             Plot.line(pts, {
               x: "label",
@@ -15783,28 +15794,29 @@ sec2PlumeHero = {
               strokeDasharray: "4,3",
               title: d => `${a.year} (#${a.rank} Analogue) ${d.label}: ${d.val >= 0 ? '+' : ''}${d.val.toFixed(2)} °C`
             }),
-            Plot.dot(pts, {
+            Plot.dot(anchorPts, {
               x: "label",
               y: "val",
               fill: col,
               stroke: "#ffffff",
-              strokeWidth: 1.0,
-              r: 3.5,
-              title: d => `${a.year} (#${a.rank} Analogue) ${d.label}: ${d.val >= 0 ? '+' : ''}${d.val.toFixed(2)} °C`
+              strokeWidth: 1.2,
+              r: 4.0,
+              title: d => `${a.year} (#${a.rank} Analogue) ${d.label} Anchor: ${d.val >= 0 ? '+' : ''}${d.val.toFixed(2)} °C`
             })
           );
-          const ondPt = pts.find(p => p.season === "OND") || pts[pts.length - 1];
-          if (ondPt) {
+          // Direct terminal label at the right margin to avoid any OND text collisions
+          const termPt = pts[pts.length - 1];
+          if (termPt) {
             marks.push(
-              Plot.text([ondPt], {
+              Plot.text([termPt], {
                 x: "label",
                 y: "val",
                 text: d => `${a.year} (#${a.rank})`,
                 fill: col,
                 fontWeight: 700,
-                fontSize: 10,
-                dy: -10,
-                textAnchor: "middle",
+                fontSize: 9.5,
+                dx: 8,
+                textAnchor: "start",
                 paintOrder: "stroke",
                 stroke: "#ffffff",
                 strokeWidth: 3
@@ -15816,10 +15828,10 @@ sec2PlumeHero = {
     }
 
     const plotSvg = Plot.plot({
-      width: 720,
+      width: 730,
       height: 330,
       marginTop: 20,
-      marginRight: 20,
+      marginRight: 65,
       marginBottom: 44,
       marginLeft: 50,
       x: {
@@ -16009,7 +16021,7 @@ sec2PlumeHero = {
                 </div>
               </div>
 
-              <!-- Top Analogue Matches Callout -->
+              <!-- Top Analogue Matches Callout with Benchmark -->
               ${topAnalogues.length > 0 ? `
                 <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.65rem 0.75rem; margin-top: 0.65rem;">
                   <div style="font-weight: 700; font-size: 0.74rem; color: #0f172a; margin-bottom: 0.35rem; display: flex; justify-content: space-between; align-items: center;">
@@ -16026,6 +16038,25 @@ sec2PlumeHero = {
                       </span>
                     </div>
                   `).join("")}
+                  ${(() => {
+                    const validPeaks = topAnalogues.map(a => isIOD ? a.dmi_conc : a.roni_conc).filter(v => v != null);
+                    if (validPeaks.length === 0 || isIOD) return '';
+                    const meanPeak = d3.mean(validPeaks) || 0;
+                    const diff = targetMedian - meanPeak;
+                    return `
+                      <div style="border-top: 1px dashed #cbd5e1; margin-top: 5px; padding-top: 5px; font-size: 0.70rem; color: #475569; line-height: 1.35;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                          <span style="font-weight: 600;">Analogue Peak Avg:</span>
+                          <span style="font-weight: 700; color: #0284c7;">+${meanPeak.toFixed(2)} °C</span>
+                        </div>
+                        <div style="color: ${diff > 0.8 ? '#b91c1c' : '#15803d'}; font-weight: 600; font-size: 0.68rem;">
+                          ${diff > 0.8 
+                            ? `⚠️ Models project unprecedented peak (+${diff.toFixed(1)} °C above analogues).` 
+                            : `✓ Models align closely with historical analogue trajectories.`}
+                        </div>
+                      </div>
+                    `;
+                  })()}
                 </div>
               ` : ''}
 
@@ -16164,34 +16195,79 @@ viewof sec4SelectedYear = {
 
 viewof matchingCriterion = {
   const modes = [
-    { id: "Full Trajectory (Lead-in + Plume)", label: "📈 Full Trajectory (Lead-in + Plume)", desc: "Matches multi-month onset momentum + forecasted peak alignment" },
-    { id: "Lead-in Observed (JAS)", label: "🔍 Lead-in Observed (JAS)", desc: "Matches purely antecedent observed ocean conditions" },
-    { id: "Projected Season (OND Plume)", label: "🎯 Projected Season (OND Plume)", desc: "Matches years reaching forecasted peak intensity" }
+    { 
+      id: "Full Trajectory (Lead-in + Plume)", 
+      label: "Full Trajectory", 
+      badge: "Balanced (50/50)",
+      desc: "Balances observed pre-season (JAS) ocean momentum with projected OND peak intensity to find full-lifecycle analogues." 
+    },
+    { 
+      id: "Lead-in Observed (JAS)", 
+      label: "Lead-in Observed (JAS)", 
+      badge: "Pre-Season Only",
+      desc: "Matches solely July–September observed Pacific & Indian Ocean states, without assuming the multi-model forecast will verify." 
+    },
+    { 
+      id: "Projected Season (OND Plume)", 
+      label: "Projected Season (OND Plume)", 
+      badge: "Peak Warming (+3.1°C)",
+      desc: "Filters for rare historical years that reached the extreme peak warming currently projected by dynamical models." 
+    }
   ];
   let currentVal = "Full Trajectory (Lead-in + Plume)";
+
   const container = html`
-    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-      <span style="font-size: 0.8rem; font-weight: 700; color: #475569; margin-right: 4px;">Matching Criterion:</span>
-      <div style="display: inline-flex; gap: 6px; background: #f1f5f9; padding: 3px; border-radius: 6px;">
+    <div style="width: 100%;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.45rem; flex-wrap: wrap; gap: 0.4rem;">
+        <span style="font-size: 0.78rem; font-weight: 800; color: #1e293b; text-transform: uppercase; letter-spacing: 0.04em;">
+          Analogue Matching Mode:
+        </span>
+        <span id="critBadge" style="font-size: 0.72rem; font-weight: 700; color: #0284c7; background: #e0f2fe; padding: 2px 8px; border-radius: 9999px;">
+          Balanced (50/50)
+        </span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; background: #f1f5f9; padding: 4px; border-radius: 8px;">
         ${modes.map(m => {
-          const btn = html`<button type="button" class="btn-driver-tab ${m.id === currentVal ? 'active' : ''}" style="${m.id === currentVal ? 'background: #0284c7 !important; color: #fff !important; border-color: #0369a1 !important;' : ''}" title="${m.desc}">${m.label}</button>`;
+          const isAct = m.id === currentVal;
+          const btn = html`
+            <button 
+              type="button" 
+              class="btn-driver-tab ${isAct ? 'active' : ''}" 
+              style="font-size: 0.76rem; font-weight: 700; padding: 6px 4px; text-align: center; border-radius: 5px; white-space: normal; line-height: 1.25; ${isAct ? 'background: #0284c7 !important; color: #fff !important; border-color: #0369a1 !important; box-shadow: 0 1px 3px rgba(2, 132, 199, 0.3);' : 'background: transparent; color: #475569; border-color: transparent;'}"
+              title="${m.desc}"
+            >
+              ${m.label}
+            </button>
+          `;
           btn.onclick = () => {
             currentVal = m.id;
             container.value = currentVal;
             container.dispatchEvent(new CustomEvent("input", { bubbles: true }));
             container.querySelectorAll("button").forEach(b => {
               b.classList.remove("active");
-              b.style.background = "";
-              b.style.color = "";
-              b.style.borderColor = "";
+              b.style.background = "transparent";
+              b.style.color = "#475569";
+              b.style.borderColor = "transparent";
+              b.style.boxShadow = "none";
             });
             btn.classList.add("active");
             btn.style.background = "#0284c7";
             btn.style.color = "#fff";
             btn.style.borderColor = "#0369a1";
+            btn.style.boxShadow = "0 1px 3px rgba(2, 132, 199, 0.3)";
+            
+            const descEl = container.querySelector("#critDesc");
+            if (descEl) descEl.textContent = m.desc;
+            const badgeEl = container.querySelector("#critBadge");
+            if (badgeEl) badgeEl.textContent = m.badge;
           };
           return btn;
         })}
+      </div>
+
+      <div id="critDesc" style="font-size: 0.74rem; color: #64748b; margin-top: 6px; line-height: 1.35; font-style: italic; padding: 0 2px;">
+        ${modes[0].desc}
       </div>
     </div>
   `;
@@ -16217,70 +16293,146 @@ sec4TercileView = {
   const pNear = n > 0 ? Math.round((counts.Near / n) * 100) : 0;
   const pDry = n > 0 ? Math.round((counts.Dry / n) * 100) : 0;
   const modal = o ? o.modal : "Near";
+  const countyName = (selectedOutlook && selectedOutlook.countyName) || county || "Marsabit";
+  const climMean = (selectedOutlook && selectedOutlook.climMean != null) 
+    ? selectedOutlook.climMean 
+    : (dots.find(d => d.clim_mean != null)?.clim_mean || null);
 
-  const pipColor = { Wet: "#0284c7", Near: "#475569", Dry: "#d97706" };
-
-  const chips = dots.map((d) => {
-    const aInfo = analogueYears.find((a) => a.year === d.year);
-    const col = pipColor[d.tercile] || "#94a3b8";
-    const isSelected = sec4SelectedYear === d.year;
-    const rankText = aInfo?.rank != null ? `#${aInfo.rank}` : "";
-    const distText = aInfo?.distStr != null ? `D=${aInfo.distStr}` : "";
-    const btn = html`
-      <button
-        type="button"
-        style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 14px; font-size: 0.78rem; font-family: inherit; font-weight: 600; cursor: pointer; border: ${isSelected ? '2px solid #0284c7' : '1px solid #cbd5e1'}; background: ${isSelected ? '#e0f2fe' : '#ffffff'}; color: #1e293b; transition: all 0.15s ease;"
-        title="${rankText ? `Rank ${rankText} (${distText}) • ` : ''}Click to inspect ${d.year} analogue scenario in Figure 2.2"
-      >
-        <span>${rankText ? `${rankText} ` : ''}${d.year}</span>
-        <span style="font-size: 0.72rem; color: #64748b; font-weight: 500;">(${distText})</span>
-        <span style="width: 8px; height: 8px; border-radius: 50%; background: ${col}; display: inline-block;"></span>
-      </button>
-    `;
-    btn.onclick = () => {
-      viewof sec4SelectedYear.value = d.year;
-      viewof sec4SelectedYear.dispatchEvent(new CustomEvent("input", { bubbles: true }));
-    };
-    return btn;
-  });
-
-  const totalSample = (analogueYears && analogueYears[0]?.totalSample) || 44;
+  const totalSample = (analogueYears && analogueYears[0]?.totalSample) || 45;
   const activeCrit = matchingCriterion || "Full Trajectory (Lead-in + Plume)";
 
+  // Partition analogues into terciles
+  const wetDots = dots.filter(d => d.tercile === "Wet");
+  const nearDots = dots.filter(d => d.tercile === "Near");
+  const dryDots = dots.filter(d => d.tercile === "Dry");
+
+  const renderAnaloguePills = (groupDots, borderCol) => {
+    if (groupDots.length === 0) {
+      return html`<div style="font-size: 0.72rem; color: #94a3b8; font-style: italic; padding: 0.5rem 0; text-align: center;">0 analogue seasons</div>`;
+    }
+    return html`
+      <div style="display: flex; flex-direction: column; gap: 5px;">
+        ${groupDots.map(d => {
+          const isSelected = sec4SelectedYear === d.year;
+          const anomText = d.anomaly_pct != null ? `${d.anomaly_pct >= 0 ? '+' : ''}${Math.round(d.anomaly_pct)}%` : '';
+          const ptotText = d.ptot != null ? `${Math.round(d.ptot)} mm` : '';
+          const rankText = d.rank != null ? `#${d.rank}` : '';
+          const distText = d.distStr != null ? `D=${d.distStr}` : '';
+          
+          const btn = html`
+            <button
+              type="button"
+              style="display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 4px 6px; border-radius: 5px; font-family: inherit; cursor: pointer; text-align: left; transition: all 0.15s ease; border: ${isSelected ? '2px solid #0284c7' : '1px solid ' + borderCol}; background: ${isSelected ? '#e0f2fe' : '#ffffff'}; box-shadow: ${isSelected ? '0 1px 4px rgba(2,132,199,0.25)' : 'none'};"
+              title="${rankText} ${d.year} (${distText}): ${anomText} anomaly (${ptotText}) in ${countyName}. Click to inspect rainfall map in Figure 2.2."
+            >
+              <div style="display: flex; align-items: baseline; gap: 4px;">
+                <span style="font-size: 0.75rem; font-weight: 800; color: #0f172a;">${rankText} ${d.year}</span>
+                <span style="font-size: 0.66rem; color: #64748b; font-weight: 500;">(${distText})</span>
+              </div>
+              <div style="font-size: 0.71rem; font-weight: 700; color: ${d.tercile === 'Wet' ? '#0284c7' : d.tercile === 'Dry' ? '#d97706' : '#475569'}; font-variant-numeric: tabular-nums;">
+                ${anomText}
+              </div>
+            </button>
+          `;
+          btn.onclick = () => {
+            viewof sec4SelectedYear.value = d.year;
+            viewof sec4SelectedYear.dispatchEvent(new CustomEvent("input", { bubbles: true }));
+          };
+          return btn;
+        })}
+      </div>
+    `;
+  };
+
   return html`
-    <div style="text-align: center; padding: 0.5rem 0 0.8rem 0;">
-      <!-- Natural Frequency First (e.g. 6 of 8 seasons, 75%) -->
-      <div style="display: flex; justify-content: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
-        <div style="background: ${modal === 'Wet' ? '#e0f2fe' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Wet' ? '2px solid #0284c7' : '1px solid #e2e8f0'}; min-width: 150px;">
-          <div style="font-size: 0.74rem; font-weight: 700; color: #0284c7; text-transform: uppercase;">Wetter than normal</div>
-          <div style="font-size: 1.65rem; font-weight: 800; color: #0284c7; margin: 0.15rem 0;">${counts.Wet} of ${n} seasons</div>
-          <div style="font-size: 0.78rem; color: #0369a1; font-weight: 600;">${pWet}% &bull; Top Tercile (&gt; +0.43&sigma;)</div>
+    <div style="padding: 0.35rem 0;">
+      
+      <!-- County & Climatology Context Strip -->
+      <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.45rem; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.35rem;">
+        <div>
+          <span style="font-size: 0.88rem; font-weight: 800; color: #0f172a;">${countyName} County</span>
+          <span style="font-size: 0.76rem; color: #64748b; margin-left: 4px;">• OND Rainfall Outcomes</span>
         </div>
-        <div style="background: ${modal === 'Near' ? '#f1f5f9' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Near' ? '2px solid #475569' : '1px solid #e2e8f0'}; min-width: 150px;">
-          <div style="font-size: 0.74rem; font-weight: 700; color: #475569; text-transform: uppercase;">Near normal</div>
-          <div style="font-size: 1.65rem; font-weight: 800; color: #334155; margin: 0.15rem 0;">${counts.Near} of ${n} seasons</div>
-          <div style="font-size: 0.78rem; color: #475569; font-weight: 600;">${pNear}% &bull; Middle Tercile (&plusmn;0.43&sigma;)</div>
-        </div>
-        <div style="background: ${modal === 'Dry' ? '#fef3c7' : '#f8fafc'}; padding: 0.75rem 1.25rem; border-radius: 6px; border: ${modal === 'Dry' ? '2px solid #d97706' : '1px solid #e2e8f0'}; min-width: 150px;">
-          <div style="font-size: 0.74rem; font-weight: 700; color: #d97706; text-transform: uppercase;">Drier than normal</div>
-          <div style="font-size: 1.65rem; font-weight: 800; color: #d97706; margin: 0.15rem 0;">${counts.Dry} of ${n} seasons</div>
-          <div style="font-size: 0.78rem; color: #b45309; font-weight: 600;">${pDry}% &bull; Bottom Tercile (&lt; &minus;0.43&sigma;)</div>
+        <div style="font-size: 0.74rem; color: #475569;">
+          Normal Baseline (1991–2020): <strong>${climMean != null ? `${Math.round(climMean)} mm` : '161 mm'}</strong>
         </div>
       </div>
 
-      <!-- Sample-size advisory warning when n < 10 -->
-      ${n < 10 ? html`
-        <div class="sample-size-warning">
-          ⚠️ <strong>Sample Advisory (N = ${n}):</strong> Empirical probabilities are conditioned on the ${n} nearest ocean analogues from ${totalSample} candidate seasons (1981–2025) using <strong>${activeCrit}</strong>. Small samples carry wide binomial sampling intervals (e.g. ${counts.Wet}/${n} = ${pWet}% has a 95% Wilson CI of ~41%–93%). Interpret as indicative physical risk scenarios, not deterministic odds.
+      <!-- 100% Horizontal Stacked Probability Bar with Climatology Markers -->
+      <div style="margin-bottom: 0.85rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+          <span style="font-size: 0.74rem; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.03em;">
+            Empirical Tercile Probability Distribution
+          </span>
+          <span style="font-size: 0.70rem; color: #64748b;">
+            Dashed ticks: 33.3% climatological equal odds
+          </span>
         </div>
-      ` : html``}
 
-      <div style="font-size: 0.8rem; color: #475569; margin: 0.6rem 0 0.4rem 0;">
-        <strong>Conditioned Analogue Years (Top ${n} Nearest Neighbors Ranked by Standardized Distance D):</strong>
+        <div style="position: relative; height: 26px; border-radius: 6px; overflow: hidden; display: flex; background: #e2e8f0; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);">
+          <!-- Wet Segment -->
+          <div style="width: ${pWet}%; background: #0284c7; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.74rem; font-weight: 800; transition: width 0.3s ease; white-space: nowrap; overflow: hidden;" title="Wetter than normal: ${counts.Wet}/${n} (${pWet}%)">
+            ${pWet >= 12 ? `${pWet}% Wetter` : (pWet > 0 ? `${pWet}%` : '')}
+          </div>
+          <!-- Near Segment -->
+          <div style="width: ${pNear}%; background: #475569; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.74rem; font-weight: 800; transition: width 0.3s ease; white-space: nowrap; overflow: hidden;" title="Near normal: ${counts.Near}/${n} (${pNear}%)">
+            ${pNear >= 12 ? `${pNear}% Near` : (pNear > 0 ? `${pNear}%` : '')}
+          </div>
+          <!-- Dry Segment -->
+          <div style="width: ${pDry}%; background: #d97706; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.74rem; font-weight: 800; transition: width 0.3s ease; white-space: nowrap; overflow: hidden;" title="Drier than normal: ${counts.Dry}/${n} (${pDry}%)">
+            ${pDry >= 12 ? `${pDry}% Drier` : (pDry > 0 ? `${pDry}%` : '')}
+          </div>
+
+          <!-- 33.3% Reference Marker -->
+          <div style="position: absolute; left: 33.33%; top: 0; bottom: 0; width: 2px; border-left: 2px dashed #ffffff; pointer-events: none; opacity: 0.85;"></div>
+          <!-- 66.6% Reference Marker -->
+          <div style="position: absolute; left: 66.67%; top: 0; bottom: 0; width: 2px; border-left: 2px dashed #ffffff; pointer-events: none; opacity: 0.85;"></div>
+        </div>
       </div>
-      <div style="display: flex; justify-content: center; gap: 0.4rem; flex-wrap: wrap; max-width: 680px; margin: 0 auto;">
-        ${chips}
+
+      <!-- 3-Column Scenario Layout (Side-by-Side) with Embedded Analogue Years -->
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.60rem; margin-bottom: 0.85rem;">
+        
+        <!-- Column 1: Wetter -->
+        <div style="background: ${modal === 'Wet' ? '#f0f9ff' : '#f8fafc'}; border: 1px solid ${modal === 'Wet' ? '#0284c7' : '#e2e8f0'}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
+          <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 0.40rem; margin-bottom: 0.45rem;">
+            <div style="font-size: 0.69rem; font-weight: 800; color: #0284c7; text-transform: uppercase;">Wetter</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #0284c7; margin: 1px 0;">${counts.Wet} of ${n}</div>
+            <div style="font-size: 0.68rem; color: #0369a1; font-weight: 600;">${pWet}% (&gt; +0.43&sigma;)</div>
+          </div>
+          ${renderAnaloguePills(wetDots, '#bae6fd')}
+        </div>
+
+        <!-- Column 2: Near Normal -->
+        <div style="background: ${modal === 'Near' ? '#f1f5f9' : '#f8fafc'}; border: 1px solid ${modal === 'Near' ? '#475569' : '#e2e8f0'}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
+          <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 0.40rem; margin-bottom: 0.45rem;">
+            <div style="font-size: 0.69rem; font-weight: 800; color: #475569; text-transform: uppercase;">Near Normal</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #334155; margin: 1px 0;">${counts.Near} of ${n}</div>
+            <div style="font-size: 0.68rem; color: #475569; font-weight: 600;">${pNear}% (&plusmn;0.43&sigma;)</div>
+          </div>
+          ${renderAnaloguePills(nearDots, '#cbd5e1')}
+        </div>
+
+        <!-- Column 3: Drier -->
+        <div style="background: ${modal === 'Dry' ? '#fffbeb' : '#f8fafc'}; border: 1px solid ${modal === 'Dry' ? '#d97706' : '#e2e8f0'}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
+          <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 0.40rem; margin-bottom: 0.45rem;">
+            <div style="font-size: 0.69rem; font-weight: 800; color: #d97706; text-transform: uppercase;">Drier</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #d97706; margin: 1px 0;">${counts.Dry} of ${n}</div>
+            <div style="font-size: 0.68rem; color: #b45309; font-weight: 600;">${pDry}% (&lt; &minus;0.43&sigma;)</div>
+          </div>
+          ${renderAnaloguePills(dryDots, '#fde68a')}
+        </div>
+
       </div>
+
+      <!-- Actionable Scenario Advisory Callout -->
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #0284c7; border-radius: 6px; padding: 0.60rem 0.80rem; font-size: 0.74rem; color: #334155; line-height: 1.45;">
+        <strong>Scenario Planning Interpretation (N = ${n} Analogue Seasons):</strong>
+        Empirical analogue distributions ground dynamic models in Kenyan climate history. Because ocean configurations are rare (${n} of ${totalSample} candidate seasons, 1981–2025), these terciles represent empirical scenarios rather than deterministic forecasts. 
+        In <strong>${countyName}</strong>, the modal scenario is <strong>${modal === 'Wet' ? 'Wetter than normal' : modal === 'Dry' ? 'Drier than normal' : 'Near normal'}</strong> (${counts[modal]} of ${n} seasons).
+        <em>Click any historical year pill above to explore its spatial rainfall footprint in Figure 2.2 below.</em>
+      </div>
+
     </div>
   `;
 }
