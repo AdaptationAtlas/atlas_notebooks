@@ -1,0 +1,63 @@
+name: Monthly Climate Driver & Telemetry Auto-Update
+
+on:
+  schedule:
+    # Runs at 04:00 UTC on the 6th and 21st of every month
+    # Aligns with NOAA CPC (monthly ~5th) and BoM (bi-monthly ~20th) index updates
+    - cron: '0 4 6,21 * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force re-fetch of all feeds'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  update-drivers:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas pyarrow
+
+      - name: Ingest latest IRI ENSO Plume
+        run: |
+          python scripts/fetch_iri_plume.py
+
+      - name: Ingest NOAA & BoM Driver Observations
+        run: |
+          python scripts/update_drivers.py ${{ inputs.force && '--force' || '' }}
+
+      - name: Validate Data Freshness & Physical Invariants
+        run: |
+          python scripts/check_data_freshness.py
+
+      - name: Commit and push updated climate datasets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add data/KE-enso-explorer/
+          
+          if git diff --staged --quiet; then
+            echo "No data changes detected. Everything is up to date."
+          else
+            STAMP=$(date -u +"%Y-%m-%d")
+            git commit -m "chore(data): auto-update climate drivers and plumes ($STAMP) [skip ci]"
+            git push
+            echo "Pushed updated climate datasets to branch."
+          fi
