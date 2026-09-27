@@ -8706,44 +8706,75 @@ driverPhaseByYear = {
 // current state: 3-month mean of RONI; DMI coalesced (dmi_hadisst lags about a year,
 // so fall back to dmi_ersst for the most recent value). Includes 1-month trajectory trends.
 currentState = {
-  const roniRows = drivers.filter((d) => d.roni != null);
-  const roni = d3.mean(roniRows.slice(-3), (d) => d.roni);
-  const asOf = roniRows.slice(-1)[0]?.date;
-  
-  // RONI 1-month trend trajectory
+  // 1. RONI from seasonalDrivers (Decision D17.1 & D17.4: native 3-month running windows)
+  const seasonsOrder = ['DJF', 'JFM', 'FMA', 'MAM', 'AMJ', 'MJJ', 'JJA', 'JAS', 'ASO', 'SON', 'OND', 'NDJ'];
+  const roniRows = (seasonalDrivers && seasonalDrivers.length) 
+    ? seasonalDrivers
+        .filter((d) => d.index === "RONI" && d.value != null)
+        .slice()
+        .sort((a, b) => (a.year - b.year) || (seasonsOrder.indexOf(a.season) - seasonsOrder.indexOf(b.season)))
+    : [];
   const nRoni = roniRows.length;
-  const roniLatest = nRoni > 0 ? roniRows[nRoni - 1]?.roni : null;
-  const roniPrev = nRoni > 1 ? roniRows[nRoni - 2]?.roni : null;
+  const latestRoniRow = nRoni > 0 ? roniRows[nRoni - 1] : null;
+  const prevRoniRow = nRoni > 1 ? roniRows[nRoni - 2] : null;
+  const roniLatest = latestRoniRow ? latestRoniRow.value : null;
+  const roniPrev = prevRoniRow ? prevRoniRow.value : null;
+  const roniSeason = latestRoniRow ? `${latestRoniRow.season} ${latestRoniRow.year}` : null;
   const roniDelta = (roniLatest != null && roniPrev != null) ? (roniLatest - roniPrev) : 0;
   const roniTrend = roniDelta > 0.05 ? "warming" : roniDelta < -0.05 ? "cooling" : "steady";
   const roniArrow = roniDelta > 0.05 ? "↑" : roniDelta < -0.05 ? "↓" : "→";
 
-  // DMI 1-month trend trajectory
-  const dmiRows = drivers.filter((d) => d.dmi_hadisst != null || d.dmi_ersst != null);
-  const nDmi = dmiRows.length;
-  const dmi = nDmi > 0 ? (dmiRows[nDmi - 1]?.dmi_hadisst ?? dmiRows[nDmi - 1]?.dmi_ersst) : null;
-  const dmiPrev = nDmi > 1 ? (dmiRows[nDmi - 2]?.dmi_hadisst ?? dmiRows[nDmi - 2]?.dmi_ersst) : null;
+  // Target predictor window for OND is JAS; for MAM it is DJF (Decision D17.2)
+  const targetSea = (activeSeason === "OND") ? "OND" : "MAM";
+  const predSea = (targetSea === "OND") ? "JAS" : "DJF";
+  const predYear = 2026;
+  const predRow = roniRows.find((d) => d.season === predSea && d.year === predYear);
+  const isPredPending = !predRow;
+  const predStatus = isPredPending 
+    ? `${predSea} ${predYear}: Pending CPC publication (~6 Oct)`
+    : `${predSea} ${predYear}: ${predRow.value >= 0 ? '+' : ''}${predRow.value.toFixed(2)} °C`;
+
+  // 2. DMI from monthlyDrivers (using clean NOAA CPC ERSSTv6, 1991-2020 base)
+  const dmiCpcRows = (monthlyDrivers && monthlyDrivers.length)
+    ? monthlyDrivers.filter((d) => d.index === "DMI_CPC" && d.value != null)
+    : [];
+  const nDmi = dmiCpcRows.length;
+  const latestDmiRow = nDmi > 0 ? dmiCpcRows[nDmi - 1] : null;
+  const prevDmiRow = nDmi > 1 ? dmiCpcRows[nDmi - 2] : null;
+  const dmi = latestDmiRow ? latestDmiRow.value : null;
+  const dmiPrev = prevDmiRow ? prevDmiRow.value : null;
   const dmiDelta = (dmi != null && dmiPrev != null) ? (dmi - dmiPrev) : 0;
   const dmiTrend = dmiDelta > 0.05 ? "warming" : dmiDelta < -0.05 ? "cooling" : "steady";
   const dmiArrow = dmiDelta > 0.05 ? "↑" : dmiDelta < -0.05 ? "↓" : "→";
+  const dmiMonthYear = latestDmiRow 
+    ? new Date(Date.UTC(latestDmiRow.year, latestDmiRow.month - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    : null;
 
-  const phase = roni > 0.5 ? "El Niño" : roni < -0.5 ? "La Niña" : "neutral";
+  const phase = (roniLatest != null) ? (roniLatest > 0.5 ? "El Niño" : roniLatest < -0.5 ? "La Niña" : "neutral") : "neutral";
+
   const stateObj = {
-    oni: roni,
-    roni,
-    dmi,
-    phase,
-    asOf,
+    roni: roniLatest,
     roniLatest,
     roniPrev,
     roniDelta,
     roniTrend,
     roniArrow,
+    roniSeason,
+    targetSea,
+    predSea,
+    predYear,
+    isPredPending,
+    predStatus,
+    dmi,
     dmiLatest: dmi,
     dmiPrev,
     dmiDelta,
     dmiTrend,
-    dmiArrow
+    dmiArrow,
+    dmiMonthYear,
+    phase,
+    dmiSource: "NOAA CPC ERSSTv6",
+    roniSource: "NOAA CPC RONI"
   };
   if (typeof window !== "undefined") window._currentState = stateObj;
   return stateObj;
@@ -8831,6 +8862,7 @@ recent = drivers.filter((d) => d.year >= 2015)
 dbDrivers = DuckDBClient.of({
   driver_indices: FileAttachment("/data/KE-enso-explorer/driver_indices.parquet"),
   enso_drivers_seasonal: FileAttachment("/data/KE-enso-explorer/enso_drivers_seasonal.parquet"),
+  enso_drivers_monthly: FileAttachment("/data/KE-enso-explorer/enso_drivers_monthly.parquet"),
 })
 
 drivers = dbDrivers.query(`
@@ -8857,7 +8889,7 @@ drivers = dbDrivers.query(`
   )
   SELECT 
     d.*,
-    COALESCE(r.roni, d.nino34_anom_noaa) AS roni
+    r.roni AS roni
   FROM driver_indices d
   LEFT JOIN roni_monthly r ON CAST(d.year AS INT) = r.year AND CAST(d.month AS INT) = r.month
   ORDER BY d.date
@@ -8865,10 +8897,18 @@ drivers = dbDrivers.query(`
 ```
 
 ```{ojs}
+monthlyDrivers = dbDrivers.query(`
+  SELECT index, CAST(year AS INT) AS year, CAST(month AS INT) AS month, value, source
+  FROM enso_drivers_monthly
+  ORDER BY year, month
+`)
+```
+
+```{ojs}
 seasonalDrivers = dbDrivers.query(`
-  SELECT index, season, CAST(year AS INT) AS year, value 
+  SELECT index, season, CAST(year AS INT) AS year, value, source 
   FROM enso_drivers_seasonal 
-  WHERE index IN ('RONI', 'DMI')
+  WHERE index IN ('RONI', 'DMI', 'DMI_CPC')
   ORDER BY year, season
 `)
 ```
@@ -8989,13 +9029,17 @@ analogueYears = {
   const sdConcDmi = d3.deviation(baseVals.map((d) => d.dmi_conc).filter((v) => v != null)) || 0.450;
 
   // 2. Target ocean states:
-  // Lead-in targets (observed JAS):
-  const r0_lead = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : ((currentState && currentState.roni != null) ? currentState.roni : 1.55);
-  const d0_lead = (currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : ((currentState && currentState.dmi != null) ? currentState.dmi : 0.55);
+  // Lead-in targets (Decision D17.2: pre-season window; if JAS is pending, use latest verified 3-month window):
+  const r0_lead = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : null;
+  const d0_lead = (currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : null;
 
-  // Forecast peak targets (multi-model ensemble median for OND):
-  const r0_peak = 3.09;
-  const d0_peak = -0.07;
+  // Forecast peak targets (multi-model ensemble median for OND, dynamically derived from plume bundles):
+  const r0_peak = (iriPlumeBundle?.current?.models)
+    ? d3.median(iriPlumeBundle.current.models.map(m => m.data[2]).filter(v => v != null))
+    : 3.09;
+  const d0_peak = (iodPlumeBundle?.current?.models)
+    ? d3.median(iodPlumeBundle.current.models.map(m => m.data[2]).filter(v => v != null))
+    : 0.39;
 
   // 3. Unique candidate historical years for the target season
   const candMap = new Map();
@@ -9019,19 +9063,19 @@ analogueYears = {
     let dist;
     if (criterion.includes("Full Trajectory")) {
       // Full Trajectory: 50% lead-in momentum + 50% peak alignment
-      const zLeadRoni = (c.roni_pred - r0_lead) / sdPredRoni;
-      const zLeadDmi = c.dmi_pred != null ? (c.dmi_pred - d0_lead) / sdPredDmi : 0;
-      const zPeakRoni = (c.roni_conc - r0_peak) / sdConcRoni;
-      const zPeakDmi = c.dmi_conc != null ? (c.dmi_conc - d0_peak) / sdConcDmi : 0;
+      const zLeadRoni = (r0_lead != null && c.roni_pred != null) ? (c.roni_pred - r0_lead) / sdPredRoni : 0;
+      const zLeadDmi = (d0_lead != null && c.dmi_pred != null) ? (c.dmi_pred - d0_lead) / sdPredDmi : 0;
+      const zPeakRoni = (r0_peak != null && c.roni_conc != null) ? (c.roni_conc - r0_peak) / sdConcRoni : 0;
+      const zPeakDmi = (d0_peak != null && c.dmi_conc != null) ? (c.dmi_conc - d0_peak) / sdConcDmi : 0;
       dist = Math.sqrt(0.5 * (zLeadRoni * zLeadRoni + zLeadDmi * zLeadDmi) + 0.5 * (zPeakRoni * zPeakRoni + zPeakDmi * zPeakDmi));
     } else if (criterion.includes("Lead-in")) {
-      const zRoni = (c.roni_pred - r0_lead) / sdPredRoni;
-      const zDmi = c.dmi_pred != null ? (c.dmi_pred - d0_lead) / sdPredDmi : 0;
+      const zRoni = (r0_lead != null && c.roni_pred != null) ? (c.roni_pred - r0_lead) / sdPredRoni : 0;
+      const zDmi = (d0_lead != null && c.dmi_pred != null) ? (c.dmi_pred - d0_lead) / sdPredDmi : 0;
       dist = Math.sqrt(zRoni * zRoni + zDmi * zDmi);
     } else {
       // Projected Season (OND Plume)
-      const zRoni = (c.roni_conc - r0_peak) / sdConcRoni;
-      const zDmi = c.dmi_conc != null ? (c.dmi_conc - d0_peak) / sdConcDmi : 0;
+      const zRoni = (r0_peak != null && c.roni_conc != null) ? (c.roni_conc - r0_peak) / sdConcRoni : 0;
+      const zDmi = (d0_peak != null && c.dmi_conc != null) ? (c.dmi_conc - d0_peak) / sdConcDmi : 0;
       dist = Math.sqrt(zRoni * zRoni + zDmi * zDmi);
     }
     scored.push({
@@ -15369,18 +15413,18 @@ sec5LiveHero = {
 
   const obsRoni = (currentState && currentState.roni != null) 
     ? `${currentState.roni >= 0 ? "+" : ""}${currentState.roni.toFixed(2)}` 
-    : "+0.47";
+    : "Pending";
   const obsDmi = (currentState && currentState.dmi != null) 
     ? `${currentState.dmi >= 0 ? "+" : ""}${currentState.dmi.toFixed(2)}` 
-    : "+0.08";
-  const roniNum = (currentState && currentState.roni != null) ? currentState.roni : 0.47;
-  const roniStateTag = roniNum >= 0.5 ? "El Niño (Warm Anomaly)" : roniNum <= -0.5 ? "La Niña (Cold Anomaly)" : "Neutral (Warm Anomaly)";
-  const dmiNum = (currentState && currentState.dmi != null) ? currentState.dmi : 0.08;
-  const dmiStateTag = dmiNum >= 0.4 ? "Positive Dipole" : dmiNum <= -0.4 ? "Negative Dipole" : "Neutral Dipole (±0.40 °C)";
-
-  const obsMonthYear = (currentState && currentState.asOf)
-    ? new Date(currentState.asOf).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
-    : "June 2026";
+    : "Pending";
+  const roniNum = (currentState && currentState.roni != null) ? currentState.roni : null;
+  const roniStateTag = roniNum != null 
+    ? (roniNum >= 0.5 ? "El Niño (Warm Anomaly)" : roniNum <= -0.5 ? "La Niña (Cold Anomaly)" : "Neutral")
+    : "Pending Observation";
+  const dmiNum = (currentState && currentState.dmi != null) ? currentState.dmi : null;
+  const dmiStateTag = dmiNum != null
+    ? (dmiNum >= 0.4 ? "Positive Dipole" : dmiNum <= -0.4 ? "Negative Dipole" : "Neutral Dipole (±0.40 °C)")
+    : "Pending Observation";
 
   const dominantPhase = pElNino >= pNeutral && pElNino >= pLaNina ? "El Niño" : pLaNina >= pNeutral ? "La Niña" : "Neutral";
   const dominantPct = Math.max(pElNino, pNeutral, pLaNina);
@@ -15388,20 +15432,15 @@ sec5LiveHero = {
   let projDesc = "";
   if (targetSea === "OND") {
     if (dominantPhase === "El Niño") {
-      projDesc = `Official NOAA CPC probabilistic forecast projects dominant El Niño conditions (${dominantPct}%) during OND 2026. Equatorial Pacific warming coupled with neutral/positive Indian Ocean Dipole historically favors above-normal rainfall, riverine flooding, and rangeland pasture flushes across Kenya.`;
+      projDesc = `Official NOAA CPC probabilistic forecast projects dominant El Niño conditions (${dominantPct}%) during OND 2026. Equatorial Pacific warming coupled with positive/neutral Indian Ocean Dipole historically favors enhanced rainfall, riverine flooding risk, and pasture flushes across Kenya.`;
     } else if (dominantPhase === "La Niña") {
-      projDesc = `Official NOAA CPC probabilistic forecast projects elevated La Niña probabilities (${dominantPct}%) during OND 2026. Central Pacific cooling historically increases the risk of suppressed Short Rains, delayed onset, and severe forage depletion in pastoral ASALs.`;
+      projDesc = `Official NOAA CPC probabilistic forecast projects elevated La Niña probabilities (${dominantPct}%) during OND 2026. Central Pacific cooling historically increases the risk of suppressed Short Rains and forage depletion in pastoral ASALs.`;
     } else {
       projDesc = `Official NOAA CPC probabilistic forecast projects ENSO-neutral conditions (${dominantPct}%) during OND 2026. Near-average Pacific forcing allows localized Indian Ocean dynamics and intra-seasonal atmospheric waves to steer seasonal rainfall.`;
     }
   } else {
     projDesc = `Official NOAA CPC forecast projects ${dominantPhase} (${dominantPct}%) through the March–May window. In equatorial East Africa, Pacific ENSO teleconnection skill drops near zero during MAM; regional planning must anchor directly to Western-V dynamics and downscaled KMSA bulletins.`;
   }
-
-  const obsDateObj = currentState?.asOf ? new Date(currentState.asOf) : new Date(2026, 8, 1);
-  const now = new Date();
-  const stalenessDays = Math.round((now.getTime() - obsDateObj.getTime()) / (1000 * 60 * 60 * 24));
-  const isStale = stalenessDays > 45;
 
   return html`
     <div class="card" style="border-top: 4px solid var(--atlas-color-primary); background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%); box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06); padding: 1.25rem 1.5rem; margin-bottom: 0;">
@@ -15412,15 +15451,9 @@ sec5LiveHero = {
               <span style="width: 7px; height: 7px; background: #fff; border-radius: 50%; display: inline-block;"></span>
               Live Climate Driver Telemetry
             </span>
-            ${isStale ? html`
-              <span style="background: #fef3c7; color: #b45309; border: 1px solid #fde68a; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 4px;">
-                ⚠️ Telemetry Lags (${stalenessDays}d) &bull; Auto-Update Pending
-              </span>
-            ` : html`
-              <span style="background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 4px;">
-                ✓ Verified Fresh (${obsMonthYear} &bull; Pipeline Synchronized)
-              </span>
-            `}
+            <span style="background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 4px;">
+              ● Observations: RONI ${currentState?.roniSeason || 'JJA 2026'} &bull; DMI ${currentState?.dmiMonthYear || 'August 2026'}
+            </span>
             <span style="font-size: 0.78rem; color: #475569; font-weight: 600;">
               NOAA Forecast Issued: <strong>${issuedDate}</strong>
             </span>
@@ -15431,20 +15464,13 @@ sec5LiveHero = {
           <p class="card-subtitle" style="font-size: 0.84rem; color: #475569; margin: 0.25rem 0 0;">
             Real-time monitoring of equatorial Pacific ENSO (Relative ONI) and Indian Ocean Dipole (DMI) coupled with official NOAA CPC probabilistic seasonal projections for Kenya's ${isOND ? "Short Rains (OND)" : "Long Rains (MAM)"}.
           </p>
-          ${isStale ? html`
-            <div style="background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #f59e0b; border-radius: 4px; padding: 0.5rem 0.75rem; margin-top: 0.65rem; font-size: 0.78rem; color: #92400e;">
-              <strong>Data Freshness Notice:</strong> The latest primary observation on record is <strong>${obsMonthYear}</strong> (${stalenessDays} days ago). 
-              The automated ingestion pipeline runs on the 6th and 21st of each month. 
-              Forward operational decisions must cross-reference latest weekly updates from KMSA and Australia BoM.
-            </div>
-          ` : ""}
         </div>
         <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
           <a href="https://www.cpc.ncep.noaa.gov/data/indices/" target="_blank" rel="noopener" class="tool-action-link" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600;">
             NOAA CPC Indices &rarr;
           </a>
-          <a href="https://psl.noaa.gov/gcos_wgsp/Timeseries/DMI/" target="_blank" rel="noopener" class="tool-action-link" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600;">
-            NOAA PSL DMI &rarr;
+          <a href="https://www.cpc.ncep.noaa.gov/products/international/ocean_monitoring/indian/IODMI/" target="_blank" rel="noopener" class="tool-action-link" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600;">
+            CPC ERSSTv6 DMI &rarr;
           </a>
         </div>
       </div>
@@ -15458,7 +15484,7 @@ sec5LiveHero = {
                 Equatorial Pacific &bull; RONI
               </span>
               <span style="font-size: 0.72rem; color: #0284c7; background: #e0f2fe; padding: 2px 7px; border-radius: 9999px; font-weight: 700;">
-                Latest Observed
+                ${currentState?.roniSeason || 'Latest Published'}
               </span>
             </div>
             <div style="display: flex; align-items: baseline; gap: 8px; margin: 0.25rem 0; flex-wrap: wrap;">
@@ -15468,16 +15494,19 @@ sec5LiveHero = {
               <span style="font-size: 0.82rem; font-weight: 700; color: #0369a1;">
                 ${roniStateTag}
               </span>
-              <span style="background: ${currentState?.roniTrend === 'warming' ? '#fee2e2' : '#eff6ff'}; color: ${currentState?.roniTrend === 'warming' ? '#dc2626' : '#2563eb'}; font-size: 0.72rem; font-weight: 700; padding: 2px 7px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 3px;" title="1-month trajectory: ${currentState?.roniDelta >= 0 ? '+' : ''}${currentState?.roniDelta?.toFixed(2)} °C/mo">
-                ${currentState?.roniArrow} ${currentState?.roniTrend === 'warming' ? 'Warming' : currentState?.roniTrend === 'cooling' ? 'Cooling' : 'Steady'} (${currentState?.roniDelta >= 0 ? '+' : ''}${currentState?.roniDelta?.toFixed(2)} °C/mo)
+              <span style="background: ${currentState?.roniTrend === 'warming' ? '#fee2e2' : '#eff6ff'}; color: ${currentState?.roniTrend === 'warming' ? '#dc2626' : '#2563eb'}; font-size: 0.72rem; font-weight: 700; padding: 2px 7px; border-radius: 9999px; display: inline-flex; align-items: center; gap: 3px;" title="Trajectory: ${currentState?.roniDelta >= 0 ? '+' : ''}${currentState?.roniDelta?.toFixed(2)} °C">
+                ${currentState?.roniArrow} ${currentState?.roniTrend === 'warming' ? 'Warming' : currentState?.roniTrend === 'cooling' ? 'Cooling' : 'Steady'} (${currentState?.roniDelta >= 0 ? '+' : ''}${currentState?.roniDelta?.toFixed(2)} °C)
               </span>
             </div>
-            <p style="font-size: 0.79rem; color: #334155; line-height: 1.45; margin: 0.4rem 0 0.6rem;">
-              Relative Oceanic Niño Index (RONI) tracks SST anomalies relative to tropical mean warming. Current value reflects observed interannual Pacific forcing.
+            <div style="font-size: 0.74rem; color: #0369a1; background: #e0f2fe; padding: 4px 8px; border-radius: 4px; margin: 0.35rem 0 0.4rem; font-weight: 600;">
+              Predictor Window (D17.2): <strong>${currentState?.predStatus}</strong>
+            </div>
+            <p style="font-size: 0.79rem; color: #334155; line-height: 1.45; margin: 0.2rem 0 0.6rem;">
+              Relative Oceanic Niño Index (RONI) tracks central Pacific SST anomalies relative to tropical mean warming.
             </p>
           </div>
           <div style="border-top: 1px solid #e0f2fe; padding-top: 0.5rem; font-size: 0.72rem; color: #64748b; display: flex; justify-content: space-between; align-items: center;">
-            <span>Source: <strong>NOAA CPC</strong> (Obs: ${obsMonthYear})</span>
+            <span>Source: <strong>NOAA CPC</strong> (RONI ${currentState?.roniSeason})</span>
             <a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso/roni/" target="_blank" rel="noopener" style="color: #0284c7; font-weight: 600; text-decoration: none;">RONI Spec &rarr;</a>
           </div>
         </div>
@@ -15487,10 +15516,10 @@ sec5LiveHero = {
           <div>
             <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.35rem;">
               <span style="font-size: 0.76rem; font-weight: 800; color: #334155; text-transform: uppercase; letter-spacing: 0.04em;">
-                Indian Ocean &bull; HadISST DMI
+                Indian Ocean &bull; NOAA CPC ERSSTv6 DMI
               </span>
               <span style="font-size: 0.72rem; color: #475569; background: #e2e8f0; padding: 2px 7px; border-radius: 9999px; font-weight: 700;">
-                Latest Observed
+                ${currentState?.dmiMonthYear || 'Latest Published'}
               </span>
             </div>
             <div style="display: flex; align-items: baseline; gap: 8px; margin: 0.25rem 0; flex-wrap: wrap;">
@@ -15505,12 +15534,12 @@ sec5LiveHero = {
               </span>
             </div>
             <p style="font-size: 0.79rem; color: #334155; line-height: 1.45; margin: 0.4rem 0 0.6rem;">
-              The Dipole Mode Index measures east-west equatorial sea surface temperature gradient. A neutral IOD creates no opposing thermal suppression, allowing Pacific teleconnection forcing to dominate.
+              Dipole Mode Index from NOAA CPC ERSSTv6 (1991–2020 climatology). August warming creates positive thermal forcing across the western equatorial Indian Ocean.
             </p>
           </div>
           <div style="border-top: 1px solid #e2e8f0; padding-top: 0.5rem; font-size: 0.72rem; color: #64748b; display: flex; justify-content: space-between; align-items: center;">
-            <span>Source: <strong>NOAA PSL HadISST</strong></span>
-            <a href="https://psl.noaa.gov/gcos_wgsp/Timeseries/DMI/" target="_blank" rel="noopener" style="color: #475569; font-weight: 600; text-decoration: none;">DMI Timeseries &rarr;</a>
+            <span>Source: <strong>NOAA CPC ERSSTv6</strong> (Obs: ${currentState?.dmiMonthYear})</span>
+            <a href="https://www.cpc.ncep.noaa.gov/products/international/ocean_monitoring/indian/IODMI/" target="_blank" rel="noopener" style="color: #475569; font-weight: 600; text-decoration: none;">CPC DMI &rarr;</a>
           </div>
         </div>
 
@@ -15609,48 +15638,42 @@ sec2PlumeHero = {
     const themeBg = isIOD ? "#f0fdfa" : "#eff6ff";
     const ribbonColor = isIOD ? "#99f6e4" : "#93c5fd";
 
-    // Build observed map
+    // Build observed map dynamically from seasonalDrivers (Decision D17.1 & D17.4)
     const obs_map = {};
-    if (bundle.observed) {
-      for (const item of bundle.observed) {
-        const [yStr, mStr] = item.date.split('-');
-        const y = parseInt(yStr, 10);
-        const m = parseInt(mStr, 10);
-        const s = seasons_order[m - 1];
-        obs_map[s + '_' + y] = item.value;
+    for (const s of all_seasons) {
+      const driverKey = isIOD 
+        ? (`DMI_CPC_${s.season}_${s.year}`)
+        : `RONI_${s.season}_${s.year}`;
+      let val = seasonalDriverMap ? seasonalDriverMap.get(driverKey) : null;
+      if (val == null && isIOD && seasonalDriverMap) {
+        val = seasonalDriverMap.get(`DMI_${s.season}_${s.year}`);
       }
-    }
-    if (isIOD) {
-      obs_map['MJJ_2026'] = -0.20;
-      obs_map['JJA_2026'] = 0.01;
-      const latestDmi = (currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : 0.55;
-      obs_map['JAS_2026'] = latestDmi;
-    } else {
-      obs_map['MJJ_2026'] = 0.97;
-      obs_map['JJA_2026'] = 1.36;
-      const latestRoni = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : 1.55;
-      obs_map['JAS_2026'] = latestRoni;
+      if (val != null) {
+        obs_map[s.id] = val;
+      }
     }
 
     const latestObsVal = isIOD 
-      ? ((currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : 0.55)
-      : ((currentState && currentState.roniLatest != null) ? currentState.roniLatest : 1.55);
+      ? (currentState?.dmiLatest ?? null)
+      : (currentState?.roniLatest ?? null);
 
     // Build forward forecast ensemble statistics for the 9 forecast seasons
     const fcstSeasons = ['ASO', 'SON', 'OND', 'NDJ', 'DJF', 'JFM', 'FMA', 'MAM', 'AMJ'];
     const fcstStats = [];
 
-    // Anchor at the latest observed season (JAS '26)
-    fcstStats.push({
-      label: "JAS '26",
-      season: "JAS",
-      year: 2026,
-      min: latestObsVal,
-      max: latestObsVal,
-      median: latestObsVal,
-      mean: latestObsVal,
-      count: bundle.current.models.length
-    });
+    // Anchor at the latest observed season (JAS '26) if available, or latest published
+    if (latestObsVal != null) {
+      fcstStats.push({
+        label: "JAS '26",
+        season: "JAS",
+        year: 2026,
+        min: latestObsVal,
+        max: latestObsVal,
+        median: latestObsVal,
+        mean: latestObsVal,
+        count: bundle.current.models.length
+      });
+    }
 
     fcstSeasons.forEach((s, idx) => {
       const sy = ['ASO', 'SON', 'OND', 'NDJ'].includes(s) ? 2026 : 2027;
@@ -15873,17 +15896,31 @@ sec2PlumeHero = {
     // Gauge calculation
     let gaugeVal, gaugePct, gaugeTag, gaugeColor, gaugeBg;
     if (isIOD) {
-      gaugeVal = (currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : 0.55;
-      gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-1.5)) / 3.0) * 100));
-      gaugeTag = gaugeVal >= 0.8 ? "Strong Positive IOD" : gaugeVal >= 0.4 ? "Positive IOD" : gaugeVal <= -0.8 ? "Strong Negative IOD" : gaugeVal <= -0.4 ? "Negative IOD" : "Neutral IOD";
-      gaugeColor = gaugeVal >= 0.4 ? "#dc2626" : gaugeVal <= -0.4 ? "#2563eb" : "#475569";
-      gaugeBg = gaugeVal >= 0.4 ? "#fee2e2" : gaugeVal <= -0.4 ? "#dbeafe" : "#f1f5f9";
+      gaugeVal = (currentState && currentState.dmiLatest != null) ? currentState.dmiLatest : null;
+      if (gaugeVal != null) {
+        gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-1.5)) / 3.0) * 100));
+        gaugeTag = gaugeVal >= 0.8 ? "Strong Positive IOD" : gaugeVal >= 0.4 ? "Positive IOD" : gaugeVal <= -0.8 ? "Strong Negative IOD" : gaugeVal <= -0.4 ? "Negative IOD" : "Neutral IOD";
+        gaugeColor = gaugeVal >= 0.4 ? "#dc2626" : gaugeVal <= -0.4 ? "#2563eb" : "#475569";
+        gaugeBg = gaugeVal >= 0.4 ? "#fee2e2" : gaugeVal <= -0.4 ? "#dbeafe" : "#f1f5f9";
+      } else {
+        gaugePct = 50;
+        gaugeTag = "Pending Observation";
+        gaugeColor = "#64748b";
+        gaugeBg = "#f1f5f9";
+      }
     } else {
-      gaugeVal = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : 1.55;
-      gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-2.0)) / 4.0) * 100));
-      gaugeTag = gaugeVal >= 2.0 ? "Super El Niño" : gaugeVal >= 1.5 ? "Strong El Niño" : gaugeVal >= 0.5 ? "Moderate El Niño" : gaugeVal <= -1.5 ? "Strong La Niña" : gaugeVal <= -0.5 ? "Weak La Niña" : "Neutral";
-      gaugeColor = gaugeVal >= 0.5 ? "#dc2626" : gaugeVal <= -0.5 ? "#2563eb" : "#475569";
-      gaugeBg = gaugeVal >= 0.5 ? "#fee2e2" : gaugeVal <= -0.5 ? "#dbeafe" : "#f1f5f9";
+      gaugeVal = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : null;
+      if (gaugeVal != null) {
+        gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-2.0)) / 4.0) * 100));
+        gaugeTag = gaugeVal >= 2.0 ? "Super El Niño" : gaugeVal >= 1.5 ? "Strong El Niño" : gaugeVal >= 0.5 ? "Moderate El Niño" : gaugeVal <= -1.5 ? "Strong La Niña" : gaugeVal <= -0.5 ? "Weak La Niña" : "Neutral";
+        gaugeColor = gaugeVal >= 0.5 ? "#dc2626" : gaugeVal <= -0.5 ? "#2563eb" : "#475569";
+        gaugeBg = gaugeVal >= 0.5 ? "#fee2e2" : gaugeVal <= -0.5 ? "#dbeafe" : "#f1f5f9";
+      } else {
+        gaugePct = 50;
+        gaugeTag = "Pending Observation";
+        gaugeColor = "#64748b";
+        gaugeBg = "#f1f5f9";
+      }
     }
 
     container.innerHTML = `
@@ -15901,7 +15938,7 @@ sec2PlumeHero = {
           </div>
           <div style="font-size: 0.74rem; color: #64748b; font-weight: 500;">
             ${isIOD 
-              ? 'International Multi-Model Suite: <strong>BOM • ECMWF • UKMO • NCEP • JMA • JAMSTEC</strong>' 
+              ? 'Coupled Global Dynamical Ensemble: <strong>JAMSTEC SINTEX-F (24 Members)</strong>' 
               : 'Global Multi-Model Ensemble: <strong>Columbia Climate School IRI • NOAA CPC</strong>'}
           </div>
         </div>
@@ -15911,30 +15948,30 @@ sec2PlumeHero = {
           <div>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.35rem; flex-wrap: wrap;">
               <span style="background: ${themeColor}; color: #fff; font-size: 0.7rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em;">
-                ${isIOD ? 'Indian Ocean Multi-Model Ensemble' : 'Pacific Multi-Model Ensemble'}
+                ${isIOD ? 'Indian Ocean Dynamical Ensemble' : 'Pacific Multi-Model Ensemble'}
               </span>
               <span style="font-size: 0.78rem; color: #475569; font-weight: 600;">
-                ${isIOD ? 'International Multi-Model Forecast (BOM / C3S / NMME) • 12 Models' : 'Columbia Climate School IRI / NOAA CPC Release: August 2026 • 28 Models'}
+                ${isIOD ? 'JAMSTEC SINTEX-F Dynamical Prediction • Initialized August 2026 • 24 Members' : 'Columbia Climate School IRI / NOAA CPC Release: August 2026 • 28 Models'}
               </span>
             </div>
             <h2 style="font-size: 1.25rem; font-weight: 800; color: #0f172a; margin: 0;">
               ${isIOD 
-                ? 'Indian Ocean Dipole (DMI) SST Anomaly — Multi-Model Forecast Plume' 
+                ? 'Indian Ocean Dipole (DMI) SST Anomaly — JAMSTEC SINTEX-F Forecast Plume' 
                 : 'Equatorial Pacific Niño 3.4 SST Anomaly — Multi-Model Forecast Plume'}
             </h2>
             <p style="font-size: 0.84rem; color: #475569; margin: 0.25rem 0 0;">
               ${isIOD 
-                ? 'Consensus multi-model ensemble forecast with min–max spread, observed Dipole Mode Index (DMI) trajectory, and historical analogue traces.' 
+                ? 'JAMSTEC SINTEX-F dynamical ocean-atmosphere ensemble forecast (24 members) with min–max spread, observed Dipole Mode Index (DMI) trajectory, and historical analogue traces.' 
                 : 'Consensus multi-model ensemble forecast with min–max spread, observed sea surface temperature trajectory, and historical analogue traces.'}
             </p>
           </div>
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
             ${isIOD ? `
-              <a href="http://www.bom.gov.au/climate/enso/#tabs=Indian-Ocean" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
-                BOM IOD Outlook &rarr;
+              <a href="https://www.jamstec.go.jp/virtualearth/general/en/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
+                JAMSTEC SINTEX-F &rarr;
               </a>
-              <a href="https://psl.noaa.gov/gcos_wgsp/Timeseries/DMI/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
-                NOAA PSL DMI Series &rarr;
+              <a href="https://www.cpc.ncep.noaa.gov/products/international/ocean_monitoring/indian/IODMI/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
+                NOAA CPC ERSSTv6 DMI &rarr;
               </a>
             ` : `
               <a href="https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/" target="_blank" rel="noopener" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #1e293b; text-decoration: none;">
@@ -15954,7 +15991,7 @@ sec2PlumeHero = {
               ${isIOD ? 'IOD State Gauge &bull; Current Dipole Mode Index (DMI) Position' : 'ENSO State Gauge &bull; Current Niño 3.4 Position'}
             </span>
             <span style="font-size: 1.25rem; font-weight: 800; color: ${gaugeColor}; font-variant-numeric: tabular-nums;">
-              ${gaugeVal >= 0 ? '+' : ''}${gaugeVal.toFixed(2)} °C
+              ${gaugeVal != null ? `${gaugeVal >= 0 ? '+' : ''}${gaugeVal.toFixed(2)} °C` : 'Pending'}
               <span style="font-size: 0.76rem; font-weight: 700; color: ${gaugeColor}; margin-left: 4px; background: ${gaugeBg}; padding: 2px 7px; border-radius: 9999px;">${gaugeTag}</span>
             </span>
           </div>
@@ -15966,7 +16003,7 @@ sec2PlumeHero = {
             <!-- Pointer Marker -->
             <div style="position: absolute; top: -14px; left: ${gaugePct}%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; pointer-events: none;">
               <div style="background: #0f172a; color: #fff; font-size: 0.68rem; font-weight: 800; padding: 1px 5px; border-radius: 3px; white-space: nowrap;">
-                ${gaugeVal >= 0 ? '+' : ''}${gaugeVal.toFixed(2)}°C
+                ${gaugeVal != null ? `${gaugeVal >= 0 ? '+' : ''}${gaugeVal.toFixed(2)}°C` : 'Pending'}
               </div>
               <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #0f172a;"></div>
             </div>
@@ -16008,7 +16045,7 @@ sec2PlumeHero = {
 
           <!-- Right: Ensemble Metadata Tag -->
           <div style="font-size: 0.72rem; color: #64748b; font-weight: 500;">
-            Multi-Model Ensemble: <strong>${bundle.current.models.length} models</strong>
+            ${isIOD ? `Dynamical Ensemble: <strong>${bundle.current.models.length} members</strong>` : `Multi-Model Ensemble: <strong>${bundle.current.models.length} models</strong>`}
           </div>
 
         </div>
@@ -16089,7 +16126,7 @@ sec2PlumeHero = {
                 </div>
                 <p style="font-size: 0.78rem; color: #475569; line-height: 1.45; margin: 0;">
                   ${isIOD 
-                    ? "The Indian Ocean Dipole is currently in a Neutral to Weak Positive state (+0.55 °C, with BoM weekly monitoring reaching +0.65 °C). Multi-model ensembles project this positive-leaning setup to persist into OND 2026. A positive/neutral IOD actively reinforces Pacific El Niño teleconnection forcing, enhancing moisture advection and Short Rains totals across East Africa."
+                    ? `The Indian Ocean Dipole is currently in a Neutral to Positive state (${currentState?.dmi != null ? `${currentState.dmi >= 0 ? '+' : ''}${currentState.dmi.toFixed(2)} °C in ${currentState.dmiMonthYear || 'August 2026'}` : 'August 2026'}). JAMSTEC SINTEX-F dynamical ensemble projections indicate positive-leaning to neutral conditions into OND 2026 (ensemble mean +0.39 °C). A positive/neutral IOD actively reinforces Pacific El Niño teleconnection forcing, enhancing moisture advection and Short Rains totals across East Africa.`
                     : (isOND 
                         ? "Equatorial Pacific warming is projected to exceed +2.0 °C throughout OND 2026. This setup strongly favors enhanced Short Rains across Kenya, with heightened riverine flood risks in the Tana/Athi basins, while supporting forage recovery in pastoral ASALs."
                         : "During MAM (Long Rains), Pacific ENSO teleconnection skill historically drops near zero. Preparedness must focus on localized Indian Ocean Dipole (DMI) and Western-V atmospheric wave dynamics."
@@ -16100,7 +16137,7 @@ sec2PlumeHero = {
             </div>
 
             <div style="border-top: 1px solid #e2e8f0; padding-top: 0.5rem; margin-top: 0.75rem; font-size: 0.70rem; color: #64748b;">
-              <span>Source: <strong>${isIOD ? 'BOM / C3S / NMME Multi-Model Suite' : 'Columbia Climate School IRI / NOAA CPC'}</strong></span>
+              <span>Source: <strong>${isIOD ? 'JAMSTEC SINTEX-F (24 Members) & NOAA CPC ERSSTv6' : 'Columbia Climate School IRI / NOAA CPC'}</strong></span>
             </div>
           </div>
 
@@ -16109,7 +16146,7 @@ sec2PlumeHero = {
         <!-- Clean, Uncluttered Legend with Optional Analogue Swatches -->
         <div style="margin-top: 0.75rem; padding-top: 0.65rem; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; font-size: 0.74rem; color: #334155; flex-wrap: wrap; gap: 0.75rem;">
           <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-            <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="display: align-items: center; gap: 6px;">
               <span style="display: inline-block; width: 14px; height: 3px; background: #0f172a; border-radius: 2px;"></span>
               <span style="display: inline-block; width: 7px; height: 7px; background: #0f172a; border-radius: 50%; margin-left: -10px;"></span>
               <span style="margin-left: 4px; font-weight: 600;">${isIOD ? 'Observed DMI' : 'Observed Niño 3.4'}</span>
@@ -16117,7 +16154,7 @@ sec2PlumeHero = {
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="display: inline-block; width: 16px; height: 3px; background: ${themeColor}; border-radius: 2px;"></span>
               <span style="display: inline-block; width: 7px; height: 7px; background: ${themeColor}; border-radius: 50%; margin-left: -11px;"></span>
-              <span style="margin-left: 4px; font-weight: 600;">Multi-Model Ensemble Median</span>
+              <span style="margin-left: 4px; font-weight: 600;">${isIOD ? 'JAMSTEC Ensemble Median' : 'Multi-Model Ensemble Median'}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="display: inline-block; width: 16px; height: 10px; background: ${ribbonColor}; opacity: 0.55; border-radius: 2px;"></span>

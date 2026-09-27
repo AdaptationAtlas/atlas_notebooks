@@ -17,14 +17,17 @@ forecast stays Kenya-Met-only. All values parsed from the source text; none type
 
 Usage:  python3.12 enso_drivers_build.py
 """
-import io, sys, collections
+import io, sys, os, collections
 import requests
 import pyarrow as pa, pyarrow.parquet as pq
 
 OUT_DIR = "data/KE-enso-explorer"
+SOURCES_DIR = os.path.dirname(os.path.abspath(__file__))
 RONI_URL = "https://www.cpc.ncep.noaa.gov/data/indices/RONI.ascii.txt"
 SOI_URL  = "https://www.cpc.ncep.noaa.gov/data/indices/soi"
 DMI_URL  = "https://psl.noaa.gov/gcos_wgsp/Timeseries/Data/dmi.had.long.data"
+DMI_CPC_URL = "https://www.cpc.ncep.noaa.gov/products/international/ocean_monitoring/indian/IODMI/mnth.ersstv6.clim19912020.dmi_current.txt"
+NINO34_URL = "https://www.cpc.ncep.noaa.gov/data/indices/ersst5.nino.mth.91-20.ascii"
 MISSING  = {-999.9, -9999.0, -99.99, -9.99}
 
 # 3-month overlapping seasons, labelled by the year the 2nd/3rd months fall in (NOAA convention).
@@ -115,8 +118,25 @@ def parse_dmi(txt):
     return out
 
 
-def seasonalise(monthly, index_name):
-    """{(year,month):value} -> [(index, season, year, mean)] for each fully-covered 3-mo season."""
+def parse_dmi_cpc(txt):
+    """CPC ERSSTv6 DMI (1991-2020 base). Rows: YR MON WTIO SETIO DMI. -> {(year, month): value}."""
+    out = {}
+    for ln in txt.splitlines():
+        p = ln.split()
+        if len(p) >= 5 and p[0].isdigit() and p[1].isdigit():
+            try:
+                y = int(p[0])
+                m = int(p[1])
+                v = float(p[4])
+                if v not in MISSING and v > -90:
+                    out[(y, m)] = v
+            except ValueError:
+                continue
+    return out
+
+
+def seasonalise(monthly, index_name, source_name=""):
+    """{(year,month):value} -> [(index, season, year, mean, source)] for each fully-covered 3-mo season."""
     out = []
     years = {y for (y, _m) in monthly}
     for y in sorted(years):
@@ -124,7 +144,7 @@ def seasonalise(monthly, index_name):
             vals = [monthly.get((y + off, m)) for (m, off) in months]
             if any(v is None for v in vals):
                 continue
-            out.append((index_name, season, y, sum(vals) / 3.0))
+            out.append((index_name, season, y, sum(vals) / 3.0, source_name))
     return out
 
 
@@ -136,30 +156,49 @@ def write_parquet(rows, cols, path):
 
 
 def main():
-    roni = parse_roni(_get(RONI_URL))
-    soi_m = parse_soi_standardized(_get(SOI_URL))
-    dmi_m = parse_dmi(_get(DMI_URL))
+    roni_txt = _get(RONI_URL)
+    soi_txt = _get(SOI_URL)
+    dmi_txt = _get(DMI_URL)
+    dmi_cpc_txt = _get(DMI_CPC_URL)
+    nino34_txt = _get(NINO34_URL)
 
-    # monthly long: SOI, DMI
-    monthly_rows = ([("SOI", y, m, v) for (y, m), v in sorted(soi_m.items())]
-                    + [("DMI", y, m, v) for (y, m), v in sorted(dmi_m.items())])
-    n_mon = write_parquet(monthly_rows, ["index", "year", "month", "value"],
+    # Save raw source snapshots for offline verification & provenance
+    os.makedirs(SOURCES_DIR, exist_ok=True)
+    with open(f"{SOURCES_DIR}/RONI.snapshot.txt", "w") as f: f.write(roni_txt)
+    with open(f"{SOURCES_DIR}/SOI.snapshot.txt", "w") as f: f.write(soi_txt)
+    with open(f"{SOURCES_DIR}/DMI_HadISST.snapshot.txt", "w") as f: f.write(dmi_txt)
+    with open(f"{SOURCES_DIR}/DMI_CPC.snapshot.txt", "w") as f: f.write(dmi_cpc_txt)
+    with open(f"{SOURCES_DIR}/NINO34.snapshot.txt", "w") as f: f.write(nino34_txt)
+
+    roni = parse_roni(roni_txt)
+    soi_m = parse_soi_standardized(soi_txt)
+    dmi_m = parse_dmi(dmi_txt)
+    dmi_cpc_m = parse_dmi_cpc(dmi_cpc_txt)
+
+    # monthly long: SOI, DMI (HadISST), DMI_CPC (ERSSTv6)
+    monthly_rows = ([("SOI", y, m, v, "NOAA CPC Standardized") for (y, m), v in sorted(soi_m.items())]
+                    + [("DMI", y, m, v, "NOAA PSL HadISST1.1") for (y, m), v in sorted(dmi_m.items())]
+                    + [("DMI_CPC", y, m, v, "NOAA CPC ERSSTv6") for (y, m), v in sorted(dmi_cpc_m.items())])
+    n_mon = write_parquet(monthly_rows, ["index", "year", "month", "value", "source"],
                           f"{OUT_DIR}/enso_drivers_monthly.parquet")
 
-    # seasonal long: RONI native + SOI/DMI 3-mo means
-    seasonal_rows = ([("RONI", s, y, v) for (s, y, v) in roni]
-                     + seasonalise(soi_m, "SOI") + seasonalise(dmi_m, "DMI"))
-    seasonal_rows.sort(key=lambda r: (r[0], r[2], r[1]))
-    n_sea = write_parquet(seasonal_rows, ["index", "season", "year", "value"],
+    # seasonal long: RONI native + SOI/DMI/DMI_CPC 3-mo means
+    seasonal_rows = ([("RONI", s, y, v, "NOAA CPC RONI") for (s, y, v) in roni]
+                     + seasonalise(soi_m, "SOI", "NOAA CPC Standardized")
+                     + seasonalise(dmi_m, "DMI", "NOAA PSL HadISST1.1")
+                     + seasonalise(dmi_cpc_m, "DMI_CPC", "NOAA CPC ERSSTv6"))
+    season_rank = {s: i for i, s in enumerate(SEASONS.keys())}
+    seasonal_rows.sort(key=lambda r: (r[0], r[2], season_rank.get(r[1], 0)))
+    n_sea = write_parquet(seasonal_rows, ["index", "season", "year", "value", "source"],
                           f"{OUT_DIR}/enso_drivers_seasonal.parquet")
 
     # report
     def span(idx, rows, yi):
         ys = [r[yi] for r in rows if r[0] == idx]
         return f"{min(ys)}-{max(ys)}" if ys else "none"
-    print(f"monthly  rows={n_mon}  SOI {span('SOI', monthly_rows, 1)}  DMI {span('DMI', monthly_rows, 1)}")
+    print(f"monthly  rows={n_mon}  SOI {span('SOI', monthly_rows, 1)}  DMI {span('DMI', monthly_rows, 1)}  DMI_CPC {span('DMI_CPC', monthly_rows, 1)}")
     print(f"seasonal rows={n_sea}  RONI {span('RONI', seasonal_rows, 2)}  "
-          f"SOI {span('SOI', seasonal_rows, 2)}  DMI {span('DMI', seasonal_rows, 2)}")
+          f"SOI {span('SOI', seasonal_rows, 2)}  DMI {span('DMI', seasonal_rows, 2)}  DMI_CPC {span('DMI_CPC', seasonal_rows, 2)}")
 
 
 if __name__ == "__main__":

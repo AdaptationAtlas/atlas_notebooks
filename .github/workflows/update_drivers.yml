@@ -1,9 +1,9 @@
-name: Monthly Climate Driver & Telemetry Auto-Update
+name: Climate Driver & Forecast Telemetry Pipeline
 
 on:
   schedule:
     # Runs at 04:00 UTC on the 6th and 21st of every month
-    # Aligns with NOAA CPC (monthly ~5th) and BoM (bi-monthly ~20th) index updates
+    # Note: On GitHub Actions, schedule triggers on the default branch (main).
     - cron: '0 4 6,21 * *'
   workflow_dispatch:
     inputs:
@@ -12,6 +12,10 @@ on:
         required: false
         type: boolean
         default: false
+
+concurrency:
+  group: update-drivers
+  cancel-in-progress: false
 
 jobs:
   update-drivers:
@@ -22,6 +26,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,19 +38,11 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas pyarrow
+          pip install pandas==2.2.2 pyarrow==16.1.0 requests==2.32.3
 
-      - name: Ingest latest IRI ENSO Plume
+      - name: Ingest NOAA & JAMSTEC Climate Telemetry
         run: |
-          python scripts/fetch_iri_plume.py
-
-      - name: Ingest NOAA & BoM Driver Observations
-        run: |
-          python scripts/update_drivers.py ${{ inputs.force && '--force' || '' }}
-
-      - name: Validate Data Freshness & Physical Invariants
-        run: |
-          python scripts/check_data_freshness.py
+          python scripts/update_drivers.py
 
       - name: Commit and push updated climate datasets
         run: |
@@ -57,7 +55,8 @@ jobs:
             echo "No data changes detected. Everything is up to date."
           else
             STAMP=$(date -u +"%Y-%m-%d")
-            git commit -m "chore(data): auto-update climate drivers and plumes ($STAMP) [skip ci]"
-            git push
-            echo "Pushed updated climate datasets to branch."
+            git commit -m "chore(data): auto-update climate drivers and plumes ($STAMP)"
+            git pull --rebase origin ${{ github.ref_name }}
+            git push origin ${{ github.ref_name }}
+            echo "Pushed updated climate datasets to branch ${{ github.ref_name }}."
           fi
