@@ -334,3 +334,24 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   4. **Universal Institutional Page Footer**: Anchored a permanent, responsive institutional `<footer>` below all tab panes featuring AAAA, CGIAR Climate Action, RCMRD, KMSA, KNBS, and NDMA attributions, CC-BY 4.0 licensing, and Digital Atlas DOI metadata.
   5. **Version Reconciliation**: Synchronized `data/KE-enso-explorer/release.json`, hero badges, Section 0, Section 6, and the footer to **Release v3.4 (Build 2026.09.25)**.
   6. **Multi-Viewport Regression Testing**: Automated regression suite `scratch/verify_wp10.mjs` passed all 11 phases with 0 console errors and 0 page uncaught exceptions. Production static render `quarto render notebooks/KE-enso-explorer/notebook_v3.qmd` compiled cleanly with exit code 0.
+
+
+## D28 — Driver-telemetry refresh contract: primary feeds, SLAs, no typed anchors (2026-10-02)
+- **RESOLVED.** `python3 scripts/update_drivers.py` is the single refresh path for Section 2 (drivers + plumes + CPC
+  probabilities); it ends in the `scripts/check_data_freshness.py` gate (30 checks) and fails loudly.
+  1. **Primary feeds only.** Niño 3.4 = NOAA CPC **ERSSTv6** monthly (`detrend.nino34.ascii.txt`, ONI input; CPC retired the
+     ERSSTv5 1991–2020 file in Aug 2026). RONI/SOI/DMI_CPC/HadISST DMI unchanged. IRI plume = the official
+     CCSR/IRI figure (`ensoforecast.iri.columbia.edu/figure4_plot/<y>/<m0>`), decoded from its vector geometry
+     (`scripts/fetch_iri_plume.py`; the IWMI mirror is dead). SINTEX IOD = JAMSTEC CSV; init month read from the CSV.
+  2. **No typed numbers, no typed calendar anchors.** Season/year labels, issue months, member counts and narrative values
+     in Section 2 derive from `current.seasons` / `current.seasonYears` / `metadata.*` in the bundles and from the latest
+     published RONI season. The Fig 2.2 typed "Projected" RONI curve was removed (now IRI plume median, labelled
+     Niño 3.4 ≠ RONI per D17.2).
+  3. **Freshness SLAs (validator FAILs).** Monthly observations (DMI_CPC, Niño 3.4): last day of obs month + 40 d. Plumes
+     (IRI, SINTEX): 20th of release month + 45 d. CPC probabilities: last day of issue month + 20 d. Snapshot fidelity on
+     trailing 6 periods for Niño 3.4, DMI_CPC, RONI.
+  4. **Churn-free.** Bundles/parquets are rewritten only when content changes (fetchedAt ignored); `release.json` is only
+     touched when a data asset changed. A quiet month produces an empty diff.
+  5. **Cadence (why "August" in early October is correct).** CPC posts month M around the 5th–8th of M+1; JAMSTEC releases
+     the M-initialised SINTEX run mid-M+1; IRI issues ~19th–21st of each month; CPC probabilities 2nd Thursday. Run the
+     refresh after the 10th and after the 21st (workflow cron 10th + 23rd on `main`; branch runs are manual).

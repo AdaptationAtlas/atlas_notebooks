@@ -3,7 +3,9 @@
 Data Freshness, Physical Invariant, and Provenance Validator.
 
 Strict validation gate enforcing:
-1. End-of-month + 40 days freshness SLA (now_utc <= last_day(obs_month) + 40d).
+1. End-of-month + 40 days freshness SLA (now_utc <= last_day(obs_month) + 40d) on DMI_CPC AND Nino 3.4.
+1b. Forecast issue SLA: IRI + SINTEX plumes <= 45 days after the 20th of their release month;
+    CPC ENSO-state probabilities <= 20 days after the end of their issue month.
 2. Snapshot provenance gate: no row exists beyond verified source snapshot.
 3. Source equality: last 6 published periods match source snapshot to within 0.005 °C.
 4. Physical jump limits: |Δ Niño 3.4| <= 1.0 °C/mo, |Δ DMI| <= 1.0 °C/mo.
@@ -115,15 +117,50 @@ class FreshnessValidator:
                 else:
                     self.log("PASS", "Nino 3.4 snapshot horizon", f"Parquet {p_year}-{p_month:02d} <= Snapshot {snap_year}-{snap_month:02d}")
 
-        # 4. Jump limits (|Δ| <= 1.0)
+        # 3b. Nino 3.4 snapshot fidelity (trailing 6 months equal the CPC file to 0.005) + freshness SLA
+        if nino_snapshot.exists():
+            snap_vals = {}
+            with open(nino_snapshot) as f:
+                for l in f:
+                    parts = l.split()
+                    if len(parts) == 5 and parts[0].isdigit() and parts[1].isdigit():
+                        try:
+                            snap_vals[(int(parts[0]), int(parts[1]))] = float(parts[4])
+                        except ValueError:
+                            pass
+            valid_nino = df[df['nino34_anom_noaa'].notna()]
+            if snap_vals and len(valid_nino) > 0:
+                mismatches = []
+                for ym in sorted(snap_vals)[-6:]:
+                    sub = valid_nino[(valid_nino['year'] == ym[0]) & (valid_nino['month'] == ym[1])]
+                    if len(sub) == 0:
+                        mismatches.append(f"Missing {ym}")
+                    elif abs(float(sub.iloc[0]['nino34_anom_noaa']) - snap_vals[ym]) > 0.005:
+                        mismatches.append(f"{ym}: parquet={sub.iloc[0]['nino34_anom_noaa']} != snap={snap_vals[ym]}")
+                if mismatches:
+                    self.errors.append(f"Nino 3.4 trailing values deviate from CPC snapshot: {mismatches}")
+                    self.log("FAIL", "Nino 3.4 snapshot fidelity", f"Deviations: {mismatches}")
+                else:
+                    self.log("PASS", "Nino 3.4 snapshot fidelity", "Last 6 months match CPC ERSSTv6 snapshot exactly (to < 0.005 °C)")
+                last_row = valid_nino.iloc[-1]
+                ly, lm = int(last_row['year']), int(last_row['month'])
+                deadline = get_last_day_of_month(ly, lm) + datetime.timedelta(days=40)
+                if self.now_utc > deadline:
+                    self.errors.append(f"Nino 3.4 is stale: latest observation {ly}-{lm:02d} (deadline was {deadline}).")
+                    self.log("FAIL", "Nino 3.4 freshness SLA", f"Stale: {self.now_utc} > {deadline}")
+                else:
+                    self.log("PASS", "Nino 3.4 freshness SLA", f"Fresh: latest {ly}-{lm:02d} (valid through {deadline})")
+
+        # 4. Jump limits: recent (post-2020) |Δ| <= 1.0 °C/mo; full record <= 1.5 °C/mo (ERSSTv6 has a 1.33 step in the 1950s)
         df_sorted = df.sort_values('date')
-        nino_diff = df_sorted['nino34_anom_noaa'].dropna().diff().abs()
-        max_nino_jump = nino_diff.max()
-        if max_nino_jump > 1.0:
-            self.errors.append(f"Niño 3.4 monthly jump exceeds 1.0 °C threshold: max jump = {max_nino_jump:.3f} °C.")
-            self.log("FAIL", "Niño 3.4 jump limit", f"Max jump = {max_nino_jump:.3f} °C (> 1.0 °C)")
+        nino_series = df_sorted['nino34_anom_noaa'].dropna()
+        max_nino_jump = nino_series.diff().abs().max()
+        recent_nino_jump = df_sorted[df_sorted['date'] >= '2020-01-01']['nino34_anom_noaa'].dropna().diff().abs().max()
+        if recent_nino_jump > 1.0 or max_nino_jump > 1.5:
+            self.errors.append(f"Niño 3.4 monthly jump exceeds threshold: recent {recent_nino_jump:.3f} °C (> 1.0) or historical {max_nino_jump:.3f} °C (> 1.5).")
+            self.log("FAIL", "Niño 3.4 jump limit", f"Recent max = {recent_nino_jump:.3f} °C, historical max = {max_nino_jump:.3f} °C")
         else:
-            self.log("PASS", "Niño 3.4 jump limit", f"Max monthly jump = {max_nino_jump:.3f} °C (<= 1.0 °C)")
+            self.log("PASS", "Niño 3.4 jump limit", f"Recent max = {recent_nino_jump:.3f} °C (<= 1.0), historical max = {max_nino_jump:.3f} °C (<= 1.5)")
 
         # Recent jump limit (post-2020: |Δ| <= 1.0 °C/mo; full historical: <= 1.3 °C/mo)
         recent_df = df_sorted[df_sorted['date'] >= '2020-01-01']
@@ -242,6 +279,52 @@ class FreshnessValidator:
                 else:
                     self.log("PASS", "RONI snapshot fidelity", "Trailing 6 seasons match NOAA CPC snapshot exactly")
 
+    def _plume_issue_sla(self, label, meta):
+        """Plumes are released around the 20th of their release month and refreshed monthly:
+        FAIL once now > 20th of release month + 45 days."""
+        ry, rm = meta.get("releaseYear"), meta.get("releaseMonth")
+        if not (ry and rm):
+            ry, rm = meta.get("issueYear"), meta.get("issueMonth")
+        if not (ry and rm):
+            self.warnings.append(f"{label}: no release/issue month in metadata; cannot apply issue SLA.")
+            self.log("WARN", f"{label} issue SLA", "No releaseYear/releaseMonth in metadata")
+            return
+        release = datetime.date(int(ry), int(rm), 20)
+        deadline = release + datetime.timedelta(days=45)
+        if self.now_utc > deadline:
+            self.errors.append(f"{label} is stale: release {ry}-{int(rm):02d} (deadline was {deadline}).")
+            self.log("FAIL", f"{label} issue SLA", f"Stale: {self.now_utc} > {deadline} (release {ry}-{int(rm):02d})")
+        else:
+            self.log("PASS", f"{label} issue SLA", f"Release {ry}-{int(rm):02d} current (valid through {deadline})")
+
+    def validate_state_probabilities(self):
+        fpath = self.data_dir / "enso_state_probabilities.parquet"
+        if not fpath.exists():
+            self.errors.append("enso_state_probabilities.parquet does not exist.")
+            self.log("FAIL", "CPC probabilities existence", f"Missing at {fpath}")
+            return
+        df = pq.read_table(fpath).to_pandas()
+        issued = str(df['issued'].iloc[0]) if len(df) else ""
+        try:
+            d = datetime.datetime.strptime(issued, "%B %Y").date()
+        except ValueError:
+            self.errors.append(f"CPC probabilities 'issued' unparseable: {issued!r}")
+            self.log("FAIL", "CPC probabilities issue SLA", f"Unparseable issued {issued!r}")
+            return
+        # CPC issues on the 2nd Thursday; allow 20 days into the following month before calling it stale
+        deadline = get_last_day_of_month(d.year, d.month) + datetime.timedelta(days=20)
+        if self.now_utc > deadline:
+            self.errors.append(f"CPC ENSO probabilities stale: issued {issued} (deadline was {deadline}).")
+            self.log("FAIL", "CPC probabilities issue SLA", f"Stale: {self.now_utc} > {deadline} (issued {issued})")
+        else:
+            self.log("PASS", "CPC probabilities issue SLA", f"Issued {issued} current (valid through {deadline})")
+        bad = df[(df[['la_nina', 'neutral', 'el_nino']].sum(axis=1) - 100).abs() > 1.5]
+        if len(bad):
+            self.errors.append(f"CPC probability rows not summing to 100: {bad['season'].tolist()}")
+            self.log("FAIL", "CPC probabilities sum", f"Rows off 100%: {bad['season'].tolist()}")
+        else:
+            self.log("PASS", "CPC probabilities sum", f"{len(df)} seasons each sum to 100% (±1.5)")
+
     def validate_forecast_plumes(self):
         # 1. JAMSTEC SINTEX-F Plume
         iod_path = self.data_dir / "iod_forecast_plume.json"
@@ -266,6 +349,8 @@ class FreshnessValidator:
             else:
                 self.log("PASS", "IOD Plume member count", f"{len(models)} dynamical ensemble members")
 
+            self._plume_issue_sla("IOD Plume", meta)
+
             # Check institution allow-list
             bad_inst = [m.get("institution") for m in models if m.get("institution") not in ALLOWED_INSTITUTIONS]
             if bad_inst:
@@ -288,13 +373,28 @@ class FreshnessValidator:
                 self.log("FAIL", "ENSO Plume model count", f"{len(models)} models (< 10)")
             else:
                 self.log("PASS", "ENSO Plume model count", f"{len(models)} multi-model members")
+            imeta = iri_data.get("metadata", {})
+            self._plume_issue_sla("ENSO Plume", imeta)
+            seasons = iri_data.get("current", {}).get("seasons", [])
+            years = iri_data.get("current", {}).get("seasonYears", [])
+            if not seasons or len(seasons) != len(years):
+                self.errors.append("IRI Plume current.seasons / seasonYears missing or misaligned.")
+                self.log("FAIL", "ENSO Plume season labels", f"seasons={seasons} years={years}")
+            else:
+                self.log("PASS", "ENSO Plume season labels", f"{seasons[0]} {years[0]} .. {seasons[-1]} {years[-1]} ({len(seasons)} seasons)")
+            origin = imeta.get("api_origin", "") or imeta.get("figureUrl", "")
+            if not (origin.startswith("https://ensoforecast.iri.columbia.edu/") or origin.startswith("https://enso.iwmi.org/")):
+                self.errors.append(f"IRI Plume origin not a recognised primary source: {origin}")
+                self.log("FAIL", "ENSO Plume origin", f"Unrecognised: {origin}")
+            else:
+                self.log("PASS", "ENSO Plume origin", f"Verified primary source: {origin}")
 
     def validate_site_sync(self):
         if not SITE_DATA_DIR.exists():
             self.log("PASS", "Build Output Sync", "_site/data does not exist (skip local sync check)")
             return
 
-        for fname in ["driver_indices.parquet", "enso_drivers_monthly.parquet", "enso_drivers_seasonal.parquet", "iod_forecast_plume.json", "iri_forecast_plume.json"]:
+        for fname in ["driver_indices.parquet", "enso_drivers_monthly.parquet", "enso_drivers_seasonal.parquet", "enso_state_probabilities.parquet", "iod_forecast_plume.json", "iri_forecast_plume.json", "release.json"]:
             p1 = self.data_dir / fname
             p2 = SITE_DATA_DIR / fname
             if p1.exists() and p2.exists():
@@ -316,6 +416,7 @@ class FreshnessValidator:
         self.validate_driver_indices()
         self.validate_enso_drivers_monthly()
         self.validate_enso_drivers_seasonal()
+        self.validate_state_probabilities()
         self.validate_forecast_plumes()
         self.validate_site_sync()
 

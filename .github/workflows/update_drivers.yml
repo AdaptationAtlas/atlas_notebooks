@@ -2,9 +2,10 @@ name: Climate Driver & Forecast Telemetry Pipeline
 
 on:
   schedule:
-    # Runs at 04:00 UTC on the 6th and 21st of every month
-    # Note: On GitHub Actions, schedule triggers on the default branch (main).
-    - cron: '0 4 6,21 * *'
+    # 10th: CPC monthly indices (posted ~5th-8th) + SINTEX M-init run (mid-month) ; 23rd: IRI plume (~19th-21st)
+    # Note: GitHub only fires schedules on the default branch (main). Until this workflow is merged there,
+    # run `python3 scripts/update_drivers.py` by hand (see .claude/skills/update-climate-drivers).
+    - cron: '0 4 10,23 * *'
   workflow_dispatch:
     inputs:
       force:
@@ -20,6 +21,7 @@ concurrency:
 jobs:
   update-drivers:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
 
@@ -49,13 +51,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          git add data/KE-enso-explorer/
+          git add data/KE-enso-explorer/ data/KE-enso-explorer/_sources/*.snapshot.*
           
           if git diff --staged --quiet; then
             echo "No data changes detected. Everything is up to date."
           else
             STAMP=$(date -u +"%Y-%m-%d")
-            git commit -m "chore(data): auto-update climate drivers and plumes ($STAMP)"
+            git commit -m "chore(data): refresh climate drivers and forecast plumes ($STAMP)" -m "Automated run of scripts/update_drivers.py; all 30 freshness/fidelity checks passed."
             git pull --rebase origin ${{ github.ref_name }}
             git push origin ${{ github.ref_name }}
             echo "Pushed updated climate datasets to branch ${{ github.ref_name }}."

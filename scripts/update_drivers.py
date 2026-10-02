@@ -10,11 +10,17 @@ Coordinates the canonical builders in _sources/:
   2. data/KE-enso-explorer/_sources/sintex_iod_build.py:
      - Fetches official JAMSTEC SINTEX-F dynamical ensemble DMI forecast
      - Writes iod_forecast_plume.json and SINTEX_DMI.snapshot.csv
-  3. scripts/fetch_iri_plume.py (if available):
-     - Fetches official Columbia IRI / NOAA CPC ENSO forecast plume
-  4. Updates release.json with verified dataVintage
-  5. Syncs updated files to _site/data/KE-enso-explorer/ if previewing
-  6. Executes scripts/check_data_freshness.py validation gate
+  3. scripts/fetch_iri_plume.py:
+     - Decodes the official CCSR/IRI ENSO prediction plume figure (vector SVG) into per-model values
+     - Writes iri_forecast_plume.json and _sources/IRI_plume.snapshot.svg
+     - A failure is FATAL (the plume is the Section 2 outlook) unless --allow-stale-plume is passed
+  4. data/KE-enso-explorer/_sources/enso_state_prob_build.py:
+     - Fetches the official NOAA CPC ENSO-state probability table -> enso_state_probabilities.parquet
+  5. Updates release.json with verified dataVintage
+  6. Syncs updated files to _site/data/KE-enso-explorer/ if previewing
+  7. Executes scripts/check_data_freshness.py validation gate
+
+All builders use paths relative to the repo root, so every step runs with cwd=ROOT_DIR.
 """
 
 import os
@@ -34,7 +40,7 @@ def run_step(cmd: list, desc: str, allow_failure: bool = False) -> bool:
     print(f"\n--- {desc} ---")
     print(f"Executing: {' '.join(str(c) for c in cmd)}")
     try:
-        res = subprocess.run(cmd, check=not allow_failure, text=True, capture_output=True)
+        res = subprocess.run(cmd, check=not allow_failure, text=True, capture_output=True, cwd=str(ROOT_DIR))
         if res.stdout:
             print(res.stdout.strip())
         if res.stderr:
@@ -50,6 +56,22 @@ def run_step(cmd: list, desc: str, allow_failure: bool = False) -> bool:
         if not allow_failure:
             return False
         return True
+
+DATA_ASSETS = [
+    "driver_indices.parquet", "enso_drivers_monthly.parquet", "enso_drivers_seasonal.parquet",
+    "enso_state_probabilities.parquet", "iod_forecast_plume.json", "iri_forecast_plume.json",
+]
+
+
+def asset_digest():
+    import hashlib
+    h = hashlib.sha256()
+    for a in DATA_ASSETS:
+        p = DATA_DIR / a
+        h.update(a.encode())
+        h.update(p.read_bytes() if p.exists() else b"missing")
+    return h.hexdigest()
+
 
 def update_release_json():
     rel_path = DATA_DIR / "release.json"
@@ -87,8 +109,11 @@ def sync_to_site():
     SITE_DATA_DIR.mkdir(parents=True, exist_ok=True)
     assets = [
         "driver_indices.parquet",
+        "driver_indices.meta.json",
         "enso_drivers_monthly.parquet",
         "enso_drivers_seasonal.parquet",
+        "enso_state_probabilities.parquet",
+        "enso_state_probabilities.meta.json",
         "iod_forecast_plume.json",
         "iri_forecast_plume.json",
         "release.json"
@@ -103,35 +128,45 @@ def sync_to_site():
 def main():
     parser = argparse.ArgumentParser(description="Ingest and validate climate driver data.")
     parser.add_argument("--skip-validator", action="store_true", help="Skip check_data_freshness.py gate")
+    parser.add_argument("--allow-stale-plume", action="store_true",
+                        help="Continue with the cached IRI plume bundle if the IRI fetch/parse fails (default: fatal)")
     args = parser.parse_args()
 
     python_bin = sys.executable
+    digest_before = asset_digest()
 
     # 1. Build ENSO and IOD driver tables from primary NOAA / PSL feeds
     enso_builder = SOURCES_DIR / "enso_drivers_build.py"
-    if not run_step([python_bin, str(enso_builder)], "1/4: Ingesting Primary Driver Data (NOAA CPC/PSL)"):
+    if not run_step([python_bin, str(enso_builder)], "1/5: Ingesting Primary Driver Data (NOAA CPC/PSL) + Nino 3.4 refresh"):
         sys.exit(1)
 
     # 2. Build JAMSTEC SINTEX-F IOD ensemble plume
     sintex_builder = SOURCES_DIR / "sintex_iod_build.py"
-    if not run_step([python_bin, str(sintex_builder)], "2/4: Ingesting JAMSTEC SINTEX-F Forecast Plume"):
+    if not run_step([python_bin, str(sintex_builder)], "2/5: Ingesting JAMSTEC SINTEX-F Forecast Plume"):
         sys.exit(1)
 
-    # 3. Fetch IRI ENSO plume if fetch script exists (continue on error)
+    # 3. Decode the official IRI ENSO plume (fatal unless --allow-stale-plume)
     iri_script = ROOT_DIR / "scripts" / "fetch_iri_plume.py"
-    if iri_script.exists():
-        run_step([python_bin, str(iri_script)], "3/4: Ingesting Columbia IRI ENSO Forecast Plume", allow_failure=True)
-    else:
-        print("\n3/4: Columbia IRI plume script not present; using verified cached bundle.")
+    if not run_step([python_bin, str(iri_script)], "3/5: Ingesting CCSR/IRI ENSO Forecast Plume", allow_failure=args.allow_stale_plume):
+        print("\n❌ IRI plume fetch failed; Section 2 outlook would go stale. Re-run with --allow-stale-plume to keep the cached bundle.", file=sys.stderr)
+        sys.exit(1)
 
-    # 4. Update release.json and sync to _site
-    update_release_json()
+    # 4. Official CPC ENSO-state probabilities
+    prob_builder = SOURCES_DIR / "enso_state_prob_build.py"
+    if not run_step([python_bin, str(prob_builder)], "4/5: Ingesting NOAA CPC ENSO-state Probabilities"):
+        sys.exit(1)
+
+    # 5. Update release.json (only when a data asset actually changed) and sync to _site
+    if asset_digest() != digest_before:
+        update_release_json()
+    else:
+        print("\nNo data asset changed in this run; release.json left untouched (no churn).")
     sync_to_site()
 
-    # 5. Run Freshness & Integrity Validator Gate
+    # 6. Run Freshness & Integrity Validator Gate
     if not args.skip_validator:
         validator = ROOT_DIR / "scripts" / "check_data_freshness.py"
-        if not run_step([python_bin, str(validator)], "4/4: Executing Data Freshness & Physical Validator Gate"):
+        if not run_step([python_bin, str(validator)], "5/5: Executing Data Freshness & Physical Validator Gate"):
             print("\n❌ Pipeline failed freshness/integrity validation gate!", file=sys.stderr)
             sys.exit(1)
 

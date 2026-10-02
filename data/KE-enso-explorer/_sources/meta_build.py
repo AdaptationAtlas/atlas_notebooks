@@ -236,13 +236,13 @@ D = {
    used_by="not yet served — registered for the production-vs-drivers design (ISSUES KE-18 / V2-15 / V2-27)"),
  "driver_indices": dict(
    title="Ocean-driver indices (Nino 3.4 / IOD / Western-V), monthly",
-   source="NOAA (Nino 3.4), Met Office HadISST / NOAA PSL (DMI), derived Western-V (WNP/WEP)",
-   url="https://www.cpc.ncep.noaa.gov/ ; https://psl.noaa.gov/",
+   source="NOAA CPC (Nino 3.4, ERSSTv6 monthly, centered base periods = ONI input), Met Office HadISST / NOAA PSL (DMI), derived Western-V (WNP/WEP)",
+   url="https://www.cpc.ncep.noaa.gov/data/indices/detrend.nino34.ascii.txt ; https://psl.noaa.gov/",
    citation="NOAA CPC; NOAA PSL / Met Office Hadley Centre; Western-V derived (Funk et al. basis).",
    license="US Government public domain (Western-V derived).",
-   fetched_on="2026-07-10",
-   method="Staged via the D409 pipeline (D409-only acquisition). Nino 3.4 reproduces NOAA r=0.998; Western-V reproduces Funk's sign + post-1997 regime shift.",
-   coverage="Monthly, 1950-2026: nino34_anom_noaa, dmi_hadisst, wep_std_ond, wnp_std_mam, nino34_std_ersst, dmi_ersst.",
+   fetched_on="2026-10-02",
+   method="Staged via the D409 pipeline (D409-only acquisition) for dmi_hadisst, wep_std_ond, wnp_std_mam, nino34_std_ersst, dmi_ersst. nino34_anom_noaa is REFRESHED by _sources/enso_drivers_build.py from the maintained CPC ERSSTv6 monthly Nino 3.4 file (CPC retired the ERSSTv5 1991-2020 file in Aug 2026; the whole column is one product, never spliced). Rows for months newer than the D409 bake carry only nino34_anom_noaa. Western-V reproduces Funk's sign + post-1997 regime shift.",
+   coverage="Monthly, 1950-2026: nino34_anom_noaa (self-refreshing), dmi_hadisst, wep_std_ond, wnp_std_mam, nino34_std_ersst, dmi_ersst (D409 bake).",
    used_by="notebook §2/§3 ocean drivers"),
 }
 

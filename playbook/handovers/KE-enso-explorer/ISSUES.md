@@ -103,6 +103,15 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   value. Don't count GESI as fully LLM-independent-gated.
 - Climate-conflict signal is exploratory (small n) — never a headline figure.
 
+- **KE-41 · Section 2 driver telemetry went stale behind a green validator · FIXED 2026-10-02.** Causes:
+  CPC retired the ERSSTv5 Niño 3.4 file (stalled 2026-06), the IWMI IRI-plume mirror 404'd (fetch
+  was `allow_failure`), SINTEX issue month and all plume season anchors were typed. Fixed per D28:
+  ERSSTv6 source + `driver_indices` refresh, IRI figure decoder, CSV-derived SINTEX horizon,
+  bundle-driven anchors, SLA checks, churn-free writes. Dispatch
+  `dispatches/2026-10-02_driver-telemetry-refresh-hardening.md`. Open follow-ups: (a) the cron
+  workflow only fires on `main` (not merged yet) — refresh manually; (b) two IRI models share
+  marker+colour in the figure (CSU CLIPR / Wyrtki-CSLIM) so their *names* may swap; ensemble stats
+  unaffected; (c) browser verification of §2 after this change.
 - **KE-40 · Official IEBC boundaries notebook-wide (was GAUL) · DONE (2026-08-24).** Pete imperative:
   Kenya-authoritative boundaries (GAUL carries the disputed Ilemi Triangle + no p-codes). Built
   simplified IEBC COD-AB assets in `data/KE-enso-explorer/`: `ken_adm0_iebc_simple` (9.7KB national),
@@ -865,3 +874,14 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   *Notebook side, done:* the Fig 2.4 / 3.1 grid now detects an all-nodata county × domain × season and
   renders a "no WRSI zone coverage" notice instead of a grid of blank cards, so a zone gap is visible
   rather than silent. That guard is not a workaround and stays after the repath.
+
+- **KE-42 · Plume to RONI translation methodology · OPEN (future research).**
+  The CCSR/IRI multi-model dynamical forecast plume is published in Niño 3.4 SST anomaly space (°C),
+  whereas the notebook standardizes on NOAA CPC RONI (Relative Oceanic Niño Index = ONI minus tropical-mean
+  20°S–20°N SST anomaly) per Decision D17.1 to isolate the Walker circulation gradient driving East African
+  rainfall. Because global dynamical modeling centers submit Niño 3.4 forecasts rather than RONI, the plume
+  cannot be directly equated with RONI (differing by up to 0.57 °C due to tropical warm-pool warming trends).
+  Investigate methodological paths to translate the multi-model plume into RONI space in future pipeline
+  versions (e.g. subtracting projected tropical-mean SST anomalies from Copernicus C3S / NMME multi-model
+  outputs, or applying an empirical tropical baseline offset).
+

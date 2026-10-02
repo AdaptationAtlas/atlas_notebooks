@@ -151,15 +151,20 @@ def main():
 
     rows, issued = parse_cpc_table(resp.text)
     table = pa.Table.from_pylist(rows)
+    before = open(OUT, "rb").read() if os.path.exists(OUT) else None
     pq.write_table(table, OUT)
-    print(f"Successfully wrote {len(rows)} forecast rows to {OUT}")
+    changed = before != open(OUT, "rb").read()
+    print(f"{'Updated' if changed else 'Unchanged (rewritten identically)'}: {len(rows)} forecast rows in {OUT}")
 
     if os.path.exists(os.path.dirname(SITE_OUT)):
         pq.write_table(table, SITE_OUT)
         print(f"Synchronized parquet to {SITE_OUT}")
 
     today_iso = datetime.date.today().isoformat()
-    update_metadata(today_iso)
+    if changed:
+        update_metadata(today_iso)
+    else:
+        print('Metadata fetched_on left unchanged (no data change)')
 
     print(f"\nIssued: {issued} | Season Count: {len(rows)}")
     for r in rows:

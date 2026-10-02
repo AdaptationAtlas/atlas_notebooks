@@ -61,6 +61,12 @@ Audience: Kenya county/national policymakers (non-coders). Standalone notebook: 
   products, both editions, all gated; `data/KE-enso-explorer/_sources/` (engine `napr_extract.py`,
   builders `napr_build*.py`, `napr_audit_ledger.csv`); reuse via the `extract-knbs-napr` skill.
   **Blank ≠ zero** — a missing county-year is a KNBS admin gap, never imputed 0.
+- **Section 2 telemetry (D28):** refresh ONLY via `python3 scripts/update_drivers.py` (drivers → SINTEX →
+  IRI plume → CPC probabilities → `check_data_freshness.py` gate). Never type a driver value, season/year
+  anchor, issue month or member count into the notebook — read them from the bundles (`current.seasons`,
+  `seasonYears`, `metadata.issueLabel`) / `currentState`. Niño 3.4 = CPC ERSSTv6 (`detrend.nino34`); IRI
+  plume = decoded figure SVG; both feeds documented in the `update-climate-drivers` skill. "August" in
+  early October is upstream cadence, not staleness — the validator's SLAs say when it IS stale.
 - Branch management: `playbook/handovers/KE-enso-explorer/` — `README.md` (status), `ISSUES.md`
   (backlog), `DECISIONS.md` (settled calls), `dispatches/` (chronological). Update these as you work.
 - Don't overclaim status. Remaining honest gaps: county crop series still short for Block 3 (uses

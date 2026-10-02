@@ -6,6 +6,13 @@ Pulls observed climate-DRIVER indices from PRIMARY sources (no model types a num
             (the same index IWMI's dashboard leads with).
   * SOI   - NOAA CPC Southern Oscillation Index, STANDARDIZED block (monthly).
   * DMI   - NOAA PSL Dipole Mode Index (IOD), HadISST1.1 (monthly).
+  * DMI_CPC - NOAA CPC Dipole Mode Index, ERSSTv6, 1991-2020 base (monthly).
+  * NINO34 - NOAA CPC monthly Nino 3.4 SST anomaly, ERSSTv6 (centered 30-yr base periods; the
+            ONI input, file detrend.nino34.ascii.txt). CPC retired the ERSSTv5 1991-2020 file
+            (ersst5.nino.mth.91-20.ascii, last row 2026-06, de-listed Aug 2026), so this is the
+            maintained official monthly Nino 3.4 series. It REFRESHES the nino34_anom_noaa column
+            of driver_indices.parquet (whole column, one product -- never spliced onto v5) and
+            appends rows for new months (other D409 columns stay NULL there).
 
 Emits two tidy long parquets under data/KE-enso-explorer/:
   * enso_drivers_monthly.parquet  [index, year, month, value]      (SOI, DMI)  -> time-series toggle
@@ -27,7 +34,7 @@ RONI_URL = "https://www.cpc.ncep.noaa.gov/data/indices/RONI.ascii.txt"
 SOI_URL  = "https://www.cpc.ncep.noaa.gov/data/indices/soi"
 DMI_URL  = "https://psl.noaa.gov/gcos_wgsp/Timeseries/Data/dmi.had.long.data"
 DMI_CPC_URL = "https://www.cpc.ncep.noaa.gov/products/international/ocean_monitoring/indian/IODMI/mnth.ersstv6.clim19912020.dmi_current.txt"
-NINO34_URL = "https://www.cpc.ncep.noaa.gov/data/indices/ersst5.nino.mth.91-20.ascii"
+NINO34_URL = "https://www.cpc.ncep.noaa.gov/data/indices/detrend.nino34.ascii.txt"  # ERSSTv6 monthly Nino 3.4 (ONI input)
 MISSING  = {-999.9, -9999.0, -99.99, -9.99}
 
 # 3-month overlapping seasons, labelled by the year the 2nd/3rd months fall in (NOAA convention).
@@ -135,6 +142,57 @@ def parse_dmi_cpc(txt):
     return out
 
 
+def parse_nino34_ersst6(txt):
+    """CPC detrend.nino34.ascii.txt: 'YR MON TOTAL ClimAdjust ANOM' whitespace rows -> {(year, month): anom}."""
+    out = {}
+    for ln in txt.splitlines():
+        p = ln.split()
+        if len(p) != 5 or not (p[0].isdigit() and p[1].isdigit()):
+            continue
+        try:
+            y, m, v = int(p[0]), int(p[1]), float(p[4])
+        except ValueError:
+            continue
+        if v in MISSING or v < -90:
+            continue
+        out[(y, m)] = v
+    if len(out) < 600:
+        raise RuntimeError(f"NINO34 ERSSTv6 parse too short ({len(out)} rows)")
+    return out
+
+
+def refresh_driver_indices(nino_m):
+    """Rewrite the nino34_anom_noaa column of driver_indices.parquet from the CPC ERSSTv6 series and
+    append rows for months newer than the parquet (other columns NULL). Schema/dtypes preserved."""
+    import datetime as _dt
+    import pandas as pd
+    path = f"{OUT_DIR}/driver_indices.parquet"
+    tbl = pq.read_table(path)
+    schema = tbl.schema
+    df = tbl.to_pandas()
+    df["date"] = pd.to_datetime(df["date"])
+    last = df["date"].max()
+    ly, lm = last.year, last.month
+    new_rows = []
+    for (y, m) in sorted(nino_m):
+        if (y, m) > (ly, lm):
+            new_rows.append({c: None for c in df.columns} | {"date": pd.Timestamp(y, m, 1), "year": float(y), "month": float(m)})
+    if new_rows:
+        add = pd.DataFrame(new_rows).astype({c: df[c].dtype for c in df.columns if c != "date"})
+        add["date"] = pd.to_datetime(add["date"])
+        df = pd.concat([df, add], ignore_index=True)
+    before = df["nino34_anom_noaa"].copy()
+    df["nino34_anom_noaa"] = [nino_m.get((int(y), int(m))) for y, m in zip(df["year"], df["month"])]
+    df["nino34_anom_noaa"] = df["nino34_anom_noaa"].astype("float64")
+    df = df.sort_values("date").reset_index(drop=True)
+    out = pa.Table.from_pandas(df, schema=schema, preserve_index=False)
+    pq.write_table(out, path)
+    after = df["nino34_anom_noaa"].iloc[:len(before)]
+    changed = int(((before.round(3) != after.round(3)) & ~(before.isna() & after.isna())).sum())
+    lastn = max(k for k, v in nino_m.items() if v is not None)
+    return len(df), len(new_rows), changed, lastn
+
+
 def seasonalise(monthly, index_name, source_name=""):
     """{(year,month):value} -> [(index, season, year, mean, source)] for each fully-covered 3-mo season."""
     out = []
@@ -174,6 +232,7 @@ def main():
     soi_m = parse_soi_standardized(soi_txt)
     dmi_m = parse_dmi(dmi_txt)
     dmi_cpc_m = parse_dmi_cpc(dmi_cpc_txt)
+    nino_m = parse_nino34_ersst6(nino34_txt)
 
     # monthly long: SOI, DMI (HadISST), DMI_CPC (ERSSTv6)
     monthly_rows = ([("SOI", y, m, v, "NOAA CPC Standardized") for (y, m), v in sorted(soi_m.items())]
@@ -191,6 +250,11 @@ def main():
     seasonal_rows.sort(key=lambda r: (r[0], r[2], season_rank.get(r[1], 0)))
     n_sea = write_parquet(seasonal_rows, ["index", "season", "year", "value", "source"],
                           f"{OUT_DIR}/enso_drivers_seasonal.parquet")
+
+    # driver_indices: refresh Nino 3.4 column from the maintained ERSSTv6 file
+    n_di, n_new, n_chg, last_nino = refresh_driver_indices(nino_m)
+    print(f"driver_indices rows={n_di}  appended={n_new}  nino34_anom_noaa values changed={n_chg}  "
+          f"latest Nino3.4 {last_nino[0]}-{last_nino[1]:02d} = {nino_m[last_nino]:+.2f}")
 
     # report
     def span(idx, rows, yi):
