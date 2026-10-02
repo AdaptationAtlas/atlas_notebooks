@@ -11,7 +11,19 @@ branch on 2026-08-11 (it is NOT part of climateRationale — do not merge into `
 The two shared helpers it imports (`helpers/toc.ojs`, `helpers/chartDownloadMenu.ojs`) are promoted
 onto this branch since `develop` lacked them.
 
-## Status — v1 scope (honest; Fable-reviewed 2026-07-09)
+## Current Status — v3.5 RCMRD Partner Review Edition (2026-10-02)
+- **Live Review Edition:** [https://peetmate.github.io/ke-enso-explorer/](https://peetmate.github.io/ke-enso-explorer/) (deployed solely to Pete Steward's personal GitHub Pages repo; **zero pushes/PRs to `origin`**).
+- **In-Situ Review Feedback Suite (D29, KE-43):** Full `cleaned-review` pattern implemented:
+  - Floating action buttons: `💬 Comment`, `▭ Highlight`, `✎ Review Notes <span class="badge">N</span>`.
+  - In-situ anchored composer popover with target auto-detection, telemetry badges (`Marsabit • OND`), quick-tag chips, and severity ranking.
+  - Client-side DOM/SVG capture via `html2canvas` into Base64 PNG data URLs in `localStorage`.
+  - Highlight mode with drag bounding box stamped directly onto captured canvas.
+  - Slide-over Review Notes Dashboard with stats, thumbnails, and `Jump to element →` (tab switch + smooth scroll + gold pulse animation).
+  - Bundled exports with **zero extra steps**: `📦 Download Report (with images)` (standalone HTML report with all images embedded inline), `📧 Email to Pete` (auto-saves report with images to `Downloads/` and opens pre-addressed mailto to `p.steward@cgiar.org`), `🗜️ Export ZIP` (`JSZip`), and `📋 Copy All` (rich HTML + Markdown).
+- **Driver Telemetry & Section 2 Verified (D28, KE-41):** Passed 11-row browser verification checklist across OND, MAM, and IOD modes with 0 console errors.
+- **Institutional Boundaries Disciplined (D29, KE-44):** Empirical data from KMSA, KNBS, and NDMA described under open/statutory empirical mandates, preventing overclaiming direct institutional collaboration.
+
+## Historical Status — v1 scope (honest; Fable-reviewed 2026-07-09)
 - **Data pipeline: v1 assembled; core series validated, with named gaps** (below). Lives in the
   D409 project OneDrive, not this repo: `…/RCMRD/ENSO explorer/`; index = `_master/DATA_CATALOG.md`.
 - **Standalone scaffold: built + browser-verified to render/run** (`…/ENSO explorer/notebook/`,

@@ -355,3 +355,26 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   5. **Cadence (why "August" in early October is correct).** CPC posts month M around the 5th–8th of M+1; JAMSTEC releases
      the M-initialised SINTEX run mid-M+1; IRI issues ~19th–21st of each month; CPC probabilities 2nd Thursday. Run the
      refresh after the 10th and after the 21st (workflow cron 10th + 23rd on `main`; branch runs are manual).
+
+## D29 — In-situ visual review feedback architecture, zero-friction export & institutional disclaimers (2026-10-02)
+- **RESOLVED.** Pete Steward decided to implement an in-situ visual feedback system for partner review based on the `cleaned-review` pattern (`peetmate.github.io/cleaned-review/ui_ux/mockup/`).
+  1. **Floating Action Bar & In-Situ Targeting**: Replaced the static, modal feedback popup with a 3-button floating action bar (`💬 Comment`, `▭ Highlight`, `✎ Review Notes <span class="badge">N</span>`).
+     - Comment mode enables an interactive crosshair hover state (`outline: 2.5px dashed #0284c7`). Clicking immediately opens an in-situ composer card anchored to that exact target element (with boundary clamping to viewport).
+     - Highlight mode overlays a pointer capture surface allowing reviewers to drag a bounding box over any chart, map, or curve. Releasing computes bounding coordinates and identifies the underlying element via `document.elementFromPoint`.
+  2. **In-Situ Composer Popover**: Automatically detects the target section/card title, displays active context (`County: Marsabit • Season: OND`), provides 6 quick-tag chips (`Confusing`, `Missing data`, `Wrong unit or value`, `Works well`, `Don't need this`, `Bug`), optional severity dropdown (*Blocker*, *High*, *Suggestion*), and reviewer name field (persisted in `localStorage`).
+  3. **Zero-Backend Client-Side Screengrabs**:
+     - `html2canvas` captures target elements and OJS Plot SVGs into HTML5 `<canvas>` elements (`useCORS: true`, ignoring feedback UI elements with `data-html2canvas-ignore`).
+     - For highlight selections, the red bounding frame is stamped directly onto the canvas.
+     - Supports direct clipboard paste (<kbd>Cmd</kbd>+<kbd>V</kbd> / <kbd>Ctrl</kbd>+<kbd>V</kbd>) for user-provided screenshots.
+     - Serializes images as Base64 PNG data URLs in browser `localStorage` (`ke_enso_feedback_items`).
+  4. **Review Notes Dashboard (Slide-over Drawer)**:
+     - Aggregates recorded observations with summary counts (Total Comments, Blockers, Screengrabs).
+     - Individual cards show target title, badges, comment, and clickable image thumbnail.
+     - `Jump to element →`: automatically switches to the relevant tab, scrolls smoothly with offset to account for `#stickyShell`, and triggers a gold pulsing animation (`.fb-flash`).
+  5. **Bundled Screengrab Exports (Zero Extra Steps)**:
+     - `📦 Download Report (with images)`: One-click download of a standalone `.html` executive report with all Base64 screengrabs embedded inline. Can be opened by any recipient or printed to PDF.
+     - `📧 Email to Pete`: Auto-downloads the visual report to the reviewer's `Downloads/` folder and opens a pre-addressed email draft to `p.steward@cgiar.org` with Markdown summary and attachment reminder.
+     - `🗜️ Export ZIP`: Bundles the standalone HTML report, Markdown notes, CSV data, and a `screenshots/` directory containing individual `.png` files via `JSZip`.
+     - `📋 Copy All`: Copies rich HTML (`text/html`) with inline base64 images and plain text Markdown to the clipboard.
+  6. **Institutional Boundary Disclaimers**: Replaced overclaiming collaboration language ("in scientific collaboration with KMSA, KNBS, NDMA") in Section 0, Section 6.1, and the global page footer with explicit statutory/open empirical data access wording.
+  7. **Deployment Boundary Discipline**: Strict policy: **No push, no PR** to `origin` (`AdaptationAtlas/atlas_notebooks`). Review edition deployed solely to personal GitHub Pages repo (`peetmate/ke-enso-explorer`). Live review URL: `https://peetmate.github.io/ke-enso-explorer/`.

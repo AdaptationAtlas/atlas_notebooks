@@ -71,6 +71,17 @@ Audience: Kenya county/national policymakers (non-coders). Standalone notebook: 
   (backlog), `DECISIONS.md` (settled calls), `dispatches/` (chronological). Update these as you work.
 - Don't overclaim status. Remaining honest gaps: county crop series still short for Block 3 (uses
   national FAOStat); GESI county column not yet dual-engine-gated; climate-conflict exploratory.
+- **Institutional boundary disclaimer (D29, KE-44):** NEVER claim direct institutional collaboration with
+  KMSA, KNBS, or NDMA. The platform utilizes their published empirical data under statutory/open access mandates.
+  RCMRD is the active regional partner for review.
+- **Partner review deployment discipline (D29):** STRICT RULE: **No push, no PR** to `origin` (`AdaptationAtlas/atlas_notebooks`).
+  Review editions deploy solely to Pete Steward's personal GitHub Pages repo (`peetmate/ke-enso-explorer`).
+  Live review edition: `https://peetmate.github.io/ke-enso-explorer/`.
+- **In-situ review feedback system (D29, KE-43):** Incorporates the `cleaned-review` pattern. Reviewers have
+  zero friction (no login, no department field), in-situ anchored comments, drag-to-highlight bounding boxes,
+  client-side `html2canvas` screengrabs in `localStorage`, and 1-click bundled export via
+  `📦 Download Report (with images)` (standalone HTML report with all Base64 images embedded inline),
+  `📧 Email to Pete` (`p.steward@cgiar.org`), and `🗜️ Export ZIP` (`JSZip`).
 
 ## Working rhythm
 Commit on `dev/KE-enso-explorer` (factual subject + why-body; end with

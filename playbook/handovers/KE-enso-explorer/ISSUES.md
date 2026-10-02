@@ -885,3 +885,27 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   versions (e.g. subtracting projected tropical-mean SST anomalies from Copernicus C3S / NMME multi-model
   outputs, or applying an empirical tropical baseline offset).
 
+- **KE-43 · In-situ visual review feedback architecture & bundled export · FIXED (2026-10-02).**
+  Partner review requirement: RCMRD reviewers needed a friction-free, in-situ mechanism to annotate
+  figures, curves, and narrative text, with automatic capture of screengrabs and zero manual attachment
+  hassle. Implemented the `cleaned-review` pattern per D29:
+  1. Floating Action Bar (`💬 Comment`, `▭ Highlight`, `✎ Review Notes <span class="badge">N</span>`).
+  2. Element crosshair outline (`outline: 2.5px dashed #0284c7`) and click-to-anchor composer.
+  3. Drag highlight box with underlying target element detection (`elementFromPoint`).
+  4. Client-side SVG/DOM capture via `html2canvas` into Base64 PNG data URLs in `localStorage`.
+  5. Slide-over Review Notes Dashboard with summary tiles, note cards, and `Jump to element →` with tab switching,
+     scroll offset, and gold outline animation (`.fb-flash`).
+  6. Bundled exports: `📦 Download Report (with images)` (self-contained HTML report with Base64 images embedded inline),
+     `📧 Email to Pete` (auto-saves report with images to `Downloads/` and opens pre-addressed mailto to `p.steward@cgiar.org`),
+     `🗜️ Export ZIP` (standalone report, Markdown, CSV, and `screenshots/` directory of raw PNGs via `JSZip`), and
+     `📋 Copy All` (rich HTML + Markdown clipboard copy).
+  7. Automated Playwright browser tests verified all interactions with 0 console errors. Deployed to `peetmate.github.io/ke-enso-explorer/`.
+
+- **KE-44 · Institutional acknowledgement boundaries & statutory data disclaimer · FIXED (2026-10-02).**
+  The platform uses open and statutory empirical data from KMSA, KNBS, and NDMA, but was phrased in several
+  places as being "developed in scientific collaboration with KMSA, KNBS, and NDMA", overclaiming direct
+  institutional collaboration. Replaced text across Section 0 (hero explainer), Section 6.1 (acknowledgements
+  card), and the global institutional footer (`<footer>`) to state that empirical datasets are utilized
+  under statutory/open data access mandates, preserving RCMRD as the active review partner.
+
+
