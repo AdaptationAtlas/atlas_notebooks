@@ -3154,8 +3154,9 @@ wrapTickLabel = (label, maxWidth = 10) => {
   </div>
 </div>
 
-<!-- HTML2CANVAS SCRIPT INCLUSION -->
+<!-- HTML2CANVAS & JSZIP SCRIPT INCLUSION -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
 
 <!-- RCMRD FLOATING ACTION BUTTONS (CLEANED-REVIEW PATTERN) -->
 <div class="fb-fab-container" id="fbFabContainer" data-html2canvas-ignore>
@@ -3283,12 +3284,22 @@ wrapTickLabel = (label, maxWidth = 10) => {
   </div>
 
   <!-- Drawer Actions Toolbar -->
-  <div style="background: #f1f5f9; border-bottom: 1px solid #e2e8f0; padding: 8px 20px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
-    <button type="button" class="btn-dataset-jump" onclick="window.copyAllNotesForEmail()" style="font-size: 0.76rem; padding: 5px 10px;">📋 Copy for Email</button>
-    <button type="button" class="btn-dataset-jump" onclick="window.sendAllNotesEmail()" style="font-size: 0.76rem; padding: 5px 10px; background: #0284c7; color: #ffffff; border-color: #0284c7;">📧 Send via Email</button>
-    <button type="button" class="btn-dataset-jump" onclick="window.exportNotes('json')" style="font-size: 0.76rem; padding: 5px 10px;">💾 Export JSON</button>
-    <button type="button" class="btn-dataset-jump" onclick="window.exportNotes('csv')" style="font-size: 0.76rem; padding: 5px 10px;">📄 Export CSV</button>
-    <button type="button" onclick="window.clearAllNotes()" style="background: none; border: none; color: #ef4444; font-size: 0.74rem; font-weight: 600; cursor: pointer; margin-left: auto; text-decoration: underline;">Clear All</button>
+  <div style="background: #f1f5f9; border-bottom: 1px solid #e2e8f0; padding: 10px 20px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+    <button type="button" class="btn-dataset-jump" onclick="window.exportVisualReport()" style="font-size: 0.78rem; padding: 6px 12px; background: #0284c7; color: #ffffff; border-color: #0284c7; font-weight: 700; box-shadow: 0 1px 3px rgba(2,132,199,0.3);" title="Download a single standalone report file with all comments and screengrab images included">
+      📦 Download Report (with images)
+    </button>
+    <button type="button" class="btn-dataset-jump" onclick="window.sendAllNotesEmail()" style="font-size: 0.78rem; padding: 6px 12px;" title="Auto-saves report with images and opens email to Pete">
+      📧 Email to Pete
+    </button>
+    <button type="button" class="btn-dataset-jump" onclick="window.exportZipBundle()" style="font-size: 0.78rem; padding: 6px 12px;" title="Download a ZIP archive containing the report, raw PNG images, and CSV data">
+      🗜️ Export ZIP
+    </button>
+    <button type="button" class="btn-dataset-jump" onclick="window.copyAllNotesForEmail()" style="font-size: 0.78rem; padding: 6px 12px;" title="Copy rich formatted notes and images to clipboard">
+      📋 Copy All
+    </button>
+    <button type="button" onclick="window.clearAllNotes()" style="background: none; border: none; color: #ef4444; font-size: 0.74rem; font-weight: 600; cursor: pointer; margin-left: auto; text-decoration: underline;">
+      Clear All
+    </button>
   </div>
 
   <!-- Notes Items List -->
@@ -7332,16 +7343,225 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
       return lines.join('\n');
     };
 
-    window.copyAllNotesForEmail = function() {
+    window.generateVisualReportHtml = function() {
+      const cty = (typeof county !== "undefined" && county) ? county : (document.querySelector('.county-name-txt')?.textContent || "Marsabit");
+      const rev = localStorage.getItem(FB_REVIEWER_KEY) || "RCMRD Reviewer";
+      const dateStr = new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+      const total = fbNotes.length;
+      const blockers = fbNotes.filter(n => n.severity === "3").length;
+      const shots = fbNotes.filter(n => !!n.screenshot).length;
+
+      const notesHtml = fbNotes.map((n, idx) => {
+        const sevLabel = n.severity === "3" ? "Blocker" : n.severity === "2" ? "High" : n.severity === "1" ? "Suggestion" : "";
+        const sevClass = n.severity === "3" ? "badge-blocker" : n.severity === "2" ? "badge-high" : n.severity === "1" ? "badge-sugg" : "";
+        const tagsHtml = (n.tags || []).map(t => `<span class="badge badge-tag">${t}</span>`).join(' ');
+        const imgHtml = n.screenshot ? `
+          <div class="shot-wrapper">
+            <div class="shot-caption">📸 Screengrab:</div>
+            <img src="${n.screenshot}" alt="Screengrab for ${n.title}" class="shot-img" />
+          </div>
+        ` : '';
+        const timeStr = n.timestamp ? new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+
+        return `
+          <div class="note-card">
+            <div class="note-header">
+              <div class="note-num">${idx + 1}</div>
+              <div class="note-title-box">
+                <h3 class="note-title">${n.title || "Section Note"}</h3>
+                <div class="note-meta">
+                  <span class="badge badge-ctx">${n.county} • ${n.season}</span>
+                  ${sevLabel ? `<span class="badge ${sevClass}">${sevLabel}</span>` : ''}
+                  ${tagsHtml}
+                  ${n.reviewer ? `<span class="note-author">by <strong>${n.reviewer}</strong></span>` : ''}
+                  <span class="note-time">${timeStr}</span>
+                </div>
+              </div>
+            </div>
+            ${n.text ? `<div class="note-body">${n.text.replace(/\n/g, '<br>')}</div>` : ''}
+            ${imgHtml}
+          </div>
+        `;
+      }).join('\n');
+
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Kenya ENSO Explorer — RCMRD Review Report (${cty})</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 24px; line-height: 1.5; }
+    .container { max-width: 920px; margin: 0 auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); overflow: hidden; }
+    .header { background: #0f172a; color: #ffffff; padding: 24px 32px; border-bottom: 3px solid #38bdf8; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .eyebrow { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #38bdf8; margin-bottom: 4px; }
+    .main-title { font-size: 1.35rem; font-weight: 800; margin: 0; }
+    .sub-title { font-size: 0.84rem; color: #94a3b8; margin-top: 4px; }
+    .print-btn { background: #0284c7; color: #ffffff; border: none; padding: 8px 16px; border-radius: 6px; font-size: 0.80rem; font-weight: 700; cursor: pointer; }
+    .stats-row { background: #f1f5f9; padding: 14px 32px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 24px; font-size: 0.82rem; color: #475569; }
+    .stat-val { font-weight: 800; color: #0f172a; }
+    .note-card { padding: 24px 32px; border-bottom: 1px solid #e2e8f0; }
+    .note-card:last-child { border-bottom: none; }
+    .note-header { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 10px; }
+    .note-num { background: #0f172a; color: #ffffff; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.80rem; font-weight: 800; flex-shrink: 0; }
+    .note-title-box { flex: 1; }
+    .note-title { margin: 0 0 6px 0; font-size: 1.05rem; font-weight: 700; color: #0f172a; }
+    .note-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .badge { padding: 2px 7px; border-radius: 4px; font-size: 0.70rem; font-weight: 600; }
+    .badge-ctx { background: #e2e8f0; color: #1e293b; }
+    .badge-blocker { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; font-weight: 700; }
+    .badge-high { background: #fef3c7; color: #d97706; border: 1px solid #fcd34d; font-weight: 700; }
+    .badge-sugg { background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe; font-weight: 700; }
+    .badge-tag { background: #e0f2fe; color: #0369a1; }
+    .note-author { font-size: 0.74rem; color: #64748b; margin-left: 4px; }
+    .note-time { font-size: 0.70rem; color: #94a3b8; margin-left: auto; }
+    .note-body { font-size: 0.88rem; color: #1e293b; line-height: 1.55; margin-top: 8px; background: #fafafa; border: 1px solid #f1f5f9; padding: 12px 16px; border-radius: 6px; }
+    .shot-wrapper { margin-top: 14px; }
+    .shot-caption { font-size: 0.74rem; font-weight: 700; color: #475569; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .shot-img { max-width: 100%; height: auto; border: 1.5px solid #cbd5e1; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); display: block; }
+    .footer { background: #f8fafc; padding: 16px 32px; font-size: 0.75rem; color: #94a3b8; text-align: center; border-top: 1px solid #e2e8f0; }
+    @media print {
+      body { padding: 0; background: #fff; }
+      .container { border: none; box-shadow: none; max-width: 100%; }
+      .print-btn { display: none; }
+      .note-card { page-break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <div class="eyebrow">RCMRD Partner Review Report</div>
+        <h1 class="main-title">Kenya ENSO Explorer Review</h1>
+        <div class="sub-title">County Focus: <strong>${cty}</strong> &bull; Reviewer: <strong>${rev}</strong> &bull; Generated: ${dateStr}</div>
+      </div>
+      <button class="print-btn" onclick="window.print()">Print / Save PDF</button>
+    </div>
+    <div class="stats-row">
+      <div>Total Comments: <span class="stat-val">${total}</span></div>
+      <div>Blockers: <span class="stat-val" style="color: #dc2626;">${blockers}</span></div>
+      <div>Screengrabs: <span class="stat-val" style="color: #0284c7;">${shots}</span></div>
+      <div style="margin-left: auto;">Live Tool: <a href="https://peetmate.github.io/ke-enso-explorer/" target="_blank" style="color: #0284c7;">peetmate.github.io/ke-enso-explorer/</a></div>
+    </div>
+    <div class="notes-container">
+      ${notesHtml}
+    </div>
+    <div class="footer">
+      Generated automatically by the Kenya ENSO Explorer in-situ review suite &bull; Africa Agriculture Adaptation Atlas
+    </div>
+  </div>
+</body>
+</html>`;
+    };
+
+    window.exportVisualReport = function() {
+      if (fbNotes.length === 0) {
+        window.showToast("No notes to export");
+        return;
+      }
+      const cty = (typeof county !== "undefined" && county) ? county : "Marsabit";
+      const dateTag = new Date().toISOString().slice(0, 10);
+      const html = window.generateVisualReportHtml();
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ENSO_Explorer_Review_${cty}_${dateTag}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      window.showToast("✓ Downloaded Visual Report with all screengrabs");
+    };
+
+    window.exportZipBundle = async function() {
+      if (fbNotes.length === 0) {
+        window.showToast("No notes to export");
+        return;
+      }
+      if (typeof JSZip === 'undefined') {
+        window.exportVisualReport();
+        return;
+      }
+      window.showToast("Creating ZIP archive with images...");
+
+      const cty = (typeof county !== "undefined" && county) ? county : "Marsabit";
+      const dateTag = new Date().toISOString().slice(0, 10);
+      const zip = new JSZip();
+
+      // 1. Standalone Visual Report (HTML with embedded images)
+      zip.file(`ENSO_Review_Report_${cty}_${dateTag}.html`, window.generateVisualReportHtml());
+
+      // 2. Markdown Report
+      zip.file(`ENSO_Review_Notes_${cty}_${dateTag}.md`, window.formatAllNotesMarkdown());
+
+      // 3. CSV file
+      const headers = ["ID", "Timestamp", "County", "Season", "Section_Title", "Severity", "Tags", "Reviewer", "Has_Screenshot", "Comment"];
+      const rows = fbNotes.map(n => [
+        `"${n.id}"`,
+        `"${n.timestamp || ''}"`,
+        `"${n.county || ''}"`,
+        `"${n.season || ''}"`,
+        `"${(n.title || '').replace(/"/g, '""')}"`,
+        `"${n.severity || ''}"`,
+        `"${(n.tags || []).join('; ')}"`,
+        `"${(n.reviewer || '').replace(/"/g, '""')}"`,
+        `"${n.screenshot ? 'Yes' : 'No'}"`,
+        `"${(n.text || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`
+      ]);
+      zip.file(`ENSO_Review_Notes_${cty}_${dateTag}.csv`, [headers.join(','), ...rows.map(r => r.join(','))].join('\n'));
+
+      // 4. Raw PNG screenshots folder
+      const imgFolder = zip.folder("screenshots");
+      fbNotes.forEach((n, idx) => {
+        if (n.screenshot && n.screenshot.startsWith("data:image/png;base64,")) {
+          const base64Data = n.screenshot.replace(/^data:image\/png;base64,/, "");
+          const safeTitle = (n.title || "figure").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 30);
+          imgFolder.file(`note_${idx + 1}_${safeTitle}.png`, base64Data, { base64: true });
+        }
+      });
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ENSO_Review_Package_${cty}_${dateTag}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      window.showToast("✓ Exported ZIP package with report & images!");
+    };
+
+    window.copyAllNotesForEmail = async function() {
       if (fbNotes.length === 0) {
         window.showToast("No notes to copy");
         return;
       }
       const md = window.formatAllNotesMarkdown();
+      const html = window.generateVisualReportHtml();
+
+      try {
+        if (navigator.clipboard && window.ClipboardItem) {
+          const textBlob = new Blob([md], { type: 'text/plain' });
+          const htmlBlob = new Blob([html], { type: 'text/html' });
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              'text/plain': textBlob,
+              'text/html': htmlBlob
+            })
+          ]);
+          window.showToast("✓ Copied rich report with images to clipboard!");
+          return;
+        }
+      } catch (err) {
+        console.warn("Rich clipboard copy failed, falling back to plain text:", err);
+      }
+
       navigator.clipboard.writeText(md).then(() => {
         window.showToast("✓ All notes copied to clipboard (Markdown)");
       }).catch(() => {
-        alert("Could not copy automatically. You can export as CSV or JSON.");
+        alert("Could not copy automatically. You can use 'Download Report (with images)'.");
       });
     };
 
@@ -7352,28 +7572,34 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
       }
       const cty = (typeof county !== "undefined" && county) ? county : "Marsabit";
       const subject = encodeURIComponent(`[RCMRD Review] Kenya ENSO Explorer Feedback (${fbNotes.length} notes, ${cty})`);
-      const body = encodeURIComponent(window.formatAllNotesMarkdown());
-      window.location.href = `mailto:p.steward@cgiar.org?subject=${subject}&body=${body}`;
+
+      // 1. Automatically download the visual report with all images into Downloads
+      window.exportVisualReport();
+
+      // 2. Draft email body referencing the auto-downloaded file
+      let bodyText = [
+        `Hi Pete,`,
+        ``,
+        `I have completed my review of the Kenya ENSO Explorer (${cty} focus).`,
+        `I have attached the visual review report (ENSO_Explorer_Review_${cty}.html) which includes my comments and all high-resolution screengrabs.`,
+        ``,
+        `---`,
+        window.formatAllNotesMarkdown()
+      ].join('\n');
+
+      window.location.href = `mailto:p.steward@cgiar.org?subject=${subject}&body=${encodeURIComponent(bodyText)}`;
+      window.showToast("✓ Visual report saved to Downloads! Please attach it to your email.");
     };
 
     window.exportNotes = function(format) {
-      if (fbNotes.length === 0) {
-        window.showToast("No notes to export");
-        return;
-      }
-      const cty = (typeof county !== "undefined" && county) ? county : "Marsabit";
-      const dateTag = new Date().toISOString().slice(0, 10);
-
-      if (format === 'json') {
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(fbNotes, null, 2));
-        const a = document.createElement('a');
-        a.href = dataStr;
-        a.download = `enso_explorer_review_${cty}_${dateTag}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.showToast("✓ Exported JSON file");
+      if (format === 'html') {
+        window.exportVisualReport();
+      } else if (format === 'zip') {
+        window.exportZipBundle();
       } else if (format === 'csv') {
+        if (fbNotes.length === 0) { window.showToast("No notes to export"); return; }
+        const cty = (typeof county !== "undefined" && county) ? county : "Marsabit";
+        const dateTag = new Date().toISOString().slice(0, 10);
         const headers = ["ID", "Timestamp", "County", "Season", "Section_Title", "Severity", "Tags", "Reviewer", "Has_Screenshot", "Comment"];
         const rows = fbNotes.map(n => [
           `"${n.id}"`,
