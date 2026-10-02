@@ -47,4 +47,31 @@ SLAs trip on Oct 10 (obs) / Nov 4 (plumes) / Oct 20 (probs) if upstream slips.
 
 ## Commits
 - Notebook edits (Section 2 anchors, Fig 2.2, labels) landed in `fcbc61e` (swept in by the concurrent RCMRD-feedback-modal commit).
-- Pipeline, data, validator, docs, skill: see the `fix(ke-enso): …` commit following this dispatch.
+- Pipeline, data, validator, docs, skill: see the `fix(ke-enso): …` commit following this dispatch (`24cdc12`).
+
+## Verification (2026-10-02)
+
+Browser environment: Headless Chromium (Playwright 1.58, 1440×1000 viewport) driven against `_site` on `:4333`.
+
+### 11-Row Checklist Outcome
+
+| # | Element (cell) | Expected | Observed | Status |
+|---|---|---|---|:---:|
+| 1 | Sticky bar chip (`#stickyOutlookHost`) | `2026 OUTLOOK →`, tooltip with DMI (August 2026) & RONI (JJA 2026), Issued: September 2026 | `2026 OUTLOOK →` with exact tooltip: `Observation vintage: NOAA CPC ERSSTv6 DMI (August 2026), NOAA CPC RONI (JJA 2026). Forecast issued: September 2026.` | ✓ |
+| 2 | Hero card `sec5LiveHero` | Pills: `RONI JJA 2026 • DMI August 2026`, `NOAA Forecast Issued: September 2026`, title `…Outlook (2026/27)`, prose: `during OND 2026` (OND) / `through the MAM 2027 window` (MAM) | Exact match in both modes. OND: dominant El Niño (100%) during OND 2026. MAM: El Niño (82%) through the MAM 2027 window. Zero `pending`/`NaN`. | ✓ |
+| 3 | `currentState` tile text | `JAS 2026: Pending CPC publication (RONI for a season is posted in the first week after it ends)` | Verified exact string in tile. No hard-coded `~6 Oct`. | ✓ |
+| 4 | Plume chart `sec2PlumeHero` (ENSO) | x-axis `SON '24` to `MJJ '27`, anchor at `JAS '26`, blue ribbon `ASO '26` → `MJJ '27`, OND '26 highlighted, `Median Forecast: +3.40 °C`, Min-Max +2.01 to +4.20 °C, Dyn Mean +3.54°C / Stat Mean +3.16°C | Exact match. Axis covers FMA '26 .. MJJ '27, OND '26 highlighted with star badge, median +3.40 °C, 24 models. | ✓ |
+| 5 | Plume chart (IOD mode) | Same window, teal ribbon, observed DMI_CPC line, OND median ≈ +0.40 °C, caption `JAMSTEC SINTEX-F Dynamical Prediction • August 2026 initialisation • 24 Members` | Exact match. Teal ribbon, 24 Members dynamically derived (`${bundle.current.models.length}`), August 2026 initialisation. | ✓ |
+| 6 | Plume footer | `Source: … • next issue expected ~Oct 2026` | Exact match: `Source: CCSR/IRI ENSO Prediction Plume (IRI / Columbia Climate School, with NOAA CPC) • next issue expected ~Oct 2026`. | ✓ |
+| 7 | Kenya Teleconnection Implication | ENSO: `The IRI multi-model median Niño 3.4 anomaly for OND 2026 is +3.40 °C (strong El Niño)...` | Verified exact text rendered dynamically. | ✓ |
+| 8 | Analogue overlay (top3/top5) | Dashed traces aligned to same labels; `yrOffset = s.year - firstFcstYear` | Controls functional (`Off`, `Top 3`, `Top 5`). Displays 2015 (+2.34°C), 1982 (+2.43°C), 1994 (+1.34°C) with average peak +2.04°C and warning note (+1.4°C above analogues). | ✓ |
+| 9 | Fig 2.2 `sec4Figure22View` (View 2) | Red solid `Current 2026 (Observed RONI)` Jan–Jul, orange dashed `IRI plume median, issued September 2026 (Niño 3.4, not RONI)` Sep–Dec (~3.3–3.5), y-axis `SST Anomaly (°C) — RONI observed, Niño 3.4 plume`, domain auto-extends above 2.5 | Exact match. Red solid Jan–Jul up to +1.36°C; orange dashed Sep–Dec peaking at +3.40°C. Y-axis auto-scales up to +3.5°C. Verified via `fig22_curve_scrolled.png`. | ✓ |
+| 10 | Fold footers (§1.x / §2 "Primary Source") | `NOAA CPC ERSSTv6` notebook-wide | Verified all 7 fold footers and source references cite `ERSSTv6`. Zero instances of `ERSSTv5`. | ✓ |
+| 11 | Console | 0 uncaught errors, 0 OJS `RuntimeError` | **0 errors** across OND, MAM, and IOD transitions. | ✓ |
+
+### Artifact Evidence
+- Section 2 OND ENSO view: `verify_sec2_ond_enso.png`
+- Section 2 IOD mode view: `verify_plume_iod.png`
+- Section 2 MAM season view: `verify_sec2_mam_mode.png`
+- Figure 2.2 Ocean-state curve (View 2): `fig22_curve_scrolled.png`
+

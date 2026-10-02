@@ -111,7 +111,7 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   `dispatches/2026-10-02_driver-telemetry-refresh-hardening.md`. Open follow-ups: (a) the cron
   workflow only fires on `main` (not merged yet) — refresh manually; (b) two IRI models share
   marker+colour in the figure (CSU CLIPR / Wyrtki-CSLIM) so their *names* may swap; ensemble stats
-  unaffected; (c) browser verification of §2 after this change.
+  unaffected; (c) browser verification of §2: VERIFIED 2026-10-02 (all 11 checklist items passed across OND, MAM, and IOD modes; 0 console errors; see dispatch).
 - **KE-40 · Official IEBC boundaries notebook-wide (was GAUL) · DONE (2026-08-24).** Pete imperative:
   Kenya-authoritative boundaries (GAUL carries the disputed Ilemi Triangle + no p-codes). Built
   simplified IEBC COD-AB assets in `data/KE-enso-explorer/`: `ken_adm0_iebc_simple` (9.7KB national),
