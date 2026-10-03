@@ -5358,11 +5358,12 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
 
           <!-- ToT Ratio Formulation Callout -->
           <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 4px solid #16a34a; border-radius: 6px; padding: 0.85rem 1.15rem; margin-bottom: 1rem; font-size: 0.84rem; color: #166534; line-height: 1.5;">
-            <strong>Terms of Trade (ToT) Economic Formulation:</strong> Quantifies pastoral purchasing power as the kilograms of white maize grain purchased by selling one medium live goat:
+            <strong>Terms of Trade (ToT) Economic Formulation &amp; Temporal Framing:</strong> Quantifies pastoral purchasing power as the kilograms of white maize grain purchased by selling one medium live goat:
             <div style="margin: 0.4rem 0; font-family: monospace; font-size: 0.95rem; font-weight: 700; color: #14532d;">
               ToT (kg maize / goat) = Retail Goat Price (KES / head) &divide; Retail Maize Grain Price (KES / kg)
             </div>
-            In normal years across Marsabit, 1 goat purchases 65–75 kg of maize grain. During severe droughts, grazing collapses force distress livestock dumping (depressing goat prices), while grain prices soar. When ToT falls below the <strong>25 kg/goat emergency threshold</strong>, pastoral households experience catastrophic purchasing power collapse.
+            In normal years across Marsabit, 1 goat purchases 65–75 kg of maize grain. During severe droughts, grazing collapses force distress livestock dumping (depressing goat prices), while grain prices soar. When ToT falls below the <strong>25 kg/goat emergency threshold</strong>, pastoral households experience catastrophic purchasing power collapse.<br>
+            <strong>Methodological Framing Note:</strong> The severe &gt;50% purchasing power collapse holds strictly on <em>monthly purchasing power evaluated against trailing 24-month peaks</em> (August 2011: &minus;68.1% to 28.7 kg/goat; October 2022: &minus;65.4% to 33.4 kg/goat; February 2023: &minus;68.1% to 25.1 kg/goat across the full 2020&ndash;23 multi-season failure). Annual mean aggregation dampens these crisis troughs (2011: &minus;32.5%; 2022: &minus;37.6%) and masks acute seasonal distress. In addition, 2020 carries only 9 paired months in the sentinel series.
           </div>
 
           <!-- Controls Host for Figure 4.4 -->
@@ -5397,7 +5398,7 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
               <span style="font-size: 0.65rem; font-weight: 700; color: #d73027; padding: 2px;">'17 ASAL Crisis</span>
             </div>
             <div style="position: absolute; top: 0; bottom: 0; left: 75%; width: 15%; background: rgba(43,131,186,0.18); border-left: 2px dashed #2b83ba;">
-              <span style="font-size: 0.65rem; font-weight: 700; color: #2b83ba; padding: 2px;">'20–22 Triple Dip</span>
+              <span style="font-size: 0.65rem; font-weight: 700; color: #2b83ba; padding: 2px;">'20–23 Drought</span>
             </div>
             <div style="height: 100%; display: flex; flex-direction: column; justify-content: space-around; font-size: 0.78rem; font-weight: 600;">
               <div style="color: #0284c7;">1. Rainfall Anomaly (CHIRPS v3) &rarr; 5 consecutive failed seasons in 2020–2022</div>
@@ -10302,6 +10303,13 @@ currentState = {
     ? new Date(Date.UTC(latestDmiRow.year, latestDmiRow.month - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
     : null;
 
+  // 3. Niño 3.4 3-month running mean from seasonalDrivers
+  const ninoRows = (seasonalDrivers && seasonalDrivers.length)
+    ? seasonalDrivers.filter((d) => d.index === "NINO34" && d.value != null)
+    : [];
+  const latestNinoRow = ninoRows.length ? ninoRows[ninoRows.length - 1] : null;
+  const nino34Latest = latestNinoRow ? latestNinoRow.value : null;
+
   const phase = (roniLatest != null) ? (roniLatest > 0.5 ? "El Niño" : roniLatest < -0.5 ? "La Niña" : "neutral") : "neutral";
 
   const stateObj = {
@@ -10312,6 +10320,7 @@ currentState = {
     roniTrend,
     roniArrow,
     roniSeason,
+    nino34Latest,
     targetSea,
     predSea,
     predYear,
@@ -10460,9 +10469,28 @@ monthlyDrivers = dbDrivers.query(`
 
 ```{ojs}
 seasonalDrivers = dbDrivers.query(`
+  WITH nino_rolling AS (
+    SELECT 
+      CAST(year AS INT) AS year,
+      CASE CAST(month AS INT)
+        WHEN 2 THEN 'DJF' WHEN 3 THEN 'JFM' WHEN 4 THEN 'FMA' WHEN 5 THEN 'MAM'
+        WHEN 6 THEN 'AMJ' WHEN 7 THEN 'MJJ' WHEN 8 THEN 'JJA' WHEN 9 THEN 'JAS'
+        WHEN 10 THEN 'ASO' WHEN 11 THEN 'SON' WHEN 12 THEN 'OND' WHEN 1 THEN 'NDJ'
+      END AS season,
+      AVG(nino34_anom_noaa) OVER (
+        ORDER BY year, month 
+        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+      ) AS value
+    FROM driver_indices
+    WHERE nino34_anom_noaa IS NOT NULL
+  )
   SELECT index, season, CAST(year AS INT) AS year, value, source 
   FROM enso_drivers_seasonal 
   WHERE index IN ('RONI', 'DMI', 'DMI_CPC')
+  UNION ALL
+  SELECT 'NINO34' AS index, season, year, value, 'NOAA CPC ERSSTv6 (3-mo Mean)' AS source
+  FROM nino_rolling
+  WHERE season IS NOT NULL
   ORDER BY year, season
 `)
 ```
@@ -16429,12 +16457,24 @@ totRows = {
       SELECT year, month, MEDIAN(value_kes) AS goat
       FROM market_prices
       WHERE ${normExpr("county")} = '${countyNorm(county)}'
+        AND (${normExpr("market")} = '${countyNorm(county)}' OR NOT EXISTS (
+          SELECT 1 FROM market_prices m_sub
+          WHERE ${normExpr("m_sub.county")} = '${countyNorm(county)}'
+            AND ${normExpr("m_sub.market")} = '${countyNorm(county)}'
+            AND m_sub.product = 'Goats (Local Quality)'
+        ))
         AND price_type = 'Retail' AND product = 'Goats (Local Quality)' AND unit = 'ea'
       GROUP BY year, month),
     m AS (
       SELECT year, month, MEDIAN(value_kes) AS maize
       FROM market_prices
       WHERE ${normExpr("county")} = '${countyNorm(county)}'
+        AND (${normExpr("market")} = '${countyNorm(county)}' OR NOT EXISTS (
+          SELECT 1 FROM market_prices m_sub
+          WHERE ${normExpr("m_sub.county")} = '${countyNorm(county)}'
+            AND ${normExpr("m_sub.market")} = '${countyNorm(county)}'
+            AND m_sub.product = 'Maize Grain (White)'
+        ))
         AND price_type = 'Retail' AND product = 'Maize Grain (White)' AND unit = 'kg'
       GROUP BY year, month)
     SELECT g.year, g.month, g.goat, m.maize
@@ -16451,6 +16491,13 @@ totRows = {
   for (let i = 0; i < out.length; i++) {
     if (i > 0 && (out[i].t - out[i - 1].t) / 86400000 > 100) seg++;
     out[i].seg = seg;
+    const startIdx = Math.max(0, i - 23);
+    let peak = 0;
+    for (let j = startIdx; j <= i; j++) {
+      if (out[j].tot > peak) peak = out[j].tot;
+    }
+    out[i].peak24 = peak;
+    out[i].drop24 = peak > 0 ? (out[i].tot - peak) / peak : 0;
   }
   return out;
 }
@@ -16633,10 +16680,11 @@ sec32PricesChart = {
           channels: {
             Month: (d) => `${d.year}-${String(d.month).padStart(2, "0")}`,
             "Terms of Trade": (d) => `${d.tot.toFixed(1)} kg maize / goat`,
+            "Drop vs 24m Peak": (d) => d.drop24 != null ? `${d3.format(".1%")(d.drop24)} (24m Peak: ${d.peak24.toFixed(1)} kg)` : "—",
             "Goat Price": (d) => `${Math.round(d.goat).toLocaleString()} KES`,
             "Maize Price": (d) => `${Math.round(d.maize)} KES/kg`
           },
-          tip: {format: {x: false, y: false, fill: false, Month: true, "Terms of Trade": true, "Goat Price": true, "Maize Price": true}}
+          tip: {format: {x: false, y: false, fill: false, Month: true, "Terms of Trade": true, "Drop vs 24m Peak": true, "Goat Price": true, "Maize Price": true}}
         })
       ]
     });
@@ -16674,7 +16722,7 @@ sec32PricesChart = {
         fig: "4.4",
         filename: `${county}_prices_and_terms_of_trade`,
         data: totRows.length ? totRows : (pricesView.rows || pricesSeg),
-        about: `Monthly retail food and livestock prices from the FEWS NET Data Warehouse (USAID), marketpricefacts, across sentinel county markets (KES, 2000–2026). Terms of Trade (ToT) is DERIVED HERE, not a published series: median goat price (KES/head) divided by median maize-grain price (KES/kg) for the same county-month. Because it is a ratio, a fall can mean cheaper livestock OR dearer grain — opposite implications — so interpret it against the two price legs, not on its own. FEWS NET redistributes third-party series in the warehouse under the originating provider's terms; identify the collecting agency before republishing any series.`,
+        about: `Monthly retail food and livestock prices from the FEWS NET Data Warehouse (USAID), marketpricefacts, across sentinel county markets (KES, 2008–2026). Terms of Trade (ToT) is DERIVED HERE, not a published series: median goat price (KES/head) divided by median maize-grain price (KES/kg) for the same county-month. Because it is a ratio, a fall can mean cheaper livestock OR dearer grain — opposite implications — so interpret it against the two price legs, not on its own. Severe purchasing power collapses (>50% to >68%) hold on monthly series evaluated against trailing 24-month peaks (e.g. Aug 2011: −68.1%, Feb 2023: −68.1% at the end of the 2020–23 drought); annual averaging dampens crisis depths. FEWS NET redistributes third-party series in the warehouse under the originating provider's terms; identify the collecting agency before republishing any series.`,
         meta: {County: county, Product: priceProduct, View: priceView, Aggregation: priceAgg}
       }
     );
@@ -16689,35 +16737,35 @@ sec32Table = {
       epoch: "2005–2006 Drought",
       driver: "La Niña + Neutral IOD",
       ndviMin: "58% of normal",
-      totMin: "28 kg / goat",
+      totMin: "28 kg / goat (pre-series)",
       impact: "Severe forage deficit across northern ASALs; ~30% livestock mortality."
     },
     {
       epoch: "2010–2011 Famine Peak",
       driver: "Strong La Niña + Negative IOD",
       ndviMin: "44% of normal",
-      totMin: "18 kg / goat",
+      totMin: "28.7 kg / goat (-68.1% vs peak)",
       impact: "Historic Horn of Africa famine crisis; IPC Phase 4 Emergency declared; widespread herd mortality."
     },
     {
       epoch: "2016–2017 ASAL Crisis",
       driver: "Consecutive failed rains (La Niña onset)",
       ndviMin: "52% of normal",
-      totMin: "26 kg / goat",
+      totMin: "43.9 kg / goat (-41.2% vs peak)",
       impact: "National drought disaster declared; massive emergency livestock off-take and water trucking."
     },
     {
-      epoch: "2020–2022 Triple Dip",
+      epoch: "2020–2023 Drought (5 failed seasons)",
       driver: "Historic 3-year consecutive La Niña (5 failed seasons)",
       ndviMin: "37% of normal",
-      totMin: "21 kg / goat",
-      impact: "Prolonged pasture collapse; over 2.5 million livestock died across ASALs; IPC Phase 4 Emergency."
+      totMin: "25.1 kg / goat (-68.1% vs peak)",
+      impact: "Prolonged pasture collapse; over 2.5 million livestock died across ASALs; deepest purchasing power trough reached in Feb 2023."
     },
     {
       epoch: "2023–2024 El Niño Rebound",
       driver: "Super El Niño (+2.0 °C) + Record Positive IOD",
       ndviMin: "148% of normal (surge)",
-      totMin: "68 kg / goat (recovery)",
+      totMin: "68+ kg / goat (up to 127 kg)",
       impact: "Catastrophic flash floods replaced by rapid pasture flush; slow herd reconstitution due to prior stock losses."
     }
   ];
@@ -17309,6 +17357,7 @@ sec2PlumeHero = {
 
   // Reactive default driver from global driverKind selector, can also be toggled locally
   let activeDriver = (driverKind && driverKind.includes("IOD")) ? "IOD" : "ENSO";
+  let ensoMetricSpace = "NINO34"; // "NINO34" (Raw CCSR/IRI Plume) | "RONI" (Translated Teleconnection Gradient)
   let hindcastSeasons = 6;
   let overlayMode = "top3"; // "none", "top3", "top5"
   const analogueColors = ["#d97706", "#7c3aed", "#059669", "#0891b2", "#e11d48"];
@@ -17359,28 +17408,43 @@ sec2PlumeHero = {
     const bundle = isIOD ? iodPlumeBundle : iriPlumeBundle;
     if (!bundle || !bundle.current) return;
 
-    const themeColor = isIOD ? "#0f766e" : "#2563eb";
-    const themeBg = isIOD ? "#f0fdfa" : "#eff6ff";
-    const ribbonColor = isIOD ? "#99f6e4" : "#93c5fd";
+    const isRoniSpace = (!isIOD && ensoMetricSpace === "RONI");
 
-    // Build observed map dynamically from seasonalDrivers (Decision D17.1 & D17.4)
+    const themeColor = isIOD ? "#0f766e" : (isRoniSpace ? "#0284c7" : "#2563eb");
+    const themeBg = isIOD ? "#f0fdfa" : (isRoniSpace ? "#f0f9ff" : "#eff6ff");
+    const ribbonColor = isIOD ? "#99f6e4" : (isRoniSpace ? "#bae6fd" : "#93c5fd");
+
+    // Build observed map dynamically from seasonalDrivers (Decision D17.1, D17.4, KE-42)
     const obs_map = {};
     for (const s of all_seasons) {
-      const driverKey = isIOD 
-        ? (`DMI_CPC_${s.season}_${s.year}`)
-        : `RONI_${s.season}_${s.year}`;
+      let driverKey;
+      if (isIOD) {
+        driverKey = `DMI_CPC_${s.season}_${s.year}`;
+      } else if (isRoniSpace) {
+        driverKey = `RONI_${s.season}_${s.year}`;
+      } else {
+        driverKey = `NINO34_${s.season}_${s.year}`;
+      }
       let val = seasonalDriverMap ? seasonalDriverMap.get(driverKey) : null;
       if (val == null && isIOD && seasonalDriverMap) {
         val = seasonalDriverMap.get(`DMI_${s.season}_${s.year}`);
+      }
+      if (val == null && !isIOD && !isRoniSpace && seasonalDriverMap) {
+        val = seasonalDriverMap.get(`RONI_${s.season}_${s.year}`);
       }
       if (val != null) {
         obs_map[s.id] = val;
       }
     }
 
-    const latestObsVal = isIOD 
-      ? (currentState?.dmiLatest ?? null)
-      : (currentState?.roniLatest ?? null);
+    let latestObsVal;
+    if (isIOD) {
+      latestObsVal = currentState?.dmiLatest ?? null;
+    } else if (isRoniSpace) {
+      latestObsVal = currentState?.roniLatest ?? null;
+    } else {
+      latestObsVal = currentState?.nino34Latest ?? currentState?.roniLatest ?? null;
+    }
 
     // Forward forecast ensemble statistics for the bundle's own forecast seasons
     const horizon = isIOD ? horizonIOD : horizonENSO;
@@ -17389,8 +17453,7 @@ sec2PlumeHero = {
     const firstFcstYear = fcstYears[0];
     const fcstStats = [];
 
-    // Anchor at the season immediately before the first forecast season (e.g. JAS before ASO):
-    // its observed value from the driver parquets if published, else the latest observed value.
+    // Anchor at the season immediately before the first forecast season (e.g. JAS before ASO)
     const firstFcstPos = all_seasons.findIndex(s => s.id === `${fcstSeasons[0]}_${firstFcstYear}`);
     const anchorSeason = firstFcstPos > 0 ? all_seasons[firstFcstPos - 1] : null;
     const anchorVal = anchorSeason ? (obs_map[anchorSeason.id] ?? latestObsVal) : latestObsVal;
@@ -17407,10 +17470,33 @@ sec2PlumeHero = {
       });
     }
 
+    // Dynamic offset at anchor for transition relaxation (Architecture C, KE-42)
+    let delta0 = 0.45;
+    if (anchorSeason && seasonalDriverMap) {
+      const ninoAnchor = seasonalDriverMap.get(`NINO34_${anchorSeason.season}_${anchorSeason.year}`);
+      const roniAnchor = seasonalDriverMap.get(`RONI_${anchorSeason.season}_${anchorSeason.year}`);
+      if (ninoAnchor != null && roniAnchor != null) {
+        delta0 = Math.max(0, ninoAnchor - roniAnchor);
+      }
+    }
+
     fcstSeasons.forEach((s, idx) => {
       const sy = fcstYears[idx];
+      let deltaOffset = 0;
+      if (isRoniSpace) {
+        const leadSeasons = idx + 1; // 1-based forecast step
+        const tMonths = leadSeasons * 3;
+        const tau = 6.0; // 6-month relaxation timescale
+        const deltaSecular = 0.35; // +0.35 °C secular baseline warming (2015-2026 empirical mean)
+        deltaOffset = delta0 * Math.exp(-tMonths / tau) + deltaSecular * (1.0 - Math.exp(-tMonths / tau));
+      }
+
       const vals = bundle.current.models
-        .map(m => m.data[idx])
+        .map(m => {
+          const raw = m.data[idx];
+          if (raw == null) return null;
+          return isRoniSpace ? (raw - deltaOffset) : raw;
+        })
         .filter(v => v != null)
         .sort((a,b) => a - b);
       if (vals.length > 0) {
@@ -17463,7 +17549,11 @@ sec2PlumeHero = {
       return `next issue expected ~${d.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
     };
 
-    const targetVals = bundle.current.models.map(m => m.data[targetIdx]).filter(v => v != null);
+    const targetDeltaOffset = (isRoniSpace && targetIdx >= 0)
+      ? (delta0 * Math.exp(-(targetIdx + 1) * 3 / 6.0) + 0.35 * (1.0 - Math.exp(-(targetIdx + 1) * 3 / 6.0)))
+      : 0;
+    const rawTargetVals = bundle.current.models.map(m => m.data[targetIdx]).filter(v => v != null);
+    const targetVals = isRoniSpace ? rawTargetVals.map(v => v - targetDeltaOffset) : rawTargetVals;
 
     // Agreement %
     let targetAgreementText = "";
@@ -17478,14 +17568,18 @@ sec2PlumeHero = {
     }
 
     const targetAverages = bundle.current.averages || {};
-    const dynAvg = targetIdx >= 0 ? (targetAverages.dynamical?.[targetIdx] ?? null) : null;
-    const statAvg = targetIdx >= 0 ? (targetAverages.statistical?.[targetIdx] ?? null) : null;
+    const rawDynAvg = targetIdx >= 0 ? (targetAverages.dynamical?.[targetIdx] ?? null) : null;
+    const rawStatAvg = targetIdx >= 0 ? (targetAverages.statistical?.[targetIdx] ?? null) : null;
+    const dynAvg = rawDynAvg != null ? (isRoniSpace ? (rawDynAvg - targetDeltaOffset) : rawDynAvg) : null;
+    const statAvg = rawStatAvg != null ? (isRoniSpace ? (rawStatAvg - targetDeltaOffset) : rawStatAvg) : null;
 
     // Thresholds and domains
     const threshUpper = isIOD ? 0.4 : 0.5;
     const threshLower = isIOD ? -0.4 : -0.5;
     const yDomain = isIOD ? [-1.5, 1.5] : [-2.0, 4.4];
-    const yLabel = isIOD ? "↑ Dipole Mode Index (DMI, °C)" : "↑ Niño 3.4 SST Anomaly (°C)";
+    const yLabel = isIOD 
+      ? "↑ Dipole Mode Index (DMI, °C)" 
+      : (isRoniSpace ? "↑ Relative Oceanic Niño Index (RONI, °C)" : "↑ Niño 3.4 SST Anomaly (°C)");
 
     const marks = [
       // Background Phase Zones
@@ -17500,12 +17594,12 @@ sec2PlumeHero = {
 
       // Highlight target season column
       Plot.ruleX([targetSeasonLabel], {
-        stroke: isIOD ? "#0f766e" : "#2563eb",
+        stroke: isIOD ? "#0f766e" : (isRoniSpace ? "#0284c7" : "#2563eb"),
         strokeWidth: 46,
         strokeOpacity: 0.12
       }),
       Plot.ruleX([targetSeasonLabel], {
-        stroke: isIOD ? "#0d9488" : "#3b82f6",
+        stroke: isIOD ? "#0d9488" : (isRoniSpace ? "#0284c7" : "#3b82f6"),
         strokeWidth: 1.5,
         strokeDasharray: "4,4"
       }),
@@ -17513,7 +17607,7 @@ sec2PlumeHero = {
         y: () => yDomain[1],
         text: () => `★ Focus: ${targetSeasonLabel}`,
         dy: 12,
-        fill: isIOD ? "#0f766e" : "#1d4ed8",
+        fill: isIOD ? "#0f766e" : (isRoniSpace ? "#0369a1" : "#1d4ed8"),
         fontWeight: 800,
         fontSize: 10.5,
         textAnchor: "middle"
@@ -17580,8 +17674,13 @@ sec2PlumeHero = {
         visibleSeasons.forEach(s => {
           const yrOffset = s.year - firstFcstYear;
           const targetHistYear = a.year + yrOffset;
-          const key = `${isIOD ? 'DMI' : 'RONI'}_${s.season}_${targetHistYear}`;
-          const val = seasonalDriverMap ? seasonalDriverMap.get(key) : null;
+          const key = isIOD 
+            ? `DMI_${s.season}_${targetHistYear}`
+            : (isRoniSpace ? `RONI_${s.season}_${targetHistYear}` : `NINO34_${s.season}_${targetHistYear}`);
+          let val = seasonalDriverMap ? seasonalDriverMap.get(key) : null;
+          if (val == null && !isIOD && !isRoniSpace && seasonalDriverMap) {
+            val = seasonalDriverMap.get(`RONI_${s.season}_${targetHistYear}`);
+          }
           if (val != null) {
             pts.push({ label: s.label, season: s.season, val: val, year: a.year, rank: a.rank, color: col });
           }
@@ -17666,8 +17765,21 @@ sec2PlumeHero = {
         gaugeColor = "#64748b";
         gaugeBg = "#f1f5f9";
       }
-    } else {
+    } else if (isRoniSpace) {
       gaugeVal = (currentState && currentState.roniLatest != null) ? currentState.roniLatest : null;
+      if (gaugeVal != null) {
+        gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-2.0)) / 4.0) * 100));
+        gaugeTag = gaugeVal >= 2.0 ? "Super El Niño" : gaugeVal >= 1.5 ? "Strong El Niño" : gaugeVal >= 0.5 ? "Moderate El Niño" : gaugeVal <= -1.5 ? "Strong La Niña" : gaugeVal <= -0.5 ? "Weak La Niña" : "Neutral";
+        gaugeColor = gaugeVal >= 0.5 ? "#dc2626" : gaugeVal <= -0.5 ? "#2563eb" : "#475569";
+        gaugeBg = gaugeVal >= 0.5 ? "#fee2e2" : gaugeVal <= -0.5 ? "#dbeafe" : "#f1f5f9";
+      } else {
+        gaugePct = 50;
+        gaugeTag = "Pending Observation";
+        gaugeColor = "#64748b";
+        gaugeBg = "#f1f5f9";
+      }
+    } else {
+      gaugeVal = (currentState && currentState.nino34Latest != null) ? currentState.nino34Latest : (currentState?.roniLatest ?? null);
       if (gaugeVal != null) {
         gaugePct = Math.max(2, Math.min(98, ((gaugeVal - (-2.0)) / 4.0) * 100));
         gaugeTag = gaugeVal >= 2.0 ? "Super El Niño" : gaugeVal >= 1.5 ? "Strong El Niño" : gaugeVal >= 0.5 ? "Moderate El Niño" : gaugeVal <= -1.5 ? "Strong La Niña" : gaugeVal <= -0.5 ? "Weak La Niña" : "Neutral";
@@ -17688,7 +17800,7 @@ sec2PlumeHero = {
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
           <div style="display: inline-flex; gap: 6px; background: #f1f5f9; padding: 3px; border-radius: 6px;">
             <button type="button" class="btn-driver-tab ${!isIOD ? 'active' : ''}" id="btnDriverEnso" style="${!isIOD ? 'background: #0284c7 !important; color: #fff !important; border-color: #0369a1 !important;' : ''}">
-              🌊 Pacific ENSO (Niño 3.4)
+              🌊 Pacific ENSO (${isRoniSpace ? 'RONI' : 'Niño 3.4'})
             </button>
             <button type="button" class="btn-driver-tab ${isIOD ? 'active' : ''}" id="btnDriverIod" style="${isIOD ? 'background: #0f766e !important; color: #fff !important; border-color: #0d9488 !important;' : ''}">
               🌊 Indian Ocean Dipole (DMI)
@@ -17697,7 +17809,7 @@ sec2PlumeHero = {
           <div style="font-size: 0.74rem; color: #64748b; font-weight: 500;">
             ${isIOD 
               ? `Coupled Global Dynamical Ensemble: <strong>JAMSTEC SINTEX-F (${bundle.current.models.length} Members)</strong>` 
-              : 'Global Multi-Model Ensemble: <strong>Columbia Climate School IRI • NOAA CPC</strong>'}
+              : `Global Multi-Model Ensemble: <strong>Columbia Climate School IRI • NOAA CPC</strong> ${isRoniSpace ? '(Translated to RONI)' : ''}`}
           </div>
         </div>
 
@@ -17709,7 +17821,7 @@ sec2PlumeHero = {
                 Figure 2.0
               </span>
               <span style="background: ${themeColor}15; color: ${themeColor}; font-size: 0.7rem; font-weight: 800; padding: 2px 8px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; border: 1px solid ${themeColor}33;">
-                ${isIOD ? 'Indian Ocean Dynamical Ensemble' : 'Pacific Multi-Model Ensemble'}
+                ${isIOD ? 'Indian Ocean Dynamical Ensemble' : (isRoniSpace ? 'Pacific Relative ONI (Walker Gradient)' : 'Pacific Multi-Model Ensemble')}
               </span>
               <span style="font-size: 0.78rem; color: #475569; font-weight: 600;">
                 ${isIOD ? `JAMSTEC SINTEX-F Dynamical Prediction • ${iodPlumeBundle?.metadata?.issueLabel || 'initialisation pending'} • ${bundle.current.models.length} Members` : `CCSR/IRI ENSO Prediction Plume • Issued ${iriPlumeBundle?.metadata?.issueLabel || 'pending'} • ${bundle.current.models.length} Models`}
@@ -17718,12 +17830,16 @@ sec2PlumeHero = {
             <h2 style="font-size: 1.25rem; font-weight: 800; color: #0f172a; margin: 0;">
               ${isIOD 
                 ? 'Indian Ocean Dipole (DMI) SST Anomaly — JAMSTEC SINTEX-F Forecast Plume & Trajectory' 
-                : 'Equatorial Pacific Niño 3.4 SST Anomaly — Multi-Model Forecast Plume & Trajectory'}
+                : (isRoniSpace 
+                    ? 'Relative Oceanic Niño Index (RONI) — Multi-Model Forecast Plume in Teleconnection Space' 
+                    : 'Equatorial Pacific Niño 3.4 SST Anomaly — Multi-Model Forecast Plume & Trajectory')}
             </h2>
             <p style="font-size: 0.84rem; color: #475569; margin: 0.25rem 0 0;">
               ${isIOD 
                 ? `JAMSTEC SINTEX-F dynamical ocean-atmosphere ensemble forecast (${bundle.current.models.length} members) with min–max spread, observed Dipole Mode Index (DMI) trajectory, and historical analogue traces.` 
-                : 'Consensus multi-model ensemble forecast with min–max spread, observed sea surface temperature trajectory, and historical analogue traces.'}
+                : (isRoniSpace
+                    ? `Consensus multi-model ensemble translated into NOAA CPC Relative ONI space (relaxation &tau; = 6 mo) removing tropical baseline warming to reflect the Walker circulation convective gradient driving Kenya rainfall.`
+                    : 'Consensus multi-model ensemble forecast with min–max spread, observed sea surface temperature trajectory, and historical analogue traces.')}
             </p>
           </div>
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
@@ -17749,7 +17865,11 @@ sec2PlumeHero = {
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.85rem 1.15rem; margin-bottom: 1rem;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
             <span style="font-size: 0.78rem; font-weight: 800; color: #1e293b; text-transform: uppercase; letter-spacing: 0.04em;">
-              ${isIOD ? 'IOD State Gauge &bull; Current Dipole Mode Index (DMI) Position' : 'ENSO State Gauge &bull; Current Niño 3.4 Position'}
+              ${isIOD 
+                ? 'IOD State Gauge &bull; Current Dipole Mode Index (DMI) Position' 
+                : (isRoniSpace 
+                    ? 'ENSO State Gauge &bull; Current Relative ONI (RONI) Position' 
+                    : 'ENSO State Gauge &bull; Current Niño 3.4 Position')}
             </span>
             <span style="font-size: 1.25rem; font-weight: 800; color: ${gaugeColor}; font-variant-numeric: tabular-nums;">
               ${gaugeVal != null ? `${gaugeVal >= 0 ? '+' : ''}${gaugeVal.toFixed(2)} °C` : 'Pending'}
@@ -17774,11 +17894,14 @@ sec2PlumeHero = {
           <div style="display: flex; justify-content: space-between; font-size: 0.68rem; font-weight: 700; color: #64748b; margin-top: 4px;">
             ${isIOD 
               ? '<span>-1.5°C (STRONG NEGATIVE)</span><span>-0.4°C</span><span>0.0°C (NEUTRAL)</span><span>+0.4°C</span><span>+1.5°C (STRONG POSITIVE)</span>'
-              : '<span>-2.0°C (STRONG LA NIÑA)</span><span>-0.5°C</span><span>0.0°C (NEUTRAL)</span><span>+0.5°C</span><span>+1.5°C (STRONG EL NIÑO)</span><span>+2.0°C (SUPER)</span>'}
+              : (isRoniSpace
+                  ? '<span>-2.0°C (STRONG LA NIÑA)</span><span>-0.5°C</span><span>0.0°C (NEUTRAL)</span><span>+0.5°C (EL NIÑO)</span><span>+1.5°C (STRONG)</span><span>+2.0°C (SUPER)</span>'
+                  : '<span>-2.0°C (STRONG LA NIÑA)</span><span>-0.5°C</span><span>0.0°C (NEUTRAL)</span><span>+0.5°C</span><span>+1.5°C (STRONG EL NIÑO)</span><span>+2.0°C (SUPER)</span>')
+            }
           </div>
         </div>
 
-        <!-- Controls Bar: Hindcast History & Analogue Overlay -->
+        <!-- Controls Bar: Hindcast History & Metric Space & Analogue Overlay -->
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; background: #f8fafc; border: 1px solid #e2e8f0; padding: 0.5rem 0.85rem; border-radius: 6px; margin-bottom: 0.85rem;">
           
           <!-- Left: Hindcast Slider + Compact Presets -->
@@ -17794,7 +17917,22 @@ sec2PlumeHero = {
             </div>
           </div>
 
-          <!-- Middle: Analogue Overlay Toggle -->
+          <!-- Middle: Metric Space Toggle for ENSO (KE-42) -->
+          ${!isIOD ? `
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="font-size: 0.74rem; font-weight: 700; color: #475569;">Metric Space:</span>
+              <div style="display: inline-flex; gap: 4px; background: #ffffff; padding: 2px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                <button class="btn-plume-pill ${!isRoniSpace ? 'active' : ''}" id="btnMetricNino34" title="Raw multi-model ensemble forecast in Niño 3.4 SST anomaly space">Raw Niño 3.4 (IRI Plume)</button>
+                <button class="btn-plume-pill ${isRoniSpace ? 'active' : ''}" id="btnMetricRoni" title="State-space transition relaxation translation into NOAA CPC Relative ONI space (removes tropical baseline warming for Kenya Walker teleconnection)">Translated RONI (Gradient)</button>
+              </div>
+            </div>
+          ` : `
+            <div style="font-size: 0.72rem; color: #64748b; font-weight: 500;">
+              Dipole Mode Index (WTIO &minus; SETIO SST Gradient)
+            </div>
+          `}
+
+          <!-- Right: Analogue Overlay Toggle -->
           <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
             <span style="font-size: 0.74rem; font-weight: 700; color: #475569;">Overlay Analogues:</span>
             <div style="display: inline-flex; gap: 4px; background: #ffffff; padding: 2px; border: 1px solid #cbd5e1; border-radius: 6px;">
@@ -17804,12 +17942,16 @@ sec2PlumeHero = {
             </div>
           </div>
 
-          <!-- Right: Ensemble Metadata Tag -->
-          <div style="font-size: 0.72rem; color: #64748b; font-weight: 500;">
-            ${isIOD ? `Dynamical Ensemble: <strong>${bundle.current.models.length} members</strong>` : `Multi-Model Ensemble: <strong>${bundle.current.models.length} models</strong>`}
-          </div>
-
         </div>
+
+        ${isRoniSpace ? `
+          <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-left: 3px solid #0284c7; border-radius: 5px; padding: 0.45rem 0.75rem; margin-bottom: 0.75rem; font-size: 0.76rem; color: #0369a1; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+            <div>
+              <strong>Walker Teleconnection Translation Active (D17.1 &amp; KE-42):</strong> Multi-model plume trajectories translated from raw Niño 3.4 space into Relative ONI space via state-space relaxation (&Delta;(t) = &Delta;<sub>0</sub> e<sup>&minus;t/&tau;</sup> + 0.35(1 &minus; e<sup>&minus;t/&tau;</sup>), &tau; = 6 mo). Seamlessly aligns model projections with the equatorial SST gradient driving Kenya rainfall without artificial boundary step-jumps.
+            </div>
+            <button type="button" class="btn-dataset-jump" onclick="openMethodDrawer('teleconnections')" style="font-size: 0.70rem; padding: 2px 6px;">Methods &rarr;</button>
+          </div>
+        ` : ''}
 
         <!-- Full-Width Plume Plot Container -->
         <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem; overflow-x: auto; width: 100%; box-sizing: border-box;" id="iriPlotHost">
@@ -17821,12 +17963,12 @@ sec2PlumeHero = {
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="display: inline-block; width: 14px; height: 3px; background: #0f172a; border-radius: 2px;"></span>
               <span style="display: inline-block; width: 7px; height: 7px; background: #0f172a; border-radius: 50%; margin-left: -10px;"></span>
-              <span style="margin-left: 4px; font-weight: 600;">${isIOD ? 'Observed DMI' : 'Observed Niño 3.4'}</span>
+              <span style="margin-left: 4px; font-weight: 600;">${isIOD ? 'Observed DMI' : (isRoniSpace ? 'Observed RONI (CPC)' : 'Observed Niño 3.4')}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="display: inline-block; width: 16px; height: 3px; background: ${themeColor}; border-radius: 2px;"></span>
               <span style="display: inline-block; width: 7px; height: 7px; background: ${themeColor}; border-radius: 50%; margin-left: -11px;"></span>
-              <span style="margin-left: 4px; font-weight: 600;">${isIOD ? 'JAMSTEC Ensemble Median' : 'Multi-Model Ensemble Median'}</span>
+              <span style="margin-left: 4px; font-weight: 600;">${isIOD ? 'JAMSTEC Ensemble Median' : (isRoniSpace ? 'Translated Ensemble Median (RONI Space)' : 'Multi-Model Ensemble Median')}</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="display: inline-block; width: 16px; height: 10px; background: ${ribbonColor}; opacity: 0.55; border-radius: 2px;"></span>
@@ -17927,7 +18069,10 @@ sec2PlumeHero = {
                 ${isIOD 
                   ? `The Indian Ocean Dipole is currently ${currentState?.dmi != null ? `at ${currentState.dmi >= 0 ? '+' : ''}${currentState.dmi.toFixed(2)} °C (${currentState.dmiMonthYear || 'latest month'})` : 'pending its latest observation'}. The JAMSTEC SINTEX-F ensemble median for ${targetSeasonTitle.split(' (')[0]} is ${targetMedian != null ? `${targetMedian >= 0 ? '+' : ''}${targetMedian.toFixed(2)} °C` : 'n/a'} (${targetMedian == null ? 'no projection' : targetMedian >= 0.4 ? 'positive IOD' : targetMedian <= -0.4 ? 'negative IOD' : 'neutral IOD'}). A positive or neutral IOD reinforces Pacific El Niño teleconnection forcing, enhancing moisture advection and Short Rains totals across East Africa; a negative IOD works against it.`
                   : (isOND 
-                      ? `The IRI multi-model median Niño 3.4 anomaly for ${targetSeasonTitle.split(' (')[0]} is ${targetMedian != null ? `${targetMedian >= 0 ? '+' : ''}${targetMedian.toFixed(2)} °C` : 'n/a'}${targetMedian != null && targetMedian >= 2.0 ? ' (strong El Niño)' : targetMedian != null && targetMedian >= 0.5 ? ' (El Niño)' : targetMedian != null && targetMedian <= -0.5 ? ' (La Niña)' : ''}. ${targetMedian != null && targetMedian >= 0.5 ? 'Warm Pacific forcing favors enhanced Short Rains across Kenya, with heightened riverine flood risk in the Tana/Athi basins and forage recovery in pastoral ASALs.' : targetMedian != null && targetMedian <= -0.5 ? 'Cool Pacific forcing raises the risk of suppressed Short Rains and forage deficits in pastoral ASALs.' : 'Near-neutral Pacific forcing leaves the Short Rains to Indian Ocean and intra-seasonal drivers.'}`
+                      ? (isRoniSpace
+                          ? `In Relative ONI (RONI) teleconnection space, the ensemble median for ${targetSeasonTitle.split(' (')[0]} is ${targetMedian != null ? `${targetMedian >= 0 ? '+' : ''}${targetMedian.toFixed(2)} °C` : 'n/a'}${targetMedian != null && targetMedian >= 2.0 ? ' (very strong relative El Niño)' : targetMedian != null && targetMedian >= 0.5 ? ' (El Niño)' : targetMedian != null && targetMedian <= -0.5 ? ' (La Niña)' : ''}. Subtracting tropical-mean warming isolates the Walker circulation convective gradient: warm Pacific forcing relative to the tropics strongly favors enhanced Short Rains across Kenya, with heightened riverine flood risk in the Tana/Athi basins and forage recovery in pastoral ASALs.`
+                          : `The raw IRI multi-model median Niño 3.4 anomaly for ${targetSeasonTitle.split(' (')[0]} is ${targetMedian != null ? `${targetMedian >= 0 ? '+' : ''}${targetMedian.toFixed(2)} °C` : 'n/a'}${targetMedian != null && targetMedian >= 2.0 ? ' (strong El Niño)' : targetMedian != null && targetMedian >= 0.5 ? ' (El Niño)' : targetMedian != null && targetMedian <= -0.5 ? ' (La Niña)' : ''}. Note: raw Niño 3.4 includes ~+0.35 to +0.50 °C tropical baseline warming. Switch to 'Translated RONI' to evaluate the Walker circulation gradient driving Kenya rainfall directly.`
+                        )
                       : "During MAM (Long Rains), Pacific ENSO teleconnection skill historically drops near zero. Preparedness must focus on localized Indian Ocean Dipole (DMI) and Western-V atmospheric wave dynamics."
                     )
                 }
@@ -17942,7 +18087,7 @@ sec2PlumeHero = {
 
         <!-- Figure 2.0 Caption & Notes -->
         <div style="border-top: 1px solid #e2e8f0; padding-top: 0.65rem; margin-top: 0.85rem; font-size: 0.74rem; color: #64748b; line-height: 1.55;">
-          <strong>Figure 2.0 Caption &amp; Method Notes:</strong> Global sea surface temperature anomaly projections relative to 1991–2020 WMO climatological baseline. The shaded envelope represents the multi-model min–max spread; the solid colored curve tracks the ensemble median; solid dark points show observed historical anomalies. Matched historical analogue years (dashed colored traces) are anchor-aligned to the seasonal cycle to evaluate trajectory parallels. Data updated monthly from Columbia University IRI and JAMSTEC. Official Kenya operational outlooks are issued exclusively by KMSA (§2.4).
+          <strong>Figure 2.0 Caption &amp; Method Notes:</strong> Global sea surface temperature anomaly projections relative to 1991–2020 WMO climatological baseline. The shaded envelope represents the multi-model min–max spread; the solid colored curve tracks the ensemble median; solid dark points show observed historical anomalies. Matched historical analogue years (dashed colored traces) are anchor-aligned to the seasonal cycle to evaluate trajectory parallels. When 'Translated RONI' is active, the raw Niño 3.4 plume is translated into NOAA CPC Relative ONI space via state-space transition relaxation (&Delta;(t) = &Delta;<sub>0</sub> e<sup>&minus;t/&tau;</sup> + 0.35(1 &minus; e<sup>&minus;t/&tau;</sup>), &tau; = 6 mo, Decision D17.1 &amp; KE-42), isolating the Walker circulation gradient driving Kenya rainfall. Data updated monthly from Columbia University IRI and JAMSTEC. Official Kenya operational outlooks are issued exclusively by KMSA (§2.4).
         </div>
 
       </div>
@@ -17964,6 +18109,22 @@ sec2PlumeHero = {
     if (btnIod) {
       btnIod.onclick = () => {
         activeDriver = 'IOD';
+        renderPlume();
+      };
+    }
+
+    const btnNino34 = container.querySelector('#btnMetricNino34');
+    if (btnNino34) {
+      btnNino34.onclick = () => {
+        ensoMetricSpace = 'NINO34';
+        renderPlume();
+      };
+    }
+
+    const btnRoni = container.querySelector('#btnMetricRoni');
+    if (btnRoni) {
+      btnRoni.onclick = () => {
+        ensoMetricSpace = 'RONI';
         renderPlume();
       };
     }

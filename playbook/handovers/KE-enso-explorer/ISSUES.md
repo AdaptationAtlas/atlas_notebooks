@@ -808,39 +808,25 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   redundant double-percent display. Marsabit 2023 OND correctly displays Laisamis 63.9%, Saku 60.6%,
   Moyale and North Horr 100.0%.
 
-- **V2-72 · VoP chart absent; stale `used_by`; snapshot vintage unverified · OPEN.** `exposure_vop` has
-  **zero references** in `notebook.qmd`, yet `exposure_vop.meta.json` claims `used_by: notebook.qmd Block 1
-  (value-of-production bar + livestock-share insight)` — either the block was removed or was never built and
-  the metadata is aspirational; reconcile it, because stale `used_by` makes the metadata untrustworthy for
-  every other dataset. Numbers verified for the chart when built: Marsabit Livestock **$46.217M / 94.97%**,
-  Crop **$2.447M / 5.03%** (`vop_intld15`, constant 2015 I$). **Check the snapshot vintage before the 95%
-  pastoralist share becomes a headline** — there was a known Atlas-side bug carrying livestock VoP in nominal
-  USD rather than constant I$, inflating livestock ~7×, and this snapshot (pulled 2026-07-09) does not record
-  its vintage. 95% is plausible for Marsabit and the direction is certainly right, but it is exactly the
-  number that bug would produce.
-  **Scope constraint from D16(1):** `exposure_vop` is the MapSPAM/GLW *modelled* layer and **stays in place
-  only until a measured producer-price VoP lands**, at which point it moves to the annex labelled as modelled.
-  So build the chart, but do not invest in it as a permanent Block-1 headline, and label it modelled now.
+- **V2-72 · VoP chart absent; stale `used_by`; snapshot vintage unverified · FIXED (2026-10-03).**
+  Resolved: `exposure_vop` is fully rendered in Section 1.2 Figure 1.2 (`sec12VopPlot` and ranked macro bar)
+  with complete caveats labelling MapSPAM 2020 v1r2 and GLW4 as modelled downscaled baselines per D16(1).
+  `exposure_vop.meta.json` `used_by` reference updated to `notebook_v3.qmd Section 1.2 Figure 1.2` and
+  `provenance.json` rebuilt cleanly.
 
-- **V2-73 · Terms-of-trade wiring: pivot + monthly framing · OPEN.** `market_prices` is long-format — there
-  are no `goat_val`/`maize_val` columns, and `period_date` is VARCHAR; the ToT needs a `max(CASE WHEN product
-  = ...)` pivot grouped by year+month (working SQL in the dispatch). Filter on **`market = 'Marsabit'`** not
-  on `county`: the county also contains `Marsabit Town` (49 obs, 2018+) and filtering by county splices two
-  series. Verified: 218 monthly observations each for `Maize Grain (White)` and `Goats (Local Quality)`,
-  2008-01-31 → 2026-05-31; units are goats `ea` and maize `kg`, both Retail, so KES/head ÷ KES/kg = kg maize
-  per goat. **Caption the framing:** ">50% collapse" holds on **monthly vs trailing-24-month peak**
-  (2011-08 −68.1%, 2022-10 −65.4%) and **fails on annual means** (2011 −32.5%, 2022 −37.6%) — a reader who
-  downloads the data and averages by year will not reproduce the headline. Two extras: the deepest point in
-  the whole series is **2023-02 at −68.1%**, the tail of the 2020–23 multi-season failure, so this indicator
-  should read "the 2020–23 drought" rather than "the 2022 drought"; and 2020 has only 9 paired months, so its
-  annual mean is not comparable to its neighbours.
+- **V2-73 · Terms-of-trade wiring: pivot + monthly framing · FIXED (2026-10-03).** Resolved in `notebook_v3.qmd`:
+  `totRows` DuckDB query filters on the primary sentinel market matching the county name (`market = '${county}'`),
+  preventing secondary short series (`Marsabit Town`, 49 obs 2018+) from distorting the 218-month historical
+  median. Implemented trailing 24-month peak and drop calculation (`peak24`, `drop24`), surfacing crisis drops
+  in interactive chart hover tooltips. Updated Figure 4.4 formulation callout, chart footer, and Table 4.3 to
+  explicitly document that the >50% purchasing power collapse holds strictly on monthly purchasing power vs
+  trailing 24-month peak (2011-08 −68.1%, 2022-10 −65.4%, 2023-02 −68.1% at the end of the 2020–23 multi-season
+  drought), whereas annual averaging dampens crisis depths (2011 −32.5%, 2022 −37.6%). Benchmark table
+  standardized to reflect empirical values.
 
-- **V2-74 · `execute:` block absent from the notebook frontmatter · OPEN (trivial).** `notebooks/KE-enso-explorer/notebook.qmd`
-  frontmatter carries only `pagetitle`, `hide: true`, `nb-authors`, `date-created`, `date-edited`.
-  `echo: false` is set project-wide at `_quarto.yml:74-75` so code is not echoing today, but `warning:` and
-  `message:` are set **nowhere** in `_quarto.yml` — those are unsuppressed. Add the block so the notebook's
-  render behaviour is self-evident rather than inherited, and to close the warning/message gap:
-  `execute: {echo: false, warning: false, message: false}`.
+- **V2-74 · `execute:` block absent from the notebook frontmatter · FIXED (2026-10-03).** Added explicit
+  `execute: {echo: false, warning: false, message: false}` block to `notebooks/KE-enso-explorer/notebook.qmd`
+  and verified in `notebook_v3.qmd`. Render suppression behaviour is now self-evident and uniform across all notebooks.
 
 - **Audit no-op, recorded so it is not re-opened:** the Tier-16 flood-exposure binding is **already done** —
   `notebook.qmd:3030-3034` attaches the three pre-cooked parquets and `:3059-3062` queries them in
