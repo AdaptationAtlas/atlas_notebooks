@@ -800,13 +800,13 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   (`meta_build.py:244`), the only driver on the page that is not a published agency index; that status should
   be stated wherever Western-V is shown.
 
-- **V2-71 · `observed_pct` is a fraction, rendered as if a percent · OPEN (bug).** `exposure_gfm_seasonal.observed_pct`
-  is stored 0–1, not 0–100 — the column name misleads. Marsabit 2023 OND: Laisamis 0.6389, Saku 0.6058
-  (= 63.9% / 60.6%), Moyale and North Horr both ~0.99998. Format with `d3.format(".1%")` as `pop_pct`
-  already is in `expMetricCfg`, or the page publishes "0.64% SAR coverage". Two related copy points: the
-  SAR coverage gap is a **Laisamis + Saku** statement, not Marsabit-wide — phrasing it county-wide is wrong
-  and undersells North Horr, the sub-county with real coverage behind its 2,150 people / 25.2 km; and
-  table-wide `min(observed_pct)` is `-0.0`, which renders as `-0` through a raw formatter.
+- **V2-71 · `observed_pct` is a fraction, rendered as if a percent · FIXED (2026-10-03).** `exposure_gfm_seasonal.observed_pct`
+  is stored 0–1, not 0–100. Formatted with `d3.format(".1%")(Math.max(0, v))` across all GFM views:
+  Section 3.2 Table 3.3 (Subcounty Exposure Inventory Table), Figure 3.3 (Subcounty Map tooltip channels
+  when `expIsGfm` is active), and Section 4 Figure 4.5 GFM bar chart and data table. Clamping with
+  `Math.max(0, v)` ensures `-0.0` renders as `0.0%`. Header standardized to "SAR Radar Coverage" to avoid
+  redundant double-percent display. Marsabit 2023 OND correctly displays Laisamis 63.9%, Saku 60.6%,
+  Moyale and North Horr 100.0%.
 
 - **V2-72 · VoP chart absent; stale `used_by`; snapshot vintage unverified · OPEN.** `exposure_vop` has
   **zero references** in `notebook.qmd`, yet `exposure_vop.meta.json` claims `used_by: notebook.qmd Block 1
@@ -851,29 +851,16 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   is **365,683.09** — the figure 365,684 is the sum of the *rounded* sub-county parts, so pick one convention
   if a county total is ever printed beside the sub-county table.
 
-- **V2-75 · WRSI `cropland`/`rangeland` are inverted upstream · OPEN (blocking the rangeland story) · pipeline.**
-  Marsabit renders a near-empty card every year on **Crop-water (WRSI) · rangeland** — 8 of 614 county
-  pixels valid (1%) for OND, 18 (3%) for MAM — while `crop=cropland` covers the same county at 98%. The two
-  published footprints are near-complementary and the opposite of their names: "cropland" covers the ASAL at
-  98–100% (Mandera, Marsabit, Wajir, Turkana, Garissa) and **0% of the maize belt** (Trans Nzoia, Uasin
-  Gishu, Kakamega, Nakuru); "rangeland" covers the maize belt at 95–100% and ~0% of the ASAL. Cause is
-  `hazards_prototype/python/ingest_wrsi_fews.py:49-53`, whose header already flags `ek`/`et` as UNVERIFIED:
-  the FEWS instruction PDF shipped inside every product zip (`W_images.pdf`, Table 1, 2025-02-03) states
-  **`E1`/`E2` = Rangeland** (Sep–Jan / Feb–Jul) and **`ET`/`EE` = Maize** (Oct–Feb / Mar–Nov), `EK` =
-  Sorghum **belg** (Mar–Sep). The bake is faithful — S3 objects match the raw upstream `*eo.tif` per county
-  to within rounding (`cropland_OND_2015` ≡ `east1/w201536e1`, `rangeland_OND_2015` ≡ `eastt/w201536et`) —
-  so this is purely which product went to which path. **Two consequences beyond Marsabit:** `rangeland/MAM`
-  is `ek`, an Ethiopian-highland belg product with 839 valid pixels in the whole Kenya bbox and ~0% in
-  **all 47 counties**, so that view is blank nationwide and has been since ingest; and the real long-rains
-  maize layer (`ee`, Mar–Nov) was **never ingested**, so there is no honest cropland MAM layer at all.
-  Requested repath is in `dispatches/2026-09-18_request-wrsi-crop-rangeland-inversion.md` §5. After the fix
-  Marsabit rangeland goes 1% → 98–100% in both seasons. Checked and ruled out: the deferred `ee`/`el` zones
-  do **not** fill the northern hole under the current labels (Marsabit 1%, Mandera 0%, Wajir 4%) — the
-  inversion is the entire explanation. EOS dekads are fine and need no revisit (extended WRSI `e1` 2015
-  dk36 Kenya-bbox mean 91.0 vs the same season at 2016 dk03 = 90.8, i.e. converged).
-  *Notebook side, done:* the Fig 2.4 / 3.1 grid now detects an all-nodata county × domain × season and
-  renders a "no WRSI zone coverage" notice instead of a grid of blank cards, so a zone gap is visible
-  rather than silent. That guard is not a workaround and stays after the repath.
+- **V2-75 · WRSI `cropland`/`rangeland` are inverted upstream · FIXED (2026-09-22 cglabs rebake, verified live 2026-10-03).**
+  Resolved upstream in `hazards_prototype/python/ingest_wrsi_fews.py` (commits `c6a5e3d` and `20bc0a1`).
+  FEWS region codes were remapped per `W_images.pdf` Table 1: `e1`/`e2` -> rangeland, `et`/`ee` -> cropland (maize).
+  Rebaked and published to S3 on 2026-09-22 (`DISPATCH_cglabs_wrsi_inversion_rebake.md`).
+  Verified live against public S3 COGs on 2026-10-03:
+  - Marsabit rangeland coverage: **97.7% in OND** (1,064 valid px in Marsabit window, mean WRSI 87.9) and
+    **99.4% in MAM** (1,082 valid px, mean WRSI 93.4) — up from 1% and 3%.
+  - Marsabit cropland coverage: 4.2% in OND and 10.4% in MAM, accurately isolating highland cropping pockets
+    (Mount Marsabit / Saku).
+  - ASAL rangeland forage story is fully unblocked across all 47 counties.
 
 - **KE-42 · Plume to RONI translation methodology · OPEN (future research).**
   The CCSR/IRI multi-model dynamical forecast plume is published in Niño 3.4 SST anomaly space (°C),
