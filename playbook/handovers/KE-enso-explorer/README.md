@@ -11,7 +11,7 @@ branch on 2026-08-11 (it is NOT part of climateRationale — do not merge into `
 The two shared helpers it imports (`helpers/toc.ojs`, `helpers/chartDownloadMenu.ojs`) are promoted
 onto this branch since `develop` lacked them.
 
-## Current Status — v3.5 RCMRD Partner Review Edition (2026-10-02)
+## Current Status — v3.5 RCMRD Partner Review Edition (2026-10-03)
 - **Live Review Edition:** [https://peetmate.github.io/ke-enso-explorer/](https://peetmate.github.io/ke-enso-explorer/) (deployed solely to Pete Steward's personal GitHub Pages repo; **zero pushes/PRs to `origin`**).
 - **In-Situ Review Feedback Suite (D29, KE-43):** Full `cleaned-review` pattern implemented:
   - Floating action buttons: `💬 Comment`, `▭ Highlight`, `✎ Review Notes <span class="badge">N</span>`.
@@ -20,7 +20,11 @@ onto this branch since `develop` lacked them.
   - Highlight mode with drag bounding box stamped directly onto captured canvas.
   - Slide-over Review Notes Dashboard with stats, thumbnails, and `Jump to element →` (tab switch + smooth scroll + gold pulse animation).
   - Bundled exports with **zero extra steps**: `📦 Download Report (with images)` (standalone HTML report with all images embedded inline), `📧 Email to Pete` (auto-saves report with images to `Downloads/` and opens pre-addressed mailto to `p.steward@cgiar.org`), `🗜️ Export ZIP` (`JSZip`), and `📋 Copy All` (rich HTML + Markdown).
-- **Driver Telemetry & Section 2 Verified (D28, KE-41):** Passed 11-row browser verification checklist across OND, MAM, and IOD modes with 0 console errors.
+- **WRSI Cropland/Rangeland Inversion Verified (D30, V2-75):** Public S3 COGs verified live against Marsabit polygon: rangeland OND coverage verified at **97.7%** (1,064 px, mean 87.9) and MAM at **99.4%** (1,082 px, mean 93.4) — up from 1% and 3%, unblocking the ASAL rangeland forage story nationwide.
+- **SAR Flood Coverage Formatting Hardened (D30, V2-71):** Formatted strictly as `d3.format(".1%")(Math.max(0, v))` across Table 3.3, Figure 3.3 subcounty map tooltip channels, and Figure 4.5. Negative zero clamped to `0.0%`, table header cleaned to "SAR Radar Coverage".
+- **NDMA Bulletin Index Finalized (D30):** Deterministic harvest of 3,513 NDMA drought early warning bulletins across 23 ASAL counties and national scope into `ndma_bulletin_index.parquet`; dual-sweep sort proved closure (0 new documents). Reusable skill documented in `.claude/skills/harvest-ndma-bulletins/`.
+- **Plume-to-RONI Translation Researched (D30, KE-42):** Analyzed physical Walker circulation vs tropical warming drift ($\Delta \approx +0.30$ to $+0.59\ ^\circ\text{C}$ post-2015) and formulated the state-space relaxation translation architecture for future pipeline builds.
+- **Driver Telemetry & Section 2 Verified (D28, KE-41):** Passed 11-row browser verification checklist across OND, MAM, and IOD modes with 0 console errors; 30/30 checks in `scripts/check_data_freshness.py` passing cleanly.
 - **Institutional Boundaries Disciplined (D29, KE-44):** Empirical data from KMSA, KNBS, and NDMA described under open/statutory empirical mandates, preventing overclaiming direct institutional collaboration.
 
 ## Historical Status — v1 scope (honest; Fable-reviewed 2026-07-09)
