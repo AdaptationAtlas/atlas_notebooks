@@ -11,7 +11,7 @@ branch on 2026-08-11 (it is NOT part of climateRationale — do not merge into `
 The two shared helpers it imports (`helpers/toc.ojs`, `helpers/chartDownloadMenu.ojs`) are promoted
 onto this branch since `develop` lacked them.
 
-## Current Status — v3.5 RCMRD Partner Review Edition (2026-10-03)
+## Current Status — v3.5.2 RCMRD Partner Review Edition (2026-10-04)
 - **Live Review Edition:** [https://peetmate.github.io/ke-enso-explorer/](https://peetmate.github.io/ke-enso-explorer/) (deployed solely to Pete Steward's personal GitHub Pages repo; **zero pushes/PRs to `origin`**).
 - **In-Situ Review Feedback Suite (D29, KE-43):** Full `cleaned-review` pattern implemented:
   - Floating action buttons: `💬 Comment`, `▭ Highlight`, `✎ Review Notes <span class="badge">N</span>`.

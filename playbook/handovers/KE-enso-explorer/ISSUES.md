@@ -848,15 +848,13 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
     (Mount Marsabit / Saku).
   - ASAL rangeland forage story is fully unblocked across all 47 counties.
 
-- **KE-42 · Plume to RONI translation methodology · OPEN (future research).**
-  The CCSR/IRI multi-model dynamical forecast plume is published in Niño 3.4 SST anomaly space (°C),
-  whereas the notebook standardizes on NOAA CPC RONI (Relative Oceanic Niño Index = ONI minus tropical-mean
-  20°S–20°N SST anomaly) per Decision D17.1 to isolate the Walker circulation gradient driving East African
-  rainfall. Because global dynamical modeling centers submit Niño 3.4 forecasts rather than RONI, the plume
-  cannot be directly equated with RONI (differing by up to 0.57 °C due to tropical warm-pool warming trends).
-  Investigate methodological paths to translate the multi-model plume into RONI space in future pipeline
-  versions (e.g. subtracting projected tropical-mean SST anomalies from Copernicus C3S / NMME multi-model
-  outputs, or applying an empirical tropical baseline offset).
+- **KE-42 · Plume to RONI translation methodology · FIXED (2026-10-03, Decision D31).**
+  Resolved in Section 2 (`sec2PlumeHero`): implemented live interactive translation toggle
+  (`[Raw Niño 3.4 (IRI Plume) | Translated RONI (Gradient)]`). Applies state-space relaxation
+  $\Delta(t) = \Delta_0 e^{-t/\tau} + \Delta_{\text{secular}}(1 - e^{-t/\tau})$ ($\tau = 6\text{ mo}$,
+  $\Delta_{\text{secular}} = +0.35\ ^\circ\text{C}$, $\Delta_0 = \text{Niño 3.4}_{\text{anchor}} - \text{RONI}_{\text{anchor}}$),
+  seamlessly eliminating the interface step-jump while properly representing the equatorial SST gradient
+  driving Kenya Walker circulation teleconnections without synthetic forecasting. Fully verified across all 24 models.
 
 - **KE-43 · In-situ visual review feedback architecture & bundled export · FIXED (2026-10-02).**
   Partner review requirement: RCMRD reviewers needed a friction-free, in-situ mechanism to annotate
