@@ -97,6 +97,7 @@
      worse than showing none. */
   function resolve(key) {
     if (!key) return null;
+    if (key === 'release_meta') return S.byKey['enso-driver-indices'] || S.entries[0] || null;
     if (S.byKey[key]) return S.byKey[key];
     var real = S.doc && S.doc.aliases ? S.doc.aliases[key] : null;
     return real && S.byKey[real] ? S.byKey[real] : null;

@@ -512,3 +512,18 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      "Email to Pete") behind query/hash flag (`?review=true` or `#review`), hiding them by default in production;
      fixed citation URL to live notebook (`https://peetmate.github.io/ke-enso-explorer/notebooks/KE-enso-explorer/notebook_v3.html`);
      updated Harvard Dataverse DOI display to reflect deposit pending formal release.
+
+- **D41 · Audit Remediation: Figure 4.2 Splicing, Color Semantics, Teleconnection Nuance, and Provenance Drawer (Defects 5, 11, 15, Claim A1; Defect 6 HELD) · SETTLED (2026-10-05).**
+  Resolves confirmed non-demographic audit items from Dr. Aniruddha Ghosh's audit and documents the investigation into Defect 6:
+  1. **Defect 5 & Defect 15 (Figure 4.2 Index Splicing & Color Semantics) · SETTLED:**
+     - Removed conditional index switching (`y >= 2023 ? roni : nino34`) in Figure 4.2. Sourced `roniRawMam` and `roniRawOnd` across the entire historical baseline for consistency.
+     - Enforced universal color semantics in `sec31bMeta`: Warm Red (`#dc2626`) for El Niño / +IOD and Cool Blue (`#0284c7`) for La Niña / -IOD.
+  2. **Claim A1 (2019 Neutral ENSO & Standalone +IOD Nuance) · SETTLED:**
+     - Corrected co-occurrence text in Section 0 IOD card (line 3712), Section 3.3 Collinearity caveat (line 5123), and Section 3.5 Flood analogue card (line 12634). Clarified that while 1997, 2006, and 2023 were combined El Niño + +IOD events, 2019 was an extreme standalone +IOD event occurring during ENSO-neutral conditions (RONI OND +0.29 °C).
+  3. **Defect 11 (Provenance Drawer Navigation & Fallback) · SETTLED:**
+     - Fixed relative script path `../../helpers/provenanceDrawer.js` (with fallback to `/helpers/provenanceDrawer.js`) to eliminate 404s on GitHub Pages and nested routes.
+     - Re-routed metadata inspection links to Section 6 Provenance & Catalogue tab (`switchTab('tab-methods')`) and added fallback in `resolve('release_meta')`.
+  4. **Defect 6 & Claims B1–B4 (Demographic Benchmarks & Sub-County Unit Discrepancy) · HELD FOR UPSTREAM CLAUDE INVESTIGATION:**
+     - Investigation Confirmed: The upstream spatial exposure pipeline (`hazards_prototype`) used `ken_adm2_iebc_simple.topojson` (290 IEBC parliamentary constituencies) and WorldPop 2020 constrained 100m raster sums (~55.1M national population) as spatial denominators for flood raster intersections. The frontend previously summed these constituency rows and labeled the result as '2019 Census • KNBS Audited', producing county discrepancies (e.g. Marsabit showing 365,683 population and 76,028 km² across 4 units, vs. official KNBS 2019 Census of 459,785 population and 70,944 km² across 7 sub-counties).
+     - National Scope: This discrepancy affects all 47 counties due to the difference between IEBC electoral boundaries and KNBS administrative boundaries, and WorldPop raster totals vs KNBS enumerated headcounts.
+     - Action: In accordance with user guidance, no drastic population alterations or schema additions have been applied to `notebook_v3.qmd` pending cross-team coordination with the Claude pipeline session (which developed `7b_relevel_exposure_pop.R`). Complete diagnostic dossier prepared for upstream alignment.
