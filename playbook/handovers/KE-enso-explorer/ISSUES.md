@@ -39,25 +39,12 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   and 30/30 green freshness gate (D36). Point Block 5's forward seasonal outlook section at KMD's AA page (#710,
   KMD+CGIAR) and ingest icechunk cloud products when released by WMO/KMD. DECISIONS D14, D36.
 
-- **KE-09 · Block-5 outlook figure · BUILT (browser render-verify pending).** Analogue-anchored "what
-  are the coming rains likely to do?" shipped to Block 5 (commit 8080334): 47-county choropleth (likely
-  Drier/Near/Wetter tercile) + per-county verdict card, OND/MAM toggle. CPC ENSO-state forecast (D14)
-  picks the phase; historical analogue years supply the county rainfall outcome. MAM flagged
-  low-confidence (Western-V; outside CPC window → FMA proxy). Data layer done + spot-checked: commits
-  52ba025 (drivers RONI/SOI/DMI), 830c0b6 (outlook base MAM/OND terciles), 5c3c2f0 (CPC probs). All
-  new JS cells pass `node --check`. **Remaining: render in a real browser** (per memory, headless
-  mis-reproduces gated DuckDB-WASM render outcome → Pete's browser is ground truth). Live KMD CAP layer
-  (KE-08) still to add. Design + data-source detail: dispatch `2026-07-23_block5-outlook-and-climweb-cap.md`.
-  *Audit 2026-09-15 (pipeline session) → **DEFECTS FOUND, see V2-64..V2-69**: the analogue selector sorts by
-  `Math.abs(roni)` descending, so it returns the most EXTREME phase-matching years rather than the most
-  SIMILAR (V2-65); the notebook mixes RONI and Niño 3.4, which disagree by up to 0.567 °C on a time-trending
-  gap (V2-64, decision needed); DMI is missing for all of 2025 so the newest year cannot be used as an
-  analogue (V2-67); RONI is stale to AMJ 2026 (V2-68). The CPC forecast phase itself was **verified correct**
-  against the live page. Full detail:
-  `dispatches/2026-09-15_reply-audit-drivers-and-explainer-recommendation.md`.
-  **Update 2026-09-25 to 2026-10-05: ALL RESOLVED.** V2-64 (RONI end-to-end), V2-65 (standardized Euclidean
-  distance nearest first), V2-66 (3-tier explainer + CDH catalogue), V2-67 (DMI 2025 coverage 100%),
-  V2-68 (CPC parser + 2026 refresh), and V2-69 (monthly RONI centre-mapping) are all FIXED and verified live.*
+- **KE-09 · Block-5 outlook figure · RESOLVED / SHIPPED (2026-10-05, Decisions D17, D19, D36).**
+  Analogue-anchored "what are the coming rains likely to do?" outlook fully rebuilt in Section 2 (`notebook_v3.qmd`):
+  standardized multi-basin Euclidean distance $D_i$ ranking nearest first (V2-65), RONI gradient end-to-end (V2-64),
+  interactive matching criterion toggles (Full Trajectory / Lead-in / Peak), complete 2025 DMI analogue coverage (V2-67),
+  hardened CPC parser (V2-68), state-space plume relaxation toggle (D31), and integrated KMD/KMSA ClimWeb CAP operational
+  advisories (KE-08 / D36). Verified with 0 browser console errors.
 
 - **KE-07 · IWMI ENSO Outlook API · CLOSED (not worth building).** Live
   public API (`https://enso.iwmi.org/ENSO_api/api/v1`, 34 layers) scanned 2026-07-22 — see
@@ -835,6 +822,7 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   5. CHIRPS v3 planting-season rainfall tercile strip aligned underneath the time series with custom legend.
   6. High-fidelity alternative views: KMD lens wet vs dry distribution plot with era medians, continuous climate anomaly scatter plot, and complete downloadable data table via standardized `plotFooter`.
   7. Registered in `figure_registry.json` (`fig_3_1c` / `Figure 4.2B`). Browser-verified with zero console errors.
-
-
-
+- **KE-47 · Version History "What's New" / Changelog Modal · OPEN (feature request, 2026-10-05).**
+  As reviewers switch between notebook editions (v1, v2, v3 via Decision D38), provide an interactive
+  "What's New in this Version?" modal or drawer accessible from the hero edition switcher. Summarizes key
+  feature additions, newly integrated datasets, methodological evolutions, and bug fixes between releases.
