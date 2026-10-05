@@ -3561,7 +3561,7 @@ viewof county = Inputs.select(countyNames, {
 
 ```{ojs}
 //| output: false
-viewof season = Inputs.select(["OND", "MAM", "OND+MAM", "annual"], {
+viewof season = Inputs.select(["OND", "MAM"], {
   label: _lang(nbText.sections.controls.season),
   value: "OND",
 })
@@ -3607,7 +3607,7 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
     enrichControl(
       viewof season,
       ["Climate", "season"],
-      "Choose the rainy season to analyze: OND (Short Rains, October–December: strong ocean teleconnection), MAM (Long Rains, March–May), OND+MAM (both seasons combined), or annual totals."
+      "Choose the rainy season to analyze: OND (Short Rains, October–December: strong ocean teleconnection) or MAM (Long Rains, March–May: weaker ENSO teleconnection)."
     );
     enrichControl(
       viewof driverKind,
@@ -10636,11 +10636,10 @@ normExpr = (col) => `lower(replace(replace(${col}, '-', ' '), chr(39), ''))`
 
 ```{ojs}
 // ---- global control derivations (verbatim standalone logic) ----
-seasonPeriods = ({"OND": ["OND"], "MAM": ["MAM"], "OND+MAM": ["OND", "MAM"], "annual": ["annual"]})[season]
+seasonPeriods = ({"OND": ["OND"], "MAM": ["MAM"]})[season] || ["OND"]
 // month set matching the selected season — used by every driver/phase
-// calc (all 4 values)
-seasonMonths = ({"OND": [10, 11, 12], "MAM": [3, 4, 5], "OND+MAM": [3, 4, 5, 10, 11, 12],
-  "annual": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]})[season]
+// calc (Decision D39: OND and MAM only)
+seasonMonths = ({"OND": [10, 11, 12], "MAM": [3, 4, 5]})[season] || [10, 11, 12]
 driverCol = ({"ENSO (RONI)": "roni", "ENSO (Niño 3.4)": "roni", "ENSO": "roni", "IOD (DMI)": "dmi_hadisst", "Western-V (WNP)": "wnp_std_mam"})[driverKind] || "roni"
 driverName = driverKind
 ```
@@ -11162,12 +11161,11 @@ rainPhaseByYear = (months, col, thr, hi, lo) => {
   return new Map(by.map(([y, v]) => [y, v > thr ? hi : v < -thr ? lo : "Neutral"]));
 }
 
-rainSeasonMonths = ({OND: [10, 11, 12], MAM: [3, 4, 5],
-  annual: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]})
-rainSeasonPeriods = ({OND: ["OND"], MAM: ["MAM"], annual: ["annual"]})
+rainSeasonMonths = ({OND: [10, 11, 12], MAM: [3, 4, 5]})
+rainSeasonPeriods = ({OND: ["OND"], MAM: ["MAM"]})
 
-// which single-season panels the current selection needs
-rainActiveSeasons = season === "OND+MAM" ? ["OND", "MAM"] : [season]
+// which single-season panels the current selection needs (Decision D39)
+rainActiveSeasons = [season]
 
 // ---- Section 2: Shared Physical & Palette Constants ----
 eventsFile = FileAttachment("/data/KE-enso-explorer/events.json").json()
@@ -11181,7 +11179,7 @@ PALETTE = ({
   event: {drought: "#a6611a", flood: "#018571", other: "#666666"},
 })
 Z_BANDS = ({weak: 0.5, moderate: 1.0, strong: 1.5})
-seasonWord = (s) => ({OND: "Short rains", MAM: "Long rains", annual: "Full year"})[s] ?? s
+seasonWord = (s) => ({OND: "Short rains", MAM: "Long rains"})[s] ?? s
 
 stripCardColor = (z) => {
   if (z == null || Number.isNaN(z)) return "#ffffff";
@@ -11659,7 +11657,7 @@ rainPanel = (s) => {
     : [PALETTE.outcome.wetter, PALETTE.outcome.near, PALETTE.outcome.drier];
   const outcomeOf = (d) => d.category;
   const yLabel = varIsSpei ? "SPEI-3 (standardised)" : (anomaly ? "mm vs 1991–2020 normal" : "Rainfall (mm total)");
-  const hasStrip = s !== "annual" && stripMode !== "Off";
+  const hasStrip = stripMode !== "Off";
   const spreadK = spreadOpt.startsWith("±1") ? 1 : spreadOpt.startsWith("±2") ? 2 : 0;
   const spreadMarks = (spreadK > 0 && !varIsSpei)
     ? [Plot.ruleX(data.filter((d) => d.sd != null), {x: "year",

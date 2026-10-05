@@ -437,8 +437,8 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   4. **Backward Compatibility Hardening**: Standardized module imports in `notebook_v2.qmd` and `notebook.qmd` (updating `.ojs` imports to ES module `.js` and inlining `formatNumCompactShort`, `wrapTickLabel`, and `dataTable`), enabling all three editions to render cleanly in modern Quarto with 0 page errors and 0 console errors in automated Playwright audits.
 
 ## D39 — Season-selector domain: drop `OND+MAM` and `annual` from the explorer UI (KE-49, 2026-10-05)
-- **OPEN — needs Pete.** Recommendation is **Option A, scoped to the notebook's season selector
-  only**. Evidence, method and counter-arguments in
+- **APPROVED & IMPLEMENTED (2026-10-05, Pete).** Recommendation **Option A, scoped to the notebook's season selector
+  only** implemented in `notebook_v3.qmd`. Evidence, method and counter-arguments in
   `dispatches/2026-10-05_season-aggregation-decision-memo.md`; every figure regenerable with
   `tools/season_aggregation_check.py` (project rule D1 — no model typed a number).
   1. **Why.** Measured on the served parquets, 1981–2024, 47 counties + Ilemi Triangle: mean

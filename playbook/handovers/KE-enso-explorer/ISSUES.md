@@ -871,8 +871,11 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
     3. Automated CI release assertions: DOI resolution check, stale data warning badges, and cross-tab value equality assertions.
     4. Formal stakeholder co-development and sign-off protocol with KMSA and NDMA.
 
-- **KE-49 · Season selector offers `OND+MAM` and `annual`, which the explorer cannot honour · OPEN (2026-10-05).**
-  The global control (`notebook_v3.qmd:3564`) offers four values, but support is only two deep.
+- **KE-49 · Season selector offers `OND+MAM` and `annual`, which the explorer cannot honour · RESOLVED (2026-10-05).**
+  Resolved via Decision **D39** (approved by Pete). `viewof season` in `notebook_v3.qmd` narrowed to `["OND", "MAM"]`,
+  tooltips updated, dead branches deleted in `seasonPeriods`/`seasonMonths`/`rainSeasonMonths`/`rainActiveSeasons`,
+  and runtime `TypeError` on driver x annual/OND+MAM combinations permanently closed.
+  The global control (`notebook_v3.qmd:3564`) previously offered four values, but support was only two deep.
   Measured on the served parquets (`tools/season_aggregation_check.py`, 1981–2024, 47 counties
   + Ilemi Triangle): mean RONI-rainfall correlation is 0.408 under `OND` (30/48 counties above
   |r| 0.4), 0.249 under `OND+MAM` (2/48) and **0.034 under `annual` (0/48)** — the annual option
