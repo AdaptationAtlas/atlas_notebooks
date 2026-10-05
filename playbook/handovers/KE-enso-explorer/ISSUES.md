@@ -826,3 +826,47 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   As reviewers switch between notebook editions (v1, v2, v3 via Decision D38), provide an interactive
   "What's New in this Version?" modal or drawer accessible from the hero edition switcher. Summarizes key
   feature additions, newly integrated datasets, methodological evolutions, and bug fixes between releases.
+
+- **KE-48 · Comprehensive Expert Critical Review & Due Diligence Audit (Dr. Aniruddha Ghosh, 2026-10-05) · OPEN.**
+  Dr. Aniruddha Ghosh (Senior Scientist / Spatial Modeler, Alliance Bioversity-CIAT / CGIAR) completed an in-depth,
+  rigorous external critical review of `KE-enso-explorer v3.5.2` (reviewed 5 Oct 2026; live site, offline build, and source code).
+  Full review document archived at: `playbook/handovers/KE-enso-explorer/reviews/2026-10-05_critical_review_aghosh.md`.
+  
+  **Executive Audit Findings:**
+  - **Overall Score:** 2.1 / 5.0 across 7 dimensions (Scientific Basis: 2, Data Accuracy: 2, References & Claims: 1, Navigation: 3, Decision Insight: 2, Engineering & Provenance: 3, Institutional Fit: 2).
+  - **Code & Data Defects:** 15 identified defects; 7 change numbers visible to users (including the ENSO gauge showing "Weak La Niña" during a strong El Niño).
+  - **Fact-Checking Results:** 126 claims audited across all 6 sections: **20 correct, 51 wrong, 17 unsupported, 38 partially correct / unverified**.
+  - **Literature Citations:** **7 of 17 academic references checked are wrong or invalid** (hallucinated titles, mismatched DOIs pointing to unrelated papers, or claiming methods the cited author never used, e.g., Gamoyo et al., Bauer-Marschallinger et al., Wagner et al.).
+  - **Over-Claiming & Machine-Written Artifacts:** The review identified excessive AI-slop / machine-generated buzzwords ("audited", "statutory", "legal baselines", "Anti-AI Slop protocols", "transcribed verbatim from KMSA", "approved GCF/AF guidance") that overclaim legal authority and create institutional risk.
+  - **Target User Mismatch:** The platform claims to serve county CIDP planners and climate proposal writers, but presents 13,000+ words of complex technical jargon ($z$-scores, partial correlations, Euclidean distance metrics) with no concise 1-screen actionable county brief.
+  - **Review Tools in Production:** Floating annotation tools, "RCMRD Review Dashboard", and the "Email to Pete" button are exposed live to public users without an environment gate.
+  - **Citation & Link Failures:** Citation URL `https://digital-atlas.org/notebooks/KE-enso-explorer/` returns 404; Harvard Dataverse DOI `10.7910/DVN/AAAA-KE-ENSO` is an unverified placeholder.
+
+  **Actionable Remediation Roadmap (Tiered Fix List):**
+  
+  * **Tier 1 — Immediate Release Blockers (Pre-Release / Critical Due Diligence):**
+    1. **Defect 1 (ENSO Gauge Sort & NDJ Indexing):** Fix SQL rolling mean year mapping and sort order so gauge reflects current +1.40 °C / +1.36 °C El Niño state rather than lagging or jumping to negative values. *(Note: NDJ 1-year rollover SQL bug resolved 2026-10-05 in commit `9a9143a`; gauge drive logic and sorting verification pending).*
+    2. **Defect 2 (Stale RONI Lead-in):** Ingest latest verified JAS 2026 RONI (+1.69 °C) from NOAA CPC rather than comparing trailing JJA (+1.36 °C) against historical JAS analogue windows.
+    3. **Defect 3 (Analogue Distance Index Mismatch):** Do not compare raw IRI plume median (Niño 3.4, +3.40 °C) against historical OND RONI values in the analogue distance metric and warning banner; use consistent metric spaces.
+    4. **Defect 4 (Silent Fallbacks):** Eliminate hardcoded silent fallback constants (peak RONI 3.09, peak DMI 0.39, static SDs); fail visibly or display "Data Pending" rather than producing synthetic $z = 0$ matches.
+    5. **Defect 5 (Figure 4.2 Index Splicing):** Remove the splicing of traditional Niño 3.4 (pre-2023) and RONI (post-2023); drive the agricultural series from one consistent index across all years.
+    6. **Defect 6 (Marsabit Population & Area Discrepancy):** Reconcile Marsabit population (365,683 constituency sum vs. 459,785 KNBS 2019 Census county total; KNBS Volume 1) and recompute exposure percentages.
+    7. **Defect 7 & 8 (Rainfall Distribution & Mode Ties):** Replace Gaussian normal-curve bands ($\pm k\sigma$) on skewed precipitation with empirical historical terciles (1991–2020); remove the hidden tie-breaking rule that defaults to "Near Normal".
+    8. **Academic Reference Remediation (Items G1–G16):** Audit and replace all 7 hallucinated/incorrect literature citations with authentic DOIs, papers, and accurate methodological descriptions; rewrite false Gamoyo method text.
+    9. **Tone & Authority Sanitization:** Strip false authority buzzwords ("transcribed verbatim", "statutory legal mandate", "audited", "Anti-AI Slop", "KNBS-POV-01", internal developer codes like `D17.2` / `KE-42`) throughout the UI.
+    10. **Institutional Alignment:** Correct governance facts (Meteorology Act 2026 / KMSA operational authority, NDMA drought phases, National Disaster Risk Management Act 2026 / CDRMCs, KRCS EAP actual triggers).
+    11. **Production Flagging & Citations:** Gate in-situ review tools (`html2canvas`, fab buttons, "Email to Pete") behind an internal review URL parameter or build flag; mint a valid Dataverse DOI and fix/redirect the citation URL.
+
+  * **Tier 2 — Partner Release Refinements (Weeks 3–6):**
+    1. **Analogue Outlook Skill Verification:** Run leave-one-out historical hindcasts (1981–2025) and publish empirical hit-rate / skill scores per county and season.
+    2. **Executive County Brief:** Build a clean, 1-screen county executive brief (current ocean state, KMSA seasonal forecast, analogue odds "X of N seasons", top 3 past impacts, and operational actions) with a 2-page print/PDF stylesheet.
+    3. **Terms of Trade & Market Thresholds:** Reconcile Terms of Trade values between Section 4 and Section 2 past-year cards; cite empirical sources for distress sale thresholds or remove arbitrary lines.
+    4. **Livestock Species Completeness:** Add camels to Marsabit/pastoral livestock asset values, or explicitly label charts as "Cattle, Sheep & Goats (excludes camels)".
+    5. **Responsive & Mobile Viewports:** Resolve menu and outlook bar overlap at 800 px and 375 px (phone viewports).
+    6. **Universal Palette Consistency (Defect 15):** Enforce strict unified color semantics (El Niño = Warm Red/Terracotta across all sections, including Fig 4.2).
+
+  * **Tier 3 — Long-Term Evolution:**
+    1. Swahili language interface toggle (`_lang` Swahili dictionary).
+    2. Precomputed summary stats and lazy tab initialization for low-bandwidth ASAL networks.
+    3. Automated CI release assertions: DOI resolution check, stale data warning badges, and cross-tab value equality assertions.
+    4. Formal stakeholder co-development and sign-off protocol with KMSA and NDMA.
