@@ -401,12 +401,9 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   4. **Summary Metric Tiles**: Total Monitored Inflow (1,615.5 kt), Top Origin Partner (Tanzania 82.3%), Key Gateways (Namanga & Isebania), Regional Decoupling.
   5. **Governance & Registry**: Registered in `figure_registry.json` as `fig_3_2c` / `Figure 4.4B`. Aliased `xbt_trade` in `provenance.json`.
 
-## D33 — Figure 4.2B HarvestStat Africa Multi-Decadal Crop Production Series (2026-10-04)
-- **RESOLVED.** Integrated `harveststat_county_production.parquet` into Section 4 Subtab 1 (`subtab-production`) following Figure 4.2.
-  1. **"Two Rulers, One Field" Governance**: Resolves the multi-decadal county crop series gap (KE-18 / V2-27). Distinctly separates HarvestStat Africa (FEWS NET / Lee et al. 2025 multi-decadal harmonized series 1990–2024) from KNBS NAPR (2019–2024 contemporary administrative baseline).
-  2. **Planted-Year Temporal Alignment**: Short Rains harvest occurs in year $t+1$ (March), but planting occurs in year $t$ (October). Short Rains are anchored strictly to planting year $t$ to align crop outcomes with OND ocean teleconnections.
-  3. **Interactive Analytical Suite**: Supports dynamic commodity selection (Maize, Beans), metric choices (Yield, Production, Area), and four view modes (Season series, Wet vs dry seasons, Vs climate, and Table).
-  4. **Transparent Data Gaps & Quality Control**: Hatched visual styling marks the 2002–2014 national reporting gap. Upstream QC-flagged observations (`qc_flag > 0`) rendered with dashed red borders and excluded from era medians.
-  5. **Rainfall Context**: Aligns CHIRPS v3 planting-season rainfall tercile strip underneath time-series panels.
-  6. **Governance & Registry**: Registered in `figure_registry.json` as `fig_3_1c` / `Figure 4.2B`. `harveststat_county_production.meta.json` updated with `used_by="notebook_v3.qmd Section 4 Figure 4.2B"`.
+## D34 — GESI County Gender Data Sheets Untruncated Extraction (V2-22) & Sticky Scroll-Margin Contract (KE-06, 2026-10-05)
+- **RESOLVED.** 
+  1. **GESI Title Truncation Resolved (V2-22)**: Fixed `_sources/gesi_extract.py` to match the full text of indicator header blocks (`b["t"]`) rather than taking only the first line (`b["t"].split("\n")[0]`), which previously dropped wrapped text across 13 of 24 indicator titles. Enhanced `clean_label` with OCR error correction and standardized punctuation. Re-extracted all 47 county PDFs from authoritative KNBS County Gender Data Sheets, generating clean `data/KE-enso-explorer/gesi_v2.parquet` with 1,578 rows across 24 indicators with 100% complete, unclipped titles.
+  2. **Sticky Navigation Scroll-Margin Contract (KE-06)**: Extended `scroll-margin-top: 220px !important;` to include `details`, `.enso-more-details`, and `summary` elements in `notebook_v3.qmd`. All methodology drawers and details accordions now offset cleanly below the sticky navigation shell upon in-page scroll navigation.
+
 

@@ -92,11 +92,10 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
 - **KE-05 · Produce filter for 30+ commodities · DONE.** Item filter defaults to the county's top-8
   by latest-year value; every item stays tickable. Revisit only if Pete wants grouping/search.
 
-- **KE-06 · Sticky control bar overlaps the sources panel top when scrolled · OPEN (cosmetic, unchanged through v2.9).** The
-  `<details>` "methodology & per-table sources" panel's first lines can sit behind the sticky
-  county/season controls mid-scroll. Pre-existing sticky-header behaviour; low priority.
-
-  *Audit 2026-08-17 → **OPEN**: KE-06 · Sticky control bar overlaps the sources panel top when scrolled · OPEN (cosmetic, unchanged through v2.8).** The §1.2 "KNBS NAPR — per-table sources" `<details>` (qmd:458) still scrolls under `.ke-sticky-controls` (top 56px, z-index 1019); the only scroll offset in the sheet is `scroll-margin-top:120px` on h1/h2. Scope halved since v2.7 — `.ke-sticky-sec` is now dead CSS (V2-54 removed the §3 sticky row), so it is a one-bar stack.*
+- **KE-06 · Sticky control bar overlaps the sources panel top when scrolled · FIXED (2026-10-05).**
+  Added `details, .enso-more-details, summary` to `.tab-pane` and `.enso-figure-card` `scroll-margin-top: 220px !important;`
+  in `notebook_v3.qmd`. All `<details>` panels and methodology accordions now offset smoothly below `#stickyShell`
+  upon scroll and jump navigation, preventing any content clipping.
 ## Standing gaps (from the v1 handover — still true, NOT NAPR)
 
 - ~~County crop series too short for a county-level teleconnection~~ **CLOSED 2026-08-13 by
@@ -147,9 +146,11 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   dumps, 0 literal fences on :4333. Also: Quarto preview stale-snapshot mystery = an orphaned
   `quarto.js preview` from 08:14 holding :4333 (see memory `feedback_quarto-preview-overwrites-site`).
 
-- **R2-3 · B4 figure numbering gap · OPEN (Pete decision).** Removing 4.2 leaves B4 = 4.1 IPC · 4.3 prices ·
-  4.4 ReliefWeb · 4.5 NDVI. Cascade-renumber (4.3→4.2 …) touches title_prices/title_rw/title_ndvi + nbText
-  captions + the "§4.3 prices" references in ISSUES/dispatches (KE-12). Leave the gap, or cascade?
+- **R2-3 · B4 figure numbering gap · FIXED / RESOLVED (2026-09-25, Decision D21).**
+  Fully resolved in the Section 4 rebuild: Section 4 now features unbroken, sequential figure numbering:
+  Fig 4.1 (KNBS crop production), Fig 4.2 (Empirical driver response), Fig 4.2B (HarvestStat multi-decadal series),
+  Fig 4.3 (MODIS NDVI pasture), Fig 4.4 (Pastoral Terms of Trade), Fig 4.4B (Cross-border trade flows),
+  Fig 4.5 (Subcounty flood exposure), and Fig 4.6 (ReliefWeb humanitarian reports). No numbering gap remains.
 
 ## Map-panel review — Pete 2026-08-21 (dev_rainfall_maps.qmd, KE-31..KE-39)
 
@@ -385,11 +386,16 @@ still live from it is re-registered here.
 - **V2-21 · Cross-border import/export price series · OPEN (xbt_trade has no price/value column)** (checklist F1 / Fig 5.1 merge idea P29) —
   scout FEWS XBT price data.
   *Audit 2026-08-17 → **OPEN**: V2-21 · Cross-border import/export price series · OPEN (data gap, unscouted).** Verified: `xbt_trade.parquet` serves qty/qty_unit only — no price, value or unit-value column; `market_prices.price_type` ∈ {Retail, Wholesale} (domestic). Fig 5.1 charts import quantities only, and the caption already discloses the gap.*
-- **V2-22 · GESI extractor label completion · OPEN (pipeline; ≥10 of 24 codes still clipped)** — truncated labels fixed at the pipeline (feeds V2-05).
-  *Audit 2026-08-17 → **OPEN**: V2-22 · GESI extractor label completion · OPEN (pipeline, verified still broken).** `gesi_v2.parquet` labels are still clipped mid-phrase on ≥10 of 24 codes (B1 '…spend less than 30', B5 '…primary reliance on', D2 '…currently using any', D10 '…with a problem in', E2 '…with no education by', etc.). Fix belongs in `_sources/gesi_extract.py` + rebuild; blocks V2-05(b)/(d).*
-- **V2-23 · Current-RONI serving · PARTIAL (seasonal RONI served + used; monthly/current RONI + analogue ranking open)** — enables nearest-neighbour analogue ranking (extend
-  enso_drivers_build.py or state_probs).
-  *Audit 2026-08-17 → **PARTIAL**: V2-23 · Current-RONI serving · PARTIAL.** Seasonal RONI IS served and current (`enso_drivers_seasonal.parquet`, 1950–AMJ-2026) and drives OND ENSO strength (`roniZOnd`, qmd:2941). STILL OPEN: (i) no monthly/current RONI — `enso_drivers_monthly` is SOI+DMI only and `driver_indices` has no roni column, so `currentState` (qmd:3651) and the v2.8 Continuous background fall back to Niño 3.4 (documented deviation, qmd:2879); CPC publishes RONI seasonally, so this needs derivation. (ii) nearest-neighbour ranking never built — `analogueYearsOND` (qmd:4014) filters by phase and sorts by year.*
+- **V2-22 · GESI extractor label completion · FIXED (2026-10-05).**
+  Updated `_sources/gesi_extract.py` to match full block text `b["t"]` across multiple lines rather than `b["t"].split("\n")[0]`,
+  eliminating premature line clipping on multi-line indicator titles. Enhanced `clean_label` to clean years and OCR typos.
+  Rebuilt `data/KE-enso-explorer/gesi_v2.parquet` from all 47 official KNBS County Gender Data Sheets: all 24 indicator
+  codes now carry 100% complete, unclipped titles across all 1,578 served rows.
+
+- **V2-23 · Current-RONI serving · FIXED / SUPERSEDED by V2-65 & V2-69 (2026-09-25, Decisions D17 & D19).**
+  (i) Monthly RONI added via centre-month mapping in DuckDB-WASM query on `enso_drivers_seasonal.parquet` (V2-69 / D17.4),
+  eliminating reliance on Niño 3.4. (ii) Nearest-neighbour analogue ranking implemented using standardized multi-basin
+  Euclidean distance $D_i$ ranking nearest first (V2-65 / D17.2 / D19). Fully active in Section 2.
 - **V2-24 · Wave-3 data builds (green-lit D15.6) · PARTIAL — 1 of 6 (served-data catalog done):** admin2 CHIRPS zonal rerun (via D409 dispatch),
   GHCN/GSOD station layer, KMD CAP snapshot, CHIRPS slim re-export (+ percentiles per V2-06),
   served-data catalog, driver_indices→git-full consolidation.
