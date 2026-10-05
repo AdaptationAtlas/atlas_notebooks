@@ -392,3 +392,21 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   2. **Pastoral Terms of Trade (ToT) Monthly vs Annual Peak Framing (V2-73)**: Updated `totRows` to filter on primary county sentinel market (e.g. `market = 'Marsabit'`) avoiding disjoint secondary series (`Marsabit Town`). Added trailing 24-month peak and percentage drop calculation. Documented in Figure 4.4 callout, chart tooltips, and Table 4.3 that the severe >50% purchasing power collapse holds strictly on monthly purchasing power vs trailing 24-month peak (Aug 2011: −68.1%; Oct 2022: −65.4%; Feb 2023: −68.1% at the end of the 2020–23 multi-season drought), while annual averaging dampens crisis troughs (2011: −32.5%; 2022: −37.6%).
   3. **Modelled VoP Metadata & Framing Reconciliation (V2-72)**: Reconciled `data/KE-enso-explorer/exposure_vop.meta.json` `used_by` pointer to Section 1.2 Figure 1.2. Reaffirmed D16(1) constraint clearly labelling MapSPAM 2020 and GLW4 as downscaled modelled priors pending measured producer-price datasets.
   4. **Frontmatter Hygiene (V2-74)**: Added `execute: {echo: false, warning: false, message: false}` block to `notebooks/KE-enso-explorer/notebook.qmd` frontmatter, making render behaviour explicit across all notebooks.
+
+## D32 — Figure 4.4B Cross-Border Food Trade Flows & Regional Shock Absorption (2026-10-04)
+- **RESOLVED.** Integrated `xbt_trade.parquet` into Section 4 Subtab 2 (`subtab-rangeland`) right after Figure 4.4 (Terms of Trade).
+  1. **Regional Food Trade Mechanics**: Addresses how trade buffers local climate shocks. When East Africa experiences asynchronous drought or bimodal teleconnection decoupling, cross-border food imports act as a critical macroeconomic shock absorber.
+  2. **Observable Plot Regional Flow Map**: IEBC Kenya boundary, neighbour centroids (Tanzania, Uganda, Ethiopia, Somalia), and 8 border crossing gateways connected via curved flow arrows (`bend: 16` constant).
+  3. **Stacked Annual Import Volumes (2010–2024)**: Full timeline with crisis reference lines (2011, 2017, 2022) highlighting import surges during Horn of Africa droughts.
+  4. **Summary Metric Tiles**: Total Monitored Inflow (1,615.5 kt), Top Origin Partner (Tanzania 82.3%), Key Gateways (Namanga & Isebania), Regional Decoupling.
+  5. **Governance & Registry**: Registered in `figure_registry.json` as `fig_3_2c` / `Figure 4.4B`. Aliased `xbt_trade` in `provenance.json`.
+
+## D33 — Figure 4.2B HarvestStat Africa Multi-Decadal Crop Production Series (2026-10-04)
+- **RESOLVED.** Integrated `harveststat_county_production.parquet` into Section 4 Subtab 1 (`subtab-production`) following Figure 4.2.
+  1. **"Two Rulers, One Field" Governance**: Resolves the multi-decadal county crop series gap (KE-18 / V2-27). Distinctly separates HarvestStat Africa (FEWS NET / Lee et al. 2025 multi-decadal harmonized series 1990–2024) from KNBS NAPR (2019–2024 contemporary administrative baseline).
+  2. **Planted-Year Temporal Alignment**: Short Rains harvest occurs in year $t+1$ (March), but planting occurs in year $t$ (October). Short Rains are anchored strictly to planting year $t$ to align crop outcomes with OND ocean teleconnections.
+  3. **Interactive Analytical Suite**: Supports dynamic commodity selection (Maize, Beans), metric choices (Yield, Production, Area), and four view modes (Season series, Wet vs dry seasons, Vs climate, and Table).
+  4. **Transparent Data Gaps & Quality Control**: Hatched visual styling marks the 2002–2014 national reporting gap. Upstream QC-flagged observations (`qc_flag > 0`) rendered with dashed red borders and excluded from era medians.
+  5. **Rainfall Context**: Aligns CHIRPS v3 planting-season rainfall tercile strip underneath time-series panels.
+  6. **Governance & Registry**: Registered in `figure_registry.json` as `fig_3_1c` / `Figure 4.2B`. `harveststat_county_production.meta.json` updated with `used_by="notebook_v3.qmd Section 4 Figure 4.2B"`.
+

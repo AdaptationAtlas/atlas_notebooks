@@ -100,7 +100,7 @@ D = {
    url="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso/roni/probabilities/",
    citation="NOAA Climate Prediction Center. Official probabilistic ENSO forecast.",
    license="US Government public domain.",
-   fetched_on="2026-07-23",
+   fetched_on="2026-10-02",
    method="Self-fetching build (_sources/enso_state_prob_build.py): parses the official HTML table; each row gated to sum ~100%. Refreshes monthly — rerun to update.",
    coverage="El Nino / Neutral / La Nina probabilities for 9 overlapping 3-month seasons; issue month in the 'issued' column.",
    used_by="notebook §7.2 outlook forecast phase (D14-allowed ENSO-state forecast)"),
@@ -243,7 +243,7 @@ D = {
    fetched_on="2026-08-13",
    method="Deterministic subset (_sources/harveststat_build.py): fetch the pinned v1.2 CSV from GitHub, filter Kenya, join gaul1_code via county_key (gate: 47/47 counties match), rename to repo conventions. No number touched. Upstream harmonization (HarvestStat): FDW boundary vintages KE1982A2(41)/KE1989A2(47)/KE2009A2(47) remapped onto KE2013A1 47 counties by production-based ratios; 1989 districts ~1:1 with counties. Cross-check vs knbs_napr_county_production maize 2019-24: r=0.94 levels, median ratio 0.92-1.04/yr, but per-county vintages differ up to ~2x — do NOT present the two as interchangeable numbers.",
    coverage="39 crops, 47 counties, harvest years 1965-2024. Seasons: Annual 1974-2020; Long (plant Mar, harvest Aug) & Short (plant Oct, harvest Mar NEXT year — lag explicit via planting_year/harvest_year) 1991-2001 + 2015/16-2024. SEASONAL HOLE 2002-2014 (Annual only). qc_flag: 0=clean (98%), 1/2=flagged by HarvestStat QC.",
-   used_by="not yet served — registered for the production-vs-drivers design (ISSUES KE-18 / V2-15 / V2-27)"),
+   used_by="notebook_v3.qmd Section 4 Figure 4.2B"),
  "driver_indices": dict(
    title="Ocean-driver indices (Nino 3.4 / IOD / Western-V), monthly",
    source="NOAA CPC (Nino 3.4, ERSSTv6 monthly, centered base periods = ONI input), Met Office HadISST / NOAA PSL (DMI), derived Western-V (WNP/WEP)",
@@ -251,8 +251,8 @@ D = {
    citation="NOAA CPC; NOAA PSL / Met Office Hadley Centre; Western-V derived (Funk et al. basis).",
    license="US Government public domain (Western-V derived).",
    fetched_on="2026-10-02",
-   method="Staged via the D409 pipeline (D409-only acquisition) for dmi_hadisst, wep_std_ond, wnp_std_mam, nino34_std_ersst, dmi_ersst. nino34_anom_noaa is REFRESHED by _sources/enso_drivers_build.py from the maintained CPC ERSSTv6 monthly Nino 3.4 file (CPC retired the ERSSTv5 1991-2020 file in Aug 2026; the whole column is one product, never spliced). Rows for months newer than the D409 bake carry only nino34_anom_noaa. Western-V reproduces Funk's sign + post-1997 regime shift.",
-   coverage="Monthly, 1950-2026: nino34_anom_noaa (self-refreshing), dmi_hadisst, wep_std_ond, wnp_std_mam, nino34_std_ersst, dmi_ersst (D409 bake).",
+   method="Staged via the D409 pipeline (D409-only acquisition) for dmi_hadisst, wep_std_ond, wnp_std_mam, nino34_std_ersst, dmi_ersst. nino34_anom_noaa is REFRESHED by _sources/enso_drivers_build.py from the maintained CPC ERSSTv6 monthly Nino 3.4 file (CPC retired the ERSSTv5 1991-2020 file in Aug 2026; the whole column is one product, never spliced). Rows for months newer than the D409 bake carry only nino34_anom_noaa. Western-V reproduces Funk's sign + post-1997 regime shift. wep_std_ond is retired/unused in production by scientific design (Western-V is strictly a MAM control).",
+   coverage="Monthly, 1950-2026: nino34_anom_noaa (self-refreshing), dmi_hadisst, wep_std_ond (retired D409 diagnostic), wnp_std_mam, nino34_std_ersst, dmi_ersst (D409 bake).",
    used_by="notebook §2/§3 ocean drivers"),
 }
 
