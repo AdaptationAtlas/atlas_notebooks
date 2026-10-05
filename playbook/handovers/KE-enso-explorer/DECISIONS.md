@@ -482,3 +482,33 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      explicit OND(t−1) → MAM(t) view with each season's own anomaly and driver state, matching the
      bimodal attribution framing already in Section 4 (`qmd:5476`) and the HarvestStat planted-year
      anchoring (KE-46). Additive work, sized separately from steps 1–6.
+
+- **D40 · Literature, Institutional Authority, and Production Gating Remediation (Workstreams A–D) · SETTLED (2026-10-05).**
+  Prompted by the critical review from Dr. Aniruddha Ghosh (`reviews/2026-10-05_critical_review_aghosh.md`)
+  and independently verified across Crossref, OpenAlex, and Kenya Law (`reviews/2026-10-05_verification_of_aghosh_audit.md`).
+  Remediates all Citation & Authority defects in `notebooks/KE-enso-explorer/notebook_v3.qmd`:
+  1. **Workstream A (Academic Literature & Citations):** Corrected all 7 defective citations in Section 09
+     and inline text with authentic Crossref DOIs:
+     - Bauer-Marschallinger et al. (2022) *Remote Sensing* (`10.3390/rs14153673`) and Wagner et al. (2026) *RSE* (`10.1016/j.rse.2025.115108`).
+     - Funk et al. (2019) BAMS Western V paper (`10.1175/BAMS-D-18-0108.1`, S55–S60).
+     - Drosdowsky (1994) *Weather and Forecasting* (`10.1175/1520-0434(1994)009<0078:AFOTSO>2.0.CO;2`).
+     - Marchant et al. (2007) *African Journal of Ecology* (`10.1111/j.1365-2028.2006.00707.x`).
+     - Messager et al. (2016) *Nature Communications* corrected title.
+     - van Oldenborgh et al. (2021) *Environ. Res. Lett.* (`10.1088/1748-9326/abe9ed`).
+     - Completely rewrote Gamoyo et al. (2015) text to eliminate fabricated WRF 15 km claims and accurately state their observational ARC2, rain gauge station, MODIS NDVI, and NCEP reanalysis study for OND 2006 and OND 2009.
+  2. **Workstream B (Tone & Authority Sanitization):** Removed unscientific phrases ("Anti-AI Slop Mandate",
+     "Anti-AI Slop protocols" -> "Empirical Governance Protocol") and pseudo-statutory over-claims
+     ("KNBS-POV-01", "transcribed verbatim", "statutory legal baselines", "statutory gazette",
+     "Audited statutory indicators"). Stripped all internal ticket and decision codes exposed in user-facing UI
+     (`D17.2`, `D17.1 & KE-42`, `Decision D22`, `Decision D6`).
+  3. **Workstream C (Institutional Alignment):** Aligned governance references with verified Kenyan legal and
+     operational frameworks: Section 0 disclaimer banner updated to Kenya Meteorological Service Authority (KMSA)
+     under Meteorology Act No. 7 of 2026; updated County Committee activation to County Disaster Risk Management
+     Committee (CDRMC) under National Disaster Risk Management Act, 2026 (Act No. 16 of 2026); expanded NDMA warning
+     stages to all six operational phases (Normal, Pre-Alert, Alert, Alarm, Emergency, Recovery); updated KRCS EAP card
+     to reflect IFRC DREF-backed protocols with physical SPI ($\le -0.98$) and Garissa Bridge gauge ($> 5\text{ m}$)
+     triggers; updated KFSSG card from "statutory body" to multi-agency coordination body led by NDMA and co-chaired by WFP.
+  4. **Workstream D (Review Tools Gating & URLs):** Gated review tools (`#fbFabContainer`, floating buttons, notes drawer,
+     "Email to Pete") behind query/hash flag (`?review=true` or `#review`), hiding them by default in production;
+     fixed citation URL to live notebook (`https://peetmate.github.io/ke-enso-explorer/notebooks/KE-enso-explorer/notebook_v3.html`);
+     updated Harvard Dataverse DOI display to reflect deposit pending formal release.
