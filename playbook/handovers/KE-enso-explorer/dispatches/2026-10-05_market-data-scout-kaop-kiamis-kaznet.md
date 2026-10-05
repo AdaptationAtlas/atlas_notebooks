@@ -37,6 +37,33 @@ frequency.
 
 ---
 
+### ⚠️ KAMIS is not KIAMIS — read this before using either name
+
+The two names differ by one letter and are constantly transposed, including in the brief that
+commissioned this scout. Settled by direct inspection 2026-10-05:
+
+| | **KAMIS** | **KIAMIS** |
+| :--- | :--- | :--- |
+| Full name | **Kilimo AgriMarkets Market Information System** | Kenya Integrated Agricultural Management Information System |
+| Host | `kamis.kilimo.go.ke` | `kiamis.kalro.org` (`kiamis.go.ke` is NXDOMAIN) |
+| What it holds | **Market prices** — 190 commodities, crops *and* live animals | **Farmer registry**, e-subsidy vouchers, vaccination, projects |
+| Prices? | **Yes** | **No** |
+
+**The crop marketplace data visible in KAOP is KAMIS.** Checked all 18 JavaScript chunks behind
+KAOP's `/advisory/market` (992 KB): **"KAMIS" appears 10 times, "KIAMIS" zero times**, and the page's
+only embed target is `https://kamis.kilimo.go.ke/`. KIAMIS's own homepage carries **zero**
+occurrences of "price", "commodity" or "marketplace", and describes KAMIS as a *separate* system it
+links out to: *"KAMIS was developed to provide members and stakeholders with improved early warning
+marketing and trade information."*
+
+**This collapses the brief's split.** The brief assigned crop/input markets to KIAMIS and pastoral
+livestock to KAZNET. In fact **one source, KAMIS, covers both halves**: 190 commodities spanning
+crops (Dry maize, Wheat, Rice, beans, finger millet, potatoes, tomatoes…) **and** the four live
+animals (Cattle, Sheep, Goat, Camel) priced per head. That is a simplification, not a loss — it is
+why KAMIS is the single build recommended below.
+
+---
+
 ## 2. The three named targets
 
 ### 2.1 KAOP — Kenya Agricultural Observatory Platform (KALRO)
@@ -77,7 +104,9 @@ management modules. It holds **no price data of its own**; its own "Market Infor
 out to KAMIS. Everything is behind single sign-on, with National-ID-based farmer registration, and
 there is no public API or open-data export.
 
-**Record it and move on.** The suspicion in the brief was right.
+**Record it and move on.** The suspicion in the brief was right — and note that if you have
+seen crop marketplace data "in KIAMIS", what you saw was **KAMIS**, reached through KIAMIS's
+or KAOP's link-out. See the disambiguation box above.
 
 ### 2.3 KAZNET (ILRI) — live system, restricted data
 

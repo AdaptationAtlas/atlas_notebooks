@@ -936,6 +936,15 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   - **KIAMIS**: `kiamis.go.ke` is NXDOMAIN; the live system (`kiamis.kalro.org`) is a **farmer
     registry / e-voucher / vaccination stack with no prices**, behind SSO, and links out to KAMIS
     for market info. Wrong door — close this line of enquiry.
+  - ⚠️ **KAMIS is not KIAMIS** — one letter apart and routinely transposed. **KAMIS** = *Kilimo
+    AgriMarkets Market Information System*, `kamis.kilimo.go.ke`, holds the prices. **KIAMIS** =
+    *Kenya Integrated Agricultural Management Information System*, the farmer registry, holds none.
+    The crop marketplace data visible **in KAOP is KAMIS**: across the 18 JS chunks behind
+    `/advisory/market` (992 KB) "KAMIS" appears 10 times and "KIAMIS" zero, and the only embed
+    target is `kamis.kilimo.go.ke`. KIAMIS's own homepage has zero occurrences of "price",
+    "commodity" or "marketplace". **This collapses the brief's crops-vs-livestock split**: KAMIS
+    carries BOTH — crops (Dry maize, Wheat, Rice, beans, millet, potatoes, tomatoes…) and the four
+    live animals — so one build covers both halves.
   - **KAZNET**: live and actively developed (ILRI stack, rewritten Jan 2024, 5 Kenyan ASAL counties,
     14 markets). Canonical dataset `hdl:20.500.11766.1/FK2/4ZMH2Y` (MELSpace, v3.0, 2026-04-16) is
     labelled **CC-BY-4.0 but every file is `restricted: true`** and the file API returns **HTTP 403**
@@ -967,3 +976,18 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
     in the ASAL counties at market-day frequency with body-condition grading, which would strengthen
     the Section 4 pastoral terms-of-trade story that currently rests on goat prices alone. Against —
     the 2021 history floor, no published licence, and visible data-quality problems.
+
+- **KE-51 · Consecutive-season sequence view, OND(Y−1) → MAM(Y) · OPEN (2026-10-05).**
+  The additive half of Decision `D39`. `OND+MAM` averaged two seasons; consecutive failure is a
+  **sequence** and an average destroys it. Build the sequence properly instead. Section 3, after
+  Figure 3.1. Uses the KNBS production-year pairing already in force (`KE-46`): production year
+  Y = OND(Y−1) + MAM(Y). **No new data** — `chirps_county.parquet` plus the existing `roniZOnd` /
+  `roniZMam` cells; no pipeline run, no republish. Standardise each season against its own
+  1991–2020 moments, never pooled. Reference values to land near (2,064 county-years, 1982–2024):
+  double failure `dry/dry` **14.2%**; consecutive sub-normal season runs 948 / 389 / 100 / 31 / 13 / 4
+  for lengths 1–6+. **Hard validation:** the worst double-failure years must come out
+  **2011 (40 counties), 2017 (31), 2008 (29), 2009 (22), 1992 (21), 2004 (20), 1984 (18), 2022 (17)** —
+  Kenya's recognised drought emergencies. If the ranking does not reproduce, the pairing or the
+  standardisation is wrong; **stop and report, do not tune the ±0.5 sd thresholds.** Full spec incl.
+  mark design, interaction and 6 gates: `dispatches/2026-10-05_plan-consecutive-season-sequence-view.md`.
+  Build **after** the D39 selector edit, not before.
