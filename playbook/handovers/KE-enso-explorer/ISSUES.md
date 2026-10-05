@@ -29,19 +29,15 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
 - **KE-04 · Bixa is area-only · RESOLVED / NOTED (2026-10-05).** Bixa has no production/value in the report (area in
   acres only, converted to ha). Formally documented in data specifications; safely handled in figures without misleading zeroes.
 
-- **KE-08 · Kenya Met forecast layer · OPEN (path found via ClimWeb/CAP).** UPDATE 2026-07-23:
-  meteo.go.ke is a **ClimWeb** site ("Powered by Climweb v1.2.1", `wmo-raf/nmhs-cms`) → machine-readable
-  Kenya-Met feeds exist after all. **CAP warning feed LIVE** `meteo.go.ke/api/cap/rss.xml` + per-alert
-  CAP XML (geolocated, severity/onset/expiry) — D11-clean, parseable now, generalizes to 40+ agencies.
-  Wagtail `/api/v2/pages/` = 404. **Ani Ghosh (WMO web team) answered 2026-07-23:** (1) no CAP API
-  beyond RSS + per-alert XML *yet* — a feature request for bulletins/maps/warnings via API is upcoming;
-  (2) **seasonal (MAM/OND) outlook as structured data = in the pipeline**, bottleneck is internal data
-  infra — they are moving forecast products to the cloud as **icechunk** (cloud-native Zarr) → ingest
-  that when it lands; (3) **Maproom (`kmddl:8081`) is a dead end** — not maintained post the IRI Data
-  Library sunset, new services coming. So: build the CAP layer on RSS+XML now; the KMD-native seasonal
-  outlook waits for the icechunk cloud products; point Block 5's forward section at KMD's AA page (#710,
-  KMD+CGIAR — ≈ our Block-5 outlook, coordinate). Old PDF/ICPAC paths + rejected `jemsethio` repos:
-  DECISIONS D13. Full: `2026-07-23_block5-outlook-and-climweb-cap.md`, DECISIONS D14.
+- **KE-08 · Kenya Met forecast layer · RESOLVED / SHIPPED (2026-10-05).** Built automated extractor pipeline
+  `_sources/kmd_cap_extract.py` parsing live OASIS CAP v1.2 alerts from `https://meteo.go.ke/api/cap/rss.xml`
+  (WMO ClimWeb) with offline caching and deterministic normalization to Kenya's 47 canonical counties
+  (`kmd_cap_alerts.json`, `kmd_cap_county_active.parquet`, `kmd_cap_alerts.meta.json`). Mounted reactive
+  operational advisory card `#kmdCapAlertsHost` directly beneath the KMSA Statutory Notice Banner in Section 2
+  of `notebook_v3.qmd`. Displays active county alerts with hazard badges, severity styling, valid periods,
+  statutory precautionary instructions, and a collapsible nationwide alerts matrix. Verified 0 console errors
+  and 30/30 green freshness gate (D36). Point Block 5's forward seasonal outlook section at KMD's AA page (#710,
+  KMD+CGIAR) and ingest icechunk cloud products when released by WMO/KMD. DECISIONS D14, D36.
 
 - **KE-09 · Block-5 outlook figure · BUILT (browser render-verify pending).** Analogue-anchored "what
   are the coming rains likely to do?" shipped to Block 5 (commit 8080334): 47-county choropleth (likely

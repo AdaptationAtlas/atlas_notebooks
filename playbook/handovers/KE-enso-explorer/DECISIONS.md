@@ -412,5 +412,12 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   2. **Full-Month Guard**: Added `v.length === mons.length` guard in `zByYear` and `rawSeasonMean`, preventing partial-month averaging from skewing seasonal anomaly calculations.
   3. **RONI Realignment**: Attached `enso_drivers_seasonal.parquet` and `enso_outlook_base.parquet` via DuckDB; replaced raw Niño 3.4 with trend-subtracted RONI (`roniZOnd` / `roniZMam`), harmonizing driver classifications between the map panel and the main explorer notebook. Browser-verified with zero console errors.
 
+## D36 — Kenya Meteorological Department (KMD) / KMSA ClimWeb CAP Operational Weather Advisories Integration (KE-08, 2026-10-05)
+- **RESOLVED.** Integrated live, machine-readable severe weather warnings and Common Alerting Protocol (CAP) v1.2 alerts from the Kenya Meteorological Department into the explorer:
+  1. **ClimWeb CAP Extractor Pipeline**: Implemented `_sources/kmd_cap_extract.py` querying `https://meteo.go.ke/api/cap/rss.xml` with local HTTP caching (`.kmd_cap_cache/`). Parsed OASIS CAP v1.2 XML alerts extracting event title, severity, urgency, certainty, effective/onset/expires timestamps, headline, description, precautionary instructions, and source URLs.
+  2. **Canonical County Resolution**: Built deterministic normalization mapping meteorologist prose and regional clusters ("Coast", "Central Highlands", "Highlands West of Rift Valley", "Lake Victoria Basin", "Northwestern", "Northeastern", "Countrywide", etc.) to all 47 counties in `county_key.parquet`. Output structured assets `kmd_cap_alerts.json`, `kmd_cap_county_active.parquet`, and `kmd_cap_alerts.meta.json`.
+  3. **Section 2 Operational Advisory Card**: Mounted reactive component `#kmdCapAlertsHost` directly beneath the statutory KMSA Framework notice in Section 2 (`tab-outlook`). Dynamically filters active advisories for the active county with hazard iconography (rain, wind, marine), severity badges (Moderate/Severe/Extreme), validity timeframes, official KMD precautionary guidance, and a collapsible nationwide alerts matrix table.
+  4. **Governance & Statutory Boundary**: Reaffirms statutory compliance with the Meteorology Act No. 7 of 2026. Bridges historical analogue risk diagnostics with official operational warnings without overstepping legal mandate. Registered in `figure_registry.json` as `box_2_0` / `Advisory Card 2.0`. Verified with 0 browser console errors and 100% green data freshness gate.
+
 
 

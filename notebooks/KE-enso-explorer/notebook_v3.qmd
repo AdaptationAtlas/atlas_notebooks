@@ -4070,6 +4070,9 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
         </div>
       </div>
 
+      <!-- SECTION 2.1.3: OFFICIAL KMD / KMSA COMMON ALERTING PROTOCOL (CAP) OPERATIONAL ADVISORIES -->
+      <div id="kmdCapAlertsHost" style="margin-bottom: 1.5rem;"></div>
+
       <!-- Side-by-Side Seasonal Outlook -->
       <div class="grid-2">
         
@@ -4317,6 +4320,9 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
           <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem;">
             <a href="https://meteo.go.ke/our-products/seasonal-forecast/" target="_blank" rel="noopener" class="tool-action-link" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #0369a1;">
               meteo.go.ke Seasonal Forecasts &rarr;
+            </a>
+            <a href="https://meteo.go.ke/weather-warnings/" target="_blank" rel="noopener" class="tool-action-link" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #d97706;">
+              meteo.go.ke CAP Weather Warnings &rarr;
             </a>
             <a href="https://meteo.go.ke/" target="_blank" rel="noopener" class="tool-action-link" style="font-size: 0.76rem; padding: 4px 8px; background: #fff; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #0f766e;">
               meteo.go.ke National Portal &rarr;
@@ -19237,6 +19243,215 @@ sec2PlumeHero = {
   const host = document.getElementById("iriForecastPlumeHost");
   if (host && sec2PlumeHero) {
     host.replaceChildren(sec2PlumeHero);
+  }
+}
+
+// =============================================================================
+// SECTION 2.1.3: KMD / KMSA OPERATIONAL COMMON ALERTING PROTOCOL (CAP) ADVISORIES
+// =============================================================================
+
+dbCap = DuckDBClient.of({
+  kmd_cap: FileAttachment("/data/KE-enso-explorer/kmd_cap_county_active.parquet"),
+})
+
+capCty = dbCap.query(`
+  SELECT *
+  FROM kmd_cap
+  WHERE ${normExpr("county")} = '${countyNorm(county)}'
+  ORDER BY onset DESC
+`)
+
+capAllAlerts = FileAttachment("/data/KE-enso-explorer/kmd_cap_alerts.json").json()
+
+kmdCapCard = {
+  [county, capCty, capAllAlerts];
+  const container = html`<div style="width: 100%;"></div>`;
+
+  const alerts = capCty || [];
+  const allAlerts = capAllAlerts || [];
+
+  const getHazardIcon = (evt) => {
+    const e = (evt || "").toLowerCase();
+    if (e.includes("rain") || e.includes("storm")) return "🌧️";
+    if (e.includes("wind")) return "💨";
+    if (e.includes("wave") || e.includes("marine")) return "🌊";
+    if (e.includes("flood")) return "🌊";
+    if (e.includes("drought") || e.includes("heat")) return "☀️";
+    return "⚠️";
+  };
+
+  const fmtDate = (isoStr) => {
+    if (!isoStr) return "N/A";
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    } catch {
+      return isoStr;
+    }
+  };
+
+  const getSeverityStyle = (sev) => {
+    const s = (sev || "").toLowerCase();
+    if (s === "extreme") return { bg: "#fef2f2", border: "#ef4444", text: "#991b1b", badgeBg: "#991b1b", badgeText: "#ffffff" };
+    if (s === "severe") return { bg: "#fff1f2", border: "#f43f5e", text: "#be123c", badgeBg: "#e11d48", badgeText: "#ffffff" };
+    return { bg: "#fffbeb", border: "#f59e0b", text: "#92400e", badgeBg: "#d97706", badgeText: "#ffffff" };
+  };
+
+  const cardHtml = `
+    <div class="enso-figure-card" style="border-top: 3.5px solid #0284c7; margin-bottom: 1.5rem; background: #ffffff;">
+      <div class="card-header" style="margin-bottom: 0.85rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 0.3rem; flex-wrap: wrap;">
+            <span class="statutory-badge" style="background: #0284c7; color: #fff;">Operational Early Warning Feed</span>
+            <span style="font-size: 0.74rem; color: #0369a1; font-weight: 700; background: #e0f2fe; padding: 2px 8px; border-radius: 4px; border: 1px solid #bae6fd;">
+              OASIS CAP v1.2 Standard &bull; ClimWeb RSS
+            </span>
+          </div>
+          <div class="enso-figure-title-row">
+            <h3 class="enso-figure-title" style="margin: 0; font-size: 1.15rem; color: #0f172a; font-weight: 800;">
+              Official KMD / KMSA Operational Weather Advisories &mdash; <span style="color: #0284c7;">${county} County</span>
+            </h3>
+          </div>
+          <p class="enso-figure-purpose" style="margin: 0.25rem 0 0; font-size: 0.84rem; color: #475569; line-height: 1.45;">
+            Real-time, machine-readable severe weather warnings issued directly by the <strong>Kenya Meteorological Department (KMD / KMSA)</strong> under the <strong>Meteorology Act No. 7 of 2026</strong>. County emergency management committees and disaster focal points must align local operational triggers to these official KMD advisories.
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+          <a href="https://meteo.go.ke/weather-warnings/" target="_blank" rel="noopener noreferrer" style="font-size: 0.76rem; padding: 6px 12px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; font-weight: 700; color: #0284c7; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+            <span>meteo.go.ke Weather Warnings &rarr;</span>
+          </a>
+          <a href="https://meteo.go.ke/api/cap/rss.xml" target="_blank" rel="noopener noreferrer" style="font-size: 0.76rem; padding: 6px 12px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 5px; font-weight: 700; color: #d97706; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+            <span>Live CAP RSS XML &rarr;</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- County-Specific Alert Section -->
+      ${alerts.length > 0 ? `
+        <div style="display: flex; flex-direction: column; gap: 0.85rem; margin-bottom: 1rem;">
+          ${alerts.map(a => {
+            const st = getSeverityStyle(a.severity);
+            const icon = getHazardIcon(a.event);
+            return `
+              <div style="background: ${st.bg}; border: 1.5px solid ${st.border}; border-left: 6px solid ${st.border}; border-radius: 6px; padding: 1rem 1.15rem; color: ${st.text};">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.45rem;">
+                  <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                    <span style="font-size: 1.35rem;">${icon}</span>
+                    <strong style="font-size: 1.05rem; font-weight: 800; color: #0f172a;">${a.headline || a.event}</strong>
+                    <span style="background: ${st.badgeBg}; color: ${st.badgeText}; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; letter-spacing: 0.04em;">
+                      ${a.severity || 'Moderate'}
+                    </span>
+                    <span style="background: #ffffff; border: 1px solid ${st.border}; color: ${st.text}; font-size: 0.72rem; font-weight: 700; padding: 2px 7px; border-radius: 4px;">
+                      ${a.urgency || 'Expected'} &bull; ${a.certainty || 'Likely'}
+                    </span>
+                  </div>
+                  <div style="font-size: 0.78rem; font-weight: 600; color: #475569;">
+                    <span>Active Period: <strong>${fmtDate(a.onset)}</strong> &rarr; <strong>${fmtDate(a.expires)}</strong></span>
+                  </div>
+                </div>
+
+                ${a.instruction ? `
+                  <div style="background: #ffffff; border: 1px solid #fde68a; border-radius: 5px; padding: 0.65rem 0.85rem; margin-top: 0.6rem; font-size: 0.82rem; line-height: 1.5; color: #334155;">
+                    <strong style="color: #92400e; display: block; margin-bottom: 0.2rem; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                      Statutory Precautionary Guidance (Issued by KMD):
+                    </strong>
+                    ${a.instruction}
+                  </div>
+                ` : ''}
+
+                <div style="display: flex; justify-content: flex-end; margin-top: 0.65rem;">
+                  <a href="${a.web || 'https://meteo.go.ke/weather-warnings/'}" target="_blank" rel="noopener noreferrer" style="font-size: 0.76rem; font-weight: 700; color: #0369a1; text-decoration: underline;">
+                    Read Official Meteorological Advisory on meteo.go.ke &rarr;
+                  </a>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : `
+        <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-left: 5px solid #16a34a; border-radius: 6px; padding: 1rem 1.15rem; margin-bottom: 1rem;">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span style="font-size: 1.25rem;">✓</span>
+            <div>
+              <strong style="font-size: 0.95rem; color: #166534; font-weight: 800;">No Active Severe Weather Advisories for ${county} County</strong>
+              <div style="font-size: 0.82rem; color: #15803d; line-height: 1.45; margin-top: 0.2rem;">
+                The Kenya Meteorological Department (KMD / KMSA) has not issued active severe weather alerts affecting ${county} in the latest bulletin. Nationwide monitoring remains operational across all 47 counties.
+              </div>
+            </div>
+          </div>
+        </div>
+      `}
+
+      <!-- Collapsible Nationwide Alerts Inventory -->
+      <details class="enso-more-details" style="margin-top: 0.5rem;">
+        <summary style="font-size: 0.82rem; font-weight: 700; color: #0369a1; cursor: pointer; padding: 0.4rem 0;">
+          <span>Nationwide KMD Early Warning Bulletins (${allAlerts.length} Bulletins Logged) &bull; View Country-Wide Matrix &darr;</span>
+        </summary>
+        <div style="margin-top: 0.75rem; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 6px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+            <thead style="background: #f8fafc; border-bottom: 1.5px solid #cbd5e1;">
+              <tr>
+                <th style="padding: 8px 10px; color: #0f172a; font-weight: 700;">Advisory Headline</th>
+                <th style="padding: 8px 10px; color: #0f172a; font-weight: 700;">Hazard</th>
+                <th style="padding: 8px 10px; color: #0f172a; font-weight: 700;">Severity</th>
+                <th style="padding: 8px 10px; color: #0f172a; font-weight: 700;">Active Window</th>
+                <th style="padding: 8px 10px; color: #0f172a; font-weight: 700;">Counties Covered</th>
+                <th style="padding: 8px 10px; color: #0f172a; font-weight: 700;">KMD Link</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${allAlerts.map((a, i) => {
+                const isMatch = a.counties && a.counties.includes(county);
+                const rowBg = isMatch ? "#ecfdf5" : (i % 2 === 0 ? "#ffffff" : "#f8fafc");
+                return `
+                  <tr style="background: ${rowBg}; border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 8px 10px; font-weight: 700; color: #0f172a;">
+                      ${isMatch ? `<span style="display: inline-block; width: 8px; height: 8px; background: #16a34a; border-radius: 50%; margin-right: 6px;" title="Applies to ${county}"></span>` : ''}
+                      ${a.headline || a.event}
+                    </td>
+                    <td style="padding: 8px 10px; color: #334155;">${getHazardIcon(a.event)} ${a.event}</td>
+                    <td style="padding: 8px 10px;">
+                      <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; background: #fef3c7; color: #92400e;">
+                        ${a.severity || 'Moderate'}
+                      </span>
+                    </td>
+                    <td style="padding: 8px 10px; color: #475569; font-size: 0.76rem; white-space: nowrap;">
+                      ${fmtDate(a.onset)} &rarr; ${fmtDate(a.expires)}
+                    </td>
+                    <td style="padding: 8px 10px; color: #334155;">
+                      <strong>${a.counties ? a.counties.length : 0}</strong> counties
+                      ${isMatch ? `<span style="color: #16a34a; font-weight: 700; font-size: 0.74rem;"> (incl. ${county})</span>` : ''}
+                    </td>
+                    <td style="padding: 8px 10px;">
+                      <a href="${a.web || 'https://meteo.go.ke/weather-warnings/'}" target="_blank" rel="noopener noreferrer" style="color: #0284c7; font-weight: 600; text-decoration: underline; font-size: 0.76rem;">
+                        Bulletin &rarr;
+                      </a>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      <div style="margin-top: 0.85rem; padding-top: 0.6rem; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; font-size: 0.74rem; color: #64748b;">
+        <span><strong>Legal Standard:</strong> Meteorology Act No. 7 of 2026 &bull; Kenya Meteorological Service Authority</span>
+        <span><strong>Machine-Readable Protocol:</strong> OASIS CAP v1.2 / ClimWeb &bull; Updated Daily</span>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = cardHtml;
+  return container;
+}
+
+// Mount KMD CAP Weather Advisories Card
+{
+  [county, capCty, capAllAlerts, kmdCapCard];
+  const host = document.getElementById("kmdCapAlertsHost");
+  if (host && kmdCapCard) {
+    host.replaceChildren(kmdCapCard);
   }
 }
 
