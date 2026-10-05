@@ -429,6 +429,9 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - 2026 NAPR Refresh (KE-01): queued for future KNBS release.
      - Wave-3 Builds (V2-24): 3 of 6 builds verified complete (dataset catalog, KMD CAP alerts, subcounty rainfall climatology, and automated freshness validator).
 
-
-
-
+## D38 — Notebook Review Edition Switcher & Unified Input Data Policy (2026-10-05)
+- **RESOLVED.** Established multi-version review navigation enabling external and partner reviewers (e.g., RCMRD) to inspect and compare previous editions of the explorer while enforcing a unified data architecture:
+  1. **Unified Input Data Policy**: Reaffirmed that previous editions of the input data are NOT retained or duplicated. All notebook editions (`notebook_v3.html`, `notebook_v2.html`, `notebook.html`) read from the single, live, authoritative `/data/KE-enso-explorer/` directory. Eliminates storage bloat and guarantees all calculations operate on clean, standardized, and validated data assets.
+  2. **Interactive Review Edition Switcher**: Mounted a prominent `Review Edition` switcher in the hero header eyebrow of `notebook_v3.qmd` (`#versionSwitcher`), dynamically populated from `release.json.availableVersions` (supporting `v3.5.2`, `v2.10`, and `v1.0`).
+  3. **Archived Milestone Banners**: Added top notification banners on archived editions (`notebook_v2.qmd` and `notebook.qmd`) informing reviewers that they are viewing an earlier review milestone, providing an in-place edition switcher, and offering a direct 1-click button to jump to the active `v3.5.2` review edition.
+  4. **Backward Compatibility Hardening**: Standardized module imports in `notebook_v2.qmd` and `notebook.qmd` (updating `.ojs` imports to ES module `.js` and inlining `formatNumCompactShort`, `wrapTickLabel`, and `dataTable`), enabling all three editions to render cleanly in modern Quarto with 0 page errors and 0 console errors in automated Playwright audits.
