@@ -435,3 +435,50 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   2. **Interactive Review Edition Switcher**: Mounted a prominent `Review Edition` switcher in the hero header eyebrow of `notebook_v3.qmd` (`#versionSwitcher`), dynamically populated from `release.json.availableVersions` (supporting `v3.5.2`, `v2.10`, and `v1.0`).
   3. **Archived Milestone Banners**: Added top notification banners on archived editions (`notebook_v2.qmd` and `notebook.qmd`) informing reviewers that they are viewing an earlier review milestone, providing an in-place edition switcher, and offering a direct 1-click button to jump to the active `v3.5.2` review edition.
   4. **Backward Compatibility Hardening**: Standardized module imports in `notebook_v2.qmd` and `notebook.qmd` (updating `.ojs` imports to ES module `.js` and inlining `formatNumCompactShort`, `wrapTickLabel`, and `dataTable`), enabling all three editions to render cleanly in modern Quarto with 0 page errors and 0 console errors in automated Playwright audits.
+
+## D39 — Season-selector domain: drop `OND+MAM` and `annual` from the explorer UI (KE-49, 2026-10-05)
+- **OPEN — needs Pete.** Recommendation is **Option A, scoped to the notebook's season selector
+  only**. Evidence, method and counter-arguments in
+  `dispatches/2026-10-05_season-aggregation-decision-memo.md`; every figure regenerable with
+  `tools/season_aggregation_check.py` (project rule D1 — no model typed a number).
+  1. **Why.** Measured on the served parquets, 1981–2024, 47 counties + Ilemi Triangle: mean
+     RONI-vs-rainfall correlation is **0.408 under `OND`** (30/48 units above |r| 0.4), **0.249
+     under `OND+MAM`** (2/48) and **0.034 under `annual`** (0/48). MAM is independently
+     ENSO-decoupled in our own data (mean r −0.066, 0/48), so combining the two seasons cannot
+     reinforce a shared signal — it can only dilute one. OND and MAM anomalies have opposite
+     signs in 47% of county-years. Kenya 2019: MAM −23%, OND +112%, annual **+26%** — the annual
+     option reports a wet year for a year that held both a long-rains food emergency and a
+     short-rains flood disaster.
+  2. **Option B is not implementable as written.** It proposed confining `Annual`/`OND+MAM` to
+     Sections 1 and 4, but **those sections never read the season selector**; their annual
+     figures come from KNBS NAPR and HarvestStat, which are annual by construction. Option B
+     therefore reduces to Option A, and Option A states the intent honestly.
+  3. **Nothing downstream needs the annual option.** Drought persistence is served by SPEI-06/12/24,
+     already produced at every window — persistence is a property of the accumulation length, not
+     of the display season. County planning and national cereal balance sheets are served by
+     Sections 1 and 4 from annual statistics. Verified consumer-by-consumer in §5 of the memo.
+  4. **Scope boundary — the pipeline does not change.** `annual` in
+     `R/observational/4_aggregate_obs_admin_periods.R` and `5_make_obs_map_climatologies.R` is one
+     of 13 periods produced continentally for the whole Atlas, is read by this notebook for map
+     climatology scaling (`notebook_v3.qmd:14618`), and is asserted by a passing smoke gate
+     (`5_make_obs_map_climatologies.R:569`). Removing it would break a product and a gate to fix a
+     user-interface problem. `OND+MAM` has no pipeline footprint at all — it is browser-side only,
+     so it sits outside every provenance and gate guarantee the rest of the notebook honours.
+  5. **Proposed implementation.** Narrow `viewof season` (qmd:3564) to `["OND", "MAM"]`; update the
+     tooltip (qmd:3610); delete the dead `OND+MAM`/`annual` branches in `seasonPeriods` (qmd:10639),
+     `seasonMonths` (qmd:10642) and `rainActiveSeasons` (qmd:11170); replace `activeSeason`
+     (qmd:14283) and `sec23SeasonCode` (qmd:12097) with `season` directly. Steps 1–3 are one file.
+     No parquet change, no republish.
+  6. **Closes a confirmed defect as a side effect.** 6 of the 16 driver x season combinations
+     the UI offers today throw `TypeError: Cannot read properties of undefined (reading 'includes')`
+     — drivers `IOD (DMI)`, `Western-V (WNP)`, `ENSO + IOD` crossed with seasons `annual`,
+     `OND+MAM` — and the two that do not throw silently serve the MAM z-series under an `annual`
+     label. Verified by running the notebook's own functions verbatim in Node
+     (`tools/season_selector_defect_repro.mjs`); a 2-click live confirm is still outstanding.
+     With a two-value domain `seasonMonthsFor` (qmd:14619) covers all of `season` and the whole
+     class of failure goes away.
+  7. **Keep the real requirement, change its shape.** Consecutive-season failure — the pattern
+     `OND+MAM` was standing in for — is a *sequence*, and an average destroys it. Serve it as an
+     explicit OND(t−1) → MAM(t) view with each season's own anomaly and driver state, matching the
+     bimodal attribution framing already in Section 4 (`qmd:5476`) and the HarvestStat planted-year
+     anchoring (KE-46). Additive work, sized separately from steps 1–6.

@@ -870,3 +870,97 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
     2. Precomputed summary stats and lazy tab initialization for low-bandwidth ASAL networks.
     3. Automated CI release assertions: DOI resolution check, stale data warning badges, and cross-tab value equality assertions.
     4. Formal stakeholder co-development and sign-off protocol with KMSA and NDMA.
+
+- **KE-49 · Season selector offers `OND+MAM` and `annual`, which the explorer cannot honour · OPEN (2026-10-05).**
+  The global control (`notebook_v3.qmd:3564`) offers four values, but support is only two deep.
+  Measured on the served parquets (`tools/season_aggregation_check.py`, 1981–2024, 47 counties
+  + Ilemi Triangle): mean RONI-rainfall correlation is 0.408 under `OND` (30/48 counties above
+  |r| 0.4), 0.249 under `OND+MAM` (2/48) and **0.034 under `annual` (0/48)** — the annual option
+  erases the teleconnection the explorer exists to show. In 2019 it reports +26% ("a wet year")
+  for a year that held a −23% long-rains failure and a +112% short-rains flood. Three structural
+  problems:
+  1. **Silent collapse.** `activeSeason` (qmd:14283) and `sec23SeasonCode` (qmd:12097) map
+     anything that is not `MAM` to `OND`, so Section 2 (outlook + analogues), Figure 3.5 (maps)
+     and Figure 3.3 (contingency) answer an OND question under an `annual` label.
+  2. **Runtime defect — CONFIRMED.** `seasonMonthsFor` (qmd:14619) has only `OND`/`MAM` keys,
+     so `zSeries` (qmd:14868) passes `undefined` into `zByYear`, which calls `mons.includes(...)`
+     (qmd:14862) and throws `TypeError: Cannot read properties of undefined (reading 'includes')`.
+     Call site is qmd:11902, which hands it the global `season` unguarded. **6 of the 16
+     driver x season combinations the UI offers throw** — drivers `IOD (DMI)`, `Western-V (WNP)`,
+     `ENSO + IOD` crossed with seasons `annual`, `OND+MAM`; reachable in two clicks. Worse, the
+     other two cells do not throw but are wrong: the RONI branch short-circuits on
+     `season === "OND" ? roniZOnd : roniZMam` (qmd:14870), so `annual` is silently served the
+     **MAM** z-series. Verified by running the notebook's own functions verbatim in Node:
+     `tools/season_selector_defect_repro.mjs`. *Unit level, not live page* — `notebook_v3.html`
+     loads with 0 console errors and 0 failed requests under both a static server and
+     `quarto preview`, but the OJS cells never evaluate there, so the controls were not drivable.
+     Do a 2-click manual confirm before closing.
+  3. **No upstream representation for `OND+MAM`.** The pipeline season dictionary
+     (`hazards_prototype/R/observational/_seasonal_helpers.R:21`) defines `annual` + 12 tri-month
+     windows only. `OND+MAM` is synthesised in the browser: no COG, no climatology, no metadata,
+     no provenance entry, outside every pipeline gate.
+  Recommendation (Decision **D39**, awaiting Pete): narrow the selector to `["OND", "MAM"]`,
+  delete the dead branches, collapse `activeSeason`/`sec23SeasonCode` to `season` (which closes
+  item 2 as a side effect), **keep all data and change nothing in the pipeline** — `annual` there
+  is a continental 13-period product with its own passing gate
+  (`5_make_obs_map_climatologies.R:569`). Serve the real need behind `OND+MAM` — consecutive
+  two-season failure — as an explicit OND(t−1) → MAM(t) sequence view, not an average.
+  Full argument, method and counter-arguments:
+  `dispatches/2026-10-05_season-aggregation-decision-memo.md`.
+  *Side note for the methods drawer:* `annual` SPEI rows are the `mean` of twelve overlapping
+  3-month standardized anomalies (`_seasonal_helpers.R:30`) and are not a defined drought index
+  at any timescale; the annual-scale drought view is SPEI-12 at a fixed anchor month, already
+  produced for every window.
+
+- **KE-50 · Upstream market-data scout: KAOP / KIAMIS / KAZNET · OPEN (2026-10-05).**
+  Asked whether these three can complement the explorer's price layer. Two of the three are the
+  wrong door; one new source is worth building. Full note:
+  `dispatches/2026-10-05_market-data-scout-kaop-kiamis-kaznet.md`. All claims re-verified from
+  this machine on 2026-10-05, not taken from search snippets.
+  - **First, a correction to our own framing.** `market_prices.parquet` is predominantly **retail**
+    (21,660 rows / 42 counties) not wholesale (5,746 / 10 counties), and it **already carries
+    livestock** — `Goats (Local Quality)` 4,864 rows / 20 counties and `Cattle (Male, 2-3 years
+    old)` 919 / 3 counties, 2000–2026, KES per head, all NDMA-sourced via FEWS NET FDW. So "ingest
+    FDW for livestock prices" is already done; we hold 4,864 of the 5,204 goat rows upstream (the
+    ~340 gap is blank-`admin_1` rows). **The real gap is camel, sheep, quality grading, breed,
+    traded volume and sub-monthly frequency.**
+  - **KAOP** (`kaop.co.ke`): market feature **dead** — its backend `kamis.kaopdata.co.ke` is
+    NXDOMAIN and the UI just iframes KAMIS. `kaop.kalro.org` does not resolve. No soil/pest layers
+    live. Two usable assets: an open **ward gazetteer with centroids** (`/weather_api/wards`) and a
+    KAZNET proxy. Weather data endpoints are POST-only with an undiscoverable contract. *Security:*
+    its Django backend runs with debug mode on and leaks its URL table and origin host in every
+    traceback — worth a quiet note to KALRO, and **never paste its error output into a public repo**.
+  - **KIAMIS**: `kiamis.go.ke` is NXDOMAIN; the live system (`kiamis.kalro.org`) is a **farmer
+    registry / e-voucher / vaccination stack with no prices**, behind SSO, and links out to KAMIS
+    for market info. Wrong door — close this line of enquiry.
+  - **KAZNET**: live and actively developed (ILRI stack, rewritten Jan 2024, 5 Kenyan ASAL counties,
+    14 markets). Canonical dataset `hdl:20.500.11766.1/FK2/4ZMH2Y` (MELSpace, v3.0, 2026-04-16) is
+    labelled **CC-BY-4.0 but every file is `restricted: true`** and the file API returns **HTTP 403**
+    — access request or a direct ask to Shikuku / Lepariyo (ILRI); the licence contradiction is worth
+    raising. CGSpace has 111 items but **zero** of type Dataset. One open endpoint exists via the KAOP
+    proxy but is **stale**: 3,352 records, 2021-03-27 → 2023-05-27, **Marsabit only**, nothing for
+    2024–26. Versus NDMA: complementary on granularity, species breadth and the forage/household
+    modules; **duplicative** on monthly ASAL goat prices, where FDW already wins and we already have it.
+  - **KAMIS** (`kamis.kilimo.go.ke`, MoALD) **is the source worth building** — the door both KAOP and
+    KIAMIS point at. 190 commodities, 49 counties, live **Cattle / Sheep / Goat / Camel** per head with
+    **Grade, Sex, breed and Supply Volume**, market-day frequency, current to today. Gotchas: history
+    floor is **2021** (2016–20 returns nothing, so it cannot reach the 2011/2017 analogue years);
+    `per_page` truncates in date-descending order; the "Excel" export is actually OOXML despite its
+    `.xls` headers; dirty rows exist (a county named `test`, order-of-magnitude intra-market-day
+    outliers); **no coordinates**, so plain parquet, not GeoParquet.
+  - **Also:** `nafis.go.ke` is **NXDOMAIN (dead)**. ⚠️ **`amis.co.ke` has been lost** — it now
+    redirects to a gambling-affiliate site. Neither of our repos references it (checked), but it is a
+    live risk for any wider Atlas or partner doc that still cites "AMIS Kenya"; the real one is KAMIS.
+    Worth passing to Brayden for an Atlas-wide link check.
+  - **Written and smoke-tested against the live sources** (not yet wired to any figure):
+    `hazards_prototype/python/ingest_market_prices_kamis.py` — date-window walker that halves the
+    window on truncation, emits a **superset of `market_prices.parquet`'s schema** so the two union
+    directly (verified on a real 290-row pull → 27,696 unioned rows), flags dirty rows instead of
+    dropping them, `--list` detects product-id drift; and
+    `hazards_prototype/python/ingest_livestock_kaznet_kaop.py` — melts the wide 83-key records to one
+    row per animal (3,743 priced rows, 4 species, body condition on 98%) with an explicit staleness
+    notice. **Demo only** until the MELSpace dataset is released.
+  - **Pete's call:** whether to promote the KAMIS harvester to a served layer. For — camel and sheep
+    in the ASAL counties at market-day frequency with body-condition grading, which would strengthen
+    the Section 4 pastoral terms-of-trade story that currently rests on goat prices alone. Against —
+    the 2021 history floor, no published licence, and visible data-quality problems.
