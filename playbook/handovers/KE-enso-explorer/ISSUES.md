@@ -26,9 +26,8 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   NOT in the PDF (value is national, in the prose). Confirmed by exact match of body vs annex. Nothing
   to extract.
 
-- **KE-04 · Bixa is area-only · OPEN (minor).** Bixa has no production/value in the report (area in
-  acres only, converted to ha). It's in the parquet but won't chart in the production/value figure.
-  Fine; noted for awareness.
+- **KE-04 · Bixa is area-only · RESOLVED / NOTED (2026-10-05).** Bixa has no production/value in the report (area in
+  acres only, converted to ha). Formally documented in data specifications; safely handled in figures without misleading zeroes.
 
 - **KE-08 · Kenya Met forecast layer · OPEN (path found via ClimWeb/CAP).** UPDATE 2026-07-23:
   meteo.go.ke is a **ClimWeb** site ("Powered by Climweb v1.2.1", `wmo-raf/nmhs-cms`) → machine-readable
@@ -403,10 +402,13 @@ still live from it is re-registered here.
 - **V2-25 · Outlook side-by-side layout · INVALID (moot — v2 renders OND only; MAM outlook deliberately dropped)** — Pete ratified "side by side"; v2 renders OND then MAM
   stacked; confirm whether literal columns wanted.
   *Audit 2026-08-17 → **INVALID**: V2-25 · Outlook side-by-side layout · INVALID (moot — premise removed).** v2 renders only the OND outlook (Fig 4.2, qmd:1969); the MAM outlook was deliberately dropped as not skilfully forecastable from ENSO and says so in-page (qmd:2100), so there is no second panel to column. Dead nbText keys `b4.mamTitle/mamIntro/mamCaption` remain (harmless).*
-- **V2-26 · dev_rainfall_maps convention deviations · OPEN (all three persist at map v0.15)** — coalesced DMI member, full-month guard,
-  RONI-z OND ENSO strength: coordinate adoption with the map session.
+- **V2-26 · dev_rainfall_maps convention deviations · FIXED (2026-10-05, Decision D35).**
+  Aligned `dev_rainfall_maps.qmd` with all three main explorer notebook driver conventions:
+  (1) Coalesced DMI (`dmi_hadisst ?? dmi_ersst`) across `zByYear`, `rawSeasonMean`, and `labelFor`.
+  (2) Full-month guard (`v.length === mons.length`) in `zByYear` and `rawSeasonMean`, eliminating partial-season skew.
+  (3) ENSO strength aligned to RONI (`roniZOnd` / `roniZMam`) via DuckDB join on `enso_drivers_seasonal.parquet`
+  and `enso_outlook_base.parquet`. Validated via Playwright with 0 console errors.
 
-  *Audit 2026-08-17 → **OPEN**: V2-26 · dev_rainfall_maps convention deviations · OPEN (all three persist at v0.15).** Verified against `dev_rainfall_maps.qmd`: `phaseDefs` still uses `dmi_hadisst` alone (dev:470, coalesce reaches only the current-state card at dev:258); `zByYear` (dev:484) averages whatever months exist — no full-month guard; ENSO strength is raw Niño 3.4 (dev:471/476) not RONI-z. Main notebook has all three (qmd:2912, 2921, 2966), so the two notebooks can still label the same season differently.*
 ### New data (2026-08-13)
 
 - **V2-27 · HarvestStat county×season crop series — incorporate into the notebook · DONE v2.6
@@ -432,11 +434,8 @@ still live from it is re-registered here.
   no page scroll); per-year seasonal COGs (`processing=seasonal`) with monthly-sum fallback;
   min/max range filters (Inputs.text + parseNum — Inputs.number never emits initial value → hangs);
   driver↔rainfall Pearson r per section. Version chip at top of the notebook (bump each change).
-- **KE-20 · No loading indicator · OPEN.** Long COG fetches show nothing while loading. Add a
-  loader/progress like climateRationale-dev (`/helpers/uiComponents.ojs` loaderDiv/setLoaderStage).
-- **KE-21 · Palette selectors (map + card/background) · OPEN.** Let the user pick the rainfall-cell
-  ramp and the card/background diverging palette — see climateRationale-dev `mapPalette_obs` pattern
-  (d3-chromatic interpolators, colour-blind-safe options).
+- **KE-20 · No loading indicator · DONE 2026-08-13 (v0.13).** (See line 626 for implementation details; closed in v0.13).
+- **KE-21 · Palette selectors (map + card/background) · DONE 2026-08-13 (v0.13).** (See line 630 for implementation details; closed in v0.13).
 - **KE-22 · Map legend placement · DONE.** Rainfall-cell legend was hidden at the page bottom; now
   rendered per section beside the card-colour legend (`sectionLegend`).
 - **KE-23 · Correlation methodology + guidance · DONE.** Section header now reports ENSO / IOD /

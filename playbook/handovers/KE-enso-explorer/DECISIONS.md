@@ -406,4 +406,11 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   1. **GESI Title Truncation Resolved (V2-22)**: Fixed `_sources/gesi_extract.py` to match the full text of indicator header blocks (`b["t"]`) rather than taking only the first line (`b["t"].split("\n")[0]`), which previously dropped wrapped text across 13 of 24 indicator titles. Enhanced `clean_label` with OCR error correction and standardized punctuation. Re-extracted all 47 county PDFs from authoritative KNBS County Gender Data Sheets, generating clean `data/KE-enso-explorer/gesi_v2.parquet` with 1,578 rows across 24 indicators with 100% complete, unclipped titles.
   2. **Sticky Navigation Scroll-Margin Contract (KE-06)**: Extended `scroll-margin-top: 220px !important;` to include `details`, `.enso-more-details`, and `summary` elements in `notebook_v3.qmd`. All methodology drawers and details accordions now offset cleanly below the sticky navigation shell upon in-page scroll navigation.
 
+## D35 — Driver Convention Alignment in Prototype Maps (V2-26, 2026-10-05)
+- **RESOLVED.**
+  1. **Coalesced DMI**: Unified `zByYear`, `rawSeasonMean`, and `labelFor` in `dev_rainfall_maps.qmd` to coalesce HadISST with NOAA CPC ERSST (`dmi_hadisst ?? dmi_ersst`), eliminating missing-member dropout across recent seasons.
+  2. **Full-Month Guard**: Added `v.length === mons.length` guard in `zByYear` and `rawSeasonMean`, preventing partial-month averaging from skewing seasonal anomaly calculations.
+  3. **RONI Realignment**: Attached `enso_drivers_seasonal.parquet` and `enso_outlook_base.parquet` via DuckDB; replaced raw Niño 3.4 with trend-subtracted RONI (`roniZOnd` / `roniZMam`), harmonizing driver classifications between the map panel and the main explorer notebook. Browser-verified with zero console errors.
+
+
 

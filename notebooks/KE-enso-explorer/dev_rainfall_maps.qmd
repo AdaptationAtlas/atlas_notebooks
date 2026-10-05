@@ -51,8 +51,8 @@ viewof county = Inputs.select(countyNames, {
 
 ```{ojs}
 md`**Current state** (as of ${d3.utcFormat("%Y-%m")(currentState.asOf)}) —
-Niño 3.4 (ONI) **${currentState.oni?.toFixed(2)} °C** (**${currentState.phase}**)${
-  currentState.dmi != null ? `, IOD (DMI) **${currentState.dmi.toFixed(2)}**` : ""}.
+${currentState.roni != null ? `RONI **${(currentState.roni > 0 ? "+" : "") + currentState.roni.toFixed(2)} °C**` : `Niño 3.4 (ONI) **${currentState.oni?.toFixed(2)} °C**`} (**${currentState.phase}**)${
+  currentState.dmi != null ? `, IOD (DMI) **${(currentState.dmi > 0 ? "+" : "") + currentState.dmi.toFixed(2)}**` : ""}.
 Selected county: **${county}**.`
 ```
 
@@ -142,7 +142,7 @@ corrHeader(activeSeason, seasonCache, seasonKeys(activeSeason))
 ```{ojs}
 // driver default follows the active season (#7): OND→IOD, MAM→ENSO. Re-created on
 // season switch so the default tracks the season; user can still override.
-viewof seasonDriver = Inputs.select(driverOptions, {value: activeSeason === "OND" ? "IOD (DMI)" : "ENSO (Niño 3.4)", label: activeSeason + " driver"})
+viewof seasonDriver = Inputs.select(driverOptions, {value: activeSeason === "OND" ? "IOD (DMI)" : "ENSO (RONI)", label: activeSeason + " driver"})
 ```
 
 ```{ojs}
@@ -244,8 +244,50 @@ nbText = FileAttachment("/data/KE-enso-explorer/nbText.json").json()
 ```{ojs}
 dbDrivers = DuckDBClient.of({
   driver_indices: FileAttachment("/data/KE-enso-explorer/driver_indices.parquet"),
+  enso_drivers_seasonal: FileAttachment("/data/KE-enso-explorer/enso_drivers_seasonal.parquet"),
+  enso_outlook_base: FileAttachment("/data/KE-enso-explorer/enso_outlook_base.parquet"),
 })
-drivers = dbDrivers.query(`SELECT * FROM driver_indices ORDER BY date`)
+drivers = dbDrivers.query(`
+  WITH roni_monthly AS (
+    SELECT 
+      year,
+      CASE season
+        WHEN 'DJF' THEN 1
+        WHEN 'JFM' THEN 2
+        WHEN 'FMA' THEN 3
+        WHEN 'MAM' THEN 4
+        WHEN 'AMJ' THEN 5
+        WHEN 'MJJ' THEN 6
+        WHEN 'JAS' THEN 7
+        WHEN 'ASO' THEN 8
+        WHEN 'SON' THEN 9
+        WHEN 'OND' THEN 10
+        WHEN 'NDJ' THEN 12
+      END AS month,
+      value AS roni
+    FROM enso_drivers_seasonal
+    WHERE index = 'RONI'
+  )
+  SELECT 
+    d.*,
+    r.roni AS roni
+  FROM driver_indices d
+  LEFT JOIN roni_monthly r ON CAST(d.year AS INT) = r.year AND CAST(d.month AS INT) = r.month
+  ORDER BY d.date
+`)
+outlookBase = dbDrivers.query(`SELECT DISTINCT year, season, roni_conc FROM enso_outlook_base WHERE roni_conc IS NOT NULL`)
+roniRawOnd = new Map(outlookBase.filter((r) => r.season === "OND").map((r) => [r.year, r.roni_conc]))
+roniRawMam = new Map(outlookBase.filter((r) => r.season === "MAM").map((r) => [r.year, r.roni_conc]))
+roniZOnd = {
+  const ref = [...roniRawOnd].filter(([y]) => y >= 1991 && y <= 2020).map(([, v]) => v);
+  const m = d3.mean(ref), sd = d3.deviation(ref) || 1;
+  return new Map([...roniRawOnd].map(([y, v]) => [y, (v - m) / sd]));
+}
+roniZMam = {
+  const ref = [...roniRawMam].filter(([y]) => y >= 1991 && y <= 2020).map(([, v]) => v);
+  const m = d3.mean(ref), sd = d3.deviation(ref) || 1;
+  return new Map([...roniRawMam].map(([y, v]) => [y, (v - m) / sd]));
+}
 ```
 
 ```{ojs}
@@ -264,8 +306,12 @@ currentState = {
   const dmiRows = drivers.filter((d) => d.dmi_hadisst != null || d.dmi_ersst != null);
   const last = dmiRows.slice(-1)[0];
   const dmi = last ? (last.dmi_hadisst ?? last.dmi_ersst) : null;
-  const phase = oni > 0.5 ? "El Niño" : oni < -0.5 ? "La Niña" : "neutral";
-  return {oni, dmi, phase, asOf};
+  const roniRows = drivers.filter((d) => d.roni != null);
+  const lastRoni = roniRows.slice(-1)[0];
+  const roni = lastRoni ? lastRoni.roni : null;
+  const activeEnso = roni ?? oni;
+  const phase = activeEnso > 0.5 ? "El Niño" : activeEnso < -0.5 ? "La Niña" : "neutral";
+  return {oni, roni, dmi, phase, asOf};
 }
 ```
 
@@ -528,19 +574,19 @@ deriveCache = async (season) => {
 seasonRawP = ({p: rawCache(activeSeason)})
 seasonCacheP = ({p: deriveCache(activeSeason)})
 seasonCache = await seasonCacheP.p
-seasonKeys = (s) => s === "OND" ? ["ENSO (Niño 3.4)", "IOD (DMI)"] : ["ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"]
+seasonKeys = (s) => s === "OND" ? ["ENSO (RONI)", "IOD (DMI)"] : ["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"]
 ```
 
 ```{ojs}
-driverOptions = ["ENSO + IOD", "ENSO (Niño 3.4)", "IOD (DMI)", "Western-V (WNP)"]
+driverOptions = ["ENSO + IOD", "ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"]
 phaseDefs = ({
-  "ENSO + IOD":       {members: ["nino34_anom_noaa", "dmi_hadisst"], pos: "El Niño/+IOD", neg: "La Niña/−IOD"},
-  "ENSO (Niño 3.4)":  {members: ["nino34_anom_noaa"], pos: "El Niño", neg: "La Niña"},
+  "ENSO + IOD":       {members: ["roni", "dmi_hadisst"], pos: "El Niño/+IOD", neg: "La Niña/−IOD"},
+  "ENSO (RONI)":      {members: ["roni"], pos: "El Niño", neg: "La Niña"},
   "IOD (DMI)":        {members: ["dmi_hadisst"],      pos: "+IOD",    neg: "−IOD"},
   "Western-V (WNP)":  {members: ["wnp_std_mam"],      pos: "High Western-V", neg: "Low Western-V"},
 })
 driverHint = (driver) => ({
-  "ENSO (Niño 3.4)": "ONI °C — El Niño ≥0.5 (mod ≥1.0, strong ≥1.5); La Niña ≤−0.5",
+  "ENSO (RONI)": "RONI °C (trend-subtracted) — El Niño ≥0.5 (mod ≥1.0, strong ≥1.5); La Niña ≤−0.5",
   "IOD (DMI)": "DMI — +IOD ≥0.4 (mod ≥0.7, strong ≥1.0); −IOD ≤−0.4",
   "Western-V (WNP)": "WNP (std) — high ≥0.5 (mod ≥1.0, strong ≥1.5); low ≤−0.5",
   "ENSO + IOD": "composite z (std) — ≥0.5, mod ≥1.0, strong ≥1.5; negatives symmetric",
@@ -549,16 +595,19 @@ driverHint = (driver) => ({
 
 ```{ojs}
 zByYear = (col, mons) => {
+  const getCol = (d) => col === "dmi" || col === "dmi_hadisst" ? (d.dmi_hadisst ?? d.dmi_ersst) : d[col];
   const byYear = d3.rollups(
-    drivers.filter((d) => mons.includes(d.month) && d[col] != null),
-    (v) => d3.mean(v, (d) => d[col]), (d) => d.year);
+    drivers.filter((d) => mons.includes(d.month) && getCol(d) != null),
+    (v) => v.length === mons.length ? d3.mean(v, (d) => getCol(d)) : null, (d) => d.year)
+    .filter(([, v]) => v != null);
   const ref = byYear.filter(([y]) => y >= 1991 && y <= 2020).map(([, v]) => v);
   const m = d3.mean(ref), s = d3.deviation(ref) || 1;
   return new Map(byYear.map(([y, v]) => [y, (v - m) / s]));
 }
 zSeries = (driver, season) => {
-  const def = phaseDefs[driver], mons = seasonMonthsFor[season];
-  const maps = def.members.map((c) => zByYear(c, mons));
+  const def = phaseDefs[driver] ?? phaseDefs["ENSO (RONI)"], mons = seasonMonthsFor[season];
+  const maps = def.members.map((c) =>
+    (c === "roni" || c === "nino34_anom_noaa") ? (season === "OND" ? roniZOnd : roniZMam) : zByYear(c, mons));
   const raw = new Map();
   for (const y of maps[0].keys()) {
     const zs = maps.map((m) => m.get(y));
@@ -569,8 +618,9 @@ zSeries = (driver, season) => {
   return new Map([...raw].map(([y, v]) => [y, (v - m) / s]));
 }
 rawSeasonMean = (col, season, year) => {
-  const rows = drivers.filter((d) => seasonMonthsFor[season].includes(d.month) && d[col] != null && d.year === year);
-  return rows.length ? d3.mean(rows, (d) => d[col]) : null;
+  const getCol = (d) => col === "dmi" || col === "dmi_hadisst" ? (d.dmi_hadisst ?? d.dmi_ersst) : d[col];
+  const rows = drivers.filter((d) => seasonMonthsFor[season].includes(d.month) && getCol(d) != null && d.year === year);
+  return rows.length === seasonMonthsFor[season].length ? d3.mean(rows, (d) => getCol(d)) : null;
 }
 ```
 
@@ -580,19 +630,23 @@ rawSeasonMean = (col, season, year) => {
 driverValueFor = (driver, season, year) => {
   const def = phaseDefs[driver];
   return def.members.length === 1
-    ? rawSeasonMean(def.members[0], season, year)
+    ? (def.members[0] === "roni"
+        ? (season === "OND" ? roniRawOnd.get(year) : roniRawMam.get(year))
+        : rawSeasonMean(def.members[0], season, year))
     : (zSeries(driver, season).get(year) ?? null);
 }
 // standardised z for the card colour
 driverSignalFor = (driver, season, year) => ({z: zSeries(driver, season).get(year) ?? null})
 // title label — raw index value(s), no category
 labelFor = (driver, season, year) => {
-  const f = (v) => v == null ? "—" : v.toFixed(2);
-  const oni = () => f(rawSeasonMean("nino34_anom_noaa", season, year));
+  const f = (v) => v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(2);
+  const roniVal = season === "OND" ? roniRawOnd.get(year) : roniRawMam.get(year);
+  const oniVal = rawSeasonMean("nino34_anom_noaa", season, year);
+  const ensoTag = roniVal != null ? `RONI: ${f(roniVal)}` : `ENSO: ${f(oniVal)}`;
   const dmi = () => f(rawSeasonMean("dmi_hadisst", season, year));
   const wnp = () => f(rawSeasonMean("wnp_std_mam", season, year));
-  if (driver === "ENSO + IOD") return `ENSO: ${oni()} · IOD: ${dmi()}`;
-  if (driver === "ENSO (Niño 3.4)") return `ENSO: ${oni()}`;
+  if (driver === "ENSO + IOD") return `${ensoTag} · IOD: ${dmi()}`;
+  if (driver === "ENSO (RONI)" || driver === "ENSO (Niño 3.4)") return `${ensoTag}`;
   if (driver === "IOD (DMI)") return `IOD: ${dmi()}`;
   return `Western-V: ${wnp()}`;
 }
