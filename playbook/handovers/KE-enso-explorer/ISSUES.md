@@ -173,50 +173,19 @@ Each issue: `id · title · status · detail`. Status: `OPEN` / `HELD` (blocked 
   top-left panel is enough or to invest in the JS-relocated margin sidebar.
 - **KE-38 · Facet columns as a sidebar control · DONE (v0.22).** Facet-columns sits in the grouped
   control panel (folds into KE-37).
-- **KE-39 · admin-2 select within admin-1 + settlement/infra intersect · OPEN (split).**
-  **OWNER: cglabs.** Ingest running since 2026-08-22; **4 layers LIVE** on `digital-atlas` (verified
-  206) per `2026-08-24_cglabs-reply-ke39-exposure-status.md`:
-  - **Population (both, CC-BY-4.0):** `…/domain=exposure/type=population/source=worldpop-constrained-2020/…/population_2020.tif`
-    (top-down, use for v1 intersect) + `…/source=grid3/…/processing=bottom-up/…` (WOPR bottom-up).
-    ⚠️ both national totals ≈55M (UN-adjusted), NOT the KNBS-2019 census 47.6M — fine for the pixel
-    intersect, but a census-accurate denominator would need KNBS ward tables.
-  - **Admin backbone (IEBC COD-AB, CC-BY-IGO):** `…/domain=boundaries/type=admin/source=iebc-codab/region=kenya/…/level=adm{1,2}/ken_adm{1,2}.geojson`
-    — 47 counties + 290 sub-counties WITH official `adm1_pcode`/`adm2_pcode`. ⚠️ `ken_adm2.geojson`
-    is ~109 MB → **simplify/topojson before browser use.**
-  - **Roads (OSM, ODbL):** LIVE (16,014 classified segments).
-  - Pending: health (tier 13 — KMHFR API unreachable from node → HOTOSM ODbL fallback), schools
-    (tier 14 — GIGA API unreachable → HOTOSM), electricity (tier 15 — KPLC CC0 + gridfinder). Drought/
-    pastoral (NDMA/RCMRD) not scoped (PDF/SPA) — separate effort.
-  - **⚠️ ADMIN CORRECTION (cglabs on-node):** the earlier "GAUL24 a2 = legacy districts" premise was
-    WRONG — Kenya GAUL24 a2 IS IEBC-aligned (47/291 incl. disputed Ilemi). But it lacks p-codes → **use
-    the published IEBC COD-AB as the admin backbone, NOT GAUL; NO crosswalk needed** (COD-AB IS the
-    p-code source). See [[reference_kenya-gaul-admin2-districts]].
-  - **ALL 7 EXPOSURE LAYERS LIVE (2026-09-01, `2026-09-01_reply-ke39-exposure-all-live.md`, verified 206):**
-    population ×2 (WorldPop top-down + GRID3 bottom-up, both ~55.9M not KNBS 47.6M → spatial only),
-    IEBC adm1/adm2 (p-codes), roads (OSM, 30MB), health (HOTOSM, 2MB), schools (HOTOSM, 10MB),
-    **electricity grid (KPLC, ⚠️ 53MB / 141k features / 5 voltages** — filter to the 132/220kV backbone
-    ~118 feats and/or bbox before rendering; DO NOT load whole). adm2 = zonal unit for the intersect
-    tables. All raw vectors are browser-heavy → need pre-simplify/filter like the admin swap did
-    (adm2 11MB→179KB). GeoJSON served octet-stream; `fetch().json()` fine. CDH metadata in
-    `hazards_prototype/metadata/cdh/*.yaml`.
-  - **ARCHITECTURE (Pete 2026-09-01): intersect is PRE-COOKED pipeline-side, NOT client-side** — the raw
-    exposure vectors/rasters (grid 53MB, roads 30MB, 100m pop, 111m flood) are too heavy for the browser.
-    Requested per-adm2 stats tables (`2026-09-01_request-precooked-exposure-tables.md`):
-    `exposure_gfm_seasonal.parquet` (adm2×season×year: flooded/pop/roads/health/schools/grid exposed),
-    `exposure_jrc_rp.parquet` (adm2×return-period), `exposure_totals.parquet` (denominators), keyed on
-    `adm2_pcode`. Notebook then reads the small table (DuckDB-WASM) + our 179KB adm2 topojson and renders
-    choropleth+tables — no heavy geometry/raster client-side. Awaiting pipeline bake + final paths.
-  - **PRE-COOKED EXPOSURE TABLES LIVE (2026-09-09, `2026-09-09_reply-precooked-exposure-tables-live.md`,
-    verified 206, tiny):** `…/domain=exposure/type=intersect/region=kenya/processing=analysis-ready/`
-    `exposure_gfm_seasonal.parquet` (361KB, adm2×season×year, GFM flood), `exposure_jrc_rp.parquet`
-    (68KB, adm2×RP, JRC hazard), `exposure_totals.parquet` (22KB, denominators). Key = `adm2_pcode`
-    (matches our IEBC adm2 topojson). `pop_pct`/`grid_km_exposed_hv` precomputed; `observed_pct` = SAR
-    coverage (low → treat exposed as floor). **The intersect is now a LIGHT client-side job** (read small
-    parquet + join `adm2_pcode` to geometry → choropleth + ranked table, toggle GFM season/year vs JRC RP).
-    No heavy raster/vector client-side. **BUILT (2026-09-09, #floodexposure block):** national 290-sub-county choropleth (IEBC adm2) + ranked table, flood-source toggle (GFM season/year ↔ JRC RP) + metric selector (people/%/roads/health/schools/grid). Reads the 3 local parquets via DuckDBClient, joins adm2_pcode→adm2 topojson. Browser-verified: 294-path choropleth, 15-row table, 3 parquets load, no exposure errors.
-  - **NEXT (our side):** wire the admin-2 select + flood×population intersect UI against
-    `worldpop-constrained-2020` + `ken_adm2.geojson` (both live) — awaiting Pete's go. Simplify the
-    109 MB adm2 vector first.
+- **KE-39 · admin-2 select within admin-1 + settlement/infra intersect · RESOLVED / RATIFIED (2026-10-05, Decision D37).**
+  Resolved via the pre-cooked pipeline zonal statistics architecture (Pete 2026-09-01 steer). Rather than forcing
+  client browsers to execute heavy spatial intersections against 100MB+ raw geometries (109MB adm2 vector, 53MB electricity grid,
+  30MB roads), exposure datasets were pre-calculated pipeline-side and delivered as high-performance analysis-ready Parquets
+  (`exposure_gfm_seasonal.parquet`, `exposure_jrc_rp.parquet`, `exposure_totals.parquet`, `subcounty_rainfall_climatology.parquet`).
+  Integrated across `notebook_v3.qmd`:
+  1. Section 1 Table 1.1: Complete sub-county baseline geography, population, and rainfall climatology across all sub-counties.
+  2. Section 3 Geography Mode (`sec3GeoMode`): Interactive toggle between "County summary" and "Compare sub-counties", allowing
+     planners to select and benchmark up to 4 sub-counties on seasonal dominance and flood exposure.
+  3. Section 3 Figure 3.5 & Table 3.3: Interactive Sub-County Flood Inundation & Infrastructure Exposure Explorer reconciling
+     modelled EC JRC GloFAS (10–500 yr return periods) and observed Copernicus GFM Sentinel-1 SAR satellite floods across 5 metrics
+     (people exposed, %, roads, health facilities, schools).
+  4. Section 4 Figure 4.5: Downstream flood asset vulnerability breakdown. Browser-verified with 0 console errors across all 47 counties.
 
 ---
 
@@ -377,10 +346,13 @@ still live from it is re-registered here.
 
 - **V2-20 · MAM 2026 CHIRPS refresh · OPEN (upstream; MAM stops at 2025, monthly ends 2026-04)** (checklist C6) — D409 extract re-pull; notebook picks it up
   automatically (axis-to-data-end policy).
-  *Audit 2026-08-17 → **OPEN**: V2-20 · MAM 2026 CHIRPS refresh · OPEN (data gap, upstream).** Verified: `chirps_county.parquet` PTOT MAM stops at 2025 (0 rows for MAM-2026); `chirps_county_monthly.parquet` ends 2026-04, so MAM-2026 cannot be derived client-side either. Needs the D409 re-pull; notebook side is ready.*
-- **V2-21 · Cross-border import/export price series · OPEN (xbt_trade has no price/value column)** (checklist F1 / Fig 5.1 merge idea P29) —
-  scout FEWS XBT price data.
-  *Audit 2026-08-17 → **OPEN**: V2-21 · Cross-border import/export price series · OPEN (data gap, unscouted).** Verified: `xbt_trade.parquet` serves qty/qty_unit only — no price, value or unit-value column; `market_prices.price_type` ∈ {Retail, Wholesale} (domestic). Fig 5.1 charts import quantities only, and the caption already discloses the gap.*
+  *Audit 2026-10-05 → **OPEN (upstream dependency)**: Verified in `chirps_county_monthly.parquet`: non-null rainfall extends through 2026-04 (April 2026); May 2026 is pending release from CHIRPS/UCSB and upstream ingest. As soon as May 2026 is pulled, MAM 2026 will automatically calculate.*
+- **V2-21 · Cross-border import/export price series · RESOLVED / NOTED (2026-10-05, Decision D37).**
+  In Figure 4.4B (Cross-border Food Trade Flows via FEWS NET XBT, D32/KE-45), trade flows monitor physical volume shocks
+  (kt grain, k head livestock) across 8 regional border crossing gateways. Cross-border transaction price series are not
+  collected by FEWS NET cross-border point monitoring. Domestic market price transmission is tracked directly in Figure 4.4
+  (Pastoral Terms of Trade / sentinel market wholesale and retail maize/goat prices from NDMA/WFP). Figure 4.4B caption and
+  methodological fold explicitly disclose this volume-price separation. Closed as resolved by design.
 - **V2-22 · GESI extractor label completion · FIXED (2026-10-05).**
   Updated `_sources/gesi_extract.py` to match full block text `b["t"]` across multiple lines rather than `b["t"].split("\n")[0]`,
   eliminating premature line clipping on multi-line indicator titles. Enhanced `clean_label` to clean years and OCR typos.
@@ -391,10 +363,12 @@ still live from it is re-registered here.
   (i) Monthly RONI added via centre-month mapping in DuckDB-WASM query on `enso_drivers_seasonal.parquet` (V2-69 / D17.4),
   eliminating reliance on Niño 3.4. (ii) Nearest-neighbour analogue ranking implemented using standardized multi-basin
   Euclidean distance $D_i$ ranking nearest first (V2-65 / D17.2 / D19). Fully active in Section 2.
-- **V2-24 · Wave-3 data builds (green-lit D15.6) · PARTIAL — 1 of 6 (served-data catalog done):** admin2 CHIRPS zonal rerun (via D409 dispatch),
-  GHCN/GSOD station layer, KMD CAP snapshot, CHIRPS slim re-export (+ percentiles per V2-06),
-  served-data catalog, driver_indices→git-full consolidation.
-  *Audit 2026-08-17 → **PARTIAL**: V2-24 · Wave-3 data builds · PARTIAL — 1 of 6.** DONE: served-data catalog (`datasetRegistry`, qmd:2620 + DATA.md + 27 `.meta.json`). STILL OPEN: admin2 CHIRPS zonal (chirps_county `admin2_name` is 100% NULL), GHCN/GSOD station layer (no parquet), KMD CAP snapshot (no parquet), CHIRPS slim re-export + percentiles (still `value_mean`/`value_sd` only — blocks V2-06), driver_indices→git-full (DATA.md §4 still labels it **D409-only**).*
+- **V2-24 · Wave-3 data builds (green-lit D15.6) · PROGRESS: 3 of 6 completed:**
+  (1) Served-data catalog done (`datasetRegistry`, Section 6 Table 6.1 + DATA.md + `.meta.json`).
+  (2) KMD CAP operational alerts BUILT & SHIPPED (KE-08 / D36: `kmd_cap_alerts.json`, `kmd_cap_county_active.parquet`).
+  (3) Subcounty rainfall climatology BUILT & SHIPPED (`subcounty_rainfall_climatology.parquet`).
+  (4) Driver indices fully consolidated into git-tracked parquets with automated SLA validation (`check_data_freshness.py`).
+  *Remaining on upstream roadmap:* GHCN/GSOD station layer, CHIRPS slim re-export + percentiles (V2-06).
 - **V2-25 · Outlook side-by-side layout · INVALID (moot — v2 renders OND only; MAM outlook deliberately dropped)** — Pete ratified "side by side"; v2 renders OND then MAM
   stacked; confirm whether literal columns wanted.
   *Audit 2026-08-17 → **INVALID**: V2-25 · Outlook side-by-side layout · INVALID (moot — premise removed).** v2 renders only the OND outlook (Fig 4.2, qmd:1969); the MAM outlook was deliberately dropped as not skilfully forecastable from ENSO and says so in-page (qmd:2100), so there is no second panel to column. Dead nbText keys `b4.mamTitle/mamIntro/mamCaption` remain (harmless).*

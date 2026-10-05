@@ -419,5 +419,16 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   3. **Section 2 Operational Advisory Card**: Mounted reactive component `#kmdCapAlertsHost` directly beneath the statutory KMSA Framework notice in Section 2 (`tab-outlook`). Dynamically filters active advisories for the active county with hazard iconography (rain, wind, marine), severity badges (Moderate/Severe/Extreme), validity timeframes, official KMD precautionary guidance, and a collapsible nationwide alerts matrix table.
   4. **Governance & Statutory Boundary**: Reaffirms statutory compliance with the Meteorology Act No. 7 of 2026. Bridges historical analogue risk diagnostics with official operational warnings without overstepping legal mandate. Registered in `figure_registry.json` as `box_2_0` / `Advisory Card 2.0`. Verified with 0 browser console errors and 100% green data freshness gate.
 
+## D37 — Sub-County Exposure Architecture Ratification (KE-39), Cross-Border Trade Scope (V2-21), and Upstream Dependency Baseline (2026-10-05)
+- **RESOLVED.** Ratified structural architecture and documentation boundaries across subcounty exposure, cross-border flows, and upstream data assets:
+  1. **Sub-County Exposure Pre-Cooked Architecture (KE-39)**: Ratified Pete's 2026-09-01 directive retiring browser-side vector intersections against 100MB+ raw geometries (109MB adm2 vector, 53MB electricity grid, 30MB roads) in favor of analysis-ready pre-cooked zonal stats parquets (`exposure_gfm_seasonal.parquet`, `exposure_jrc_rp.parquet`, `exposure_totals.parquet`, `subcounty_rainfall_climatology.parquet`). Operationalized across Section 1 Table 1.1, Section 3 Subcounty Comparison tool (`sec3GeoMode`), Section 3 Figure 3.5 & Table 3.3 (GloFAS vs GFM Sentinel-1 SAR exposure across 5 metrics), and Section 4 Figure 4.5 with 0 browser console errors.
+  2. **Cross-Border Trade Physical vs Price Separation (V2-21)**: Formally separated regional cross-border physical food trade flows (FEWS NET XBT import quantities in kt and head, Figure 4.4B) from domestic market price transmission (NDMA/WFP wholesale and retail food prices / Terms of Trade, Figure 4.4). Noted that cross-border transaction prices are outside FEWS NET border-crossing survey scope, with explicit disclosures in Figure 4.4B captions and methods drawer.
+  3. **Upstream Asset Baseline (V2-20, V2-63, KE-01, V2-24)**: Documented current operational state:
+     - MAM 2026 CHIRPS (V2-20): verified `chirps_county_monthly.parquet` spans up to 2026-04 (April 2026); MAM 2026 will compute automatically when May 2026 is published upstream.
+     - NDJ Series Corruption (V2-63): confirmed client-side quarantine in `notebook_v3.qmd` isolates corrupted NDJ windows so December displays an honest measured gap rather than spurious anomalies.
+     - 2026 NAPR Refresh (KE-01): queued for future KNBS release.
+     - Wave-3 Builds (V2-24): 3 of 6 builds verified complete (dataset catalog, KMD CAP alerts, subcounty rainfall climatology, and automated freshness validator).
+
+
 
 
