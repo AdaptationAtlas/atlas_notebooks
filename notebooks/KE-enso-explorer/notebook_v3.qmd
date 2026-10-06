@@ -5730,16 +5730,16 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
           <!-- Multi-hazard timeline visual -->
           <div style="height: 180px; background: #fafafa; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; position: relative; margin-top: 1rem;">
             <div style="position: absolute; top: 0; bottom: 0; left: 15%; width: 5%; background: rgba(215,48,39,0.12); border-left: 2px dashed #d73027;">
-              <span style="font-size: 0.65rem; font-weight: 700; color: #d73027; padding: 2px;">'06 Drought</span>
+              <span style="font-size: 0.65rem; font-weight: 700; color: #d73027; padding: 2px;">2006 Drought</span>
             </div>
             <div style="position: absolute; top: 0; bottom: 0; left: 38%; width: 8%; background: rgba(43,131,186,0.12); border-left: 2px dashed #2b83ba;">
-              <span style="font-size: 0.65rem; font-weight: 700; color: #2b83ba; padding: 2px;">'11 Famine Peak</span>
+              <span style="font-size: 0.65rem; font-weight: 700; color: #2b83ba; padding: 2px;">2011 Famine Peak</span>
             </div>
             <div style="position: absolute; top: 0; bottom: 0; left: 58%; width: 7%; background: rgba(215,48,39,0.12); border-left: 2px dashed #d73027;">
-              <span style="font-size: 0.65rem; font-weight: 700; color: #d73027; padding: 2px;">'17 ASAL Crisis</span>
+              <span style="font-size: 0.65rem; font-weight: 700; color: #d73027; padding: 2px;">2017 ASAL Crisis</span>
             </div>
             <div style="position: absolute; top: 0; bottom: 0; left: 75%; width: 15%; background: rgba(43,131,186,0.18); border-left: 2px dashed #2b83ba;">
-              <span style="font-size: 0.65rem; font-weight: 700; color: #2b83ba; padding: 2px;">'20–23 Drought</span>
+              <span style="font-size: 0.65rem; font-weight: 700; color: #2b83ba; padding: 2px;">2020–2023 Drought</span>
             </div>
             <div style="height: 100%; display: flex; flex-direction: column; justify-content: space-around; font-size: 0.78rem; font-weight: 600;">
               <div style="color: #0284c7;">1. Rainfall Anomaly (CHIRPS v3) &rarr; 5 consecutive failed seasons in 2020–2022</div>
@@ -10341,7 +10341,7 @@ figureRegistry = FileAttachment("/data/KE-enso-explorer/figure_registry.json").j
     const vSel = document.getElementById("versionSwitcher");
     if (vSel && Array.isArray(releaseMeta.availableVersions)) {
       vSel.innerHTML = releaseMeta.availableVersions.map(v => 
-        `<option value="${v.url}" ${v.id === "v3" ? "selected" : ""} style="background: #0f172a; color: #ffffff;">${v.label}</option>`
+        `<option value="${v.url}" ${v.status === "active" || v.id === "v3.6" || v.id === "v3" ? "selected" : ""} style="background: #0f172a; color: #ffffff;">${v.label}</option>`
       ).join("");
     }
   }
@@ -11470,14 +11470,14 @@ viewof rainView = Inputs.radio(["Absolute rainfall", "Anomaly vs 1991–2020 nor
 ```
 
 ```{ojs}
-viewof spreadOpt = Inputs.select(["None", "±1 sd", "±2 sd (~95%)"], {
-  label: "Between-sub-county variation:", value: "None",
+viewof spreadOpt = Inputs.select(["None (county mean)", "Typical range (±1 sd, 68%)", "Full spread (±2 sd, 95%)"], {
+  label: "Sub-county range bars:", value: "None (county mean)",
 })
 ```
 
 ```{ojs}
-viewof stripMode = Inputs.radio(["Phase (discrete)", "Strength (continuous)", "Off"], {
-  label: "Ocean-state markers:", value: "Phase (discrete)",
+viewof stripMode = Inputs.radio(["Event phase (El Niño / La Niña)", "Driver intensity (heat gradient)", "Off"], {
+  label: "Ocean driver marker strip:", value: "Event phase (El Niño / La Niña)",
 })
 ```
 
@@ -11630,7 +11630,7 @@ rainPanel = (s) => {
   const outcomeOf = (d) => d.category;
   const yLabel = varIsSpei ? "SPEI-3 (standardised)" : (anomaly ? "mm vs 1991–2020 normal" : "Rainfall (mm total)");
   const hasStrip = stripMode !== "Off";
-  const spreadK = spreadOpt.startsWith("±1") ? 1 : spreadOpt.startsWith("±2") ? 2 : 0;
+  const spreadK = (spreadOpt && spreadOpt.includes("±1")) ? 1 : (spreadOpt && spreadOpt.includes("±2")) ? 2 : 0;
   const spreadMarks = (spreadK > 0 && !varIsSpei)
     ? [Plot.ruleX(data.filter((d) => d.sd != null), {x: "year",
         y1: (d) => (!anomaly) ? Math.max(0, d.y - spreadK * d.sd) : d.y - spreadK * d.sd,
@@ -11730,7 +11730,7 @@ rainPanel = (s) => {
 
   let stripEl = html``;
   if (hasStrip) {
-    const isDiscrete = stripMode.startsWith("Phase");
+    const isDiscrete = !stripMode.includes("intensity") && !stripMode.startsWith("Strength");
     const cellColors = (d) => {
       if (s === "MAM") {
         const ph = d.wnp;
@@ -13868,7 +13868,13 @@ prodGroupsShown = () => [...new Set(prodRows.map((d) => d.group))]
 prodViewLines = () => {
   if (!prodRows.length) return noDataPlaceholder("No agricultural production records for selected criteria in " + county);
   const isLog = prodMode === "Log scale";
-  const panels = prodGroupsShown().map((g) => {
+  const groups = prodGroupsShown();
+  const numGroups = groups.length;
+  const hostEl = document.getElementById("plotProduceHost");
+  const hostW = hostEl?.clientWidth || 980;
+  const panelW = numGroups > 1 ? Math.max(340, Math.floor((hostW - 24 * (numGroups - 1)) / numGroups)) : Math.min(hostW, 880);
+
+  const panels = groups.map((g) => {
     const rows = prodRows.filter((d) => d.group === g);
     const items = [...new Set(rows.map((d) => d.item))];
     const colors = paletteRange(items.length);
@@ -13876,7 +13882,7 @@ prodViewLines = () => {
     // Draw lines for series with 2 or more points (connects consecutive surveyed years)
     const lineItems = new Set(items.filter((it) => rows.filter((r) => r.item === it).length >= 2));
     const plot = Plot.plot({
-      height: 270, width: 590, marginLeft: 65, marginRight: 130,
+      height: 270, width: panelW, marginLeft: 65, marginRight: numGroups > 1 ? 95 : 130,
       x: {ticks: years, tickFormat: "d", label: null},
       y: {
         label: isLog ? `${prodUnitFor(g)} (log scale)` : prodUnitFor(g),
@@ -13896,18 +13902,24 @@ prodViewLines = () => {
         ...(isLog ? [] : [Plot.ruleY([0])]),
       ],
     });
-    return html`<div style="flex:1 1 380px; min-width:320px; max-width:100%; margin-bottom:0.75rem;"><div style="font-size:0.8rem; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.25rem;">${g} (${isLog ? prodUnitFor(g) + " • log scale" : prodUnitFor(g)})</div>${plot}</div>`;
+    return html`<div style="flex:1 1 ${panelW}px; min-width:320px; max-width:100%; margin-bottom:0.75rem;"><div style="font-size:0.8rem; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.25rem;">${g} (${isLog ? prodUnitFor(g) + " • log scale" : prodUnitFor(g)})</div>${plot}</div>`;
   });
-  return html`<div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-start;">${panels}</div>`;
+  return html`<div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-start; width:100%;">${panels}</div>`;
 }
 
 // 2. Bars View
 prodViewBars = () => {
   if (!prodRows.length) return noDataPlaceholder("No agricultural production records for selected criteria in " + county);
   const isLog = prodMode === "Log scale";
+  const groups = prodGroupsShown();
+  const numGroups = groups.length;
+  const hostEl = document.getElementById("plotProduceHost");
+  const hostW = hostEl?.clientWidth || 980;
+  const panelW = numGroups > 1 ? Math.max(340, Math.floor((hostW - 24 * (numGroups - 1)) / numGroups)) : Math.min(hostW, 880);
+
   const years = [...new Set(prodRows.map((d) => d.year))].sort((a, b) => a - b);
   const yearColor = new Map(years.map((y, i) => [y, paletteRange(Math.max(years.length, 3))[i]]));
-  const panels = prodGroupsShown().map((g) => {
+  const panels = groups.map((g) => {
     const rows = prodRows.filter((d) => d.group === g && d.value > 0);
     const panelYears = [...new Set(rows.map((d) => d.year))].sort((a, b) => a - b);
     const items = [...new Set(rows.map((d) => d.item))]
@@ -13928,7 +13940,7 @@ prodViewBars = () => {
       return midYear(it) === +y;
     });
     const plot = Plot.plot({
-      height: 290, width: 590, marginLeft: 65, marginBottom: 55,
+      height: 290, width: panelW, marginLeft: 65, marginBottom: 55,
       x: {domain: xDomain, ticks: labelTicks, tickFormat: (k) => wrapTickLabel(k.split("|")[0], 12), label: null, padding: 0.12},
       y: {
         label: isLog ? `${prodUnitFor(g)} (log scale)` : prodUnitFor(g),
@@ -13946,9 +13958,9 @@ prodViewBars = () => {
         ...(isLog ? [] : [Plot.ruleY([0])]),
       ],
     });
-    return html`<div style="flex:1 1 380px; min-width:320px; max-width:100%; margin-bottom:0.75rem;"><div style="font-size:0.8rem; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.25rem;">${g} (${isLog ? prodUnitFor(g) + " • log scale" : prodUnitFor(g)})</div>${plot}</div>`;
+    return html`<div style="flex:1 1 ${panelW}px; min-width:320px; max-width:100%; margin-bottom:0.75rem;"><div style="font-size:0.8rem; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.25rem;">${g} (${isLog ? prodUnitFor(g) + " • log scale" : prodUnitFor(g)})</div>${plot}</div>`;
   });
-  return html`<div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-start;">${panels}</div>`;
+  return html`<div style="display:flex; flex-wrap:wrap; gap:1.25rem; align-items:flex-start; width:100%;">${panels}</div>`;
 }
 
 // 3. Treemap View
@@ -17650,11 +17662,11 @@ sec32NdviChart = {
   const rows = ndviCty.map((d) => ({...d, t: new Date(d.date)}));
   
   const epochs = [
-    {from: new Date("2005-09-01"), to: new Date("2006-03-31"), label: "'06 Drought"},
-    {from: new Date("2010-09-01"), to: new Date("2011-09-30"), label: "'11 Famine"},
-    {from: new Date("2016-09-01"), to: new Date("2017-06-30"), label: "'17 Crisis"},
-    {from: new Date("2020-09-01"), to: new Date("2023-01-31"), label: "'20–22 Triple Dip"},
-    {from: new Date("2023-10-01"), to: new Date("2024-05-31"), label: "'23–24 El Niño Flush"}
+    {from: new Date("2005-09-01"), to: new Date("2006-03-31"), label: "2006 Drought"},
+    {from: new Date("2010-09-01"), to: new Date("2011-09-30"), label: "2011 Famine"},
+    {from: new Date("2016-09-01"), to: new Date("2017-06-30"), label: "2017 Crisis"},
+    {from: new Date("2020-09-01"), to: new Date("2023-01-31"), label: "2020–2022 Triple Dip"},
+    {from: new Date("2023-10-01"), to: new Date("2024-05-31"), label: "2023–2024 El Niño Flush"}
   ];
 
   return Plot.plot({

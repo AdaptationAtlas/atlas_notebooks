@@ -615,3 +615,15 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Converted all operational deliverables in Table 2.3 into active hyperlinks pointing to live official portals (KMSA seasonal/county/severe-weather advisories; NDMA monthly county/national bulletins and VCI; KRCS IFRC-approved EAPs and trigger matrices; ICPAC Hazards Watch, GHACOF consensus, and Drought Watch; KFSSG LRA/SRA assessments and IPC reports; NDOC situation reports and coordination).
      - Replaced generic SVGs in Table 2.3 with branded institutional monogram emblems (`KMSA`, `NDMA`, `KRCS`, `ICPAC`, `KFSSG`, `NDOC`).
      - Added official `rcmrd-logo.png` to Section 0 institutional partners grid and universal page footer.
+- **D48 · Figure 1.1 Responsive Side-by-Side Panels, Climatology Controls Usability & Epoch Cleanliness (Pete Review Lines 39–43, 89–109) · SETTLED (2026-10-06).**
+  Addressed Pete's dashboard layout, control nomenclature, and year label review items:
+  1. **Figure 1.1 Responsive Side-by-Side Panel Layout (Pete Review Lines 39–43):**
+     - Updated `prodViewLines` and `prodViewBars` to compute panel width dynamically based on host container width (`hostEl?.clientWidth || 980`) and active sector count (`numGroups`).
+     - Clamped multi-group width (`panelW`) between 340 px and 600 px so that when both Crops and Livestock are selected, panels sit cleanly side-by-side without forced vertical wrapping or horizontal overflow.
+  2. **Figure 3.1 Control Nomenclature Usability (Pete Review Lines 95–97):**
+     - Simplified sub-county variation control label from technical `"Between-sub-county variation:"` to intuitive `"Sub-county range bars:"`, and updated options to `"None (county mean)"`, `"Typical range (±1 sd, 68%)"`, and `"Full spread (±2 sd, 95%)"`.
+     - Simplified ocean driver marker control from `"Ocean-state markers:"` with `"Phase (discrete)"` / `"Strength (continuous)"` to `"Ocean driver marker strip:"` with `"Event phase (El Niño / La Niña)"` / `"Driver intensity (heat gradient)"`.
+  3. **Year Labeling & Epoch Cleanliness (Pete Review Line 103):**
+     - Cleaned up all year labels in Section 4 multi-hazard timeline visual and Section 4 Figure 4.3 NDVI timeseries, replacing fragmented `'06 Drought`, `'11 Famine`, `'17 Crisis`, `'20–22 Triple Dip` labels with clean 4-digit years (`2006 Drought`, `2011 Famine`, `2017 Crisis`, `2020–2022 Triple Dip`, `2023–2024 El Niño Flush`).
+  4. **Active Release Version Switcher Selection:**
+     - Fixed `versionSwitcher` dynamic population from `releaseMeta` to evaluate `v.status === "active"` rather than stale hardcoded `"v3"`, correctly selecting `v3.6.0 (Post-Audit Remediation)`.
