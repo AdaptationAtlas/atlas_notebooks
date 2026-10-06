@@ -523,7 +523,28 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   3. **Defect 11 (Provenance Drawer Navigation & Fallback) · SETTLED:**
      - Fixed relative script path `../../helpers/provenanceDrawer.js` (with fallback to `/helpers/provenanceDrawer.js`) to eliminate 404s on GitHub Pages and nested routes.
      - Re-routed metadata inspection links to Section 6 Provenance & Catalogue tab (`switchTab('tab-methods')`) and added fallback in `resolve('release_meta')`.
-  4. **Defect 6 & Claims B1–B4 (Demographic Benchmarks & Sub-County Unit Discrepancy) · HELD FOR UPSTREAM CLAUDE INVESTIGATION:**
+   4. **Defect 6 & Claims B1–B4 (Demographic Benchmarks & Sub-County Unit Discrepancy) · HELD FOR UPSTREAM CLAUDE INVESTIGATION:**
      - Investigation Confirmed: The upstream spatial exposure pipeline (`hazards_prototype`) used `ken_adm2_iebc_simple.topojson` (290 IEBC parliamentary constituencies) and WorldPop 2020 constrained 100m raster sums (~55.1M national population) as spatial denominators for flood raster intersections. The frontend previously summed these constituency rows and labeled the result as '2019 Census • KNBS Audited', producing county discrepancies (e.g. Marsabit showing 365,683 population and 76,028 km² across 4 units, vs. official KNBS 2019 Census of 459,785 population and 70,944 km² across 7 sub-counties).
      - National Scope: This discrepancy affects all 47 counties due to the difference between IEBC electoral boundaries and KNBS administrative boundaries, and WorldPop raster totals vs KNBS enumerated headcounts.
      - Action: In accordance with user guidance, no drastic population alterations or schema additions have been applied to `notebook_v3.qmd` pending cross-team coordination with the Claude pipeline session (which developed `7b_relevel_exposure_pop.R`). Complete diagnostic dossier prepared for upstream alignment.
+
+- **D42 · Version Bump to v3.6.0 & Audit Remediation: Defects 1–4 Resolution (ENSO Gauge Chronology, RONI Ingestion, Metric Alignment, Silent Fallbacks) · SETTLED (2026-10-06).**
+  Bumps platform version from audited baseline `v3.5.2` to `v3.6.0` and resolves critical scientific and engineering defects identified in Dr. Aniruddha Ghosh's audit:
+  1. **Platform Version Bump to v3.6.0:**
+     - Bumped version from `v3.5.2` (audited baseline) to `v3.6.0` (post-audit remediation) across `data/KE-enso-explorer/release.json`, hero badges, version switcher (`#versionSwitcher`), Section 0, Section 6 provenance, and global footer.
+     - Preserved `v3.5.2` in `#versionSwitcher` as `v3.5.2 (Dr. Ghosh Audit Baseline)` (`notebook_v3.html?review=true`) so reviewers can compare against the baseline evaluated in the audit.
+  2. **Defect 1 (ENSO Gauge Chronological Sort & Drive Logic) · SETTLED:**
+     - Fixed DuckDB SQL query `seasonalDrivers` (qmd:10950–10985) to order seasons by an explicit `season_order` (DJF=1 .. NDJ=12) instead of alphabetical string sorting (`AMJ, DJF, ... NDJ, OND, SON`).
+     - Updated `currentState` (qmd:10780–10795) to sort `ninoRows` chronologically via `seasonsOrder`, resolving the alphabetical bug where `NDJ` (Nov–Jan 2025/26, −0.59 °C) was picked as the latest season over `JAS 2026` (+1.69 °C), showing "Weak La Niña" during an active El Niño.
+     - Updated gauge headers in Section 2 (qmd:19300) to explicitly report the active observation season/month (`JAS 2026` / `August 2026`).
+  3. **Defect 2 (RONI Lead-in Vintage Refresh & Ingestion) · SETTLED:**
+     - Ingested official NOAA CPC JAS 2026 RONI (+1.69 °C) and Sep 2026 Niño 3.4 (+2.56 °C) via `enso_drivers_build.py`.
+     - Synced `driver_indices.parquet`, `enso_drivers_monthly.parquet`, and `enso_drivers_seasonal.parquet` into `_site/data/KE-enso-explorer/`.
+     - Validated via `scripts/check_data_freshness.py` (30/30 checks passed).
+  4. **Defect 3 (Analogue Distance Metric Space Alignment) · SETTLED:**
+     - Translated raw IRI Niño 3.4 plume median into RONI teleconnection space (`rawIriMedian - 0.38`), removing ~0.38 °C tropical background warming before computing Euclidean distance against historical peak RONI (`c.roni_conc`).
+     - Aligned target comparison in analogue peak comparison card (qmd:19470–19488) to compare like-with-like in RONI space, eliminating the spurious "unprecedented peak (+1.2 °C above analogues)" alert banner.
+  5. **Defect 4 (Silent Fallback & Synthetic Match Removal) · SETTLED:**
+     - Removed hardcoded silent fallback constants (`0.821, 0.370, 0.950, 0.450`, `3.09`, `0.39`) from `analogueYears` (qmd:11095–11195).
+     - Removed synthetic $z = 0$ scoring for missing candidate values: candidate years missing required predictor dimensions are cleanly dropped from ranking rather than falsely rewarded with zero distance.
+
