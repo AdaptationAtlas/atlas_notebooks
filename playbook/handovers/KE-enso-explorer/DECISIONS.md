@@ -576,3 +576,13 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Updated Section 5 Technical Dynamics Track (qmd:6220–6226) to define the Western V gradient per Funk et al. (2019, 2023) and Hoell & Funk (2013) ($WV_{\text{gradient}} = \text{SSTA}_{\text{Niño 3.4}} - \text{SSTA}_{\text{Western V}}$ with Western V warm pool $\subset 120^\circ\text{--}160^\circ\text{E}, 15^\circ\text{S}\text{--}20^\circ\text{N}$). Replaced simplistic bounding box with accurate gradient physics.
      - Replaced "persistent Long Rains droughts" with "more frequent Long Rains droughts" (qmd:6207), acknowledging the exceptionally wet MAM 2018 event (+303 mm in Marsabit).
      - Corrected Drosdowsky (1994) journal venue to *Weather and Forecasting* across inline citations (qmd:6274).
+
+- **D45 · Audit Remediation: CCSR/IRI Plume Model Verification & Averages Segregation (Defect 10) · SETTLED (2026-10-06).**
+  Investigated and resolved auditor query regarding CCSR/IRI multi-model prediction plume parser:
+  1. **Ensemble Composition & Member Verification:**
+     - Verified that official CCSR/IRI Figure 4 SVG contains exactly 24 distinct individual model trajectories (14 dynamical: AUS-ACCESS, CMC CANSIP, CMCC SPS4, COLA CCSM4, CS-IRI-MM, IOCAS ICM, JMA, KMA, LDEO, MetFRANCE, NASA GMAOv3, NCEP CFSv2, SINTEX-F, UKMO; 10 statistical: BCC_RZDM, CPC MRKOV, CSU CLIPR, IAP-NN, TONGJI-ML, UCLA-TCD, UW PSL-CSLIM, UW PSL-LIM, Wyrtki-CSLIM, XRO). The mention of "22 models" in the IRI text discussion reflects an unupdated upstream text boilerplate (predating the addition of CMCC SPS4 and TONGJI-ML to the active plume figure).
+  2. **Exclusion of Group Averages from Median:**
+     - Confirmed that group average traces (`DYN Average`, `STAT Average`, and `COMBINED AVG`) are parsed into `bundle.current.averages` (`dynamical`, `statistical`, `total`) and are strictly excluded from `bundle.current.models`.
+     - Verified that the ensemble median calculation (`d3.median(iriPlumeBundle.current.models.map(...))`) operates strictly across the 24 individual model members (+3.395 °C, rounding to +3.40 °C for OND 2026), with zero average-trace pollution.
+  3. **UI Transparency & Provenance:**
+     - Updated Section 2 Figure 2.0 header badge and caption to explicitly display the breakdown: `24 Models (14 Dynamical, 10 Statistical; Averages Excluded from Median)`.
