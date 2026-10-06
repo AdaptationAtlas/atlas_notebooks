@@ -586,3 +586,17 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Verified that the ensemble median calculation (`d3.median(iriPlumeBundle.current.models.map(...))`) operates strictly across the 24 individual model members (+3.395 °C, rounding to +3.40 °C for OND 2026), with zero average-trace pollution.
   3. **UI Transparency & Provenance:**
      - Updated Section 2 Figure 2.0 header badge and caption to explicitly display the breakdown: `24 Models (14 Dynamical, 10 Statistical; Averages Excluded from Median)`.
+
+- **D46 · Section 1.3 GESI Vulnerability Profile Re-alignment & County Interactivity Bug (Pete Review Lines 59–76, Claims B12–B14) · SETTLED (2026-10-06).**
+  Resolved critical data-binding discrepancy and UX defects in Section 1.3 Figure 1.3 (GESI Vulnerability Profile):
+  1. **Database Re-alignment to Official KNBS Survey Indicators:**
+     - Re-aligned `FULL_35_GESI_DB` to the 35 verified indicators officially extracted in `data/KE-enso-explorer/gesi_v2.parquet` from the KNBS 2019 Census & 2023 County Gender Data Sheets across 4 thematic domains: Water & Sanitation (B1, B3, B4, B5), Living Conditions & Food Security (B7, B6-F, B6-M), Health & Nutrition (D7-F, D7-M, D8-F, D8-M, D10, D9, D11-F, D11-M, D2, D6, C6, C7-F, C7-M, A3-F, A3-M), and Education & Gender Demographics (E1-F, E1-M, E2-F, E2-M, E6-Gross, E6-Net, E8-Gross, E8-Net, C1-F, C1-M, C2, C4, C9).
+     - Curated 10 high-priority climate vulnerability indicators for `#climate_key`: Water fetching time burden (B3), food insecurity (B7), female thinness (D7-F), male thinness (D7-M), health access barriers (D10), water access <30 min (B1), unshared sanitation (B4), clean cooking (B5), female literacy (E1-F), and child marriage (C1-F).
+  2. **County Switching Bug Resolution:**
+     - Fixed `updateGesiWithLiveSeries` to match active series by exact KNBS `code` and `sub` disaggregation. Removed the silent Marsabit-only hardcoded fallback (`ind.marsabitVal`). All 47 counties now dynamically populate with real survey data, ranks, and national comparisons.
+  3. **UI Consolidation & Elimination of Duplicate Titles:**
+     - Consolidated domain filter pills, view toggles, plot type selectors, and compact inline legend into a single streamlined control block, reducing vertical whitespace before the plot canvas by >50%.
+     - Removed duplicate "Figure 1.3" title text rendered inside the SVG graphic, preserving single standard header and footer references.
+     - Added comprehensive tooltips to each indicator row explaining why the metric matters for climate adaptation and shock transmission.
+     - Wired dynamic HURUmap / KNBS county profile links (`https://kenya.hurumap.org/profiles/county-{code}-{slug}/`) that reactively update when switching counties.
+
