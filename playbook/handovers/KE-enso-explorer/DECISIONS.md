@@ -599,4 +599,19 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Removed duplicate "Figure 1.3" title text rendered inside the SVG graphic, preserving single standard header and footer references.
      - Added comprehensive tooltips to each indicator row explaining why the metric matters for climate adaptation and shock transmission.
      - Wired dynamic HURUmap / KNBS county profile links (`https://kenya.hurumap.org/profiles/county-{code}-{slug}/`) that reactively update when switching counties.
-
+- **D47 · Livestock Species Completeness (Exclusion of Camels), Terms of Trade Threshold Reconciliation & Directory Tool Hyperlinks (Claims B11, E7, E9, Pete Review Lines 9, 45–56, 221) · SETTLED (2026-10-06).**
+  Resolved critical data-integrity, economic threshold, and navigation items from Dr. Ghosh's audit and Pete's direct review notes:
+  1. **Livestock Species Completeness & Exclusion of Camels (Claim B11, Pete Review Lines 45–56):**
+     - Explicitly clarified across Section 1.2 Figure 1.2 macroBar label (`Pastoralist Livestock (Cattle, Goats, Sheep, Poultry • Excludes Camels)`), insight warning callout, folded methodology text, and `plotFooter` metadata that FAO GLW4 models cattle, sheep, goats, pigs, and poultry, but omits camels.
+     - Documented that in northern pastoral ASALs (Marsabit, Wajir, Mandera, Garissa), modeled livestock figures represent ruminants and poultry only; total pastoral capital is substantially higher when accounting for camel herds. Directed users to Section 1.1 for official KNBS administrative camel census headcounts (e.g. 203,320 camels in Marsabit).
+     - Updated Section 1 primary agricultural asset KPI tile placeholder and dynamic subtitle logic to clarify `(excl. camels)` whenever livestock is the dominant asset.
+  2. **Terms of Trade Threshold Reconciliation & Multi-hazard Card Alignment (Claims E7, E9):**
+     - Reconciled August 2011 drought peak ToT across Section 4, Section 5, and Table 4.3 to `28.7 kg maize / goat (-68.1% vs. 24-month peak of 90.0 kg)`, eliminating internal contradictions (e.g. `20.5 kg`).
+     - Reconciled February 2023 drought trough ToT across Section 4, Section 5, and Table 4.3 to `25.1 kg maize / goat (-68.1% vs. peak; October 2022 reached 33.4 kg, -65.4%)`, fixing inconsistent references (e.g. `21.3 kg` and `21 kg`).
+     - Harmonized normal baseline purchasing power to `60 to 75 kg maize per goat (2008–2020 climatological baseline median: 63.0 kg/goat)`.
+     - Remediated Claim E9 by eliminating unsupported statements that ToT "declares" IPC emergency phases or leads by 60–90 days; updated wording to reflect empirical co-occurrence with IPC Phase 3+ (Crisis) and Phase 4 (Emergency) acute food insecurity classifications in ASAL counties.
+     - Enhanced Section 2 historical analogue card (`sec4Profile`) to report both annual median ToT and the monthly crisis trough (`Trough: ${totMin} kg in ${totMinMo}`), eliminating cross-tab perceptual discrepancies.
+  3. **Official Tools Directory Hyperlinks & Institutional Branding (Pete Review Lines 9, 221):**
+     - Converted all operational deliverables in Table 2.3 into active hyperlinks pointing to live official portals (KMSA seasonal/county/severe-weather advisories; NDMA monthly county/national bulletins and VCI; KRCS IFRC-approved EAPs and trigger matrices; ICPAC Hazards Watch, GHACOF consensus, and Drought Watch; KFSSG LRA/SRA assessments and IPC reports; NDOC situation reports and coordination).
+     - Replaced generic SVGs in Table 2.3 with branded institutional monogram emblems (`KMSA`, `NDMA`, `KRCS`, `ICPAC`, `KFSSG`, `NDOC`).
+     - Added official `rcmrd-logo.png` to Section 0 institutional partners grid and universal page footer.
