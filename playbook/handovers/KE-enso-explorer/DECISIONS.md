@@ -548,3 +548,20 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Removed hardcoded silent fallback constants (`0.821, 0.370, 0.950, 0.450`, `3.09`, `0.39`) from `analogueYears` (qmd:11095–11195).
      - Removed synthetic $z = 0$ scoring for missing candidate values: candidate years missing required predictor dimensions are cleanly dropped from ranking rather than falsely rewarded with zero distance.
 
+- **D43 · Audit Remediation: Empirical Rainfall Quantiles & Unbiased Mode Tie-Breaking (Defects 7 & 8, Claims C12, D2, D6, H4) · SETTLED (2026-10-06).**
+  Resolves statistical integrity and physical realism defects regarding precipitation distributions and modal classification:
+  1. **Defect 7 & Claim D2 (Rainfall Distribution & Climatological Rules) · SETTLED:**
+     - In Figure 3.1 (`rainPanel`, qmd:11720–11810), replaced parametric Gaussian standard deviation bands (`clim ± 0.5σ` and `clim ± 1.5σ`) with empirical non-parametric quantiles derived directly from the 1991–2020 WMO normal baseline: empirical terciles (P33, P67) and extreme deciles (P10, P90).
+     - Eliminates the physical absurdity flagged by Dr. Ghosh in Marsabit OND where `clim - 1.5σ` evaluated to −11.5 mm, rendering a nonsensical "Much drier: ≤ 0 mm (−1.5σ)" label. Under empirical quantiles, P10 is a physically valid 64 mm, rendering `Much Drier: ≤64 mm (P10)`.
+     - Aligned anomaly mode classifications with 1991–2020 empirical tercile thresholds.
+  2. **Claim C12 & Method 02 (Empirical Quantile Labels vs Gaussian ±0.43σ) · SETTLED:**
+     - In Section 2 Figure 2.1 (`sec4TercileView`, qmd:19950–20100), eliminated false Gaussian labels (`> +0.43σ`, `±0.43σ`, `< -0.43σ`). Replaced with authentic empirical tercile labels reporting exact county thresholds in mm (`Upper Tercile • >167 mm`, `Middle Tercile • 101–167 mm`, `Lower Tercile • ≤101 mm` for Marsabit OND).
+     - In Section 6 Method 02 (qmd:6730), corrected methodology notes to state that East African precipitation is positively skewed and strictly evaluated via empirical sample quantiles (Q̂_0.333 and Q̂_0.667) rather than symmetric Gaussian approximations.
+  3. **Claim D6 (Single Baseline Harmonization between Fig 3.2 and Fig 3.3) · SETTLED:**
+     - In Figure 3.3 (`sec23Data`, qmd:12440–12455), restricted the quantile calculation for scatter plot outcome coloring (`Wetter`, `Near-normal`, `Drier`) to the 1991–2020 climatological normal period rather than the full 1981–2024 record.
+     - Harmonized color definitions using `PALETTE.outcome` tokens.
+  4. **Defect 8 (Unbiased Modal Tercile & Tie Handling) · SETTLED:**
+     - In `countyOutlook` (qmd:11200–11220), eliminated the biased `reduce` accumulator that defaulted to "Near Normal" on ties. Implemented explicit mode detection: if multiple categories tie for maximum count, `modal` is set to `null` and `isTie: true` with `tiedCategories` recorded.
+     - In Figure 2.1 (`sec4TercileView`), when analogue seasons are tied (e.g. 4 Wet, 4 Near), both tied columns receive active styling with a distinct `TIED MODE` indicator. The scenario advisory text explicitly reports: *"In [County], historical analogue seasons are evenly split between [Wetter than normal and Near normal] (X of N seasons each). There is no single modal outcome; contingency planning should evaluate both scenarios."*
+
+

@@ -6728,7 +6728,7 @@ viewof driverKind = Inputs.select(["ENSO (RONI)", "IOD (DMI)", "Western-V (WNP)"
               Below &lt; Q&#770;<sub>0.333</sub>, &nbsp;&nbsp; Q&#770;<sub>0.333</sub> &le; Near-Normal &le; Q&#770;<sub>0.667</sub>, &nbsp;&nbsp; Above &gt; Q&#770;<sub>0.667</sub>
             </div>
             <div class="methods-formula-notes">
-              <strong>Equiprobable Partitioning:</strong> Under a Gaussian climatological distribution, tercile boundaries correspond to &mu; &plusmn; 0.4307&sigma;. Natural frequencies (X of Y seasons in tercile) are prioritized over raw percentages to communicate small-sample uncertainty (N = 8 analogues).
+              <strong>Non-Parametric Empirical Partitioning:</strong> Because East African seasonal rainfall is positively skewed, tercile boundaries are calculated as empirical sample quantiles (Q&#770;<sub>0.333</sub> and Q&#770;<sub>0.667</sub>) from the 1991–2020 normal baseline rather than symmetric parametric Gaussian bounds (&mu; &plusmn; 0.43&sigma;). Natural frequencies (X of Y seasons in tercile) are prioritized over raw percentages to communicate small-sample uncertainty (N = 8 analogues).
             </div>
           </div>
 
@@ -11201,7 +11201,7 @@ analogueYearSet = new Set(analogueYears.map((d) => d.year))
 ```
 
 ```{ojs}
-// per-county likely outcome across the analogue years: modal tercile + share
+// per-county likely outcome across the analogue years: empirical tercile counts + unbiased modal classification (Defect 8)
 countyOutlook = {
   const byCty = d3.group(
     outlookBase.filter((r) => r.season === outlookTarget && analogueYearSet.has(r.year)),
@@ -11211,9 +11211,18 @@ countyOutlook = {
     const counts = {Dry: 0, Near: 0, Wet: 0};
     for (const r of rows) counts[r.tercile]++;
     const n = rows.length;
-    const modal = ["Wet", "Near", "Dry"].reduce((a, b) => counts[b] > counts[a] ? b : a, "Near");
-    out.set(gaul, {gaul, county: rows[0].county, is_county: rows[0].is_county,
-      counts, n, modal, share: n ? counts[modal] / n : 0});
+    
+    // Explicit, unbiased mode detection: do NOT pick a winner on ties (Defect 8)
+    const maxCount = Math.max(counts.Wet, counts.Near, counts.Dry);
+    const tiedCategories = ["Wet", "Near", "Dry"].filter((c) => counts[c] === maxCount);
+    const isTie = tiedCategories.length > 1;
+    const modal = isTie ? null : tiedCategories[0];
+
+    out.set(gaul, {
+      gaul, county: rows[0].county, is_county: rows[0].is_county,
+      counts, n, modal, isTie, tiedCategories, maxCount,
+      share: n && modal ? counts[modal] / n : (n ? maxCount / n : 0)
+    });
   }
   return out;
 }
@@ -11226,7 +11235,7 @@ selectedOutlook = {
   const key = rec.gaul1_code != null ? +rec.gaul1_code : null;
   const o = key != null ? countyOutlook.get(key) : null;
   const dots = analogueYears.map((a) => {
-    const row = outlookBase.find((r) => r.season === outlookTarget && r.year === a.year && r.gaul1_code === key);
+    const row = outlookBase.find((r) => r.season === outlookTarget && r.year === a.year && (key != null ? r.gaul1_code === key : r.county === county));
     return {
       year: a.year, 
       tercile: row ? row.tercile : null,
@@ -11239,7 +11248,14 @@ selectedOutlook = {
     };
   });
   const climMean = dots.find((d) => d.clim_mean != null)?.clim_mean || (o ? o.clim_mean : null);
-  return {outlook: o, dots, countyName: county, key, climMean};
+
+  // Compute county-specific empirical 1991–2020 tercile thresholds in mm (Defect 7)
+  const climRows = outlookBase.filter((r) => r.season === outlookTarget && (key != null ? r.gaul1_code === key : r.county === county) && r.year >= 1991 && r.year <= 2020 && r.ptot != null);
+  const climPtot = climRows.map((r) => r.ptot).sort((a, b) => a - b);
+  const tP33 = climPtot.length >= 10 ? d3.quantile(climPtot, 1 / 3) : null;
+  const tP67 = climPtot.length >= 10 ? d3.quantile(climPtot, 2 / 3) : null;
+
+  return {outlook: o, dots, countyName: county, key, climMean, tP33, tP67};
 }
 ```
 
@@ -11711,20 +11727,21 @@ rainPanel = (s) => {
   if (!rows.length) return html`<div style="color:#666;font-style:italic">No ${varDef.v} data for ${county} (${s}).</div>`;
   const anomaly = varIsSpei ? true : rainView.startsWith("Anomaly");
 
-  // Baseline stats for absolute & anomaly thresholds
+  // Baseline stats for absolute & anomaly thresholds (Empirical 1991–2020 quantiles, Defect 7)
   const climYears = rows.filter((r) => r.year >= 1991 && r.year <= 2020 && r.value != null);
-  const climSd = d3.deviation(climYears, (r) => r.value) || (clim * 0.35) || 1;
+  const climVals = climYears.map((r) => r.value).sort((a, b) => a - b);
   const tMean = Math.round(clim);
-  const tMuchWetter = Math.round(clim + 1.5 * climSd);
-  const tWetter = Math.round(clim + 0.5 * climSd);
-  const tDrier = Math.round(clim - 0.5 * climSd);
-  const tMuchDrier = Math.max(0, Math.round(clim - 1.5 * climSd));
+  // Empirical quantiles over 1991–2020: terciles (P33, P67) and extreme bounds (P10, P90)
+  const tP10 = Math.round(d3.quantile(climVals, 0.10) ?? Math.max(0, clim * 0.4));
+  const tP33 = Math.round(d3.quantile(climVals, 1 / 3) ?? (clim * 0.7));
+  const tP67 = Math.round(d3.quantile(climVals, 2 / 3) ?? (clim * 1.3));
+  const tP90 = Math.round(d3.quantile(climVals, 0.90) ?? (clim * 1.6));
 
   const categoryOfAbs = (val) => {
-    if (val >= tMuchWetter) return "Much wetter";
-    if (val >= tWetter) return "Wetter";
-    if (val > tDrier) return "Normal";
-    if (val > tMuchDrier) return "Drier";
+    if (val >= tP90) return "Much wetter";
+    if (val >= tP67) return "Wetter";
+    if (val > tP33) return "Normal";
+    if (val > tP10) return "Drier";
     return "Much drier";
   };
 
@@ -11733,8 +11750,8 @@ rainPanel = (s) => {
     if (varIsSpei) {
       return val >= 0.5 ? "Wetter than normal" : val <= -0.5 ? "Drier than normal" : "Near normal";
     }
-    const diff = val - clim;
-    return Math.abs(diff) < 0.3 * climSd ? "Near normal" : (diff >= 0 ? "Wetter than normal" : "Drier than normal");
+    // Anomaly representation evaluated against empirical 1991–2020 terciles
+    return val >= tP67 ? "Wetter than normal" : (val <= tP33 ? "Drier than normal" : "Near normal");
   };
 
   const data = rows.map((r) => ({...r,
@@ -11766,23 +11783,33 @@ rainPanel = (s) => {
 
   const absRules = isAbsMode ? [
     Plot.ruleY([tMean], {stroke: "#334155", strokeDasharray: "4,4", strokeWidth: 1.3}),
-    Plot.ruleY([tMuchWetter], {stroke: "#1d4ed8", strokeDasharray: "2,2", strokeWidth: 1, strokeOpacity: 0.8}),
-    Plot.ruleY([tWetter], {stroke: "#0ea5e9", strokeDasharray: "2,2", strokeWidth: 1, strokeOpacity: 0.8}),
-    Plot.ruleY([tDrier], {stroke: "#f97316", strokeDasharray: "2,2", strokeWidth: 1, strokeOpacity: 0.8}),
-    Plot.ruleY([tMuchDrier], {stroke: "#b91c1c", strokeDasharray: "2,2", strokeWidth: 1, strokeOpacity: 0.8}),
+    Plot.ruleY([tP90], {stroke: "#1d4ed8", strokeDasharray: "2,2", strokeWidth: 1, strokeOpacity: 0.8}),
+    Plot.ruleY([tP67], {stroke: "#0ea5e9", strokeDasharray: "2,2", strokeWidth: 1, strokeOpacity: 0.8}),
+    Plot.ruleY([tP33], {stroke: "#f97316", strokeDasharray: "2,2", strokeWidth: 1, strokeOpacity: 0.8}),
+    Plot.ruleY([tP10], {stroke: "#b91c1c", strokeDasharray: "2,2", strokeWidth: 1, strokeOpacity: 0.8}),
     Plot.text([tMean], {
       x: () => yrDomain[yrDomain.length - 1], y: () => tMean,
       textAnchor: "start", dx: 6, text: () => `Normal Mean (${tMean} mm)`,
       fill: "#334155", fontSize: 8.5, fontWeight: 700
     }),
-    Plot.text([tMuchWetter], {
-      x: () => yrDomain[yrDomain.length - 1], y: () => tMuchWetter,
-      textAnchor: "start", dx: 6, text: () => `Much Wetter: ≥${tMuchWetter} mm (+1.5σ)`,
+    Plot.text([tP90], {
+      x: () => yrDomain[yrDomain.length - 1], y: () => tP90,
+      textAnchor: "start", dx: 6, text: () => `Much Wetter: ≥${tP90} mm (P90)`,
       fill: "#1d4ed8", fontSize: 8, fontWeight: 600
     }),
-    Plot.text([tMuchDrier], {
-      x: () => yrDomain[yrDomain.length - 1], y: () => tMuchDrier,
-      textAnchor: "start", dx: 6, text: () => `Much Drier: ≤${tMuchDrier} mm (−1.5σ)`,
+    Plot.text([tP67], {
+      x: () => yrDomain[yrDomain.length - 1], y: () => tP67,
+      textAnchor: "start", dx: 6, text: () => `Wetter: ≥${tP67} mm (P67)`,
+      fill: "#0ea5e9", fontSize: 8, fontWeight: 600
+    }),
+    Plot.text([tP33], {
+      x: () => yrDomain[yrDomain.length - 1], y: () => tP33,
+      textAnchor: "start", dx: 6, text: () => `Drier: ≤${tP33} mm (P33)`,
+      fill: "#f97316", fontSize: 8, fontWeight: 600
+    }),
+    Plot.text([tP10], {
+      x: () => yrDomain[yrDomain.length - 1], y: () => tP10,
+      textAnchor: "start", dx: 6, text: () => `Much Drier: ≤${tP10} mm (P10)`,
       fill: "#b91c1c", fontSize: 8, fontWeight: 600
     })
   ] : [Plot.ruleY([0])];
@@ -12415,14 +12442,15 @@ sec23Data = {
     });
   }
 
-  // Calculate tercile classifications for county rainfall response
-  const yVals = joined.map(d => d.y).sort((a, b) => a - b);
-  const q33 = d3.quantile(yVals, 0.333);
-  const q67 = d3.quantile(yVals, 0.667);
+  // Calculate tercile classifications from 1991–2020 climatological baseline (Defect 7 & Audit D6)
+  const baselineJoined = joined.filter(d => d.year >= 1991 && d.year <= 2020);
+  const baseYVals = (baselineJoined.length >= 10 ? baselineJoined : joined).map(d => d.y).sort((a, b) => a - b);
+  const q33 = d3.quantile(baseYVals, 1 / 3);
+  const q67 = d3.quantile(baseYVals, 2 / 3);
 
   joined.forEach(d => {
     d.outcome = d.y >= q67 ? "Wetter" : (d.y <= q33 ? "Drier" : "Near-normal");
-    d.color = d.outcome === "Wetter" ? "#2b83ba" : (d.outcome === "Drier" ? "#d7191c" : "#94a3b8");
+    d.color = d.outcome === "Wetter" ? (PALETTE?.outcome?.wetter || "#2b83ba") : (d.outcome === "Drier" ? (PALETTE?.outcome?.drier || "#d7191c") : (PALETTE?.outcome?.near || "#94a3b8"));
   });
 
   // Identify notable benchmark years to label by default (top 3 wettest, top 3 driest, top 2 strongest driver departures)
@@ -19930,11 +19958,15 @@ sec4TercileView = {
   const pWet = n > 0 ? Math.round((counts.Wet / n) * 100) : 0;
   const pNear = n > 0 ? Math.round((counts.Near / n) * 100) : 0;
   const pDry = n > 0 ? Math.round((counts.Dry / n) * 100) : 0;
-  const modal = o ? o.modal : "Near";
+  const modal = o ? o.modal : null;
+  const isTie = o ? o.isTie : false;
+  const tiedCategories = o ? (o.tiedCategories || []) : [];
   const countyName = (selectedOutlook && selectedOutlook.countyName) || county || "Marsabit";
   const climMean = (selectedOutlook && selectedOutlook.climMean != null) 
     ? selectedOutlook.climMean 
     : (dots.find(d => d.clim_mean != null)?.clim_mean || null);
+  const tP33 = selectedOutlook ? selectedOutlook.tP33 : null;
+  const tP67 = selectedOutlook ? selectedOutlook.tP67 : null;
 
   const totalSample = (analogueYears && analogueYears[0]?.totalSample) || 45;
   const activeCrit = matchingCriterion || "Full Trajectory (Lead-in + Plume)";
@@ -20032,31 +20064,40 @@ sec4TercileView = {
       <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.60rem; margin-bottom: 0.85rem;">
         
         <!-- Column 1: Wetter -->
-        <div style="background: ${modal === 'Wet' ? '#f0f9ff' : '#f8fafc'}; border: 1px solid ${modal === 'Wet' ? '#0284c7' : '#e2e8f0'}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
+        <div style="background: ${(!isTie && modal === 'Wet') ? '#f0f9ff' : (isTie && tiedCategories.includes('Wet') ? '#f0f9ff' : '#f8fafc')}; border: 1px solid ${(!isTie && modal === 'Wet') ? '#0284c7' : (isTie && tiedCategories.includes('Wet') ? '#38bdf8' : '#e2e8f0')}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
           <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 0.40rem; margin-bottom: 0.45rem;">
-            <div style="font-size: 0.69rem; font-weight: 800; color: #0284c7; text-transform: uppercase;">Wetter</div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+              <span style="font-size: 0.69rem; font-weight: 800; color: #0284c7; text-transform: uppercase;">Wetter</span>
+              ${isTie && tiedCategories.includes('Wet') ? html`<span style="font-size: 0.58rem; font-weight: 700; background: #e0f2fe; color: #0369a1; padding: 1px 4px; border-radius: 3px;">TIED MODE</span>` : ''}
+            </div>
             <div style="font-size: 1.15rem; font-weight: 800; color: #0284c7; margin: 1px 0;">${counts.Wet} of ${n}</div>
-            <div style="font-size: 0.68rem; color: #0369a1; font-weight: 600;">${pWet}% (&gt; +0.43&sigma;)</div>
+            <div style="font-size: 0.68rem; color: #0369a1; font-weight: 600;">${pWet}% (${tP67 != null ? `Upper Tercile &bull; &gt;${Math.round(tP67)} mm` : 'Upper Tercile'})</div>
           </div>
           ${renderAnaloguePills(wetDots, '#bae6fd')}
         </div>
 
         <!-- Column 2: Near Normal -->
-        <div style="background: ${modal === 'Near' ? '#f1f5f9' : '#f8fafc'}; border: 1px solid ${modal === 'Near' ? '#475569' : '#e2e8f0'}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
+        <div style="background: ${(!isTie && modal === 'Near') ? '#f1f5f9' : (isTie && tiedCategories.includes('Near') ? '#f1f5f9' : '#f8fafc')}; border: 1px solid ${(!isTie && modal === 'Near') ? '#475569' : (isTie && tiedCategories.includes('Near') ? '#94a3b8' : '#e2e8f0')}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
           <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 0.40rem; margin-bottom: 0.45rem;">
-            <div style="font-size: 0.69rem; font-weight: 800; color: #475569; text-transform: uppercase;">Near Normal</div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+              <span style="font-size: 0.69rem; font-weight: 800; color: #475569; text-transform: uppercase;">Near Normal</span>
+              ${isTie && tiedCategories.includes('Near') ? html`<span style="font-size: 0.58rem; font-weight: 700; background: #e2e8f0; color: #334155; padding: 1px 4px; border-radius: 3px;">TIED MODE</span>` : ''}
+            </div>
             <div style="font-size: 1.15rem; font-weight: 800; color: #334155; margin: 1px 0;">${counts.Near} of ${n}</div>
-            <div style="font-size: 0.68rem; color: #475569; font-weight: 600;">${pNear}% (&plusmn;0.43&sigma;)</div>
+            <div style="font-size: 0.68rem; color: #475569; font-weight: 600;">${pNear}% (${(tP33 != null && tP67 != null) ? `Middle Tercile &bull; ${Math.round(tP33)}–${Math.round(tP67)} mm` : 'Middle Tercile'})</div>
           </div>
           ${renderAnaloguePills(nearDots, '#cbd5e1')}
         </div>
 
         <!-- Column 3: Drier -->
-        <div style="background: ${modal === 'Dry' ? '#fffbeb' : '#f8fafc'}; border: 1px solid ${modal === 'Dry' ? '#d97706' : '#e2e8f0'}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
+        <div style="background: ${(!isTie && modal === 'Dry') ? '#fffbeb' : (isTie && tiedCategories.includes('Dry') ? '#fffbeb' : '#f8fafc')}; border: 1px solid ${(!isTie && modal === 'Dry') ? '#d97706' : (isTie && tiedCategories.includes('Dry') ? '#f59e0b' : '#e2e8f0')}; border-radius: 6px; padding: 0.60rem 0.55rem; display: flex; flex-direction: column;">
           <div style="border-bottom: 1px solid #e2e8f0; padding-bottom: 0.40rem; margin-bottom: 0.45rem;">
-            <div style="font-size: 0.69rem; font-weight: 800; color: #d97706; text-transform: uppercase;">Drier</div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline;">
+              <span style="font-size: 0.69rem; font-weight: 800; color: #d97706; text-transform: uppercase;">Drier</span>
+              ${isTie && tiedCategories.includes('Dry') ? html`<span style="font-size: 0.58rem; font-weight: 700; background: #fef3c7; color: #92400e; padding: 1px 4px; border-radius: 3px;">TIED MODE</span>` : ''}
+            </div>
             <div style="font-size: 1.15rem; font-weight: 800; color: #d97706; margin: 1px 0;">${counts.Dry} of ${n}</div>
-            <div style="font-size: 0.68rem; color: #b45309; font-weight: 600;">${pDry}% (&lt; &minus;0.43&sigma;)</div>
+            <div style="font-size: 0.68rem; color: #b45309; font-weight: 600;">${pDry}% (${tP33 != null ? `Lower Tercile &bull; &le;${Math.round(tP33)} mm` : 'Lower Tercile'})</div>
           </div>
           ${renderAnaloguePills(dryDots, '#fde68a')}
         </div>
@@ -20067,7 +20108,11 @@ sec4TercileView = {
       <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-left: 4px solid #0284c7; border-radius: 6px; padding: 0.60rem 0.80rem; font-size: 0.74rem; color: #334155; line-height: 1.45;">
         <strong>Scenario Planning Interpretation (N = ${n} Analogue Seasons):</strong>
         Empirical analogue distributions ground dynamic models in Kenyan climate history. Because ocean configurations are rare (${n} of ${totalSample} candidate seasons, 1981–2025), these terciles represent empirical scenarios rather than deterministic forecasts. 
-        In <strong>${countyName}</strong>, the modal scenario is <strong>${modal === 'Wet' ? 'Wetter than normal' : modal === 'Dry' ? 'Drier than normal' : 'Near normal'}</strong> (${counts[modal]} of ${n} seasons).
+        ${isTie 
+          ? `In <strong>${countyName}</strong>, historical analogue seasons are <strong>evenly split</strong> between <strong>${tiedCategories.map(c => c === 'Wet' ? 'Wetter than normal' : c === 'Dry' ? 'Drier than normal' : 'Near normal').join(' and ')}</strong> (${counts[tiedCategories[0]]} of ${n} seasons each). There is no single modal outcome; contingency planning should evaluate both scenarios.`
+          : (modal 
+              ? `In <strong>${countyName}</strong>, the modal scenario is <strong>${modal === 'Wet' ? 'Wetter than normal' : modal === 'Dry' ? 'Drier than normal' : 'Near normal'}</strong> (${counts[modal]} of ${n} seasons).`
+              : `In <strong>${countyName}</strong>, analogue seasons are distributed across terciles (${counts.Wet} Wet, ${counts.Near} Near, ${counts.Dry} Dry).`)}
         <em>Click any historical year pill above to explore its spatial rainfall footprint in Figure 2.2 below.</em>
       </div>
 
