@@ -583,7 +583,9 @@
   window.openMethodDrawer = openMethodDrawer;
   window.closeDrawer = closeDrawer;
   window.jumpToFullCatalog = function () {
-    if (typeof window.jumpToDataset === 'function' && S.activeKey) {
+    if (typeof window.jumpToDatasetCard === 'function' && S.activeKey) {
+      window.jumpToDatasetCard(S.activeKey);
+    } else if (typeof window.jumpToDataset === 'function' && S.activeKey) {
       window.jumpToDataset(S.activeKey);
     } else if (typeof window.switchTab === 'function') {
       window.switchTab('tab-methods');

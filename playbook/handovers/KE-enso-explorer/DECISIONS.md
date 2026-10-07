@@ -627,3 +627,18 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Cleaned up all year labels in Section 4 multi-hazard timeline visual and Section 4 Figure 4.3 NDVI timeseries, replacing fragmented `'06 Drought`, `'11 Famine`, `'17 Crisis`, `'20–22 Triple Dip` labels with clean 4-digit years (`2006 Drought`, `2011 Famine`, `2017 Crisis`, `2020–2022 Triple Dip`, `2023–2024 El Niño Flush`).
   4. **Active Release Version Switcher Selection:**
      - Fixed `versionSwitcher` dynamic population from `releaseMeta` to evaluate `v.status === "active"` rather than stale hardcoded `"v3"`, correctly selecting `v3.6.0 (Post-Audit Remediation)`.
+
+- **D49 · Flood Hazard Hydrodynamic Modeling Alignment, Metadata Drawer In-Place Navigation & Teleconnection Natural Frequencies (Claims D10–D15, H2, Pete Review Lines 121, 165, 260–268) · SETTLED (2026-10-07).**
+  Addressed auditor claims on flood hazard specifications and Pete's UX navigation / teleconnection presentation items:
+  1. **Flood Hazard Specifications & Geomorphic Drainage Realignment (Claims D10–D15, H2):**
+     - Updated Section 3.5 (Figure 3.5), Section 6 Method 01, and plotFooter metadata across `notebook_v3.qmd` to specify the authoritative EC JRC Global River Flood Hazard Maps v2.1 dataset (90 m, 2D LISFLOOD-FP forced by GloFAS v4 runoff, 10- to 500-year return periods; Baugh et al. 2024), retiring erroneous "GloFAS-Hazard v4.0", "1 km JRC GloFAS", and "2D LISFLOOD channel simulations" phrasing.
+     - Clarified that Copernicus GFM Sentinel-1 SAR flood footprints are curated across 2018–2025 from Copernicus's January 2015–present archive.
+     - Realigned geomorphic drainage documentation: in pastoral ASALs like Marsabit, drainage operates through ephemeral sand-rivers (*laggas / wadis*) terminating into Lake Turkana and the Chalbi Desert endorheic pan, rather than perennial rivers (Tana, Athi, Daua). Explicitly documented permanent waterbody (Lake Turkana) and seasonal salt pan (Chalbi Desert) pre-masking (HydroLAKES v1.0 & RCMRD land cover) to prevent conflating natural water surfaces with flooded assets.
+     - Corrected seasonal flood dynamics to acknowledge that both OND and MAM produce severe riverine and flash flooding across Kenya (e.g. MAM 2018 and MAM 2024 in Tana, Nyando, and Athi basins alongside flash surges).
+  2. **In-Fold "Sources & Methods" Metadata Drawer Navigation (Pete Review Lines 260–268):**
+     - Updated `window.jumpToDataset(datasetKey)` in `notebook_v3.qmd` to call `window.openMethodDrawer(datasetKey)` directly, sliding out the metadata drawer in-place on the active tab without navigating the user away to Tab 6 (`tab-methods`) or losing their reading position.
+     - Routed deep-dive catalog navigation from inside the drawer footer ("Open in full catalogue") through `window.jumpToDatasetCard(datasetKey)` in `helpers/provenanceDrawer.js` to ensure clean transitions when the user explicitly requests the full catalog grid.
+  3. **Figure 3.2 Teleconnection Natural Frequency & Empirical Anomaly Error Term (Pete Review Line 121):**
+     - Refactored `contRows` to attach classified historical rows (`classifiedRows`) with driver groups and outcome classifications.
+     - Updated `insightB2` to display concise natural frequency formatting: `During ${posName} conditions (${seasonWord(activeSeason)}), <strong>${cTop}/${n} (${pct}%)</strong> resulted in <strong>${topOutcome}</strong> conditions.`
+     - Appended empirical rainfall anomaly mean and standard deviation error term: `• Mean anomaly: +X% (±Y%) vs 1991–2020 normal`.
