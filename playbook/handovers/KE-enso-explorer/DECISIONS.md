@@ -650,3 +650,28 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   2. **Combined Heading & Legend Unification (Pete Review Lines 179–181):**
      - Consolidated separate Panel A and Panel B headings into a single unified title above the graphic: `Figure 4.1: County Agricultural Output Series & Bimodal Environmental Overlays (${minYr}–${maxYr})`.
      - Combined Panel A commodity indicators and Panel B bimodal season swatches into a single cohesive legend bar (`unifiedLegend`) above the plot, eliminating redundant Plot-generated overlay legends (`legend: false`).
+
+- **D51 · Tier 16 Exposure Denominators & Demographic Re-Leveling (Defect 6, Claims B1–B4, Dispatch 2026-10-07) · SETTLED (2026-10-07).**
+  Actioned upstream pipeline dispatch `playbook/handovers/KE-enso-explorer/dispatches/2026-10-07_request-repull-tier16-exposure-denominator.md` to resolve Defect 6 and auditor Claims B1–B4:
+  1. **Re-Pulled Exposure Parquets & Ingested Official KNBS Census Surface:**
+     - Downloaded analysis-ready parquets: `exposure_totals.parquet`, `exposure_jrc_rp.parquet`, and `exposure_gfm_seasonal.parquet` from S3.
+     - Downloaded `population_knbs_census_adm1.parquet` (CC0-1.0 official KNBS census benchmarks across all 47 counties) into both `data/KE-enso-explorer/` and `_site/data/KE-enso-explorer/`.
+  2. **Vintage Check Assertions Suite (100% Passed):**
+     - `exposure_totals` rows / counties: 290 / 47.
+     - National `sum(pop_total)`: 52,837,534.03 vs. expected 52,837,534.
+     - National `sum(pop_total_grid)`: 55,119,797.93 vs. expected 55,119,798.
+     - Zero columns with `i.` prefix across all three tables.
+     - `pop_method`: `county-growth-from-2020` (totals, jrc) and `county-growth-from-2020-yearmatched` (gfm).
+     - `pop_source` / `pop_year`: `knbs-projection-2026` / 2026 (totals, jrc); exactly 7 distinct vintages in `gfm` (`knbs-census-2019` for 2018+2019, `knbs-projection-2020`...`2025`).
+     - Column counts: `gfm` (26), `jrc` (23), `totals` (18).
+  3. **Section 1 KPI Cards & Demographic Alignment:**
+     - Registered `census_adm1` in `dbExposure` DuckDB client.
+     - Section 1 KPI cards reactively query `census_adm1` for official audited benchmarks: Marsabit land area 70,944 km² (12.2% of national 580,895 km²), population 459,785 (0.97% of national 47,564,296), 6.5 persons/km², and 4 IEBC parliamentary constituencies.
+  4. **Table 1.1 Boundary Universe & Constituency Labeling:**
+     - Labeled sub-county units as official **IEBC parliamentary constituencies** (COD-AB adm2 boundaries). Added explicit footnote documenting the boundary universe difference from KNBS's 345 administrative sub-counties (e.g., Marsabit's 4 electoral constituencies — Laisamis, Moyale, North Horr, Saku — vs. 7 administrative sub-counties).
+     - Displayed both 2019 Census distributed headcount (`pop_2019`) and 2026 KNBS projections (`pop_total`). Added `"2026 Projected Pop"` and `"2019 Census Pop"` options to plot indicator selector.
+  5. **Exposure Labels & Copy Remediation:**
+     - Replaced all outdated "WorldPop counts" labels with *"People exposed — KNBS census level, distributed by WorldPop 100 m"*.
+     - Preserved exact invariance of `pop_pct`.
+     - In Section 4 Table 4.4, included `pop_source` per row (year-matched in GFM).
+     - Maintained strict neutrality on Mandera, Wajir, and Garissa census figures per *Sheikh & 24 others v KNBS* ([2025] KEHC 3212 (KLR)). Avoided writing flat national scaling percentage claims ("~14% lower").
