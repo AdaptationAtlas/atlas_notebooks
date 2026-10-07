@@ -763,3 +763,29 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Quarto render compiled with exit code 0 (`_site/notebooks/KE-enso-explorer/notebook_v3.html`).
      - Verified via Playwright in headless Chromium: 0 console errors, 0 page errors, full reactive re-computation on county switcher (Marsabit to Turkana), and strictly 2-page PDF export (`len(doc) == 2`).
 
+## D56 — Leave-One-Out Historical Hindcast Skill Verification (KE-48 Tier 2 Item 1, 1981–2025, 2026-10-07)
+- **APPROVED & IMPLEMENTED (2026-10-07).** Designed, computed, and surfaced empirical 45-year leave-one-out cross-validation (LOOCV, 1981–2025) hindcast skill for the analogue outlook in `notebook_v3.qmd` per KE-48 Tier 2 Item 1 and recommendations in Dr. Aniruddha Ghosh's external critical review (`reviews/2026-10-05_critical_review_aghosh.md`):
+  1. **Core Problem & Scientific Mandate:**
+     Dr. Ghosh's audit highlighted that presenting empirical analogue odds (such as "75% Wetter (6 of 8)" for Marsabit) without objective retrospective verification scores created institutional vulnerability for Anticipatory Action officers (Persona 4 checking trigger false-alarm rates), Development Partner reviewers (Persona 5 evaluating proposal evidence), and Climate Scientists (Persona 6 requiring standard cross-validation). Without skill scores, users could not determine whether analogue matching represented genuine predictive skill or random coincidence.
+  2. **45-Year Leave-One-Out Cross-Validation (LOOCV) Protocol:**
+     - For every historical season $T \in [1981, 2025]$ (45 years), evaluated the analogue outlook retrospectively by withholding test year $T$, ranking the remaining 44 seasons by standardized Euclidean distance $D_i$, predicting tercile probability distributions across the top $K$ nearest analogues ($K \in [5, 8]$), and validating against observed CHIRPS rainfall terciles (1991–2020 WMO baseline).
+     - Executed across all 48 spatial units (47 counties + Ilemi Triangle), both seasons (OND Short Rains and MAM Long Rains), and all three matching criteria (`Full Trajectory`, `Lead-in Observed (JAS)`, and `Projected Season`).
+  3. **Evaluated Verification Metrics:**
+     - **Ranked Probability Skill Score (RPSS):** $\text{RPSS} = 1 - \overline{\text{RPS}}_{\text{analogue}} / \overline{\text{RPS}}_{\text{clim}}$ measuring cumulative probability accuracy against 1991–2020 equal-odds climatology.
+     - **Modal Hit Rate & Skill Gain:** Modal classification accuracy vs 33.3% random expectation baseline ($\Delta \text{Hit} = \text{Hit Rate} - 33.3\%$).
+     - **Heidke Skill Score (HSS):** $(H - E) / (N - E)$ where $E = 15$ expected random hits out of $N=45$ seasons.
+     - **Brier Skill Score (BSS) for Extremes:** Evaluated separately for upper wet flood terciles (`bss_wet`) and lower dry drought terciles (`bss_dry`).
+     - **Severe False Alarm Rate:** Rate of predicting the upper tercile (Wet) when the actual observed outcome was the lower tercile (Dry), and vice versa.
+     - **3x3 Contingency Table:** Full confusion matrix recording predicted modal terciles vs observed actual terciles.
+  4. **Empirical Findings & Seasonal Contrasts:**
+     - **Short Rains (OND):** Confirmed strong positive teleconnection skill across pastoral ASALs and eastern Kenya. In Marsabit ($K=8$, Full Trajectory), RPSS reaches **+0.297**, modal accuracy is **64.4%** (29 of 45 seasons correct vs 15 expected by chance, a **+31.1% gain**), HSS is **+0.467**, wet flood BSS is **+0.41**, and severe false alarm rate is **0.0%**. Lead-in only matching achieves RPSS **+0.221** and 61.1% hit rate.
+     - **Long Rains (MAM):** Retrospective skill drops to ~33% hit rate and negative/zero RPSS across Kenya (national mean RPSS: −0.13). Empirically validates the physical reality that planetary ENSO signals decouple during MAM, where local convective moisture convergence and the Western-V gradient dominate.
+  5. **User Interface Integration:**
+     - **Section 2 Figure 2.1 (`sec4TercileView`):** Mounted a dedicated **Empirical Hindcast Skill & Verification Panel** featuring 4 diagnostic tiles (RPSS, Modal Accuracy with gain vs climatology, Wet Flood BSS, Severe False Alarm Rate), colored qualitative skill badges (`High Skill`, `Moderate Skill`, `Marginal Skill`, `No Skill`), season-aware scientific guidance callouts, and an interactive `<details>` accordion revealing the full 3x3 historical confusion matrix.
+     - **Section 0 Executive County Brief (`#section-executive-brief`):** Embedded an LOOCV validation skill tag (`LOOCV: RPSS ${skillRPSS} • ${skillHitPct} Hit`) into KPI Card 3 ("Analogue Consensus"), enhancing proposal rigor for donors and county disaster coordinators.
+     - **Section 6 Method 04:** Formally documented the mathematical formulation of the LOOCV cross-validation protocol and RPSS skill score.
+  6. **Data Pipeline & Registry:**
+     - Built `data/KE-enso-explorer/_sources/enso_hindcast_skill_build.py` generating analysis-ready parquets (`data/KE-enso-explorer/enso_hindcast_skill.parquet`, 56 KB) and JSON (`enso_hindcast_skill.json`), mirrored into `_site/data/KE-enso-explorer/`.
+     - Registered in `dbOutlook` DuckDB client, `data/KE-enso-explorer/figure_registry.json` (`fig_4_1`), and `data/KE-enso-explorer/release.json`.
+
+
