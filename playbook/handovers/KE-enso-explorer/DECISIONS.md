@@ -712,3 +712,23 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - **Gate 4 (Explicit Gaps):** Missing seasons render explicit gap cells, never zero.
      - **Gate 5 (Zero Console Errors):** Verified in headless Chromium via Playwright: 0 console errors.
      - **Gate 6 (Governance & Registry):** Registered in `data/KE-enso-explorer/figure_registry.json` as `fig_2_1b` / `Figure 3.1B`. Integrated standardized `plotFooter` with PNG/SVG/CSV export and dataset provenance linking.
+
+## D54 — Interactive Version History & "What's New" Changelog Modal (KE-47, Decision D38, 2026-10-07)
+- **APPROVED & IMPLEMENTED (2026-10-07).** Designed and implemented an accessible, high-fidelity Version History & "What's New" Changelog Modal in `notebook_v3.qmd` per KE-47 feature specification, enhancing reviewer transparency as stakeholders switch between notebook editions (v1.0, v2.10, v3.5.2, v3.6.0 via Decision D38):
+  1. **Single Source of Truth Metadata Architecture:**
+     Enriched `data/KE-enso-explorer/release.json` with comprehensive structured changelogs across all releases (`v3.6.0`, `v3.5.2`, `v2.10`, `v1.0`). Each version record includes release status (`active` vs `archived`), release date, Git build commit, data vintage, milestone highlights, categorized changes (*New Features & Visualizations*, *Data Ingestion & Benchmarks*, *Science & Methodology*, *Institutional Alignment*, and *Audit Remediations & Bug Fixes*), and associated Decision IDs from `DECISIONS.md`.
+  2. **Hero Edition Switcher Integration & Touchpoints:**
+     - Mounted a sleek, accessible `What's New` button directly inside the hero header edition switcher pill (`#btnWhatsNew`), adjacent to `#versionSwitcher`.
+     - Wired the hero version badge (`#heroVersionBadge`) with clickable pointer cursor to open the changelog modal.
+     - Added direct `What's New in this Version →` hyperlinks in Section 0's platform release telemetry box and the universal page footer.
+  3. **High-Fidelity Accessible Dialog UI:**
+     - Built responsive modal with backdrop blur, smooth entrance transitions, dark-slate header with monospace build tags, and interactive version tab pills.
+     - Active version displays clear status badges (`Active Release` vs `Archived Milestone`), build metadata, full summary text, a 1-click button to jump to archived versions, milestone highlights callout card, categorized change lists, and ratified Decision tags (`D38`…`D53`).
+     - Fully accessible: keyboard ESC closes modal, click outside backdrop closes modal, ARIA dialog roles (`role="dialog"`, `aria-modal="true"`, `aria-labelledby="clModalTitle"`).
+  4. **Deep-Linking & Fallback Ingestion:**
+     - Supports direct deep-linking via `#changelog` URL hash or `?changelog=true` query parameter, automatically launching the dialog on page load.
+     - Implemented dual-path metadata loader: reads synchronous `releaseMeta` stashed by OJS reactive runtime, falling back to relative `fetch()` if invoked before OJS bootstrap.
+  5. **Archived Milestone Edition Parity:**
+     - Updated top archived banners in `notebook_v2.qmd` and `notebook.qmd` to point to `v3.6.0 (Latest Active Review)` and provided direct links to `notebook_v3.html#changelog` so reviewers inspecting older editions can immediately audit what evolved.
+  6. **Zero Browser Console Errors:**
+     - Verified in headless Chromium via Playwright: 0 console errors and 0 page errors across modal opening, version tab switching, ESC key closing, hash deep-linking, and footer triggers.

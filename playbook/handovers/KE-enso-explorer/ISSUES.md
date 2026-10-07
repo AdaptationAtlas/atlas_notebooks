@@ -822,10 +822,15 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   5. CHIRPS v3 planting-season rainfall tercile strip aligned underneath the time series with custom legend.
   6. High-fidelity alternative views: KMD lens wet vs dry distribution plot with era medians, continuous climate anomaly scatter plot, and complete downloadable data table via standardized `plotFooter`.
   7. Registered in `figure_registry.json` (`fig_3_1c` / `Figure 4.2B`). Browser-verified with zero console errors.
-- **KE-47 · Version History "What's New" / Changelog Modal · OPEN (feature request, 2026-10-05).**
-  As reviewers switch between notebook editions (v1, v2, v3 via Decision D38), provide an interactive
-  "What's New in this Version?" modal or drawer accessible from the hero edition switcher. Summarizes key
-  feature additions, newly integrated datasets, methodological evolutions, and bug fixes between releases.
+- **KE-47 · Version History "What's New" / Changelog Modal · FIXED & VERIFIED (2026-10-07, Decision D54).**
+  Designed and implemented an interactive, accessible Version History & "What's New" Changelog Modal across
+  notebook editions (v1.0, v2.10, v3.5.2, v3.6.0 via Decision D38):
+  1. Enriched `data/KE-enso-explorer/release.json` with comprehensive structured changelogs across all releases, categorized into *New Features*, *Data Ingestion*, *Science & Methodology*, *Institutional Alignment*, *Audit Remediations*, and associated *Decision IDs*.
+  2. Mounted `#btnWhatsNew` button in hero header edition switcher pill and wired `#heroVersionBadge` to open dialog.
+  3. Added direct `What's New in this Version →` hyperlinks in Section 0 platform release box and universal page footer.
+  4. Features tabbed version switching, milestone highlights, categorized changes, decision tags, 1-click jump to archived editions, ARIA dialog accessibility, ESC key closing, and deep-linking via `#changelog`.
+  5. Updated top archived banners in `notebook_v2.qmd` and `notebook.qmd` to reference `v3.6.0 (Latest Active Review)` and link directly to `notebook_v3.html#changelog`.
+  6. Verified in headless Chromium via Playwright: 0 console errors and 0 page errors. Decision `D54`.
 
 - **KE-48 · Comprehensive Expert Critical Review & Due Diligence Audit (Dr. Aniruddha Ghosh, 2026-10-05) · OPEN.**
   Dr. Aniruddha Ghosh (Senior Scientist / Spatial Modeler, Alliance Bioversity-CIAT / CGIAR) completed an in-depth,
