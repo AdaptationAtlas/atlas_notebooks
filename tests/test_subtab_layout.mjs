@@ -14,8 +14,8 @@ const URL = 'http://localhost:4333/notebooks/KE-enso-explorer/notebook_v3.html';
   page.on('pageerror', err => consoleErrors.push(err.toString()));
 
   console.log(`Navigating to ${URL}...`);
-  await page.goto(URL, { waitUntil: 'networkidle', timeout: 60000 });
-  await page.waitForTimeout(4000);
+  await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(5000);
 
   // 1. Switch to Section 2 (tab-outlook)
   console.log('Switching to Section 2 (tab-outlook)...');
