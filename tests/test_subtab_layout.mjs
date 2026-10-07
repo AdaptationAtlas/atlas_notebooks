@@ -58,19 +58,71 @@ const URL = 'http://localhost:4333/notebooks/KE-enso-explorer/notebook_v3.html';
       p21Display: window.getComputedStyle(p21).display,
       p22Display: window.getComputedStyle(p22).display,
       fig21Width: fig21 ? fig21.offsetWidth : 0,
-      mamWidth: mam ? mam.offsetWidth : 0
+      mamDisplay: mam ? window.getComputedStyle(mam).display : 'none',
+      mamAboveFig21: mam && fig21 ? !!(mam.compareDocumentPosition(fig21) & Node.DOCUMENT_POSITION_FOLLOWING) : false
     };
   });
-  console.log('Subtab 2.2 status:', sub22Active);
+  console.log('Subtab 2.2 status (OND):', sub22Active);
   if (sub22Active.p22Display !== 'block' || sub22Active.p21Display !== 'none') {
     throw new Error('FAIL: subtab-outlook-22 should be block and subtab-outlook-21 should be none');
   }
+  if (sub22Active.mamDisplay !== 'none') {
+    throw new Error('FAIL: MAM teleconnection card should be hidden when OND season is selected');
+  }
+  if (!sub22Active.mamAboveFig21) {
+    throw new Error('FAIL: MAM teleconnection card should be positioned above Figure 2.1 in DOM');
+  }
 
+  // Screenshot OND clean view (without MAM card)
   const sec22Pane = await page.$('#subtab-outlook-22');
   if (sec22Pane) {
-    await sec22Pane.screenshot({ path: `${ARTIFACT_DIR}/fig21_fullwidth_with_mam_below.png` });
-    console.log(`Saved ${ARTIFACT_DIR}/fig21_fullwidth_with_mam_below.png`);
+    await sec22Pane.screenshot({ path: `${ARTIFACT_DIR}/fig21_ond_clean_no_mam.png` });
+    console.log(`Saved ${ARTIFACT_DIR}/fig21_ond_clean_no_mam.png`);
   }
+
+  // Test Season Switch to MAM
+  console.log('Testing season switch to MAM in Subtab 2.2...');
+  await page.evaluate(() => {
+    const selects = document.querySelectorAll('#globalControlsHost select');
+    const seasonSel = selects[1];
+    if (seasonSel) {
+      seasonSel.selectedIndex = 1;
+      seasonSel.dispatchEvent(new Event('input', { bubbles: true }));
+      seasonSel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await page.waitForTimeout(2000);
+
+  const mamStatus = await page.evaluate(() => {
+    const mam = document.getElementById('section-mam-teleconnection');
+    const f21Title = document.getElementById('fig21TitleHeader');
+    return {
+      mamDisplay: mam ? window.getComputedStyle(mam).display : 'none',
+      mamWidth: mam ? mam.offsetWidth : 0,
+      titleText: f21Title ? f21Title.textContent : ''
+    };
+  });
+  console.log('Subtab 2.2 status (MAM):', mamStatus);
+  if (mamStatus.mamDisplay !== 'block' || mamStatus.mamWidth < 500) {
+    throw new Error('FAIL: MAM teleconnection card should be visible and wide when MAM season is selected');
+  }
+
+  if (sec22Pane) {
+    await sec22Pane.screenshot({ path: `${ARTIFACT_DIR}/fig21_mam_with_card_at_top.png` });
+    console.log(`Saved ${ARTIFACT_DIR}/fig21_mam_with_card_at_top.png`);
+  }
+
+  // Switch back to OND
+  await page.evaluate(() => {
+    const selects = document.querySelectorAll('#globalControlsHost select');
+    const seasonSel = selects[1];
+    if (seasonSel) {
+      seasonSel.selectedIndex = 0;
+      seasonSel.dispatchEvent(new Event('input', { bubbles: true }));
+      seasonSel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  });
+  await page.waitForTimeout(1000);
 
   // 3. Switch to Section 2.3
   console.log('Switching to Subtab 2.3...');
