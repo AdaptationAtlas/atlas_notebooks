@@ -690,3 +690,25 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
   4. **Section 5 & 6 Partner Grid, Custodianship & Disclosures:**
      - Replaced *"Statutory Disclosure:"* for Sentinel-1 orbital radar coverage with *"Observational Coverage Disclosure:"* (line 6324).
      - Cleaned loose references claiming that all platform data sources are "statutory" in the Section 0 partners grid (line 3791), Section 5 IWMI comparator (line 6151), Section 6.1 partner grid (lines 6632, 6670, 6685, 6714), and universal page footer (line 7037).
+
+## D53 — Consecutive-Season Sequence View: Dual-Season Failure Trajectory & Compounding Runs (KE-51, Figure 3.1B, 2026-10-07)
+- **APPROVED & IMPLEMENTED (2026-10-07).** Implemented the consecutive-season sequence view directly after Figure 3.1 in Section 3 of `notebook_v3.qmd` per dispatch `dispatches/2026-10-05_plan-consecutive-season-sequence-view.md`, fulfilling the additive half of Decision D39:
+  1. **Core Problem Addressed:**
+     Single-season rainfall anomalies can often be buffered by household food reserves, pastoral herd condition, or regional grain trade, but consecutive failures across both seasons trigger systemic collapse of livestock forage and staple harvest failure. Combining or averaging two seasons (such as $OND+MAM$) obscures this physical reality by letting a wet season and a severe drought cancel out to "near-normal." The sequence view evaluates the true chronological progression.
+  2. **Production Year Pairing Rule (KNBS & HarvestStat Standard):**
+     Anchored on the official Kenyan production year convention: `production year Y = OND(Y−1) + MAM(Y)`. The Short Rains $OND(Y-1)$ fall in Oct–Dec of year $Y-1$ and harvest in Jan/Feb of year $Y$; the Long Rains $MAM(Y)$ fall in Mar–May of year $Y$ and harvest in Jul/Aug of year $Y$. Both harvests land within calendar year $Y$.
+  3. **Independent Seasonal Moments (Gate 3):**
+     Standardized each season independently against its own 1991–2020 normal period (WMO standard) or optional full record (1981–2025). OND and MAM moments are computed from their own distinct seasonal subsets and never pooled into a shared distribution ($\mu_{\text{OND}}, \sigma_{\text{OND}}$ vs $\mu_{\text{MAM}}, \sigma_{\text{MAM}}$).
+  4. **Categorical Classification & Unbroken Run Length:**
+     Classified on $z$: Dry ($z < -0.5$), Wet ($z > +0.5$), and Near-normal ($-0.5 \le z \le +0.5$). Walked all seasons in true chronological order ($\dots OND(Y-1), MAM(Y), OND(Y), MAM(Y+1) \dots$) to compute unbroken cumulative runs of sub-normal seasons ($z < -0.5$), reflecting pastoral rangeland forage deficit compounding.
+  5. **Two-Cell Domino Strip Mark (Figure 3.1B):**
+     Rendered a responsive two-cell domino strip per production year with a visible gutter separating $OND(Y-1)$ from $MAM(Y)$, shared continuous diverging colormap on $z$ ($[-2.5, +2.5]$ via `d3.interpolateRdBu`), explicit $z$-score and mm departure labels, unbroken run-length horizontal bars, and prominent double-failure highlighting (`🚨 CRISIS` badge, red outline, `dry / dry` pill). Missing observational records render as explicit striped gap cells (`GAP (No Data)`), never zero.
+  6. **Interactive Agricultural Overlay & Controls:**
+     Provided interactive controls for View Mode (`Domino sequence & runs` vs `Domino sequence + Crop outcomes`), Filter Rows (`All years`, `Double failure years only`, `Compounding runs ≥ 2`, `Any failure season`), Baseline moments (`1991–2020 WMO normal` vs `Full record`), and Agricultural outcome metric (HarvestStat Maize Yield, HarvestStat Maize Production, KNBS NAPR Production). Displays 4 summary KPI cards including county double-failure frequency and yield deficit percentage during double failures.
+  7. **Strict Validation & 6-Gate Compliance:**
+     - **Gate 1 (Pair Arithmetic):** Spot-checked Marsabit 2011: $OND(2010) = 50.9\text{ mm}$, $MAM(2011) = 47.0\text{ mm}$, exactly matching parquet rows.
+     - **Gate 2 (Double-Failure Emergency Ranking):** Across all 47 counties + Ilemi, reproduced Kenya's recognized national drought disaster emergencies: 2011 (40 counties under full / 34 under WMO), 2017 (31 / 30), 2008 (29 / 25), 2009 (22 / 17), 1992 (21 / 18), 2004 (20 / 18), 1984 (18 / 20), 2022 (17 / 18).
+     - **Gate 3 (No Pooling):** Confirmed separate moments in code.
+     - **Gate 4 (Explicit Gaps):** Missing seasons render explicit gap cells, never zero.
+     - **Gate 5 (Zero Console Errors):** Verified in headless Chromium via Playwright: 0 console errors.
+     - **Gate 6 (Governance & Registry):** Registered in `data/KE-enso-explorer/figure_registry.json` as `fig_2_1b` / `Figure 3.1B`. Integrated standardized `plotFooter` with PNG/SVG/CSV export and dataset provenance linking.

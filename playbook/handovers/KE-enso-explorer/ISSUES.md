@@ -998,17 +998,14 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
     the Section 4 pastoral terms-of-trade story that currently rests on goat prices alone. Against —
     the 2021 history floor, no published licence, and visible data-quality problems.
 
-- **KE-51 · Consecutive-season sequence view, OND(Y−1) → MAM(Y) · OPEN (2026-10-05).**
-  The additive half of Decision `D39`. `OND+MAM` averaged two seasons; consecutive failure is a
-  **sequence** and an average destroys it. Build the sequence properly instead. Section 3, after
-  Figure 3.1. Uses the KNBS production-year pairing already in force (`KE-46`): production year
-  Y = OND(Y−1) + MAM(Y). **No new data** — `chirps_county.parquet` plus the existing `roniZOnd` /
-  `roniZMam` cells; no pipeline run, no republish. Standardise each season against its own
-  1991–2020 moments, never pooled. Reference values to land near (2,064 county-years, 1982–2024):
-  double failure `dry/dry` **14.2%**; consecutive sub-normal season runs 948 / 389 / 100 / 31 / 13 / 4
-  for lengths 1–6+. **Hard validation:** the worst double-failure years must come out
-  **2011 (40 counties), 2017 (31), 2008 (29), 2009 (22), 1992 (21), 2004 (20), 1984 (18), 2022 (17)** —
-  Kenya's recognised drought emergencies. If the ranking does not reproduce, the pairing or the
-  standardisation is wrong; **stop and report, do not tune the ±0.5 sd thresholds.** Full spec incl.
-  mark design, interaction and 6 gates: `dispatches/2026-10-05_plan-consecutive-season-sequence-view.md`.
-  Build **after** the D39 selector edit, not before.
+- **KE-51 · Consecutive-season sequence view, OND(Y−1) → MAM(Y) (Figure 3.1B) · FIXED & VERIFIED (2026-10-07, Decision D53).**
+  The additive half of Decision `D39`. Built the consecutive-season sequence view in Section 3 directly after
+  Figure 3.1 (`#section-consecutive-sequence`). Anchors on the official KNBS production-year convention
+  (`KE-46`): production year $Y = OND(Y-1) + MAM(Y)$. Features:
+  1. Standardises each season independently against its own 1991–2020 normal period (WMO standard) or optional full record; OND and MAM moments are never pooled (Gate 3).
+  2. Classifies each season: Dry ($z < -0.5$), Wet ($z > +0.5$), Near-normal ($-0.5 \le z \le +0.5$).
+  3. Walks seasons in chronological order to compute unbroken consecutive sub-normal season runs ($z < -0.5$), reflecting compounding rangeland forage deficits.
+  4. Primary mark: 2-cell domino strip per year with visible gutter, shared diverging colormap on $z$, printed $z$ and mm anomaly labels, unbroken run-length horizontal bars, and distinctive double-failure flagging (`🚨 CRISIS` badge, red outline, `dry / dry` pill). Missing seasons render explicit gap cells, never zero (Gate 4).
+  5. Interactive controls: View Mode (`Domino sequence & runs` vs `Domino sequence + Crop outcomes`), Filter Rows (`All years`, `Double failure years only`, `Compounding runs ≥ 2`, `Any failure season`), Baseline moments (`1991–2020 WMO normal` vs `Full record`), and Crop outcome metric (HarvestStat Maize Yield/Production, KNBS NAPR Production). 4 summary KPI cards including county double-failure frequency and yield deficit percentage during double failures.
+  6. **Hard validation passed (Gate 1 & 2):** Spot check Marsabit 2011 ($OND_{2010}=50.9\text{ mm}, MAM_{2011}=47.0\text{ mm}$) exactly equals parquet rows; national double-failure ranking reproduces Kenya's recognized emergencies: 2011 (40 counties full / 34 WMO), 2017 (31/30), 2008 (29/25), 2009 (22/17), 1992 (21/18), 2004 (20/18), 1984 (18/20), 2022 (17/18).
+  7. Registered in `figure_registry.json` (`fig_2_1b` / `Figure 3.1B`). Browser-verified in headless Chromium with zero console errors (Gate 5). Full spec and dispatch: `dispatches/2026-10-05_plan-consecutive-season-sequence-view.md`. Decision `D53`.
