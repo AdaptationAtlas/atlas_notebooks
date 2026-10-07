@@ -199,10 +199,12 @@ def check_freshness_and_disclosures():
     with open(RELEASE_PATH, "r", encoding="utf-8") as f:
         rel = json.load(f)
 
-    assert "version" in rel
+    assert rel.get("version") == "3.7.0", f"Expected version 3.7.0, got {rel.get('version')}"
     active_rel = rel.get("availableVersions", [{}])[0]
+    assert active_rel.get("version") == "v3.7.0", f"Expected active version v3.7.0, got {active_rel.get('version')}"
     assert "decisions" in active_rel
     assert "D56" in active_rel["decisions"], "Decision D56 should be recorded in release.json decisions"
+    assert "D57" in active_rel["decisions"], "Decision D57 should be recorded in release.json decisions"
     assert active_rel.get("status") in ["production", "active", "ready", "current"], f"Unexpected release status: {active_rel.get('status')}"
 
     # Verify notebook disclosure regarding pending May 2026 CHIRPS (V2-20)
