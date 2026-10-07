@@ -675,3 +675,18 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Preserved exact invariance of `pop_pct`.
      - In Section 4 Table 4.4, included `pop_source` per row (year-matched in GFM).
      - Maintained strict neutrality on Mandera, Wajir, and Garissa census figures per *Sheikh & 24 others v KNBS* ([2025] KEHC 3212 (KLR)). Avoided writing flat national scaling percentage claims ("~14% lower").
+
+- **D52 · Tone & Authority Sanitization: Final Remediation of Overlooked Audit Remnants (Workstream B / Claim B10) · SETTLED (2026-10-07).**
+  Addressed the remaining unscrubbed pseudo-statutory and over-claiming language identified in the Workstream B / D audit review (`reviews/2026-10-07_ghosh_audit_workstreams_b_and_d_status.md`):
+  1. **Figure 1.1 NAPR Fold Language (Claim B10):**
+     - Neutralized line 3962 in `notebook_v3.qmd` from *"These audited administrative statistics carry binding statutory authority under Kenyan law and form the mandatory baseline for CIDP sector plans and multilateral funding proposals (GCF, AF, GEF)"* to *"These official statistics published by KNBS provide the recognized administrative baseline for county planning (CIDP) and project design documentation."*
+     - Replaced *"statutory national figure"* with *"published national figure"* in additivity reconciliation text.
+  2. **Section 1 KPI & Administrative Summaries (Tone & Authority):**
+     - Replaced *"KNBS Audited"* with *"KNBS Official Census"* in the population metric tile (line 3852) and reactive summary (line 9868).
+     - Replaced *"KNBS AUDITED"* with *"KNBS OFFICIAL CENSUS"* / *"KNBS OFFICIAL NAPR"* in the reactive Section 1.1 summary cards (lines 9907, 9937).
+     - Softened Figure 4.1 card labels and empty states (lines 16086, 17029).
+  3. **Section 2 Live Advisory Header:**
+     - Replaced *"Statutory Precautionary Guidance (Issued by KMD):"* with *"Official Precautionary Guidance (Issued by KMSA):"* (line 19684), eliminating both pseudo-statutory claiming and obsolete pre-2026 "KMD" branding.
+  4. **Section 5 & 6 Partner Grid, Custodianship & Disclosures:**
+     - Replaced *"Statutory Disclosure:"* for Sentinel-1 orbital radar coverage with *"Observational Coverage Disclosure:"* (line 6324).
+     - Cleaned loose references claiming that all platform data sources are "statutory" in the Section 0 partners grid (line 3791), Section 5 IWMI comparator (line 6151), Section 6.1 partner grid (lines 6632, 6670, 6685, 6714), and universal page footer (line 7037).
