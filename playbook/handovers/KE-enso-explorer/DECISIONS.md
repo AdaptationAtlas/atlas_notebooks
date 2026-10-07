@@ -732,3 +732,34 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Updated top archived banners in `notebook_v2.qmd` and `notebook.qmd` to point to `v3.6.0 (Latest Active Review)` and provided direct links to `notebook_v3.html#changelog` so reviewers inspecting older editions can immediately audit what evolved.
   6. **Zero Browser Console Errors:**
      - Verified in headless Chromium via Playwright: 0 console errors and 0 page errors across modal opening, version tab switching, ESC key closing, hash deep-linking, and footer triggers.
+
+## D55 — Executive County Brief & 2-Page Citable Print/PDF Export (KE-48 Tier 2 Item 2, 2026-10-07)
+- **APPROVED & IMPLEMENTED (2026-10-07).** Designed, engineered, and verified the Executive County Brief in Section 0 (`#section-executive-brief`) of `notebook_v3.qmd` per KE-48 Tier 2 Item 2 recommendations in Dr. Aniruddha Ghosh's external critical review (`reviews/2026-10-05_critical_review_aghosh.md`), specifically serving Persona 1 (County Climate-Finance / CIDP Officers) and Persona 3 (County Drought & Disaster Coordinators):
+  1. **Core Problem & Institutional Mandate:**
+     The 13,000+ word technical explorer presents extensive academic depth ($z$-scores, partial correlations, Euclidean analogue distances, hydrodynamic flood modeling), but county decision-makers and proposal writers require a concise, 1-screen operational brief that directly answers: *What is the current planetary climate signal? What is the official forecast? What happened historically in this county under similar conditions? What specific anticipatory actions should our county departments take right now?*
+  2. **Four Diagnostic KPI Cards:**
+     - **Active Planetary Ocean State:** Reports current observed NOAA CPC RONI and DMI anomaly metrics with observation period (e.g., JAS 2026 RONI +1.69 °C, DMI +0.72 °C), current status, and trend trajectory.
+     - **Statutory Forecasting Mandate:** Cites Kenya Meteorological Service Authority (KMSA) under Meteorology Act No. 7 of 2026, explicitly reinforcing KMSA as Kenya's sole statutory weather and climate forecasting authority while positioning the explorer as an empirical adaptation and analogue scenario platform.
+     - **Empirical Analogue Consensus:** Formulates consensus in natural frequencies (*"X of N historical analogues"*) paired with exact 95% Wilson score binomial confidence intervals per Dr. Ghosh's audit recommendations (Table D4), preventing false overconfidence when sample sizes are modest ($N=5$).
+     - **Consecutive-Season Compounding Risk:** Tracks chronological sequences and unbroken runs of sub-normal seasons ($z < -0.5$), highlighting whether the county is entering a compound dual-season failure crisis.
+  3. **Top 3 Historical Analogue Precedents:**
+     Dynamically queries county-specific historical rainfall departures (mm and % anomaly) for the top 3 closest analogue seasons, enriched with verified ground-truth impacts and citable citations across Copernicus GFM Sentinel-1 SAR flood records (`exp_gfm`), NDMA county drought early warning bulletins, and UN OCHA situation reports.
+  4. **4-Sector Anticipatory Action Matrix:**
+     Translates analogue risks into actionable operational protocols across four county sectors aligned with the National Disaster Risk Management Act No. 16 of 2026 and County Disaster Risk Management Committee (CDRMC) activation:
+     - **Agriculture & Food Security:** Seed distribution, early-maturing varieties, post-harvest drying, pest/locust scouting.
+     - **Livestock & Pastoral Livelihoods:** Strategic feed reserves, commercial off-take, ring-fenced borehole vaccination, rangeland migration corridors.
+     - **Water Resources & Public Health:** Borehole servicing, cholera/waterborne epidemic prepositioning, vector control, water trucking contingency.
+     - **DRM & Infrastructure Logistics:** Culvert clearing, flood barrier reinforcement in low-lying *laggas*, evacuation route prepositioning, CDRMC alert activation.
+  5. **Citable Proposal Climate Rationale Generator:**
+     Provides a donor-ready climate rationale synthesis paragraph dynamically calibrated with official KNBS 2019 Census population headcounts, land area benchmarks, seasonal climatology, and historical analogue statistics, complete with a 1-click clipboard copy tool (`📋 Copy Proposal Rationale`) for immediate pasting into GCF, AF, GEF, or FLLoCA project documentation.
+  6. **Strict 2-Page Print & PDF Export Architecture:**
+     - Built a dedicated `@media print` stylesheet formatted for **strictly 2 pages** of standard A4/Letter paper with zero spillover:
+       - **Page 1:** Header, Administrative Baseline Strip, Diagnostic KPIs, and Top 3 Historical Analogue Precedents (`.brief-page-1`, `break-after: page; max-height: 275mm; overflow: hidden;`).
+       - **Page 2:** 4-Sector Anticipatory Action Matrix, Proposal Climate Rationale Text Block, and Institutional Provenance / Statutory Disclaimers (`.brief-page-2`, `break-after: avoid; max-height: 275mm; overflow: hidden;`).
+     - Overrode screen media queries (`@media (max-width: 860px)`) inside `@media print` to enforce multi-column layout on portrait print width (~718 px), preventing single-column card collapse and vertical height ballooning.
+     - Fixed CSS selector scoping on `.fb-toast` to ensure global print rules are never sequestered.
+     - Added 1-click jump button (`📄 County Brief`, `#btnCountyBrief`) in hero eyebrow for instant navigation.
+  7. **Rigorous Headless Verification:**
+     - Quarto render compiled with exit code 0 (`_site/notebooks/KE-enso-explorer/notebook_v3.html`).
+     - Verified via Playwright in headless Chromium: 0 console errors, 0 page errors, full reactive re-computation on county switcher (Marsabit to Turkana), and strictly 2-page PDF export (`len(doc) == 2`).
+
