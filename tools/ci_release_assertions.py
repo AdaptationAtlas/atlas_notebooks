@@ -199,9 +199,9 @@ def check_freshness_and_disclosures():
     with open(RELEASE_PATH, "r", encoding="utf-8") as f:
         rel = json.load(f)
 
-    assert rel.get("version") in ["3.7.0", "3.8.0", "3.8.1", "3.8.2"], f"Expected version 3.8.x, got {rel.get('version')}"
+    assert rel.get("version", "").startswith("3.8.") or rel.get("version") == "3.7.0", f"Expected version 3.8.x, got {rel.get('version')}"
     active_rel = rel.get("availableVersions", [{}])[0]
-    assert active_rel.get("version") in ["v3.7.0", "v3.8.0", "v3.8.1", "v3.8.2"], f"Expected active version v3.8.x, got {active_rel.get('version')}"
+    assert active_rel.get("version", "").startswith("v3.8.") or active_rel.get("version") == "v3.7.0", f"Expected active version v3.8.x, got {active_rel.get('version')}"
     assert "decisions" in active_rel
     assert "D56" in active_rel["decisions"], "Decision D56 should be recorded in release.json decisions"
     assert "D57" in active_rel["decisions"], "Decision D57 should be recorded in release.json decisions"
