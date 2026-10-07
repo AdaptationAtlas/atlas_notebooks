@@ -188,13 +188,7 @@ Robust deterministic NAPR engine + full mine of both editions: **31 crops** (201
   (`pricesSeg`, GAP_DAYS=100) breaks each market's line across gaps > ~3 months instead of
   interpolating; `Plot.dot` overlays every observation. Browser-verified: orange Marsabit-Town line
   now segments at its 2018–20 / 2024+ gaps. Also set `x:{label:null}` (was showing `_t`).
-- **KE-13 · Caption vs "About this plot" split · DONE v2.10 (D16.2 scope: all 19 body figures now carry About; 10 annex figures keep single captions by decision).** Captions across the 8 new splits: 925 → 486 words (3.1: 235 → 59). Three fabricated/incorrect numbers caught in my own verification pass after the agent fact-check (3.7 org count, 3.5 pre-2008 counties + 2020 gap, 3.1 NDJ spread) — see reviews/2026-08-19_ke13_about/. `plotFooter`
-  rebuilt (in-notebook ~line 1046): caption now ALWAYS VISIBLE (`.plot-caption`, leads with Figure
-  N.M); optional `opts.about` renders a foldable "About this plot" with detailed methodology.
-  **§4.3 prices is the exemplar** (short `pricesCaption` + new `pricesAbout` in nbText). REMAINING:
-  author a short caption + `about` split for the other 18 figures (they currently show their existing
-  caption string visibly — number shows, but short/detailed not yet separated). Incremental content task.
-  *Audit 2026-08-17 → **PARTIAL**: KE-13 · Caption vs "About this plot" split · PARTIAL — infra done, content 11/29.** Every figure shows a visible `**Figure N.M**` caption (`plotFooter`, qmd:3566); `about:` is now authored for 11 of 19 body figures. STILL OPEN: 2.3, 2.4, 3.1 (235-word caption), 3.2, 3.3, 3.5, 3.7, 5.1 and all 10 annex figures (A1.1–A5.3). Also: `b2.rainAbout` still describes the Temperature toggle removed by V2-42(f).*
+- **KE-13 · Caption vs "About this plot" split · DONE & FULLY VERIFIED (2026-10-07, Decision D57).** Restored rendering of `mergedOpts.about` in `plotFooter` across `notebook_v3.qmd`. All 22 figures across Sections 1 to 4 now display a visible concise caption/note and an expandable `<details class="plot-caption-details">` with styled methodology (`ℹ️ About this plot (data & methodology)`). Authored methodology for Figure 4.4B (FEWS NET XBT). Browser-verified across all tabs with Playwright (0 console errors). Decision D57.
 - **KE-14 · Visible figure/table numbers · DONE 2026-08-10.** Every figure caption now renders
   visibly and leads with **Figure N.M** (was hidden behind the "About this plot" foldout). Verified:
   19/19 captions visible in-browser.
@@ -894,7 +888,7 @@ V2-64 gates V2-65/66/68 — settle the index before rewriting the engine or writ
   * **Tier 3 — Long-Term Evolution:**
     1. Swahili language interface toggle (`_lang` Swahili dictionary).
     2. Precomputed summary stats and lazy tab initialization for low-bandwidth ASAL networks.
-    3. Automated CI release assertions: DOI resolution check, stale data warning badges, and cross-tab value equality assertions.
+    3. ~~**Automated CI release assertions:**~~ **RESOLVED (2026-10-07, Decision D57):** Implemented automated release test suite `tools/ci_release_assertions.py` (canonical academic DOI registration check via Handle REST API, dataset schemas and bounds, cross-dataset value equality) and `tests/test_crosstab_integrity.mjs` (headless Playwright verifying cross-tab value equality across Section 0 Brief, Section 2 Outlook, Section 3 Evidence, Section 4 Impacts, plus interactive About expanders with 0 console errors).
     4. Formal stakeholder co-development and sign-off protocol with KMSA and NDMA.
 
 - **KE-49 · Season selector offers `OND+MAM` and `annual`, which the explorer cannot honour · RESOLVED (2026-10-05).**

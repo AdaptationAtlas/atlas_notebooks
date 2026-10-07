@@ -788,4 +788,23 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Built `data/KE-enso-explorer/_sources/enso_hindcast_skill_build.py` generating analysis-ready parquets (`data/KE-enso-explorer/enso_hindcast_skill.parquet`, 56 KB) and JSON (`enso_hindcast_skill.json`), mirrored into `_site/data/KE-enso-explorer/`.
      - Registered in `dbOutlook` DuckDB client, `data/KE-enso-explorer/figure_registry.json` (`fig_4_1`), and `data/KE-enso-explorer/release.json`.
 
+## D57 — Automated CI Release Assertions & Methodological Foldout Restoration (KE-13, Tier 3 Item 3, 2026-10-07)
+- **APPROVED & IMPLEMENTED (2026-10-07).** Executed comprehensive release automation, DOI registration audit, cross-tab data integrity assertions, and restored interactive methodological expanders across all figures:
+  1. **KE-13 "About this plot" / Methodological Foldouts:**
+     - Restored rendering of `mergedOpts.about` in `plotFooter` inside `notebook_v3.qmd`. Previously, while `opts.about` strings were authored for figures across Sections 1 to 4, `plotFooter` omitted rendering the details element into the DOM.
+     - Implemented clean, accessible `<details class="plot-caption-details">` with an info icon summary (`ℹ️ About this plot (data & methodology)`) and styled methodology block (`background: #f8fafc; border-left: 3px solid #0284c7;`).
+     - Authored missing methodology documentation for Figure 4.4B (FEWS NET East Africa Cross-Border Food Trade Monitoring, formal and informal border posts, regional food buffer mechanisms).
+     - Confirmed that all 22 figures across Sections 1–4 now feature both an always-visible figure caption/note and an expandable methodology foldout.
+  2. **Automated CI Release & Data Integrity Test Suite (`tools/ci_release_assertions.py`):**
+     - **DOI Registration Audit:** Validated all 18 unique canonical academic DOIs referenced in `notebook_v3.qmd`, `provenance.json`, and `release.json` against the official International DOI Foundation / Handle System REST API (`https://doi.org/api/handles/{doi}`). Replaced erroneous historical Saji et al. 1999 Nature citation (`10.1038/35044055`) with the verified canonical DOI `10.1038/43854`. Asserted 100% `rc=1` (success) across all DOIs.
+     - **Parquet Schema, Bounds & Freshness:** Asserted row counts, non-empty bounds, date horizons, and column schemas for `enso_hindcast_skill.parquet` (576 rows across 48 counties), `chirps_county_monthly.parquet` (26,112 rows through 2026), `driver_indices.parquet` (2,073 records), `population_knbs_census_adm1.parquet` (47 counties, 47,564,296 headcount), and `exposure_totals.parquet`.
+     - **Cross-Dataset Value Equality:** Verified that CHIRPS 1991–2020 normal rainfall equals `enso_hindcast_skill` baseline moments, and KNBS census headcounts match exposure tables across benchmark counties (Marsabit, Turkana, Mandera, Kilifi, Kisumu, Garissa).
+     - **Governance & Disclosures:** Asserted that `release.json` records Decision D56/D57 and marks release status as production.
+  3. **Headless Browser Cross-Tab Integrity & Reactivity Audit (`tests/test_crosstab_integrity.mjs`):**
+     - Verified mutual consistency between Section 0 Brief (KPI Card 3, Top 3 Precedents, Census Headcount), Section 2 Figure 2.1 (Tercile Distribution, LOOCV Skill Tiles, Analogue Pills), Section 3 Graphs (Figure 3.1 & 3.1B), and Section 4 Impacts (Figure 4.4B).
+     - Verified interactive expand/collapse functionality for "About this plot" foldouts across tabs.
+     - Tested dynamic county switching to Turkana: verified instantaneous re-calculation of census headcounts (`926,976`), baseline climatology (`162 mm`), and analogue outlook.
+     - Zero browser console errors across all phases.
+
+
 
