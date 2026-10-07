@@ -42,7 +42,7 @@ const URL = 'http://localhost:4333/notebooks/KE-enso-explorer/notebook_v3.html';
   // 2. CROSS-TAB VALUE EQUALITY ON TAB 2 (SEASONAL OUTLOOK / FIGURE 2.1)
   // =========================================================================
   console.log('--- 2. Testing Tab 2 (Figure 2.1 Cross-Tab Equality & About Expander) ---');
-  await page.evaluate(() => window.switchTab('tab-outlook'));
+  await page.evaluate(() => window.switchTab('tab-outlook', 'subtab-outlook-22'));
   await page.waitForTimeout(2000);
   await page.waitForSelector('#fig21TercileHost', { state: 'visible', timeout: 15000 });
 
