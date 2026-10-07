@@ -642,3 +642,11 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Refactored `contRows` to attach classified historical rows (`classifiedRows`) with driver groups and outcome classifications.
      - Updated `insightB2` to display concise natural frequency formatting: `During ${posName} conditions (${seasonWord(activeSeason)}), <strong>${cTop}/${n} (${pct}%)</strong> resulted in <strong>${topOutcome}</strong> conditions.`
      - Appended empirical rainfall anomaly mean and standard deviation error term: `• Mean anomaly: +X% (±Y%) vs 1991–2020 normal`.
+
+- **D50 · Figure 4.1 Bimodal Environmental Overlays: Headroom, Margin & Legend Unification (Pete Review Lines 179–185) · SETTLED (2026-10-07).**
+  Addressed Pete's review feedback regarding Figure 4.1 (Agricultural Production vs. Climate Overlays):
+  1. **Bar Label Clipping Fix (Pete Review Line 185):**
+     - Resolved cut-off text labels above positive bars in Panel B across all four environmental overlay options (Rainfall Anomaly, Ocean Driver, SPEI-3, and MODIS NDVI). Increased `marginTop` from 6 px to 22 px, expanded panel height from 165 px to 180 px, and applied `nice: true` to y-axis scales (and adjusted NDVI domain to [50, 185]%), providing ample headroom above `dy: -8` labels.
+  2. **Combined Heading & Legend Unification (Pete Review Lines 179–181):**
+     - Consolidated separate Panel A and Panel B headings into a single unified title above the graphic: `Figure 4.1: County Agricultural Output Series & Bimodal Environmental Overlays (${minYr}–${maxYr})`.
+     - Combined Panel A commodity indicators and Panel B bimodal season swatches into a single cohesive legend bar (`unifiedLegend`) above the plot, eliminating redundant Plot-generated overlay legends (`legend: false`).
