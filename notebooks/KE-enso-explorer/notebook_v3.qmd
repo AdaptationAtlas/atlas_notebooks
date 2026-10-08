@@ -13233,7 +13233,7 @@ wnpPhaseLeadMAM = phaseByYearFor([12, 1, 2], "wnp_std_mam", 0.5, "Western-V high
 // Global reactive highlight state across Figure 3.1, 3.3, and 3.4
 mutable similarHighlightActive = false
 mutable activePhaseHighlight = null
-mutable similarYearsMode = "projected" // "projected" (Target Season Peak) vs "recent" (Pre-Season Lead-in Setup)
+mutable similarYearsMode = "analogues" // "analogues" (Section 2 Multi-variate Analogues), "projected" (Target Season Peak Phase), "recent" (Pre-Season Lead-in Setup)
 ```
 
 ```{ojs}
@@ -13245,6 +13245,13 @@ mutable similarYearsMode = "projected" // "projected" (Target Season Peak) vs "r
     } else {
       mutable activePhaseHighlight = p;
       mutable similarHighlightActive = true;
+      if (p === "Forecast Analogues") {
+        mutable similarYearsMode = "analogues";
+      } else {
+        if (mutable similarYearsMode === "analogues") {
+          mutable similarYearsMode = "projected";
+        }
+      }
     }
   };
 }
@@ -13253,9 +13260,16 @@ similarYearsSet = {
   if (!similarHighlightActive) return new Set();
   const yrs = [];
   const p = mutable activePhaseHighlight;
-  const mode = mutable similarYearsMode || "projected";
+  const mode = mutable similarYearsMode || "analogues";
 
-  if (mode === "recent") {
+  if (p === "Forecast Analogues" || (mode === "analogues" && !p)) {
+    // Mode: Section 2 Multi-variate Continuous Euclidean Distance Forecast Analogues
+    if (typeof analogueYears !== "undefined" && analogueYears && analogueYears.length > 0) {
+      for (const a of analogueYears) {
+        if (a.year != null) yrs.push(a.year);
+      }
+    }
+  } else if (mode === "recent") {
     // Mode: Pre-season Lead-in Setup (e.g. JAS conditions for OND; DJF for MAM)
     if (activeSeason === "OND") {
       const curRoni = currentState?.roniLatest ?? currentState?.roni ?? 0;
@@ -13269,7 +13283,7 @@ similarYearsSet = {
       }
     }
   } else {
-    // Mode: Projected Peak Target Season (e.g. OND peak conditions)
+    // Mode: Projected Peak Target Season Climatology (e.g. OND peak conditions)
     if (p === "El Niño" || (!p && activeSeason === "OND")) {
       for (const [y, ph] of ensoPhaseOND.entries()) if (ph === "El Niño") yrs.push(y);
     } else if (p === "La Niña") {
@@ -14412,14 +14426,42 @@ rainPanel = (s) => {
           Value: {value: (d) => `${Math.round(d.value * 100) / 100} ${varDef.unit}`, label: climateVar},
           "Classification": {value: (d) => `${d.category}`},
           "Vs normal": {value: (d) => varIsSpei ? "—" : `${d.y >= 0 ? "+" : ""}${Math.round(d.value - clim)} mm`, label: "vs 1991–2020"},
-          Ocean: {value: (d) => s === "MAM" ? d.wnp : `${d.enso} · ${d.iodPhase}`, label: "Ocean state"}},
-        tip: {format: {x: false, y: false, fill: false, Year: true, Value: true, Classification: true, "Vs normal": true, Ocean: true}}}),
+          Ocean: {value: (d) => s === "MAM" ? d.wnp : `${d.enso} · ${d.iodPhase}`, label: "Ocean state"},
+          "Sec 2 Analogue": {value: (d) => {
+            if (s !== (typeof outlookTarget !== "undefined" ? outlookTarget : "OND")) return "—";
+            const an = (typeof analogueYears !== "undefined" && analogueYears) ? analogueYears.find(a => a.year === d.year) : null;
+            return an ? `Rank #${an.rank} (D=${an.distStr})` : "—";
+          }, label: "Sec 2 Analogue"}},
+        tip: {format: {x: false, y: false, fill: false, Year: true, Value: true, Classification: true, "Vs normal": true, Ocean: true, "Sec 2 Analogue": true}}}),
       ...spreadMarks,
       ...absRules,
     ],
   });
 
-  // Season-specific Clickable Empirical Chips placed directly under heading
+  // 1. Dedicated Section 2 Forecast Analogues Empirical Chip (multi-variate continuous Euclidean distance top-8)
+  let analogueChip = null;
+  if (typeof analogueYears !== "undefined" && analogueYears && analogueYears.length > 0 && s === (typeof outlookTarget !== "undefined" ? outlookTarget : "OND")) {
+    const anYears = new Set(analogueYears.map(d => d.year));
+    const anSub = rows.filter(r => anYears.has(r.year));
+    if (anSub.length > 0) {
+      const anM = d3.mean(anSub, r => r.value);
+      const anDev = anM - clim;
+      const anCol = anDev >= 0 ? PALETTE.outcome.wetter : PALETTE.outcome.drier;
+      const anLbl = varIsSpei ? anM.toFixed(2) : `${anDev >= 0 ? "+" : ""}${Math.round(anDev)} mm`;
+      const isAnPressed = similarHighlightActive && (activePhaseHighlight === "Forecast Analogues" || (similarYearsMode === "analogues" && !activePhaseHighlight));
+      
+      analogueChip = html`<button type="button" class="enso-empirical-chip enso-analogue-chip" role="button" aria-pressed="${isAnPressed ? 'true' : 'false'}"
+        onclick="window.togglePhaseHighlight('Forecast Analogues')"
+        title="Highlight the 8 multi-variate continuous Euclidean distance forecast analogues from Section 2 for ${county}."
+        style="cursor: pointer; display: inline-flex; align-items: center; margin: 2px 6px 4px 0; padding: 3px 10px; border: 1.5px solid ${isAnPressed ? '#2563eb' : '#93c5fd'}; background: ${isAnPressed ? '#eff6ff' : '#f0f9ff'}; border-radius: 12px; font-size: 11.5px; transition: all 0.15s ease; box-shadow: ${isAnPressed ? '0 0 0 2px rgba(37,99,235,0.25)' : 'none'};">
+        <span style="font-weight: 700; color: #1e40af; margin-right: 4px;">🎯 Forecast Analogues (Sec 2):</span>
+        <b style="color: ${anCol};">${varIsSpei ? "SPEI " + anLbl : anLbl + " vs normal"}</b>
+        <span style="color: #3b82f6; margin-left: 5px; font-size: 10.5px; font-weight: 600;">(${anSub.length} yrs)</span>
+      </button>`;
+    }
+  }
+
+  // 2. Season-specific Clickable Empirical Phase Chips
   const isMAM = s === "MAM";
   const chipGroups = isMAM
     ? [{key: "wnp", p: "Western-V high"}, {key: "wnp", p: "Western-V low"}]
@@ -14444,10 +14486,11 @@ rainPanel = (s) => {
     </button>`;
   }).filter(Boolean);
 
-  const chipsBar = chips.length ? html`
+  const allChips = [analogueChip, ...chips].filter(Boolean);
+  const chipsBar = allChips.length ? html`
     <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 0.25rem 0 0.5rem 0;">
-      <span style="font-size: 10.5px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-right: 4px;">Click to highlight analogue seasons:</span>
-      ${chips}
+      <span style="font-size: 10.5px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-right: 4px;">Highlight on chart:</span>
+      ${allChips}
     </div>
   ` : "";
 
@@ -15142,9 +15185,13 @@ plotDriverScatter = {
           "Year": d => String(d.year),
           "Rainfall Outcome": d => d.outcome,
           "Ocean Driver Anomaly": d => `${d.x >= 0 ? '+' : ''}${d.x.toFixed(2)} ${sec23Driver.includes("WNP") ? "std" : "°C"}`,
-          "County Rainfall Response": d => `${d.y >= 0 ? '+' : ''}${d.y.toFixed(1)}${sec23Metric.includes('%') ? '%' : ''}`
+          "County Rainfall Response": d => `${d.y >= 0 ? '+' : ''}${d.y.toFixed(1)}${sec23Metric.includes('%') ? '%' : ''}`,
+          "Sec 2 Analogue": d => {
+            const an = (typeof analogueYears !== "undefined" && analogueYears) ? analogueYears.find(a => a.year === d.year) : null;
+            return an ? `Rank #${an.rank} (D=${an.distStr})` : "—";
+          }
         },
-        tip: {format: {fill: false, "Year": true, "Rainfall Outcome": true, "Ocean Driver Anomaly": true, "County Rainfall Response": true}}
+        tip: {format: {fill: false, "Year": true, "Rainfall Outcome": true, "Ocean Driver Anomaly": true, "County Rainfall Response": true, "Sec 2 Analogue": true}}
       }),
       Plot.text(d.points.filter(p => isFiltering ? similarYearsSet.has(p.year) : p.isBenchmark), {
         x: "x", y: "y",
@@ -15176,7 +15223,11 @@ plotDriverScatter = {
         </span>
         ${isFiltering ? html`
           <span style="display: inline-flex; align-items: center; gap: 4px; background: #eff6ff; color: #1d4ed8; padding: 2px 7px; border-radius: 4px; font-weight: 700; border: 1px solid #bfdbfe;">
-            <span>⭕ Highlighted: ${similarYearsSet.size} Similar Years (${(similarYearsMode || 'projected') === 'recent' ? 'Pre-Season Lead-in' : 'Projected Peak'})</span>
+            <span>⭕ Highlighted: ${similarYearsSet.size} Similar Years (${
+              (similarYearsMode === 'analogues' || activePhaseHighlight === 'Forecast Analogues')
+                ? 'Sec 2 Forecast Analogues'
+                : (similarYearsMode === 'recent' ? 'Pre-Season Lead-in' : 'Peak Phase Climatology')
+            })</span>
           </span>
         ` : ''}
         <span style="display: inline-flex; align-items: center; gap: 6px; margin-left: auto;">
@@ -15621,7 +15672,7 @@ table21Render = {
 ```{ojs}
 // Mount Figure 3.1 Plot and Footer
 {
-  [county, climateVar, season, rainTimeRes, rainView, spreadOpt, stripMode, rainYears, rainYearFrom, rainYearTo, rainSeasonData, rainMonthlyClim, similarHighlightActive, activePhaseHighlight];
+  [county, climateVar, season, rainTimeRes, rainView, spreadOpt, stripMode, rainYears, rainYearFrom, rainYearTo, rainSeasonData, rainMonthlyClim, similarHighlightActive, activePhaseHighlight, similarYearsMode, analogueYears, outlookTarget];
   const host = document.getElementById("plotRainHost");
   const footerHost = document.getElementById("fig31FooterHost");
   if (host) {
@@ -15647,7 +15698,7 @@ table21Render = {
              about: `Monthly precipitation climatology derived from CHIRPS v3 (UCSB/CHC) 5 km raster zonal statistics across all 1981–present records for ${county}.`,
              meta: {Source: "CHIRPS v3 (UCSB CHC via Atlas hub)", County: county, View: "Monthly climatology"}}
           : {fig: "3.1", filename: `${county}_${varShort}_by_year`, data: rainDownloadRows,
-             about: `Historical seasonal ${climateVar} from CHIRPS v3 (UCSB/CHC) and Vicente-Serrano SPEI-3. Anomalies are calculated relative to the 1991–2020 WMO standard climatological baseline. Driver markers indicate concurrent ocean state: ENSO (RONI) and Indian Ocean Dipole (IOD) for Short Rains (OND); Western North Pacific Western-V for Long Rains (MAM).`,
+             about: `Historical seasonal ${climateVar} from CHIRPS v3 (UCSB/CHC) and Vicente-Serrano SPEI-3. Anomalies are calculated relative to the 1991–2020 WMO standard climatological baseline. Driver markers indicate concurrent ocean state: ENSO (RONI) and Indian Ocean Dipole (IOD) for Short Rains (OND); Western North Pacific Western-V for Long Rains (MAM). Click the empirical chips (including Section 2 Forecast Analogues) to isolate and highlight analogue seasons.`,
              meta: {Source: "CHIRPS v3 / SPEI-3 (UCSB CHC via Atlas hub)", County: county, Variable: climateVar}}
       );
       footerHost.replaceChildren(footer);
@@ -17739,11 +17790,15 @@ yearsSel = {
   window.toggleSimilarSeasons = () => {
     mutable similarHighlightActive = !mutable similarHighlightActive;
     if (mutable similarHighlightActive) {
+      if ((mutable similarYearsMode || "analogues") === "analogues") {
+        mutable activePhaseHighlight = "Forecast Analogues";
+      }
       if (typeof viewof driverIntensity !== "undefined" && viewof driverIntensity) {
         viewof driverIntensity.value = "Positive Phase";
         viewof driverIntensity.dispatchEvent(new Event("input"));
       }
     } else {
+      mutable activePhaseHighlight = null;
       if (typeof viewof driverIntensity !== "undefined" && viewof driverIntensity) {
         viewof driverIntensity.value = "All Intensities";
         viewof driverIntensity.dispatchEvent(new Event("input"));
@@ -17754,10 +17809,18 @@ yearsSel = {
   window.setSimilarMode = (mode) => {
     mutable similarYearsMode = mode;
     mutable similarHighlightActive = true;
+    if (mode === "analogues") {
+      mutable activePhaseHighlight = "Forecast Analogues";
+    } else {
+      if (mutable activePhaseHighlight === "Forecast Analogues") {
+        mutable activePhaseHighlight = null;
+      }
+    }
   };
 
   window.clearSimilarSeasons = () => {
     mutable similarHighlightActive = false;
+    mutable activePhaseHighlight = null;
     if (typeof viewof driverIntensity !== "undefined" && viewof driverIntensity) {
       viewof driverIntensity.value = "All Intensities";
       viewof driverIntensity.dispatchEvent(new Event("input"));
@@ -17780,7 +17843,7 @@ yearsSel = {
 
 // Reactively mount and sync sticky active seasonal outlook in sticky controls
 {
-  [activeSeason, driverIntensity, seasonDriver, similarHighlightActive, similarYearsMode, stateProbs, currentState, releaseMeta, iriPlumeBundle];
+  [activeSeason, driverIntensity, seasonDriver, similarHighlightActive, similarYearsMode, activePhaseHighlight, stateProbs, currentState, releaseMeta, iriPlumeBundle, analogueYears];
   const host = document.getElementById("stickyOutlookHost");
   if (host) {
     const isFiltered = similarHighlightActive || (driverIntensity && driverIntensity !== "All Intensities");
@@ -17862,11 +17925,12 @@ yearsSel = {
       </div>
       <div class="ke-outlook-actions" style="display: flex; align-items: center; gap: 6px;">
         <div style="display: inline-flex; align-items: center; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; padding: 1px; overflow: hidden;">
-          <button type="button" id="btnToggleSimilar" class="btn-analogue-jump" onclick="toggleSimilarSeasons()" aria-pressed="${isFiltered ? 'true' : 'false'}" title="${isFiltered ? 'Active: Filter enabled across Section 3. Click to reset and display all historical years.' : 'Click to filter and highlight historical seasons across Section 3 that match the active ocean teleconnection phase.'}" style="background:${isFiltered ? '#1d4ed8' : '#2563eb'}; color:#fff; border:none; padding:3px 8px; border-radius:3px; font-size:0.72rem; font-weight:700; cursor:pointer; white-space:nowrap; ${isFiltered ? 'box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);' : ''}">
+          <button type="button" id="btnToggleSimilar" class="btn-analogue-jump" onclick="toggleSimilarSeasons()" aria-pressed="${isFiltered ? 'true' : 'false'}" title="${isFiltered ? 'Active: Analogue highlight enabled across Section 3. Click to reset and display all historical years.' : 'Click to highlight Section 2 forecast analogue seasons across Section 3 historical charts.'}" style="background:${isFiltered ? '#1d4ed8' : '#2563eb'}; color:#fff; border:none; padding:3px 8px; border-radius:3px; font-size:0.72rem; font-weight:700; cursor:pointer; white-space:nowrap; ${isFiltered ? 'box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);' : ''}">
             <span>${isFiltered ? '✓ Similar years' : 'Similar years'}</span>
           </button>
-          <select id="selSimilarMode" onchange="setSimilarMode(this.value)" style="border:none; background:transparent; font-size:0.68rem; font-weight:600; color:#334155; padding:2px 4px; cursor:pointer; outline:none;" title="Choose analogue matching criterion: Projected Peak Season vs Pre-Season Lead-in setup">
-            <option value="projected" ${(similarYearsMode || 'projected') === 'projected' ? 'selected' : ''}>Peak (${targetSea})</option>
+          <select id="selSimilarMode" onchange="setSimilarMode(this.value)" style="border:none; background:transparent; font-size:0.68rem; font-weight:600; color:#334155; padding:2px 4px; cursor:pointer; outline:none;" title="Choose analogue matching source: Section 2 Forecast Analogues vs Peak Phase Climatology vs Pre-Season Lead-in">
+            <option value="analogues" ${(similarYearsMode || 'analogues') === 'analogues' ? 'selected' : ''}>Sec 2 Analogues (${(typeof analogueYears !== 'undefined' && analogueYears) ? analogueYears.length : 8} yrs)</option>
+            <option value="projected" ${similarYearsMode === 'projected' ? 'selected' : ''}>All Phase (${targetSea})</option>
             <option value="recent" ${similarYearsMode === 'recent' ? 'selected' : ''}>Lead-in (${isOND ? 'JAS' : 'DJF'})</option>
           </select>
         </div>
