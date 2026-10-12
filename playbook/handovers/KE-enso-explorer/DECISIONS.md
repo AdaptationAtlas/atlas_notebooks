@@ -806,5 +806,13 @@ GitHub #48, tracker entries V2-64…V2-74). Target version **v2.11**.
      - Tested dynamic county switching to Turkana: verified instantaneous re-calculation of census headcounts (`926,976`), baseline climatology (`162 mm`), and analogue outlook.
      - Zero browser console errors across all phases.
 
+## D58 — Strict Prohibition on Gates Foundation Logo (2026-10-12)
+- **APPROVED & RATIFIED (2026-10-12).** STRICT OPERATIONAL DIRECTIVE FROM PETE STEWARD: **NEVER PUT THE GATES LOGO.**
+  1. **Strict Prohibition on Visual Logo Marks:** Under NO circumstances may the Bill & Melinda Gates Foundation visual logo (`gates-foundation-logo.svg`, PNG, or any graphical emblem) be displayed or mounted anywhere on the platform (header, hero logo bar, partner grid, cards, or footer).
+  2. **Complete Scrub Executed (2026-10-12):** Removed all 3 instances from `notebook_v3.qmd` (top hero header `.ke-hero-logos`, Section 0 partner grid, and universal page footer `.ke-page-footer`), compiled Quarto bundle, and verified via Playwright screenshot assertions (`header_no_gates.png`, `footer_no_gates.png`).
+  3. **Text-Only Attribution Rule:** Philanthropic/grant support may only be acknowledged in plain text narrative attribution where legally required (e.g., "with foundational support from the Bill & Melinda Gates Foundation"), but NEVER accompanied by a trademarked visual logo.
+  4. **Regression Prevention:** All future platform editions, templates, components, and automated scripts must enforce zero occurrences of Gates Foundation logo imagery.
+
+
 
 

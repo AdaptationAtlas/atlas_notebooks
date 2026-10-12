@@ -82,6 +82,10 @@ Audience: Kenya county/national policymakers (non-coders). Standalone notebook: 
   client-side `html2canvas` screengrabs in `localStorage`, and 1-click bundled export via
   `📦 Download Report (with images)` (standalone HTML report with all Base64 images embedded inline),
   `📧 Email to Pete` (`p.steward@cgiar.org`), and `🗜️ Export ZIP` (`JSZip`).
+- **NEVER PUT THE GATES LOGO (D58):** STRICT MANDATE FROM PETE STEWARD. Under NO circumstances should
+  the Bill & Melinda Gates Foundation logo (`gates-foundation-logo.svg`, PNG, or any visual emblem) be
+  mounted or rendered anywhere on the platform (header, hero, partner grid, cards, or footer). Philanthropic/grant
+  support may only be acknowledged in plain text attribution where legally required, but NEVER with a visual logo.
 
 ## Working rhythm
 Commit on `dev/KE-enso-explorer` (factual subject + why-body; end with
